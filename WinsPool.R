@@ -43,7 +43,7 @@ todayTeams <- teams %>% filter(season == seasonToLook)
 todayStandings <- standings %>% filter(season == seasonToLook)
 todayDraftResults <- draftResults %>% filter(season==seasonToLook)
 todayGames <- games %>% 
-  dplyr::filter(season==seasonToLook, week <=17) %>% 
+  dplyr::filter(season==seasonToLook, week <=max(week)) %>% 
   dplyr::select(game_id, game_type, season, week, away_team, home_team, result, winner, TotalWinsBySeason) %>% 
   dplyr::rename(team = winner)
 #head(todayDraftResults)
