@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Week by Week — {{ year }}{% endblock %}
+
+{% block content %}
+
+<main class="dashboard-main">
+    <div class="card-glass page-card weekbyweek-wrap">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
+            <h2>📊 Wins by Week — {{ year }}</h2>
+            <div class="year-selector">
+                <label for="year-pick">Season:</label>
+                <select id="year-pick" onchange="window.location='/wins-pool/' + this.value + '/weekbyweek'">
+                    {% for y in available_years %}
+                    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="table-container">
+            {{ table|safe }}
+        </div>
+    </div>
+</main>
+{% endblock %}

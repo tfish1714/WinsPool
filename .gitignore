@@ -1,4 +1,23 @@
-.Rproj.user
-.Rhistory
-.RData
-.Ruserdata
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Environment & credentials — NEVER commit these
+.env
+firebase_credentials.json
+*.json.key
+
+# Local data cache
+.local_db/
+
+# Debug / scratch files
+debug/
+
+# Build artifacts
+*.db
+dist/
+build/

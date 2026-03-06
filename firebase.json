@@ -1,0 +1,37 @@
+{
+    "hosting": {
+        "public": "static",
+        "ignore": [
+            "firebase.json",
+            "**/.*",
+            "**/node_modules/**"
+        ],
+        "rewrites": [
+            {
+                "source": "/api/**",
+                "run": {
+                    "serviceId": "winspool-api",
+                    "region": "us-central1"
+                }
+            },
+            {
+                "source": "/ws/**",
+                "run": {
+                    "serviceId": "winspool-api",
+                    "region": "us-central1"
+                }
+            },
+            {
+                "source": "/admin",
+                "run": {
+                    "serviceId": "winspool-api",
+                    "region": "us-central1"
+                }
+            },
+            {
+                "source": "**",
+                "destination": "/index.html"
+            }
+        ]
+    }
+}

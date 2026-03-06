@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Head-to-Head History{% endblock %}
+{% block content %}
+
+<main class="dashboard-main">
+    <div class="card-glass page-card">
+        <h2>📚 Head-to-Head History — All Seasons</h2>
+        <p style="color:var(--text-secondary); margin-bottom:1.5rem; font-size:.9rem;">
+            Win-loss records between each pair of players.
+        </p>
+
+        {% if all_time_table %}
+        <div class="season-block" style="border: 2px solid var(--primary-color); padding: 1rem; border-radius: 8px;">
+            <div class="season-header" style="border-bottom:none; margin-bottom: 1rem;">
+                🏆 All-Time Head-to-Head Record
+            </div>
+            <div style="overflow-x:auto;">{{ all_time_table | safe }}</div>
+        </div>
+        {% endif %}
+
+        {% if history %}
+        <h3 style="margin-top:2rem; margin-bottom:1rem;">Season by Season</h3>
+        {% for entry in history | sort(attribute='year', reverse=True) %}
+        <div class="season-block">
+
+            <div class="season-header">
+                {{ entry.year }} Season
+                <a href="/headtohead/{{ entry.year }}"
+                    style="font-size:.75rem; color:var(--text-secondary); margin-left:1rem; text-decoration:none;">
+                    View standalone →
+                </a>
+            </div>
+            <div style="overflow-x:auto;">{{ entry.table | safe }}</div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="empty-note">No head-to-head data available yet.</div>
+        {% endif %}
+    </div>
+</main>
+{% endblock %}

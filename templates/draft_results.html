@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Draft Results — {{ year }}{% endblock %}
+
+{% block content %}
+
+
+<main class="dashboard-main">
+    <div class="card-glass page-card">
+
+        <!-- Header + Year Selector -->
+        <div
+            style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem; margin-bottom:1.5rem;">
+            <h2>📝 Draft Results — {{ year }}</h2>
+            <div class="year-selector">
+                <label for="year-pick">Season:</label>
+                <select id="year-pick" onchange="window.location='/draft/' + this.value">
+                    {% for y in available_years | sort(reverse=True) %}
+                    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <!-- Best Pick Badges -->
+        {% if best_overall or best_by_round %}
+        <h3 class="section-title">🏅 Best Picks — {{ year }}</h3>
+        <div class="best-picks-grid">
+            {% if best_overall %}
+            <div class="best-pick-card gold">
+                <div class="best-pick-label">🥇 Best Overall</div>
+                <div class="best-pick-name">{{ best_overall.player }}</div>
+                <div class="best-pick-team">{{ best_overall.team }}</div>
+                <div class="best-pick-detail">Pick #{{ best_overall.pick }} · {{ best_overall.wins }} wins</div>
+            </div>
+            {% endif %}
+            {% for rnum in [1, 2, 3] %}
+            {% if best_by_round[rnum] is defined %}
+            {% set r = best_by_round[rnum] %}
+            <div class="best-pick-card">
+                <div class="best-pick-label">🎯 {{ r.label }}</div>
+                <div class="best-pick-name">{{ r.player }}</div>
+                <div class="best-pick-team">{{ r.team }}</div>
+                <div class="best-pick-detail">Pick #{{ r.pick }} · {{ r.wins }} wins</div>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Draft Results Table -->
+        <h3 class="section-title">📋 All Picks</h3>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Draft Pick</th>
+                        <th>Player</th>
+                        <th>Team</th>
+                        <th>Season Wins</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in data %}
+                    <tr {% if best_overall and row['team']==best_overall.team %}style="border-left: 3px solid #f5c542;"
+                        {% endif %}>
+                        <td>{{ row['draftPick'] | int }}</td>
+                        <td>{{ row['fullName'] }}</td>
+                        <td>{{ row['team'] }}</td>
+                        <td>{{ row['TotalWinsBySeason'] | int }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+</main>
+{% endblock %}

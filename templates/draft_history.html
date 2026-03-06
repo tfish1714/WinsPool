@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}Draft History{% endblock %}
+
+{% block content %}
+<main class="dashboard-main" style="display:block;">
+    <div style="max-width: 1400px; margin: 0 auto;">
+        <div style="text-align: center; margin-bottom: 2rem;">
+            <h2>📜 All-Time Draft History</h2>
+            <p style="color:var(--text-secondary); font-size:.95rem; margin-bottom: 1rem;">
+                A comprehensive view of draft tendencies and total wins. Hover over any team/player chip to see their
+                Best and Worst seasons.
+            </p>
+
+            <!-- View Toggle -->
+            <div class="view-toggle"
+                style="display: inline-flex; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 8px; padding: 4px;">
+                <button id="btn-player-view" class="toggle-btn active" onclick="switchView('player')">Group by
+                    Player</button>
+                <button id="btn-team-view" class="toggle-btn" onclick="switchView('team')">Group by Team</button>
+            </div>
+        </div>
+
+        {# grouped_players maps fullName → list of picks; iteration order comes from sorted_players (server-sorted by
+        wins desc) #}
+        {% set grouped_players = {} %}
+        {% for row in data %}
+        {% if row['fullName'] not in grouped_players %}
+        {% set _ = grouped_players.update({row['fullName']: []}) %}
+        {% endif %}
+        {% set _ = grouped_players[row['fullName']].append(row) %}
+        {% endfor %}
+
+        {# grouped_teams maps team → list of picks; iteration order comes from sorted_teams (server-sorted by wins desc)
+        #}
+        {% set grouped_teams = {} %}
+        {% for row in data %}
+        {% if row['team'] not in grouped_teams %}
+        {% set _ = grouped_teams.update({row['team']: []}) %}
+        {% endif %}
+        {% set _ = grouped_teams[row['team']].append(row) %}
+        {% endfor %}
+
+        <div class="card-glass page-card" style="padding: 1.5rem;">
+            <!-- ================= PLAYER VIEW ================= -->
+            <div id="player-view">
+                <table class="dense-history-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 15%;">Player</th>
+                            <th style="width: 10%;">Total Wins</th>
+                            <th style="width: 75%;">Draft Portfolio
+                                <span
+                                    style="font-weight:normal; font-size:0.8rem; color:var(--text-secondary); margin-left:10px;">
+                                    (Sorted by most wins)
+                                </span>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for player in sorted_players %}
+                        {% set picks = grouped_players.get(player, []) %}
+                        {% set overall_wins = picks | sum(attribute='total_wins') %}
+                        <tr>
+                            <td style="font-weight:700; font-size:1.05rem; color:var(--text-primary);">
+                                {{ player }}
+                                {% if player_first_picks and player in player_first_picks and player_first_picks[player]
+                                > 0 %}
+                                <div
+                                    style="font-size:0.75rem; color:var(--accent-green); font-weight:600; margin-top:4px;">
+                                    🏆 {{ player_first_picks[player] }}x #1 Picks
+                                </div>
+                                {% endif %}
+                            </td>
+                            <td style="font-weight:800; color:var(--primary-color); font-size:1.1rem;">{{ overall_wins
+                                }}</td>
+                            <td>
+                                <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                                    {% for p in picks | sort(attribute='total_wins', reverse=True) %}
+                                    <div class="history-chip"
+                                        title="{% for row in p.picks_list %}{{ row.season }} — {% if row.draftPick %}Pick #{{ row.draftPick }}{% else %}Undrafted{% endif %} | {{ row.wins }}W&#10;{% endfor %}🏆 Best: {{ p.best_year }} ({{ p.best_wins }}W)&#10;🧊 Worst: {{ p.worst_year }} ({{ p.worst_wins }}W)">
+                                        <div style="width:20px; text-align:center; display:flex; align-items:center;">
+                                            <img src="/static/logos/{{ p.team }}.png" alt="{{ p.team }}"
+                                                style="max-width:100%; max-height:20px;"
+                                                onerror="this.style.display='none'">
+                                        </div>
+                                        <span style="font-weight:600;">{{ p.team }}</span>
+                                        <span class="chip-metric">{{ p.times_picked }}x ({{ p.total_wins }}W - {{
+                                            (p.total_wins / p.times_picked)|round(1) }} Avg)</span>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- ================= TEAM VIEW ================= -->
+            <div id="team-view" style="display: none;">
+                <table class="dense-history-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 15%;">Team</th>
+                            <th style="width: 8%;">Times Drafted</th>
+                            <th style="width: 8%;">#1 Picks</th>
+                            <th style="width: 8%;">Total Wins</th>
+                            <th style="width: 61%;">Drafted By
+                                <span
+                                    style="font-weight:normal; font-size:0.8rem; color:var(--text-secondary); margin-left:10px;">
+                                    (Sorted by most wins)
+                                </span>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for team in sorted_teams %}
+                        {% set picks = grouped_teams.get(team, []) %}
+                        {% set overall_wins = picks | sum(attribute='total_wins') %}
+                        {% set times_drafted = picks | rejectattr('fullName', 'equalto', 'Undrafted Teams') |
+                        sum(attribute='times_picked') %}
+                        <tr>
+                            <td>
+                                <div
+                                    style="display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.05rem;">
+                                    <div style="width:24px; text-align:center; display:flex; align-items:center;">
+                                        <img src="/static/logos/{{ team }}.png" alt="{{ team }}"
+                                            style="max-width:100%; max-height:24px;"
+                                            onerror="this.style.display='none'">
+                                    </div>
+                                    <div>
+                                        {{ team }}
+                                        {% if team_first_picks and team in team_first_picks and team_first_picks[team] >
+                                        0 %}
+                                        <div
+                                            style="font-size:0.75rem; color:var(--accent-green); font-weight:600; margin-top:3px;">
+                                            🏆 {{ team_first_picks[team] }}x #1 Overall
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </td>
+                            <td style="font-weight:600; color:var(--text-secondary); font-size:0.95rem;">{{
+                                times_drafted }}x</td>
+                            <td style="font-weight:700; color:var(--accent-green); font-size:0.95rem;">{{
+                                team_first_picks[team] if team_first_picks and team in team_first_picks else 0 }}x</td>
+                            <td style="font-weight:800; color:#4aa8ff; font-size:1.1rem;">{{ overall_wins }}</td>
+                            <td>
+                                <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                                    {% for p in picks | sort(attribute='total_wins', reverse=True) %}
+                                    <div class="history-chip blue-chip"
+                                        title="{% for row in p.picks_list %}{{ row.season }} — {% if row.draftPick %}Pick #{{ row.draftPick }}{% else %}Undrafted{% endif %} | {{ row.wins }}W&#10;{% endfor %}🏆 Best: {{ p.best_year }} ({{ p.best_wins }}W)&#10;🧊 Worst: {{ p.worst_year }} ({{ p.worst_wins }}W)">
+                                        <span style="font-weight:600;">{{ p.fullName }}</span>
+                                        <span class="chip-metric">{{ p.times_picked }}x ({{ p.total_wins }}W - {{
+                                            (p.total_wins / p.times_picked)|round(1) }} Avg)</span>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</main>
+
+
+
+<script src="/static/js/draft_history.js"></script>
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}NFL Wins Pool - Admin Panel{% endblock %}
+
+{% block content %}
+
+
+<div class="container admin-container">
+    <div class="card-glass" style="height: auto;">
+        <h2 style="border-bottom: 1px solid var(--glass-border); padding-bottom: 0.5rem;">Admin Control Panel</h2>
+        <p>Generate a new season and random draft order.</p>
+
+        <div class="admin-form">
+            <input type="number" id="season-input" class="admin-input" placeholder="Enter Season Year (e.g. 2024)"
+                min="2000" max="2100">
+            <input type="password" id="admin-code-input" class="admin-input" placeholder="Admin Code">
+            <button id="generate-btn" class="btn-primary" style="margin-top: 1rem;">Generate New Season</button>
+        </div>
+
+        <p id="admin-message" style="margin-top: 1rem;"></p>
+    </div>
+</div>
+
+<script src="{{ url_for('static', path='admin.js') }}?v=3"></script>
+{% endblock %}

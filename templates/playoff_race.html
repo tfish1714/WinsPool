@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Playoff Race {{ year }}{% endblock %}
+
+{% block content %}
+
+
+<main class="dashboard-main">
+    <div class="card-glass page-card">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
+            <h2>🏁 Playoff Race — {{ year }}</h2>
+            <div class="year-selector">
+                <label for="year-pick">Season:</label>
+                <select id="year-pick" onchange="window.location='/playoff-race/' + this.value">
+                    {% for y in available_years %}
+                    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <p style="color: var(--text-secondary); margin-top: 0.5rem;">
+            Shows whether each player can mathematically catch the players ahead of them based on remaining games.
+        </p>
+
+        <div class="race-container" style="margin-top: 2rem;">
+            {% for rec in race %}
+            <div class="race-card {% if rec.rank == 1 %}leader{% endif %}">
+                <div class="race-header">
+                    <span class="race-rank">#{{ rec.rank }}</span>
+                    <span class="race-name">{{ rec.player }}</span>
+                    {% if rec.rank == 1 %}
+                    <span class="leader-tag">🥇 Current Leader</span>
+                    {% endif %}
+                    {# Check if fully eliminated — can't pass anyone above them #}
+                    {% set can_pass_anyone = namespace(v=false) %}
+                    {% for r in rec.race %}
+                    {% if r.gap > 0 and r.can_pass %}{% set can_pass_anyone.v = true %}{% endif %}
+                    {% endfor %}
+                    {% if rec.rank > 1 and not can_pass_anyone.v and rec.remaining_games == 0 %}
+                    <span class="eliminated-tag">Eliminated</span>
+                    {% endif %}
+                </div>
+
+                <div class="race-stats">
+                    <div class="race-stat">Wins: <strong>{{ rec.current_wins }}</strong></div>
+                    <div class="race-stat">Remaining Games: <strong>{{ rec.remaining_games }}</strong></div>
+                    <div class="race-stat">Best Possible: <strong>{{ rec.max_wins }}</strong></div>
+                </div>
+
+                {% if rec.rank > 1 %}
+                <div class="race-targets">
+                    {% for r in rec.race %}
+                    {% if r.gap > 0 %}
+                    <span class="target-badge {% if r.can_pass %}can-pass{% else %}eliminated{% endif %}">
+                        {% if r.can_pass %}✅{% else %}❌{% endif %}
+                        Catch #{{ r.position }} {{ r.target_player }}
+                        ({{ '+' if r.gap > 0 else '' }}{{ r.gap }} wins needed)
+                    </span>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+                <p class="summary-note">
+                    Best case scenario: {{ rec.max_wins }} wins
+                    ·
+                    Need {{ rec.remaining_games }} more win{{ 's' if rec.remaining_games != 1 else '' }} to match leader
+                </p>
+                {% else %}
+                <p class="summary-note">
+                    Leading the pool with {{ rec.current_wins }} wins.
+                    {% if rec.remaining_games > 0 %}{{ rec.remaining_games }} games remaining.{% else %}Season
+                    complete.{% endif %}
+                </p>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</main>
+{% endblock %}

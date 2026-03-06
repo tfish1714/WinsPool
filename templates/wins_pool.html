@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block title %}Wins Pool Standings — {{ year }}{% endblock %}
+
+{% block content %}
+
+
+<main class="dashboard-main">
+    <div class="card-glass page-card">
+
+        <!-- Header + Year Selector -->
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
+            <h2>🏆 Wins Pool Standings</h2>
+            <div class="year-selector">
+                <label for="year-pick">Season:</label>
+                <select id="year-pick" onchange="window.location='/wins-pool/' + this.value">
+                    {% for y in available_years %}
+                    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <!-- Weekly Progress Line Chart -->
+        <div
+            style="width: 100%; max-width: 1400px; height: 350px; margin: 1rem 0 2rem; padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 8px; border: 1px solid var(--glass-border);">
+            <canvas id="winsChart"></canvas>
+        </div>
+
+        <!-- Desktop Table -->
+        <div class="table-container desktop-only-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Rank</th>
+                        <th>Name</th>
+                        <th>Total Wins</th>
+                        <th>Team 1</th>
+                        <th>Team 2</th>
+                        <th>Team 3</th>
+                        <th>TB1</th>
+                        <th>TB2</th>
+                        <th>TB3</th>
+                        <th>TB4</th>
+                        <th>TB5</th>
+                        <th>TB6</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in data %}
+                    <tr>
+                        <td>{{ row['Rank'] }}</td>
+                        <td>{{ row['fullName'] }}</td>
+                        <td>{{ row['TotalWins'] }}</td>
+                        <td>{{ row['team1'] }} ({{ row['wins1'] }} W, {{ row['ptDiff1'] }} diff)</td>
+                        <td>{{ row['team2'] }} ({{ row['wins2'] }} W, {{ row['ptDiff2'] }} diff)</td>
+                        <td>{{ row['team3'] }} ({{ row['wins3'] }} W, {{ row['ptDiff3'] }} diff)</td>
+                        <td>{{ row['Tiebreaker1_WorstTeamWins'] }}</td>
+                        <td>{{ row['Tiebreaker2_2ndWorstTeamWins'] }}</td>
+                        <td>{{ row['Tiebreaker3_BestTeamWins'] }}</td>
+                        <td>{{ row['Tiebreaker4_WorstTeamPtDiff'] }}</td>
+                        <td>{{ row['Tiebreaker5_2ndWorstTeamPtDiff'] }}</td>
+                        <td>{{ row['Tiebreaker6_BestTeamPtDiff'] }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Mobile Cards -->
+        <div class="card-container">
+            {% for row in data %}
+            <div class="card">
+                <div class="card-header">
+                    {{ row['Rank'] }} — {{ row['fullName'] }} ({{ row['TotalWins'] }} Wins)
+                </div>
+                <button class="expand-button" onclick="toggleCard(this)">Show Details</button>
+                <div class="card-content">
+                    <p><strong>Team 1:</strong> {{ row['team1'] }} ({{ row['wins1'] }} W, {{ row['ptDiff1'] }} diff)</p>
+                    <p><strong>Team 2:</strong> {{ row['team2'] }} ({{ row['wins2'] }} W, {{ row['ptDiff2'] }} diff)</p>
+                    <p><strong>Team 3:</strong> {{ row['team3'] }} ({{ row['wins3'] }} W, {{ row['ptDiff3'] }} diff)</p>
+                    <p><strong>TB 1:</strong> {{ row['Tiebreaker1_WorstTeamWins'] }} &nbsp; <strong>TB 2:</strong> {{
+                        row['Tiebreaker2_2ndWorstTeamWins'] }} &nbsp; <strong>TB 3:</strong> {{
+                        row['Tiebreaker3_BestTeamWins'] }}</p>
+                    <p><strong>TB 4:</strong> {{ row['Tiebreaker4_WorstTeamPtDiff'] }} &nbsp; <strong>TB 5:</strong> {{
+                        row['Tiebreaker5_2ndWorstTeamPtDiff'] }} &nbsp; <strong>TB 6:</strong> {{
+                        row['Tiebreaker6_BestTeamPtDiff'] }}</p>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- ── Live Schedule ───────────────────────────────── -->
+        {% if schedule %}
+        <h3 class="section-title">📅 Game Schedule — Week Results</h3>
+        <div class="week-filter-bar">
+            <label for="week-filter">Week:</label>
+            <select id="week-filter" onchange="filterByWeek(this.value)">
+                {% for w in unique_weeks %}
+                <option value="{{ w }}" {% if w==current_week %}selected{% endif %}>Week {{ w }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="schedule-table-wrap">
+            <table class="schedule-table" id="schedule-tbl">
+                <thead>
+                    <tr>
+                        <th data-week style="display:none">Week</th>
+                        <th>Home Team</th>
+                        <th>Home Score</th>
+                        <th>Home Player</th>
+                        <th>Away Team</th>
+                        <th>Away Score</th>
+                        <th>Away Player</th>
+                    </tr>
+                </thead>
+                <tbody id="schedule-body">
+                    {% for row in schedule %}
+                    <tr data-week="{{ row['week'] }}">
+                        <td style="display:none">{{ row['week'] }}</td>
+                        <td>{{ row['home_team'] }}</td>
+                        <td class="score-col">{{ row['home_score'] if row['home_score'] not in (none, -1000) else '—' }}
+                        </td>
+                        <td
+                            class="{% if row['fullName_home'] not in (none, -1000, '-1000') and row['result'] is number and row['result'] > 0 %}highlight-match{% endif %}">
+                            {{ row['fullName_home'] if row['fullName_home'] not in (none, -1000, '-1000') else '—' }}
+                        </td>
+                        <td>{{ row['away_team'] }}</td>
+                        <td class="score-col">{{ row['away_score'] if row['away_score'] not in (none, -1000) else '—' }}
+                        </td>
+                        <td
+                            class="{% if row['fullName_away'] not in (none, -1000, '-1000') and row['result'] is number and row['result'] < 0 %}highlight-match{% endif %}">
+                            {{ row['fullName_away'] if row['fullName_away'] not in (none, -1000, '-1000') else '—' }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <!-- Tiebreaker key + refresh note -->
+        <div class="tiebreaker-note">
+            <strong>Tiebreakers:</strong>
+            TB1 = worst team wins · TB2 = 2nd-worst team wins · TB3 = best team wins ·
+            TB4 = worst team pt diff · TB5 = 2nd-worst pt diff · TB6 = best team pt diff
+        </div>
+        {% if refreshTime %}
+        <div class="refresh-note">Data refreshed: {{ refreshTime }}</div>
+        {% endif %}
+
+    </div>
+</main>
+
+<div id="standings-cfg-data" style="display:none;" data-year="{{ year }}"
+    data-orders="[{% for row in data %}{{ row.playerId }}{% if not loop.last %},{% endif %}{% endfor %}]"></div>
+<script>
+    /* Safely parse Jinja data from HTML attributes to prevent auto-formatters from spacing out curly braces */
+    const cfgEl = document.getElementById('standings-cfg-data');
+    window.STANDINGS_CONFIG = {
+        year: parseInt(cfgEl.dataset.year, 10),
+        standingsOrderIds: JSON.parse(cfgEl.dataset.orders)
+    };
+</script>
+<script src="/static/js/standings.js"></script>
+{% endblock %}

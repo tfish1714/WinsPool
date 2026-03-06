@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}NFL Wins Pool{% endblock %}</title>
+    <!-- Use the primary glassmorphism design system -->
+    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}?v=10">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    {% block head %}{% endblock %}
+
+</head>
+
+<body>
+    <div class="glass-bg"></div>
+
+    <div class="app-container">
+        <!-- Sign In Screen (Global Authentication Overlay) -->
+        <main class="signin-screen" id="signin-screen">
+            <div class="card-glass signin-card">
+                <div id="signin-step-1">
+                    <h2>Welcome to the NFL Wins Pool</h2>
+                    <p>Please select your player name to enter the system.</p>
+                    <div id="player-grid" class="player-grid"></div>
+                </div>
+
+                <div id="signin-step-2" class="hidden">
+                    <h2>Authentication</h2>
+                    <p>Please enter the shared draft room code.</p>
+                    <input type="text" id="verification-code" placeholder="Enter Room Code" maxlength="20">
+                    <button id="verify-btn" class="btn-primary mt-10">Verify Code</button>
+                    <button id="cancel-verify-btn" class="btn-primary btn-cancel mt-10">Cancel</button>
+                    <p id="verify-error" class="error-text hidden">Invalid code, please try again.</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- Unified Global Navigation (Hidden until Authenticated) -->
+        <div class="app-nav" id="app-nav" style="display: none;">
+            <button class="hamburger-btn" onclick="document.getElementById('nav-links').classList.toggle('open')">☰
+                Menu</button>
+            <nav class="nav-links" id="nav-links">
+                <a href="/draft" class="tab-btn">🏈 Live Draft Room</a>
+                <a href="/wins-pool" class="tab-btn">🏆 Overall Standings</a>
+                <a href="/wins-pool/{{ current_year|default(2024) }}/weekbyweek" class="tab-btn">📊 Week by Week</a>
+                <a href="/playoff-race" class="tab-btn">🏁 Playoff Race</a>
+                <a href="/draft-results" class="tab-btn">📝 Draft Results</a>
+                <a href="/draft/history" class="tab-btn">📖 Draft History</a>
+                <a href="/headtohead" class="tab-btn">🤝 Head-to-Head</a>
+                <a href="/history" class="tab-btn">👑 Overall History</a>
+            </nav>
+        </div>
+
+        <!-- Dynamic Page Content -->
+        <div id="content" style="display: none;">
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+
+    <!-- Error Toast -->
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{{ url_for('static', path='script.js') }}?v=6"></script>
+    {% block scripts %}{% endblock %}
+</body>
+
+</html>

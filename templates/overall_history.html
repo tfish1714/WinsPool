@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Overall History{% endblock %}
+{% block content %}
+<main class="dashboard-main" style="display:block;">
+    <div class="card-glass" style="height:auto; overflow:visible;">
+        <h2>👑 Overall Wins Pool History</h2>
+        <p style="color:var(--text-secondary); margin-bottom:1.5rem; font-size:.9rem;">
+            All-time metrics for every player across all seasons.
+        </p>
+
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="text-align:left;">Player</th>
+                        <th>Seasons Played</th>
+                        <th>Total Wins</th>
+                        <th>🥇 1st</th>
+                        <th>🥈 2nd</th>
+                        <th>🥉 3rd</th>
+                        <th>Avg Wins</th>
+                        <th>Best Season</th>
+                        <th>Worst Season</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stat in stats %}
+                    <tr>
+                        <td style="text-align:left; font-weight:700; color:var(--text-primary);">{{ stat.name }}</td>
+                        <td>{{ stat.seasons_played }}</td>
+                        <td style="font-weight:700; color:var(--primary-color);">{{ stat.total_wins }}</td>
+                        <td>{{ stat['1st'] if stat['1st'] > 0 else '-' }}</td>
+                        <td>{{ stat['2nd'] if stat['2nd'] > 0 else '-' }}</td>
+                        <td>{{ stat['3rd'] if stat['3rd'] > 0 else '-' }}</td>
+                        <td>{{ (stat.total_wins / stat.seasons_played)|round(1) if stat.seasons_played > 0 else 0 }}
+                        </td>
+                        <td style="font-size:0.85rem;"><span style="color:var(--primary-color);font-weight:600;">{{
+                                stat.best.year }}</span> ({{ stat.best.wins }}W, #{{ stat.best.rank }})</td>
+                        <td style="font-size:0.85rem;"><span style="color:#ff6b6b;font-weight:600;">{{ stat.worst.year
+                                }}</span> ({{ stat.worst.wins }}W, #{{ stat.worst.rank }})</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div
+            style="background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); border-radius: 12px; padding: 1.5rem; margin-top: 2rem; display: flex; justify-content: space-around; text-align: center;">
+            <div>
+                <h4
+                    style="color: var(--text-secondary); margin-bottom: 0.5rem; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1px;">
+                    🔥 All-Time Best Undrafted Team</h4>
+                <div style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.25rem;">{{ undrafted_best.team }}
+                    <span style="font-weight: 400; color: var(--text-secondary);">({{ undrafted_best.year }})</span>
+                </div>
+                <div style="color: var(--primary-color); font-weight: 800; font-size: 1.2rem;">{{ undrafted_best.wins }}
+                    Wins</div>
+            </div>
+            <div style="width: 1px; background: var(--glass-border);"></div>
+            <div>
+                <h4
+                    style="color: var(--text-secondary); margin-bottom: 0.5rem; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1px;">
+                    🧊 All-Time Worst Undrafted Team</h4>
+                <div style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.25rem;">{{ undrafted_worst.team }}
+                    <span style="font-weight: 400; color: var(--text-secondary);">({{ undrafted_worst.year }})</span>
+                </div>
+                <div style="color: #ff6b6b; font-weight: 800; font-size: 1.2rem;">{{ undrafted_worst.wins }} Wins</div>
+            </div>
+        </div>
+
+        <div class="two-col" style="margin-top: 3rem;">
+            <!-- Top 10 Seasons -->
+            <div>
+                <h3 style="color:var(--primary-color); margin-bottom: 1rem;">🔥 Top 10 Best Seasons</h3>
+                <table style="font-size: 0.88rem; width:100%;">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th style="text-align:left;">Player</th>
+                            <th>Season</th>
+                            <th>Wins</th>
+                            <th>Rank</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in top_seasons %}
+                        <tr>
+                            <td style="color:var(--text-secondary);font-size:0.8rem;">{{ loop.index }}</td>
+                            <td
+                                style="text-align:left; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px;">
+                                {{ s.player }}</td>
+                            <td>{{ s.season }}</td>
+                            <td style="color:var(--primary-color); font-weight:700;">{{ s.wins }}</td>
+                            <td>#{{ s.rank }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Bottom 10 Seasons -->
+            <div>
+                <h3 style="color:#ff6b6b; margin-bottom: 1rem;">🧊 Top 10 Worst Seasons</h3>
+                <table style="font-size: 0.88rem; width:100%;">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th style="text-align:left;">Player</th>
+                            <th>Season</th>
+                            <th>Wins</th>
+                            <th>Rank</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in bottom_seasons %}
+                        <tr>
+                            <td style="color:var(--text-secondary);font-size:0.8rem;">{{ loop.index }}</td>
+                            <td
+                                style="text-align:left; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px;">
+                                {{ s.player }}</td>
+                            <td>{{ s.season }}</td>
+                            <td style="color:#ff6b6b; font-weight:700;">{{ s.wins }}</td>
+                            <td>#{{ s.rank }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+</main>
+{% endblock %}
