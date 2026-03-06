@@ -53,6 +53,7 @@ function initWebSocket() {
 
             // Show Step 2 UI directly
             signinStep1.style.display = 'none';
+            signinStep2.classList.remove('hidden');
             signinStep2.style.display = 'block';
             codeInput.value = '';
             verifyError.classList.add('hidden');
@@ -298,7 +299,10 @@ if (verifyBtn) {
 if (cancelVerifyBtn) {
     cancelVerifyBtn.addEventListener('click', () => {
         pendingVerificationId = null;
-        if (signinStep2) signinStep2.style.display = 'none';
+        if (signinStep2) {
+            signinStep2.classList.add('hidden');
+            signinStep2.style.display = 'none';
+        }
         if (signinStep1) signinStep1.style.display = 'block';
         if (verifyError) verifyError.classList.add('hidden');
     });

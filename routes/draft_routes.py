@@ -257,7 +257,7 @@ async def route_draft_results_by_year(request: Request, year: int):
 # ─── WebSocket ────────────────────────────────────────────────────────────────
 
 import os
-ROOM_CODE = os.environ.get("ROOM_CODE", "test")
+ROOM_CODE = os.environ.get("ROOM_CODE", "test").strip().lower()
 
 
 @router.websocket("/ws")
