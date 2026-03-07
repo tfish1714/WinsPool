@@ -10,7 +10,7 @@ def get_remaining_games(player, schedule):
     ].apply(lambda row: 2 if row['fullName_away'] == row['fullName_home'] else 1, axis=1).sum()
     return remaining_games
 
-def player_winsbyWeek(schedule):
+def player_winsbyWeek(schedule, sorted_players=None):
     df = schedule[['week', 'fullName_away', 'fullName_home', 'result']].dropna(subset=['result'])
     all_players = pd.concat([df['fullName_away'], df['fullName_home']]).unique()
     all_weeks = df['week'].unique()
@@ -47,9 +47,25 @@ def player_winsbyWeek(schedule):
 
     record_by_week['Total'] = total_wins_losses
     result_df = record_by_week.T
+
     # Rename the undrafted sentinel index (−1000) to a human-readable label.
-    # Keep the column — it shows how each player fares vs. teams nobody drafted (bad-pick indicator).
     result_df = result_df.rename(columns=lambda c: 'Undrafted' if str(c) in ('-1000', '-1000.0') else c)
+
+    # Sort columns if sorted_players is provided
+    if sorted_players:
+        cols = []
+        # Add players in ranked order if they exist in the dataframe
+        for p in sorted_players:
+            if p in result_df.columns:
+                cols.append(p)
+        
+        # Add any remaining players not in the sorted list (e.g. 'Undrafted')
+        for p in result_df.columns:
+            if p not in cols:
+                cols.append(p)
+        
+        result_df = result_df[cols]
+
     return result_df
 
 def create_what_if_scenario_matrix(schedule, record_by_week, step=0.166666666666):

@@ -364,6 +364,32 @@ def get_season_progress(season: int, week: int) -> Dict[str, Any]:
         "standings": wins_pool_standings.to_dict(orient="records")
     }
 
+def get_preseason_predictions(season: int) -> Dict[str, float]:
+    """Retrieves Vegas Win Totals from the database."""
+    preds_df = get_collection_df("preseason_predictions", filters=[("season", "==", season)])
+    if preds_df.empty:
+        return {}
+    return dict(zip(preds_df["team"], preds_df["projected_wins"]))
+
+def get_team_schedule(team: str, games_df: pd.DataFrame, season: int) -> List[str]:
+    """Extracts a team's sequential 17-game schedule from the NFL Games dataframe."""
+    schedule = []
+    if games_df.empty or "season" not in games_df.columns:
+        return schedule
+        
+    season_games = games_df[(games_df["season"] == season)]
+    team_games = season_games[(season_games["home_team"] == team) | (season_games["away_team"] == team)].copy()
+
+    if "week" in team_games.columns:
+        team_games = team_games.sort_values(by="week")
+        
+    for _, row in team_games.iterrows():
+        opp = row["away_team"] if row["home_team"] == team else row["home_team"]
+        home_away = "vs" if row["home_team"] == team else "@"
+        schedule.append(f"Wk{row.get('week', '?')} {home_away} {opp}")
+        
+    return schedule
+
 if __name__ == "__main__":
     # Quick test
     import json

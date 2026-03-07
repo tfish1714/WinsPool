@@ -9,7 +9,7 @@ from fastapi.templating import Jinja2Templates
 from services.data_service import (
     load_data, get_available_years, get_draft_years, get_active_season,
 )
-from services.draft_service import load_draft_state, save_pick
+from services.draft_service import load_draft_state, save_pick, undo_pick
 from services.db_service import get_collection_df, add_draft_order, add_draft_rule
 import services.analysis_service as analysis
 
@@ -243,6 +243,42 @@ async def route_draft_results_by_year(request: Request, year: int):
                     "pick": int(rb.get("draftPick", 0)), "wins": int(rb.get("TotalWinsBySeason", 0)),
                 }
 
+    quickest = None
+    slowest = None
+    if "time_taken_seconds" in merged.columns:
+        valid_times = merged[merged["time_taken_seconds"] > 0]
+        if not valid_times.empty:
+            sorted_times = valid_times.sort_values("time_taken_seconds")
+            q_row = sorted_times.iloc[0]
+            s_row = sorted_times.iloc[-1]
+            quickest = {
+                "player": q_row.get("fullName", ""), "team": q_row.get("team", ""),
+                "time": int(q_row.get("time_taken_seconds", 0))
+            }
+            slowest = {
+                "player": s_row.get("fullName", ""), "team": s_row.get("team", ""),
+                "time": int(s_row.get("time_taken_seconds", 0))
+            }
+
+    # Draft Value Calculus
+    from services.data_service import get_preseason_predictions
+    preds = get_preseason_predictions(year)
+    def calculate_draft_value(row):
+        team = row.get("team")
+        actual = float(row.get("TotalWinsBySeason", 0))
+        proj = preds.get(team)
+        if proj is not None and proj > 0:
+            return round(actual - proj, 1)
+        return ""
+
+    def get_proj(row):
+        team = row.get("team")
+        proj = preds.get(team)
+        return proj if proj is not None and proj > 0 else ""
+        
+    merged["projected_wins"] = merged.apply(get_proj, axis=1)
+    merged["draft_value"] = merged.apply(calculate_draft_value, axis=1)
+
     return templates.TemplateResponse("draft_results.html", {
         "request": request,
         "data": merged.to_dict(orient="records"),
@@ -251,6 +287,8 @@ async def route_draft_results_by_year(request: Request, year: int):
         "available_years": get_draft_years(all_draft_results),
         "best_overall": best_overall,
         "best_by_round": best_by_round,
+        "quickest": quickest,
+        "slowest": slowest
     })
 
 
@@ -301,6 +339,50 @@ async def websocket_endpoint(websocket: WebSocket):
                     except ValueError:
                         pass
 
+            elif action == "undo_pick":
+                pid = msg.get("playerId")
+                state = load_draft_state(connected_players)
+                
+                player = next((p for p in state["all_players"] if p["playerId"] == int(pid)), None)
+                if not player or player["playerName"] != "TFish":
+                    await websocket.send_json({"type": "error", "message": "Unauthorized: Only TFish can execute Master Undo."})
+                    continue
+                
+                active_pick = state["active_pick"]
+                last_pick_num = active_pick - 1
+                if last_pick_num < 1:
+                    await websocket.send_json({"type": "error", "message": "No picks to undo."})
+                    continue
+                
+                undo_pick(state["season"], last_pick_num)
+                await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players)})
+
+            elif action == "force_pick":
+                pid = msg.get("playerId")
+                team = msg.get("team")
+                state = load_draft_state(connected_players)
+                
+                player = next((p for p in state["all_players"] if p["playerId"] == int(pid)), None)
+                if not player or player["playerName"] != "TFish":
+                    await websocket.send_json({"type": "error", "message": "Unauthorized: Only TFish can execute Master Force Pick."})
+                    continue
+                
+                if not state["draft_ready"]:
+                    await websocket.send_json({"type": "error", "message": "Draft cannot start until everyone is signed in!"})
+                    continue
+                if state["active_pick"] > 30:
+                    await websocket.send_json({"type": "error", "message": "Draft is already complete!"})
+                    continue
+                if team not in state["available_teams"]:
+                    await websocket.send_json({"type": "error", "message": "Team is not available!"})
+                    continue
+
+                active_pick = state["active_pick"]
+                target_pid = next((x["playerId"] for x in state["draft_board"] if x["pick"] == active_pick), None)
+                if target_pid is not None:
+                    save_pick(state["season"], active_pick, target_pid, team, executed_by="TFish")
+                    await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players)})
+
             elif action == "pick":
                 team = msg.get("team")
                 state = load_draft_state(connected_players)
@@ -315,9 +397,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 active_pick = state["active_pick"]
-                pid = next((x["playerId"] for x in state["draft_board"] if x["pick"] == active_pick), None)
-                if pid is not None:
-                    save_pick(state["season"], active_pick, pid, team)
+                target_pid = next((x["playerId"] for x in state["draft_board"] if x["pick"] == active_pick), None)
+                
+                # Assert it's actually their turn
+                pid = msg.get("playerId")
+                if int(pid) != target_pid:
+                    await websocket.send_json({"type": "error", "message": "It is not your turn to pick!"})
+                    continue
+
+                if target_pid is not None:
+                    save_pick(state["season"], active_pick, target_pid, team)
                     await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players)})
 
     except WebSocketDisconnect:

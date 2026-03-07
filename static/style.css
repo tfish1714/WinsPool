@@ -42,13 +42,39 @@ body {
     pointer-events: none;
 }
 
+/* Anti-flicker: hide both by default */
+.signin-screen,
+.app-nav,
+#content {
+    display: none !important;
+}
+
+/* Force show signin if state detection finds no user id */
+.show-signin .signin-screen {
+    display: flex !important;
+}
+
+/* Show app content if signed in */
+html:not(.show-signin) .app-nav {
+    display: flex !important;
+}
+
+html:not(.show-signin) #content {
+    display: block !important;
+}
+
+.hidden {
+    display: none !important;
+}
+
 .app-container {
     max-width: var(--container-max);
     margin: 0 auto;
     padding: 1.5rem var(--content-padding);
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
+    gap: 2rem;
+    align-items: stretch;
 }
 
 header {
@@ -292,6 +318,7 @@ tr:hover {
 
 /* Sign In */
 .signin-screen {
+    grid-column: 1 / -1;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -381,9 +408,60 @@ tr:hover {
 
 .app-nav {
     width: 100%;
-    margin-top: 1.5rem;
-    position: relative;
-    z-index: 10;
+    position: sticky;
+    top: 1rem;
+    z-index: 100;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    padding: 0.75rem 1.5rem;
+    /* Aligns internal logo with card content */
+    backdrop-filter: blur(12px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.nav-header {
+    display: flex;
+    align-items: center;
+}
+
+.brand-box {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    transition: transform 0.3s ease;
+    cursor: pointer;
+}
+
+.brand-box:hover {
+    transform: scale(1.02);
+}
+
+.nav-logo {
+    height: 38px;
+    width: auto;
+    filter: drop-shadow(0 0 10px rgba(88, 166, 255, 0.4));
+    transition: filter 0.3s ease;
+}
+
+.brand-box:hover .nav-logo {
+    filter: drop-shadow(0 0 15px rgba(88, 166, 255, 0.6));
+}
+
+.nav-header h1 {
+    font-size: 1.6rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #58a6ff, #a371f7);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1;
+    margin: 0;
+    white-space: nowrap;
 }
 
 .hamburger-btn {
@@ -407,19 +485,20 @@ tr:hover {
 
 .nav-links {
     display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 0.5rem;
-    width: 100%;
+    flex-direction: row;
+    gap: 0.4rem;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
 }
 
 .tab-btn {
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--glass-border);
     color: var(--text-secondary);
-    padding: 0.6rem 1.2rem;
+    padding: 0.5rem 0.9rem;
     border-radius: 8px;
-    font-size: 0.95rem;
+    font-size: 0.85rem;
     cursor: pointer;
     font-family: inherit;
     text-decoration: none;
@@ -436,6 +515,7 @@ tr:hover {
     background: var(--primary-color);
     color: #fff;
     border-color: var(--primary-color);
+    box-shadow: 0 0 15px rgba(88, 166, 255, 0.3);
 }
 
 /* Progress Section */
@@ -787,18 +867,35 @@ tr:hover {
     }
 
     .app-nav {
-        margin-top: 1rem;
+        margin-top: 0;
+        top: 1rem;
+        flex-direction: column;
+        padding: 1rem;
+        gap: 1rem;
+    }
+
+    .brand-box {
+        justify-content: center;
+        width: 100%;
+    }
+
+    .nav-header h1 {
+        font-size: 1.4rem;
     }
 
     .hamburger-btn {
         display: block;
+        margin: 0;
+        width: 100%;
     }
 
     .nav-links {
         display: none !important;
         flex-direction: column;
-        align-items: center;
-        gap: 0.4rem;
+        width: 100%;
+        gap: 0.5rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--glass-border);
     }
 
     .nav-links.open {

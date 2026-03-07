@@ -6,10 +6,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}NFL Wins Pool{% endblock %}</title>
     <!-- Use the primary glassmorphism design system -->
-    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}?v=10">
+    <link rel="stylesheet" href="/static/style.css?v=11">
+    <link rel="icon" type="image/png" href="/static/fishbone.png">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
     {% block head %}{% endblock %}
 
+    <!-- Early Auth Detection to prevent flicker -->
+    <script>
+        (function () {
+            const myPlayerId = localStorage.getItem('nfl_wins_my_player_id');
+            if (!myPlayerId || myPlayerId === "null") {
+                document.documentElement.classList.add('show-signin');
+            }
+        })();
+    </script>
 </head>
 
 <body>
@@ -19,25 +29,51 @@
         <!-- Sign In Screen (Global Authentication Overlay) -->
         <main class="signin-screen" id="signin-screen">
             <div class="card-glass signin-card">
-                <div id="signin-step-1">
-                    <h2>Welcome to the NFL Wins Pool</h2>
-                    <p>Please select your player name to enter the system.</p>
-                    <div id="player-grid" class="player-grid"></div>
-                </div>
+                <div id="auth-form-container">
+                    <h2 id="auth-title">Sign In</h2>
+                    <p id="auth-subtitle">Welcome to the NFL Wins Pool</p>
 
-                <div id="signin-step-2" class="hidden">
-                    <h2>Authentication</h2>
-                    <p>Please enter the shared draft room code.</p>
-                    <input type="text" id="verification-code" placeholder="Enter Room Code" maxlength="20">
-                    <button id="verify-btn" class="btn-primary mt-10">Verify Code</button>
-                    <button id="cancel-verify-btn" class="btn-primary btn-cancel mt-10">Cancel</button>
-                    <p id="verify-error" class="error-text hidden">Invalid code, please try again.</p>
+                    <div id="auth-fields">
+                        <input type="email" id="auth-email" class="admin-input" style="width:100%; margin-bottom: 10px;"
+                            placeholder="Email Address">
+
+                        <div id="setup-requirements" class="hidden"
+                            style="display: none; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 12px; text-align: left; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px;">
+                            <strong>Requirements:</strong><br />
+                            • Minimum 12 characters<br />
+                            • Uppercase & Lowercase letters<br />
+                            • At least 1 number<br />
+                            • At least 1 symbol (@$!%*?&amp;_)
+                        </div>
+
+                        <input type="password" id="auth-password" class="admin-input"
+                            style="width:100%; margin-bottom: 10px;" placeholder="Password">
+
+                        <input type="password" id="auth-confirm-password" class="admin-input hidden"
+                            style="width:100%; display: none;" placeholder="Confirm Password">
+                    </div>
+
+                    <button id="auth-submit-btn" class="btn-primary" style="width: 100%; margin-top: 15px;">Log
+                        In</button>
+
+                    <p id="auth-error" class="error-text hidden" style="margin-top: 10px;"></p>
+
+                    <div id="auth-loading" class="hidden"
+                        style="margin-top: 10px; color: var(--accent-gold); font-size: 0.9rem;">
+                        Checking account status...
+                    </div>
                 </div>
             </div>
         </main>
 
         <!-- Unified Global Navigation (Hidden until Authenticated) -->
-        <div class="app-nav" id="app-nav" style="display: none;">
+        <div class="app-nav" id="app-nav">
+            <div class="nav-header">
+                <div class="brand-box">
+                    <img src="/static/fishbone.png" alt="Logo" class="nav-logo">
+                    <h1>NFL Wins Pool</h1>
+                </div>
+            </div>
             <button class="hamburger-btn" onclick="document.getElementById('nav-links').classList.toggle('open')">☰
                 Menu</button>
             <nav class="nav-links" id="nav-links">
@@ -49,11 +85,13 @@
                 <a href="/draft/history" class="tab-btn">📖 Draft History</a>
                 <a href="/headtohead" class="tab-btn">🤝 Head-to-Head</a>
                 <a href="/history" class="tab-btn">👑 Overall History</a>
+                <a href="/admin" id="admin-nav-link" class="tab-btn"
+                    style="display: none; color: var(--accent-orange); font-weight: bold;">⚙️ Admin Portal</a>
             </nav>
         </div>
 
         <!-- Dynamic Page Content -->
-        <div id="content" style="display: none;">
+        <div id="content">
             {% block content %}{% endblock %}
         </div>
     </div>
@@ -62,7 +100,7 @@
     <div id="toast" class="toast hidden"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="{{ url_for('static', path='script.js') }}?v=6"></script>
+    <script src="/static/script.js?v=7"></script>
     {% block scripts %}{% endblock %}
 </body>
 

@@ -5,7 +5,15 @@ import pandas as pd
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
+import hashlib
 
+def get_password_hash(password: str) -> str:
+    """Hash the password securely using SHA-256 to bypass bcrypt's 72-byte strict limit limit."""
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verifies the plain_password matching against the SHA-256 hash."""
+    return hashlib.sha256(plain_password.encode("utf-8")).hexdigest() == hashed_password
 
 def _init_firebase():
     """
@@ -87,15 +95,61 @@ def get_collection_df(collection_name: str, filters: list = None) -> pd.DataFram
 def update_player_cell(player_id: int, cell: str):
     get_db().collection("players").document(str(player_id)).update({"cell": cell})
 
+def get_player_by_email(email: str):
+    """Retrieve a single player directly by their standardized email address."""
+    db = get_db()
+    docs = db.collection("players").where(filter=FieldFilter("email", "==", email)).stream()
+    for doc in docs:
+        data = doc.to_dict()
+        data["playerId"] = doc.id
+        return data
+    return None
 
-def add_draft_result(season: int, draft_pick: int, player_id: int, team: str):
+def update_player_credentials(player_id: str, password_hash: str):
+    """Binds the active bcrypt password_hash natively onto the User Document."""
+    get_db().collection("players").document(str(player_id)).update({
+        "password_hash": password_hash,
+        "failed_setup_attempts": 0,
+        "lockout_until": None
+    })
+
+def increment_failed_setup_attempts(player_id: str, new_count: int, lockout_until: float = None):
+    """Applies the 5-Attempt rate limiter lockouts physically onto the Database."""
+    update_data = {"failed_setup_attempts": new_count}
+    if lockout_until:
+        update_data["lockout_until"] = lockout_until
+    get_db().collection("players").document(str(player_id)).update(update_data)
+
+
+def add_draft_result(season: int, draft_pick: int, player_id: int, team: str, executed_by: str = None, time_taken_seconds: float = None):
     doc_id = f"{season}_{draft_pick}"
-    get_db().collection("draft_results").document(doc_id).set({
+    data = {
         "season": season,
         "draftPick": draft_pick,
         "playerId": player_id,
         "team": team,
-    })
+    }
+    if executed_by:
+        data["executed_by"] = executed_by
+    if time_taken_seconds is not None:
+        data["time_taken_seconds"] = time_taken_seconds
+        
+    get_db().collection("draft_results").document(doc_id).set(data)
+
+def delete_draft_pick(season: int, draft_pick: int):
+    doc_id = f"{season}_{draft_pick}"
+    get_db().collection("draft_results").document(doc_id).delete()
+
+def delete_draft_results_for_season(season: int):
+    db = get_db()
+    docs = db.collection("draft_results").where(filter=FieldFilter("season", "==", season)).stream()
+    batch = db.batch()
+    count = 0
+    for doc in docs:
+        batch.delete(doc.reference)
+        count += 1
+    if count > 0:
+        batch.commit()
 
 
 def add_draft_order(season: int, draft_order: int, player_id: int):

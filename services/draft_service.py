@@ -2,17 +2,33 @@ import os
 import traceback
 import pandas as pd
 from typing import Dict, Any, List
-from services.db_service import get_collection_df, add_draft_result, update_player_cell
+from services.db_service import get_collection_df, add_draft_result, update_player_cell, delete_draft_pick
+from services.data_service import get_preseason_predictions, get_team_schedule, load_data
+import time
 
 NFL_DATA_GITHUB = "https://raw.githubusercontent.com/leesharpe/nfldata/master/data/"
+
+_CACHED_DRAFT_STATE = None
 
 def load_draft_state(connected_players: set) -> Dict[str, Any]:
     """
     Loads all players, draft order, rules, and existing results to construct the current draft board state.
     """
+    global _CACHED_DRAFT_STATE
+    import copy
+    
+    if _CACHED_DRAFT_STATE is not None:
+        state = copy.deepcopy(_CACHED_DRAFT_STATE)
+        state["draft_ready"] = len(connected_players) >= len(state["all_players"])
+        state["connected_players"] = list(connected_players)
+        for p in state["all_players"]:
+            p["connected"] = p["playerId"] in connected_players
+        return state
+
     # Load players
     players_df = get_collection_df('players')
-    total_players = len(players_df)
+    valid_players = players_df.dropna(subset=['playerId'])
+    total_players = len(valid_players)
     
     # Check if draft is ready to start
     draft_ready = len(connected_players) >= total_players
@@ -99,6 +115,11 @@ def load_draft_state(connected_players: set) -> Dict[str, Any]:
     # List of available teams
     available_teams = sorted(list(set(all_nfl_teams) - picked_teams))
     
+    # Analytics Projections & 17-Game Opponent Trees
+    preseason_predictions = get_preseason_predictions(int(season))
+    _, _, games_df, _, _, _, _ = load_data(year=int(season))
+    team_schedules = {t: get_team_schedule(t, games_df, int(season)) for t in all_nfl_teams}
+    
     # List of all players with connection status (skip rows with NaN playerId)
     all_players_info = []
     valid_players = players_df.dropna(subset=['playerId'])
@@ -117,6 +138,8 @@ def load_draft_state(connected_players: set) -> Dict[str, Any]:
         is_email_nan = pd.isna(row.get('email')) or email.strip() == 'nan' or email.strip() == ''
         has_email = not is_email_nan
         masked_email = f"{email[0]}***@{email.split('@')[-1]}" if has_email and '@' in email else "Unknown"
+        
+        has_password = 'password_hash' in row and not pd.isna(row['password_hash']) and str(row['password_hash']).strip() != ''
 
         all_players_info.append({
             "playerId": pid,
@@ -125,7 +148,8 @@ def load_draft_state(connected_players: set) -> Dict[str, Any]:
             "has_phone": has_phone,
             "phone": masked_phone,
             "has_email": has_email,
-            "email": masked_email
+            "email": masked_email,
+            "has_password": has_password
         })
     
     state = {
@@ -135,15 +159,38 @@ def load_draft_state(connected_players: set) -> Dict[str, Any]:
         "available_teams": available_teams,
         "draft_ready": draft_ready,
         "connected_players": list(connected_players),
-        "all_players": all_players_info
+        "all_players": all_players_info,
+        "pick_start_time": int(time.time()),
+        "preseason_predictions": preseason_predictions,
+        "team_schedules": team_schedules,
     }
     
+    import copy
+    _CACHED_DRAFT_STATE = copy.deepcopy(state)
     return state
 
-def save_pick(season: int, draft_pick: int, player_id: int, team: str):
+def save_pick(season: int, draft_pick: int, player_id: int, team: str, executed_by: str = None):
     """Appends a new draft pick to the results."""
-    add_draft_result(season, draft_pick, player_id, team)
+    global _CACHED_DRAFT_STATE
+    time_taken = None
+    if _CACHED_DRAFT_STATE and "pick_start_time" in _CACHED_DRAFT_STATE:
+        time_taken = time.time() - _CACHED_DRAFT_STATE["pick_start_time"]
+    add_draft_result(season, draft_pick, player_id, team, executed_by, time_taken)
+    _CACHED_DRAFT_STATE = None
+
+def undo_pick(season: int, draft_pick: int):
+    """Deletes the most recent draft pick."""
+    global _CACHED_DRAFT_STATE
+    delete_draft_pick(season, draft_pick)
+    _CACHED_DRAFT_STATE = None
 
 def update_player_phone(player_id: int, phone: str):
     """Updates a player's phone number."""
+    global _CACHED_DRAFT_STATE
     update_player_cell(player_id, phone)
+    _CACHED_DRAFT_STATE = None
+
+def wipe_draft_cache():
+    """Manually evicts the Draft Singleton (used by Admin sandbox reset)."""
+    global _CACHED_DRAFT_STATE
+    _CACHED_DRAFT_STATE = None

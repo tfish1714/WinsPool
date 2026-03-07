@@ -64,11 +64,15 @@ async def wins_pool_by_year(request: Request, year: int):
 
 @router.get("/wins-pool/{year}/weekbyweek")
 async def wins_pool_weekbyweek(request: Request, year: int):
-    standings, _, games, players, _, draft_results, _ = load_data(year=year)
+    standings_df, _, games, players, _, draft_results, _ = load_data(year=year)
     _, _, all_games, _, _, all_draft_results, _ = load_data()
 
+    # Calculate standings to get the ranked player order
+    standings_ranked = analysis.calculate_wins_pool_standings(standings_df, draft_results, players, year)
+    sorted_player_names = standings_ranked["fullName"].tolist() if not standings_ranked.empty else None
+
     schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
-    record_by_week = analysis.player_winsbyWeek(schedule_enriched)
+    record_by_week = analysis.player_winsbyWeek(schedule_enriched, sorted_players=sorted_player_names)
 
     return templates.TemplateResponse("weekbyweek.html", {
         "request": request,
