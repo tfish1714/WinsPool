@@ -123,6 +123,53 @@ fly machine run . --command "python scripts/daily_nfl_sync.py" --schedule daily
 
 ---
 
+## Custom Domains (Google Cloud Run)
+
+### Method A: Cloud Run Domain Mappings (Easiest)
+Note: This is in "Preview" and only supported in specific regions (like `us-central1`).
+
+1. Go to the **Cloud Run** console.
+2. Click **Manage Custom Domains** at the top.
+3. Click **Add Mapping**.
+4. Select your service (`winspool`).
+5. Follow the verification steps (via **Google Search Console** if you haven't verified the domain yet).
+6. GCP will provide `CNAME` or `A` records to add to your DNS provider (GoDaddy, Namecheap, etc.).
+
+### Method B: Firebase Hosting (Recommended for Global CDN)
+If Domain Mappings aren't available for your region, or if you want Firebase integration:
+
+1. Initialize Firebase in your project: `firebase init hosting`
+2. Configure `firebase.json` to rewrite all requests to your Cloud Run service:
+   ```json
+   {
+     "hosting": {
+       "rewrites": [{ "source": "**", "run": { "serviceId": "winspool", "region": "us-east1" } }]
+     }
+   }
+   ```
+3. Deploy: `firebase deploy --only hosting`
+4. Connect your domain in the **Firebase Hosting** console.
+
+### Method C: Global Load Balancer (Enterprise/Production)
+Best for production environments requiring a global IP and advanced SSL control. Requires setting up a **Backend Service** for Cloud Run behind an **HTTPS Load Balancer**.
+
+---
+
+## Customizing the Default (Free) URL
+
+If you don't want to buy a custom domain, you can still make the URL look better by controlling the **Service Name** and **Project ID**.
+
+### Cloud Run Default URL
+Format: `https://[SERVICE_NAME]-[HASH]-[REGION].a.run.app`
+- **To change the name**: Simply change the name in the `gcloud run deploy` command (e.g., `gcloud run deploy nfl-pool-2024`). This immediately updates the URL.
+
+### Firebase Hosting Default URL (Branded)
+Format: `https://[PROJECT_ID].web.app` or `https://[PROJECT_ID].firebaseapp.com`
+- **To change the name**: This requires creating a **New Google Cloud Project** with a custom Project ID. 
+- Example: If you create a project called `wins-pool-league`, your URL will be `wins-pool-league.web.app`.
+
+---
+
 ## Environment Variables Reference
 
 | Variable | Required | Description |

@@ -4,6 +4,7 @@ import pathlib
 import pandas as pd
 import firebase_admin
 from firebase_admin import credentials, firestore
+import time
 
 NFL_DATA_GITHUB = "https://raw.githubusercontent.com/leesharpe/nfldata/master/data/"
 POOL_START_YEAR = 2013  # Earliest season in the pool
@@ -100,6 +101,12 @@ def sync_nfl_data():
     #       Run upload_configfiles.py manually if teams need updating.
     batch_upload(db, 'nfl_standings', df_standings)
     batch_upload(db, 'nfl_games', df_games_filtered)
+
+    # Signal web server to invalidate cache
+    print("Signaling cache invalidation...")
+    db.collection("metadata").document("cache_control").set({
+        "last_update": time.time()
+    })
 
     print("Daily sync completed successfully!")
 

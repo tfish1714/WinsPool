@@ -6,6 +6,8 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 import hashlib
+import time
+from services.cache_service import clear_data_cache
 
 def get_password_hash(password: str) -> str:
     """Hash the password securely using SHA-256 to bypass bcrypt's 72-byte strict limit limit."""
@@ -58,6 +60,17 @@ def get_db():
         _init_firebase()
     return firestore.client()
 
+def signal_data_update():
+    """Signals all application instances to invalidate their caches."""
+    try:
+        db = get_db()
+        if db:
+            db.collection("metadata").document("cache_control").set({
+                "last_update": time.time()
+            })
+    except Exception as e:
+        print(f"Warning: Failed to signal remote cache update: {e}")
+
 
 def get_collection_df(collection_name: str, filters: list = None) -> pd.DataFrame:
     """
@@ -94,6 +107,7 @@ def get_collection_df(collection_name: str, filters: list = None) -> pd.DataFram
 
 def update_player_cell(player_id: int, cell: str):
     get_db().collection("players").document(str(player_id)).update({"cell": cell})
+    clear_data_cache()
 
 def get_player_by_email(email: str):
     """Retrieve a single player directly by their standardized email address."""
@@ -112,6 +126,7 @@ def update_player_credentials(player_id: str, password_hash: str):
         "failed_setup_attempts": 0,
         "lockout_until": None
     })
+    clear_data_cache()
 
 def increment_failed_setup_attempts(player_id: str, new_count: int, lockout_until: float = None):
     """Applies the 5-Attempt rate limiter lockouts physically onto the Database."""
@@ -119,6 +134,32 @@ def increment_failed_setup_attempts(player_id: str, new_count: int, lockout_unti
     if lockout_until:
         update_data["lockout_until"] = lockout_until
     get_db().collection("players").document(str(player_id)).update(update_data)
+
+def add_player(full_name: str, nick_name: str, email: str):
+    """Creates a new player with a unique numeric ID."""
+    db = get_db()
+    players = db.collection("players").get()
+    max_id = 0
+    for doc in players:
+        try:
+            val = int(doc.id)
+            if val > max_id:
+                max_id = val
+        except ValueError:
+            continue
+    
+    new_id = max_id + 1
+    db.collection("players").document(str(new_id)).set({
+        "playerId": new_id,
+        "fullName": full_name,
+        "nickName": nick_name,
+        "email": email.strip().lower(),
+        "role": "user",
+        "failed_setup_attempts": 0,
+    })
+    clear_data_cache()
+    signal_data_update()
+    return new_id
 
 
 def add_draft_result(season: int, draft_pick: int, player_id: int, team: str, executed_by: str = None, time_taken_seconds: float = None):
@@ -135,10 +176,12 @@ def add_draft_result(season: int, draft_pick: int, player_id: int, team: str, ex
         data["time_taken_seconds"] = time_taken_seconds
         
     get_db().collection("draft_results").document(doc_id).set(data)
+    clear_data_cache()
 
 def delete_draft_pick(season: int, draft_pick: int):
     doc_id = f"{season}_{draft_pick}"
     get_db().collection("draft_results").document(doc_id).delete()
+    clear_data_cache()
 
 def delete_draft_results_for_season(season: int):
     db = get_db()
@@ -150,6 +193,22 @@ def delete_draft_results_for_season(season: int):
         count += 1
     if count > 0:
         batch.commit()
+    clear_data_cache()
+
+def delete_season_data(season: int):
+    """Wipes draft_order, draft_order_rules, and draft_results for a season."""
+    db = get_db()
+    for col in ["draft_order", "draft_order_rules", "draft_results"]:
+        docs = db.collection(col).where(filter=FieldFilter("season", "==", season)).stream()
+        batch = db.batch()
+        count = 0
+        for doc in docs:
+            batch.delete(doc.reference)
+            count += 1
+        if count > 0:
+            batch.commit()
+    clear_data_cache()
+    signal_data_update()
 
 
 def add_draft_order(season: int, draft_order: int, player_id: int):
@@ -159,6 +218,7 @@ def add_draft_order(season: int, draft_order: int, player_id: int):
         "draftOrder": draft_order,
         "playerId": player_id,
     })
+    clear_data_cache()
 
 
 def add_draft_rule(season: int, draft_order: int, pick_one: int, pick_two: int, pick_three: int):
@@ -170,3 +230,26 @@ def add_draft_rule(season: int, draft_order: int, pick_one: int, pick_two: int, 
         "pickTwo": pick_two,
         "pickThree": pick_three,
     })
+    clear_data_cache()
+    signal_data_update()
+
+def update_player_profile(player_id: str, updates: dict):
+    """Updates non-credential player fields (nickname, email, MFA) with cache invalidation."""
+    get_db().collection("players").document(str(player_id)).update(updates)
+    clear_data_cache()
+    signal_data_update()
+
+def save_weekly_recap(year: int, week: int, summary: str):
+    """Saves an AI-generated weekly summary to Firestore."""
+    doc_id = f"{year}_{week}"
+    get_db().collection("weekly_recaps").document(doc_id).set({
+        "year": year,
+        "week": week,
+        "summary": summary,
+        "timestamp": time.time()
+    })
+
+def get_weekly_recap(year: int, week: int):
+    """Retrieves a specific weekly recap from Firestore."""
+    doc = get_db().collection("weekly_recaps").document(f"{year}_{week}").get()
+    return doc.to_dict() if doc.exists else None

@@ -6,9 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}NFL Wins Pool{% endblock %}</title>
     <!-- Use the primary glassmorphism design system -->
-    <link rel="stylesheet" href="/static/style.css?v=11">
-    <link rel="icon" type="image/png" href="/static/fishbone.png">
+    <link rel="icon" href="/static/fishbone.png" type="image/png">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=11">
     {% block head %}{% endblock %}
 
     <!-- Early Auth Detection to prevent flicker -->
@@ -51,6 +51,10 @@
 
                         <input type="password" id="auth-confirm-password" class="admin-input hidden"
                             style="width:100%; display: none;" placeholder="Confirm Password">
+
+                        <input type="text" id="auth-mfa-code" class="admin-input hidden"
+                            style="width:100%; display: none; text-align: center; letter-spacing: 0.5rem; font-size: 1.5rem; font-weight: bold;"
+                            placeholder="000000" maxlength="6">
                     </div>
 
                     <button id="auth-submit-btn" class="btn-primary" style="width: 100%; margin-top: 15px;">Log
@@ -85,6 +89,7 @@
                 <a href="/draft/history" class="tab-btn">📖 Draft History</a>
                 <a href="/headtohead" class="tab-btn">🤝 Head-to-Head</a>
                 <a href="/history" class="tab-btn">👑 Overall History</a>
+                <a href="/profile" class="tab-btn">👤 My Profile</a>
                 <a href="/admin" id="admin-nav-link" class="tab-btn"
                     style="display: none; color: var(--accent-orange); font-weight: bold;">⚙️ Admin Portal</a>
             </nav>

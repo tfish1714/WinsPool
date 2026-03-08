@@ -11,8 +11,29 @@
     // ---------- Week filter ----------
 
     window.filterByWeek = function (week) {
-        document.querySelectorAll('#schedule-body tr').forEach(row => {
-            row.classList.toggle('hidden-row', String(row.dataset.week) !== String(week));
+        // Update carousel active state
+        document.querySelectorAll('.week-item').forEach(item => {
+            if (String(item.dataset.week) === String(week)) {
+                item.classList.add('active');
+                // Scroll the active item into view within the horizontal carousel
+                item.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            } else {
+                item.classList.remove('active');
+            }
+        });
+
+        // Toggle Game Cards and Date Headers
+        const cards = document.querySelectorAll('.game-card');
+        const headers = document.querySelectorAll('.date-group-header');
+
+        cards.forEach(card => {
+            card.classList.toggle('hidden', String(card.dataset.week) !== String(week));
+        });
+
+        // Only show date headers if there is at least one visible card for that date
+        headers.forEach(header => {
+            const weekOfHeader = String(header.dataset.week);
+            header.classList.toggle('hidden', weekOfHeader !== String(week));
         });
     };
 
@@ -101,9 +122,12 @@
     // ---------- Boot ----------
 
     document.addEventListener('DOMContentLoaded', () => {
-        // Apply default week filter
-        const sel = document.getElementById('week-filter');
-        if (sel) filterByWeek(sel.value);
+        // Apply default week filter from carousel
+        const activeItem = document.querySelector('.week-item.active');
+        if (activeItem) {
+            const week = activeItem.dataset.week;
+            filterByWeek(week);
+        }
 
         // Init chart using config injected by Jinja template
         const cfg = window.STANDINGS_CONFIG;

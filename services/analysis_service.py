@@ -333,6 +333,9 @@ def get_enriched_schedule(games, draft_results, players, season):
     final_merged['home_score'] = final_merged['home_score'].astype('Int64')
     final_merged['away_score'] = final_merged['away_score'].astype('Int64')
     
+    # Sort chronologically by week and gameday
+    final_merged = final_merged.sort_values(['week', 'gameday'], ascending=[True, True])
+    
     final_merged = final_merged.where(pd.notnull(final_merged), None)
     final_merged = final_merged.fillna(-1000)
                                    

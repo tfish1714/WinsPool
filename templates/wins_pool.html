@@ -52,9 +52,18 @@
                         <td>{{ row['Rank'] }}</td>
                         <td>{{ row['fullName'] }}</td>
                         <td>{{ row['TotalWins'] }}</td>
-                        <td>{{ row['team1'] }} ({{ row['wins1'] }} W, {{ row['ptDiff1'] }} diff)</td>
-                        <td>{{ row['team2'] }} ({{ row['wins2'] }} W, {{ row['ptDiff2'] }} diff)</td>
-                        <td>{{ row['team3'] }} ({{ row['wins3'] }} W, {{ row['ptDiff3'] }} diff)</td>
+                        <td>
+                            <img src="{{ get_team_logo(row['team1']) }}" class="tiny-logo" alt="">
+                            {{ row['team1'] }} ({{ row['wins1'] }} W, {{ row['ptDiff1'] }} diff)
+                        </td>
+                        <td>
+                            <img src="{{ get_team_logo(row['team2']) }}" class="tiny-logo" alt="">
+                            {{ row['team2'] }} ({{ row['wins2'] }} W, {{ row['ptDiff2'] }} diff)
+                        </td>
+                        <td>
+                            <img src="{{ get_team_logo(row['team3']) }}" class="tiny-logo" alt="">
+                            {{ row['team3'] }} ({{ row['wins3'] }} W, {{ row['ptDiff3'] }} diff)
+                        </td>
                         <td>{{ row['Tiebreaker1_WorstTeamWins'] }}</td>
                         <td>{{ row['Tiebreaker2_2ndWorstTeamWins'] }}</td>
                         <td>{{ row['Tiebreaker3_BestTeamWins'] }}</td>
@@ -76,9 +85,12 @@
                 </div>
                 <button class="expand-button" onclick="toggleCard(this)">Show Details</button>
                 <div class="card-content">
-                    <p><strong>Team 1:</strong> {{ row['team1'] }} ({{ row['wins1'] }} W, {{ row['ptDiff1'] }} diff)</p>
-                    <p><strong>Team 2:</strong> {{ row['team2'] }} ({{ row['wins2'] }} W, {{ row['ptDiff2'] }} diff)</p>
-                    <p><strong>Team 3:</strong> {{ row['team3'] }} ({{ row['wins3'] }} W, {{ row['ptDiff3'] }} diff)</p>
+                    <p><strong>Team 1:</strong> <img src="{{ get_team_logo(row['team1']) }}" class="tiny-logo" alt="">
+                        {{ row['team1'] }} ({{ row['wins1'] }} W, {{ row['ptDiff1'] }} diff)</p>
+                    <p><strong>Team 2:</strong> <img src="{{ get_team_logo(row['team2']) }}" class="tiny-logo" alt="">
+                        {{ row['team2'] }} ({{ row['wins2'] }} W, {{ row['ptDiff2'] }} diff)</p>
+                    <p><strong>Team 3:</strong> <img src="{{ get_team_logo(row['team3']) }}" class="tiny-logo" alt="">
+                        {{ row['team3'] }} ({{ row['wins3'] }} W, {{ row['ptDiff3'] }} diff)</p>
                     <p><strong>TB 1:</strong> {{ row['Tiebreaker1_WorstTeamWins'] }} &nbsp; <strong>TB 2:</strong> {{
                         row['Tiebreaker2_2ndWorstTeamWins'] }} &nbsp; <strong>TB 3:</strong> {{
                         row['Tiebreaker3_BestTeamWins'] }}</p>
@@ -90,52 +102,86 @@
             {% endfor %}
         </div>
 
-        <!-- ── Live Schedule ───────────────────────────────── -->
+        <!-- ── Weekly AI Recap ────────────────────────── -->
+        {% if recap %}
+        <div class="recap-card-glass">
+            <h3 class="recap-title">
+                <span class="sparkle">✨</span> Weekly AI Recap: Week {{ current_week }}
+            </h3>
+            <div class="recap-content">
+                {{ recap | safe }}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ── theScore Style Schedule ─────────────────────── -->
         {% if schedule %}
         <h3 class="section-title">📅 Game Schedule — Week Results</h3>
-        <div class="week-filter-bar">
-            <label for="week-filter">Week:</label>
-            <select id="week-filter" onchange="filterByWeek(this.value)">
+
+        <!-- Week Carousel -->
+        <div class="week-carousel-container">
+            <div class="week-carousel" id="week-carousel">
                 {% for w in unique_weeks %}
-                <option value="{{ w }}" {% if w==current_week %}selected{% endif %}>Week {{ w }}</option>
+                <div class="week-item {% if w==current_week %}active{% endif %}" data-week="{{ w }}"
+                    onclick="filterByWeek('{{ w }}')">
+                    Week {{ w }}
+                </div>
                 {% endfor %}
-            </select>
+            </div>
         </div>
-        <div class="schedule-table-wrap">
-            <table class="schedule-table" id="schedule-tbl">
-                <thead>
-                    <tr>
-                        <th data-week style="display:none">Week</th>
-                        <th>Home Team</th>
-                        <th>Home Score</th>
-                        <th>Home Player</th>
-                        <th>Away Team</th>
-                        <th>Away Score</th>
-                        <th>Away Player</th>
-                    </tr>
-                </thead>
-                <tbody id="schedule-body">
-                    {% for row in schedule %}
-                    <tr data-week="{{ row['week'] }}">
-                        <td style="display:none">{{ row['week'] }}</td>
-                        <td>{{ row['home_team'] }}</td>
-                        <td class="score-col">{{ row['home_score'] if row['home_score'] not in (none, -1000) else '—' }}
-                        </td>
-                        <td
-                            class="{% if row['fullName_home'] not in (none, -1000, '-1000') and row['result'] is number and row['result'] > 0 %}highlight-match{% endif %}">
-                            {{ row['fullName_home'] if row['fullName_home'] not in (none, -1000, '-1000') else '—' }}
-                        </td>
-                        <td>{{ row['away_team'] }}</td>
-                        <td class="score-col">{{ row['away_score'] if row['away_score'] not in (none, -1000) else '—' }}
-                        </td>
-                        <td
-                            class="{% if row['fullName_away'] not in (none, -1000, '-1000') and row['result'] is number and row['result'] < 0 %}highlight-match{% endif %}">
-                            {{ row['fullName_away'] if row['fullName_away'] not in (none, -1000, '-1000') else '—' }}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+
+        <div class="schedule-container" id="schedule-container">
+            {% set ns = namespace(last_date=none) %}
+            {% for row in schedule %}
+            {% set current_date = row['gameday'].strftime('%A, %b %d') if row['gameday'] and row['gameday'] != -1000
+            else 'Unknown Date' %}
+
+            {% if current_date != ns.last_date %}
+            <div class="date-group-header" data-week="{{ row['week'] }}">
+                {{ current_date }}
+            </div>
+            {% set ns.last_date = current_date %}
+            {% endif %}
+
+            <div class="game-card" data-week="{{ row['week'] }}">
+                <div class="game-teams">
+                    <!-- Away Team -->
+                    <div
+                        class="team-row {% if row['result'] is number and row['result'] < 0 and row['result'] != -1000 %}winner-highlight{% endif %}">
+                        <img src="{{ get_team_logo(row['away_team']) }}" class="tiny-logo" alt="">
+                        <div class="team-name-box">
+                            <span class="team-name-text">{{ row['away_team'] }}</span>
+                            <span class="player-name-text">
+                                {{ row['fullName_away'] if row['fullName_away'] not in (none, -1000, '-1000') else '—'
+                                }}
+                            </span>
+                        </div>
+                        <span class="score-text">{{ row['away_score'] if row['away_score'] not in (none, -1000) else '—'
+                            }}</span>
+                    </div>
+                    <!-- Home Team -->
+                    <div
+                        class="team-row {% if row['result'] is number and row['result'] > 0 and row['result'] != -1000 %}winner-highlight{% endif %}">
+                        <img src="{{ get_team_logo(row['home_team']) }}" class="tiny-logo" alt="">
+                        <div class="team-name-box">
+                            <span class="team-name-text">{{ row['home_team'] }}</span>
+                            <span class="player-name-text">
+                                {{ row['fullName_home'] if row['fullName_home'] not in (none, -1000, '-1000') else '—'
+                                }}
+                            </span>
+                        </div>
+                        <span class="score-text">{{ row['home_score'] if row['home_score'] not in (none, -1000) else '—'
+                            }}</span>
+                    </div>
+                </div>
+                <div class="game-info-aside">
+                    <span
+                        class="game-status-label {% if row['result'] != -1000 %}status-final{% else %}status-live{% endif %}">
+                        {{ 'Final' if row['result'] != -1000 else 'Live' }}
+                    </span>
+                </div>
+            </div>
+            {% endfor %}
         </div>
         {% endif %}
 

@@ -50,7 +50,10 @@
                 <h4
                     style="color: var(--text-secondary); margin-bottom: 0.5rem; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1px;">
                     🔥 All-Time Best Undrafted Team</h4>
-                <div style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.25rem;">{{ undrafted_best.team }}
+                <div style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.25rem;">
+                    <img src="{{ get_team_logo(undrafted_best.team) }}" class="tiny-logo"
+                        style="height: 32px; vertical-align: middle; margin-right: 8px;" alt="">
+                    {{ undrafted_best.team }}
                     <span style="font-weight: 400; color: var(--text-secondary);">({{ undrafted_best.year }})</span>
                 </div>
                 <div style="color: var(--primary-color); font-weight: 800; font-size: 1.2rem;">{{ undrafted_best.wins }}
@@ -61,7 +64,10 @@
                 <h4
                     style="color: var(--text-secondary); margin-bottom: 0.5rem; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1px;">
                     🧊 All-Time Worst Undrafted Team</h4>
-                <div style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.25rem;">{{ undrafted_worst.team }}
+                <div style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.25rem;">
+                    <img src="{{ get_team_logo(undrafted_worst.team) }}" class="tiny-logo"
+                        style="height: 32px; vertical-align: middle; margin-right: 8px;" alt="">
+                    {{ undrafted_worst.team }}
                     <span style="font-weight: 400; color: var(--text-secondary);">({{ undrafted_worst.year }})</span>
                 </div>
                 <div style="color: #ff6b6b; font-weight: 800; font-size: 1.2rem;">{{ undrafted_worst.wins }} Wins</div>

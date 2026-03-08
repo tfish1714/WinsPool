@@ -105,3 +105,23 @@ def is_cache_final(analytic: str, year: int, week: int) -> bool:
         except Exception:
             pass
         return False
+
+# --- Data Cache (Moved from data_service to break circular import) ---
+import time
+
+# In-memory cache keyed by year (or 'all' for unfiltered load)
+_DATA_CACHE: dict = {}
+_CACHE_TIMESTAMPS: dict = {}
+_CACHE_TTL_SECONDS = 3600  # 1 hour - long-lived persistence
+_LAST_REMOTE_CHECK = 0
+_REMOTE_CHECK_INTERVAL = 60 # Check Firestore for invalidation every 60 seconds
+
+def clear_data_cache():
+    """Explicitly invalidates all in-memory data caches and signals remote observers."""
+    global _DATA_CACHE, _CACHE_TIMESTAMPS
+    _DATA_CACHE.clear()
+    _CACHE_TIMESTAMPS.clear()
+    print("Log: Global data cache explicitly cleared.")
+
+def _cache_key(year):
+    return str(year) if year is not None else 'all'

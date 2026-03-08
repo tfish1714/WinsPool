@@ -8,6 +8,7 @@ from services.data_service import (
     load_data, get_available_years, get_latest_season_and_week,
     get_latest_week_for_year, get_active_season,
 )
+import services.db_service as db
 import services.analysis_service as analysis
 
 router = APIRouter()
@@ -16,6 +17,11 @@ templates = Jinja2Templates(directory="templates")
 
 def _current_year(games, draft_results=None) -> int:
     return get_active_season(games, draft_results)
+
+
+@router.get("/profile")
+async def user_profile(request: Request):
+    return templates.TemplateResponse("profile.html", {"request": request})
 
 
 @router.get("/wins-pool")
@@ -44,6 +50,8 @@ async def wins_pool_by_year(request: Request, year: int):
 
         h2h_df = analysis.player_winlossmatrix(schedule_enriched)
 
+        recap = db.get_weekly_recap(year, latest_week)
+
         return templates.TemplateResponse("wins_pool.html", {
             "request": request,
             "data": sorted_df.to_dict(orient="records"),
@@ -54,6 +62,7 @@ async def wins_pool_by_year(request: Request, year: int):
             "schedule": schedule_enriched.to_dict(orient="records") if not schedule_enriched.empty else [],
             "unique_weeks": unique_weeks,
             "current_week": latest_week,
+            "recap": recap["summary"] if recap else None,
             "h2h_html": h2h_df.to_html(classes="table table-striped", border=0) if not h2h_df.empty else "",
         })
     except Exception as e:

@@ -269,12 +269,12 @@ async def route_draft_results_by_year(request: Request, year: int):
         proj = preds.get(team)
         if proj is not None and proj > 0:
             return round(actual - proj, 1)
-        return ""
+        return None
 
     def get_proj(row):
         team = row.get("team")
         proj = preds.get(team)
-        return proj if proj is not None and proj > 0 else ""
+        return proj if proj is not None and proj > 0 else None
         
     merged["projected_wins"] = merged.apply(get_proj, axis=1)
     merged["draft_value"] = merged.apply(calculate_draft_value, axis=1)
@@ -301,6 +301,7 @@ ROOM_CODE = os.environ.get("ROOM_CODE", "test").strip().lower()
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
+    current_view_year = None # Default to latest
     try:
         await websocket.send_json({"type": "state", "payload": load_draft_state(connected_players)})
         while True:
@@ -308,7 +309,18 @@ async def websocket_endpoint(websocket: WebSocket):
             msg = json.loads(data)
             action = msg.get("action")
 
-            if action == "request_signin":
+            # Determine target season for this action
+            # If not provided in message, use current_view_year, else fallback to latest in load_draft_state
+            target_year = msg.get("year") or current_view_year
+
+            if action == "switch_season":
+                yr = msg.get("year")
+                if yr:
+                    current_view_year = int(yr)
+                    await websocket.send_json({"type": "state", "payload": load_draft_state(connected_players, year=current_view_year)})
+                continue
+
+            elif action == "request_signin":
                 pid = msg.get("playerId")
                 if pid and str(pid).strip().lower() != "null":
                     await websocket.send_json({
@@ -324,7 +336,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     if str(code).strip().lower() == ROOM_CODE:
                         connected_players.add(pid)
                         await websocket.send_json({"type": "verified", "playerId": pid})
-                        await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players)})
+                        await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
                     else:
                         await websocket.send_json({"type": "error", "message": "Invalid Room Code."})
 
@@ -335,17 +347,17 @@ async def websocket_endpoint(websocket: WebSocket):
                         pid = int(pid)
                         connected_players.add(pid)
                         await websocket.send_json({"type": "verified", "playerId": pid})
-                        await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players)})
+                        await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
                     except ValueError:
                         pass
 
             elif action == "undo_pick":
                 pid = msg.get("playerId")
-                state = load_draft_state(connected_players)
+                state = load_draft_state(connected_players, year=target_year)
                 
                 player = next((p for p in state["all_players"] if p["playerId"] == int(pid)), None)
-                if not player or player["playerName"] != "TFish":
-                    await websocket.send_json({"type": "error", "message": "Unauthorized: Only TFish can execute Master Undo."})
+                if not player or player.get("role") != "admin":
+                    await websocket.send_json({"type": "error", "message": "Unauthorized: Admin access required."})
                     continue
                 
                 active_pick = state["active_pick"]
@@ -355,16 +367,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
                 
                 undo_pick(state["season"], last_pick_num)
-                await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players)})
+                await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
 
             elif action == "force_pick":
                 pid = msg.get("playerId")
                 team = msg.get("team")
-                state = load_draft_state(connected_players)
+                state = load_draft_state(connected_players, year=target_year)
                 
                 player = next((p for p in state["all_players"] if p["playerId"] == int(pid)), None)
-                if not player or player["playerName"] != "TFish":
-                    await websocket.send_json({"type": "error", "message": "Unauthorized: Only TFish can execute Master Force Pick."})
+                if not player or player.get("role") != "admin":
+                    await websocket.send_json({"type": "error", "message": "Unauthorized: Admin access required."})
                     continue
                 
                 if not state["draft_ready"]:
@@ -380,12 +392,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 active_pick = state["active_pick"]
                 target_pid = next((x["playerId"] for x in state["draft_board"] if x["pick"] == active_pick), None)
                 if target_pid is not None:
-                    save_pick(state["season"], active_pick, target_pid, team, executed_by="TFish")
-                    await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players)})
+                    save_pick(state["season"], active_pick, target_pid, team, executed_by=player.get("playerName", "Admin"))
+                    await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
 
             elif action == "pick":
                 team = msg.get("team")
-                state = load_draft_state(connected_players)
+                pid = msg.get("playerId")
+                state = load_draft_state(connected_players, year=target_year)
                 if not state["draft_ready"]:
                     await websocket.send_json({"type": "error", "message": "Draft cannot start until everyone is signed in!"})
                     continue
@@ -396,18 +409,24 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json({"type": "error", "message": "Team is not available!"})
                     continue
 
-                active_pick = state["active_pick"]
-                target_pid = next((x["playerId"] for x in state["draft_board"] if x["pick"] == active_pick), None)
-                
-                # Assert it's actually their turn
-                pid = msg.get("playerId")
-                if int(pid) != target_pid:
+                # Check permissions: Is it their turn OR are they an admin?
+                try:
+                    target_pid_int = int(target_pid) if target_pid is not None else None
+                    pid_int = int(pid) if pid is not None else None
+                except (ValueError, TypeError):
+                    await websocket.send_json({"type": "error", "message": "Invalid Player ID."})
+                    continue
+
+                player = next((p for p in state["all_players"] if p["playerId"] == pid_int), None)
+                is_admin = player and player.get("role") == "admin"
+
+                if pid_int != target_pid_int and not is_admin:
                     await websocket.send_json({"type": "error", "message": "It is not your turn to pick!"})
                     continue
 
                 if target_pid is not None:
-                    save_pick(state["season"], active_pick, target_pid, team)
-                    await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players)})
+                    save_pick(state["season"], active_pick, target_pid, team, executed_by=player.get("playerName") if is_admin else None)
+                    await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)

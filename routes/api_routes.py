@@ -12,9 +12,10 @@ from services.data_service import (
 from services.db_service import (
     get_collection_df, add_draft_order, add_draft_rule, delete_draft_results_for_season,
     get_player_by_email, verify_password, get_password_hash, 
-    update_player_credentials, increment_failed_setup_attempts
+    update_player_credentials, increment_failed_setup_attempts,
+    update_player_profile, add_player, delete_season_data
 )
-from services.draft_service import load_draft_state, wipe_draft_cache
+from services.draft_service import load_draft_state, wipe_draft_cache, sanitize_state
 import time
 import re
 
@@ -121,6 +122,7 @@ async def set_password(request: Request):
             "message": "Password setup securely! Redirecting...",
             "playerId": str(player["playerId"]),
             "playerName": player.get("fullName"),
+            "email": player.get("email"),
             "role": role
         })
     except Exception as e:
@@ -145,16 +147,153 @@ async def login(request: Request):
         if not verify_password(password, player.get("password_hash")):
             return JSONResponse(status_code=401, content={"error": "Invalid email or password."})
 
+        # Check for MFA
+        if player.get("mfa_enabled"):
+            import random
+            mfa_code = "".join([str(random.randint(0, 9)) for _ in range(6)])
+            get_db().collection("players").document(str(player["playerId"])).update({
+                "mfa_token": mfa_code,
+                "mfa_expiry": time.time() + 600
+            })
+            print(f"DEBUG: MFA Code for {email} is {mfa_code}")
+            return JSONResponse(content={
+                "status": "mfa_required",
+                "playerId": str(player["playerId"]),
+                "message": "A 6-digit verification code has been sent to your email."
+            })
+
         role = player.get("role", "user")
 
         return JSONResponse(content={
-            "message": "Login successful!",
+            "status": "success",
             "playerId": str(player["playerId"]),
             "playerName": player.get("fullName"),
+            "email": player.get("email"),
             "role": role
         })
     except Exception as e:
         import traceback; traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.get("/profile")
+async def get_profile(playerId: str):
+    """Fetch current player profile data for pre-filling the form."""
+    from services.db_service import get_db
+    doc = get_db().collection("players").document(str(playerId)).get()
+    if not doc.exists:
+        return JSONResponse(status_code=404, content={"error": "Player not found."})
+    
+    player = doc.to_dict()
+    return {
+        "fullName": player.get("fullName"),
+        "nickname": player.get("nickName"),
+        "email": player.get("email"),
+        "mfa_enabled": bool(player.get("mfa_enabled"))
+    }
+
+
+@router.post("/profile/update")
+async def update_profile(request: Request):
+    try:
+        data = await request.json()
+        pid = data.get("playerId")
+        full_name = data.get("fullName", "").strip()
+        nickname = data.get("nickname", "").strip()
+        new_email = data.get("email", "").strip().lower()
+        curr_password = data.get("currentPassword")
+        new_password = data.get("newPassword")
+        mfa_enabled = data.get("mfaEnabled", False)
+
+        if not pid or not curr_password:
+            return JSONResponse(status_code=400, content={"error": "Missing player ID or current password."})
+
+        # 1. Fetch current player (not by email, but by ID to be safe during email change)
+        from services.db_service import get_db
+        db = get_db()
+        doc = db.collection("players").document(str(pid)).get()
+        if not doc.exists:
+            return JSONResponse(status_code=404, content={"error": "Player not found."})
+        
+        player = doc.to_dict()
+        
+        # 2. Verify current password
+        if not verify_password(curr_password, player.get("password_hash")):
+            return JSONResponse(status_code=401, content={"error": "Incorrect current password."})
+
+        # 3. Check for email collision if changing
+        if new_email and new_email != player.get("email"):
+            collision = get_player_by_email(new_email)
+            if collision:
+                return JSONResponse(status_code=400, content={"error": "Email is already in use by another account."})
+
+        # 4. Prepare updates
+        updates = {}
+        if full_name:
+            updates["fullName"] = full_name
+        if nickname:
+            updates["nickName"] = nickname
+        if new_email:
+            updates["email"] = new_email
+        if new_password:
+            # Complexity check
+            pw_regex = r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$"
+            if not re.match(pw_regex, new_password):
+                 return JSONResponse(status_code=400, content={"error": "New password too weak."})
+            updates["password_hash"] = get_password_hash(new_password)
+        
+        # MFA placeholder logic
+        updates["mfa_enabled"] = bool(mfa_enabled)
+
+        if updates:
+            update_player_profile(str(pid), updates)
+
+        return JSONResponse(content={"message": "Profile updated successfully!"})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.post("/mfa/verify")
+async def verify_mfa(request: Request):
+    try:
+        data = await request.json()
+        pid = data.get("playerId")
+        code = data.get("code")
+
+        if not pid or not code:
+             return JSONResponse(status_code=400, content={"error": "Missing player ID or verification code."})
+
+        from services.db_service import get_db
+        db = get_db()
+        doc = db.collection("players").document(str(pid)).get()
+        if not doc.exists:
+             return JSONResponse(status_code=404, content={"error": "Player not found."})
+
+        player = doc.to_dict()
+        stored_code = player.get("mfa_token")
+        expiry = player.get("mfa_expiry", 0)
+
+        if not stored_code or time.time() > expiry:
+            return JSONResponse(status_code=401, content={"error": "MFA code expired or invalid."})
+
+        if code != stored_code:
+            return JSONResponse(status_code=401, content={"error": "Incorrect verification code."})
+
+        # Clear code on success
+        db.collection("players").document(str(pid)).update({
+            "mfa_token": None,
+            "mfa_expiry": 0
+        })
+
+        return JSONResponse(content={
+            "status": "success",
+            "playerId": str(pid),
+            "playerName": player.get("fullName"),
+            "email": player.get("email"),
+            "role": player.get("role", "user")
+        })
+    except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
@@ -194,28 +333,82 @@ async def create_new_season(request: Request):
             return JSONResponse(status_code=401, content={"error": "Unauthorized: Invalid admin code."})
 
         season = int(data.get("season"))
+        player_ids = data.get("playerIds", [])
+
+        if not player_ids:
+            return JSONResponse(status_code=400, content={"error": "At least one player must be selected."})
 
         order_df = get_collection_df("draft_order")
         existing = order_df[order_df["season"] == season] if not order_df.empty and "season" in order_df.columns else []
         if len(existing):
             return JSONResponse(status_code=400, content={"error": f"Season {season} already exists."})
 
-        players = get_collection_df("players")
-        player_ids = players["playerId"].tolist()
+        # Shuffle the selected players
         random.shuffle(player_ids)
 
         for idx, pid in enumerate(player_ids):
-            add_draft_order(season, idx + 1, pid)
+            add_draft_order(season, idx + 1, int(pid))
 
         rules_df = get_collection_df("draft_order_rules")
         if not rules_df.empty and "season" in rules_df.columns:
             prev_s = int(rules_df["season"].max())
             for _, r in rules_df[rules_df["season"] == prev_s].iterrows():
-                add_draft_rule(season, int(r["draftOrder"]), int(r["pickOne"]), int(r["pickTwo"]), int(r["pickThree"]))
+                # Only copy rules if the draftOrder exists in our new selection
+                if int(r["draftOrder"]) <= len(player_ids):
+                    add_draft_rule(season, int(r["draftOrder"]), int(r["pickOne"]), int(r["pickTwo"]), int(r["pickThree"]))
 
-        return JSONResponse(content={"message": f"Draft order for {season} created successfully."})
+        wipe_draft_cache()
+        return JSONResponse(content={"message": f"Draft order for {season} created successfully with {len(player_ids)} players."})
     except Exception as e:
         import traceback; traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.get("/admin/players")
+async def fetch_admin_players(admin_code: str):
+    """Retrieve all players for the admin selection grid."""
+    if admin_code != ADMIN_CODE:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    try:
+        players_df = get_collection_df("players")
+        players = players_df.to_dict(orient="records")
+        # Ensure standard JSON
+        return JSONResponse(content=sanitize_state(players))
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.post("/admin/create_player")
+async def create_player(request: Request):
+    """Admin-only: Create a new player entrant."""
+    try:
+        data = await request.json()
+        if data.get("admin_code") != ADMIN_CODE:
+            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+        
+        full_name = data.get("fullName")
+        nick_name = data.get("nickName")
+        email = data.get("email")
+
+        if not full_name or not nick_name or not email:
+            return JSONResponse(status_code=400, content={"error": "All fields are required."})
+
+        new_id = add_player(full_name, nick_name, email)
+        return JSONResponse(content={"message": f"Player created with ID {new_id}", "playerId": new_id})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.post("/admin/delete_season")
+async def delete_season(request: Request):
+    """Wipes all draft data for a specific season."""
+    try:
+        data = await request.json()
+        if data.get("admin_code") != ADMIN_CODE:
+            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+        
+        season = int(data.get("season"))
+        delete_season_data(season)
+        wipe_draft_cache()
+        return JSONResponse(content={"message": f"Season {season} data wiped successfully."})
+    except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @router.post("/admin/reset_draft")

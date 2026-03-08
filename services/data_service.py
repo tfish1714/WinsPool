@@ -15,25 +15,54 @@ from services.db_service import get_collection_df
 # Constants
 NFL_DATA_GITHUB = "https://raw.githubusercontent.com/leesharpe/nfldata/master/data/"
 
-# In-memory cache keyed by year (or 'all' for unfiltered load)
-_DATA_CACHE: dict = {}
-_CACHE_TIMESTAMPS: dict = {}
-_CACHE_TTL_SECONDS = 300  # 5 minutes
+def get_team_logo(team_code: str) -> str:
+    """Returns the official high-resolution logo URL for an NFL team."""
+    if not team_code or pd.isna(team_code):
+        return ""
+    code = str(team_code).upper()
+    mapping = {
+        'LA': 'LAR',
+        'WAS': 'WSH',
+    }
+    cdn_code = mapping.get(code, code)
+    return f"https://a.espncdn.com/i/teamlogos/nfl/500/{cdn_code}.png"
 
-def _cache_key(year):
-    return str(year) if year is not None else 'all'
+from services.cache_service import (
+    _DATA_CACHE, _CACHE_TIMESTAMPS, _CACHE_TTL_SECONDS,
+    _LAST_REMOTE_CHECK, _REMOTE_CHECK_INTERVAL,
+    clear_data_cache, _cache_key
+)
 
 def load_data(year: int = None):
     """
-    Loads data for the given season year.
-    - nfl_games and nfl_standings are filtered to `year` if provided.
-    - Players/draft collections are loaded in full (no season filter) and deduplicated.
-    - Results are cached to .local_db/<collection>_<year>.pkl for year-specific loads.
+    Loads data for the given season year with smart caching.
     """
-    global _DATA_CACHE, _CACHE_TIMESTAMPS
+    # 1. Check for remote invalidation signals if it's been a while
+    current_time = time.time()
+    
+    # We need to access and potentially update the module-level globals in cache_service
+    import services.cache_service as cs
+    
+    if (current_time - cs._LAST_REMOTE_CHECK) > cs._REMOTE_CHECK_INTERVAL:
+        cs._LAST_REMOTE_CHECK = current_time
+        try:
+            # We use a raw Firestore fetch here to avoid circular dependencies
+            from services.db_service import get_db
+            db = get_db()
+            if db:
+                ctrl = db.collection("metadata").document("cache_control").get()
+                if ctrl.exists:
+                    remote_ts = ctrl.to_dict().get("last_update", 0)
+                    # If remote signal is newer than our local cache creation for this key
+                    key = _cache_key(year)
+                    local_ts = _CACHE_TIMESTAMPS.get(key, 0)
+                    if remote_ts > local_ts:
+                        print(f"Log: Remote invalidation detected (Remote: {remote_ts}, Local: {local_ts}). Clearing cache.")
+                        clear_data_cache()
+        except Exception as e:
+            print(f"Warning: Failed to check remote cache control: {e}")
 
     key = _cache_key(year)
-    current_time = time.time()
     if key in _DATA_CACHE and (current_time - _CACHE_TIMESTAMPS.get(key, 0) < _CACHE_TTL_SECONDS):
         return _DATA_CACHE[key]
 

@@ -30,7 +30,10 @@
             <div class="best-pick-card gold">
                 <div class="best-pick-label">🥇 Best Overall</div>
                 <div class="best-pick-name">{{ best_overall.player }}</div>
-                <div class="best-pick-team">{{ best_overall.team }}</div>
+                <div class="best-pick-team">
+                    <img src="{{ get_team_logo(best_overall.team) }}" class="tiny-logo" alt="">
+                    {{ best_overall.team }}
+                </div>
                 <div class="best-pick-detail">Pick #{{ best_overall.pick }} · {{ best_overall.wins }} wins</div>
             </div>
             {% endif %}
@@ -40,7 +43,10 @@
             <div class="best-pick-card">
                 <div class="best-pick-label">🎯 {{ r.label }}</div>
                 <div class="best-pick-name">{{ r.player }}</div>
-                <div class="best-pick-team">{{ r.team }}</div>
+                <div class="best-pick-team">
+                    <img src="{{ get_team_logo(r.team) }}" class="tiny-logo" alt="">
+                    {{ r.team }}
+                </div>
                 <div class="best-pick-detail">Pick #{{ r.pick }} · {{ r.wins }} wins</div>
             </div>
             {% endif %}
@@ -84,14 +90,19 @@
                         %}style="border-left: 3px solid #f5c542; background: rgba(245, 197, 66, 0.05);" {% endif %}>
                         <td style="text-align: center;"><strong>#{{ row['draftPick'] | int }}</strong></td>
                         <td>{{ row['fullName'] }}</td>
-                        <td><strong>{{ row['team'] }}</strong></td>
-                        <td style="text-align: center; opacity: 0.8;">{% if row['projected_wins'] != '' %}{{
-                            row['projected_wins'] }}{% else %}-{% endif %}</td>
+                        <td>
+                            <img src="{{ get_team_logo(row['team']) }}" class="tiny-logo" alt="">
+                            <strong>{{ row['team'] }}</strong>
+                        </td>
+                        <td style="text-align: center; opacity: 0.8;">
+                            {% if row['projected_wins'] is not none %}{{ row['projected_wins'] }}{% else %}-{% endif %}
+                        </td>
                         <td style="text-align: center;">{{ row['TotalWinsBySeason'] | int }}</td>
-                        <td
-                            style="text-align: center; font-weight: bold; {% if row['draft_value'] != '' %}{% if row['draft_value'] > 0 %}color: var(--accent-green);{% elif row['draft_value'] < 0 %}color: var(--accent-red);{% endif %}{% endif %}">
-                            {% if row['draft_value'] != '' %}{% if row['draft_value'] > 0 %}+{% endif %}{{
-                            row['draft_value'] }}{% else %}-{% endif %}
+                        <td style="text-align: center; font-weight: bold;"
+                            class="{% if row['draft_value'] is not none %}{% if row['draft_value'] > 0 %}value-positive{% elif row['draft_value'] < 0 %}value-negative{% endif %}{% endif %}">
+                            {% if row['draft_value'] is not none %}
+                            {% if row['draft_value'] > 0 %}+{% endif %}{{ row['draft_value'] }}
+                            {% else %}-{% endif %}
                         </td>
                     </tr>
                     {% endfor %}

@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+
+{% block title %}User Profile — WinsPool{% endblock %}
+
+{% block content %}
+<main class="dashboard-main">
+    <div class="card-glass page-card" style="max-width: 600px; margin: 2rem auto;">
+        <h2>👤 User Profile</h2>
+        <p style="color:var(--text-secondary); margin-bottom: 2rem;">Manage your account settings and security.</p>
+
+        <form id="profile-form" class="auth-form">
+            <div class="form-group">
+                <label for="full-name">Full Name</label>
+                <input type="text" id="full-name" name="full_name" placeholder="First Last" required>
+            </div>
+
+            <div class="form-group">
+                <label for="nickname">Nickname</label>
+                <input type="text" id="nickname" name="nickname" placeholder="Your display name">
+            </div>
+
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" name="email" placeholder="email@example.com" required>
+                <small style="color:var(--text-secondary);">Updating your email requires your current password.</small>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid var(--glass-border); margin: 2rem 0;">
+
+            <h3>🔒 Security</h3>
+
+            <div class="form-group mfa-toggle-container"
+                style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <label>Multi-Factor Authentication (MFA)</label>
+                    <p style="font-size:0.8rem; color:var(--text-secondary); margin:0;">Receive a 6-digit code via email
+                        when logging in.</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="mfa-enabled">
+                    <span class="slider round"></span>
+                </label>
+            </div>
+
+            <div class="form-group" style="margin-top: 1.5rem;">
+                <label for="current-password">Current Password (Required to save changes)</label>
+                <input type="password" id="current-password" name="current_password" placeholder="••••••••" required>
+            </div>
+
+            <div class="form-group">
+                <label for="new-password">New Password (Optional)</label>
+                <input type="password" id="new-password" name="new_password" placeholder="Leave blank to keep current">
+            </div>
+
+            <div class="form-group">
+                <label for="confirm-new-password">Confirm New Password</label>
+                <input type="password" id="confirm-new-password" name="confirm_new_password" placeholder="••••••••">
+            </div>
+
+            <button type="submit" class="btn-primary" style="width:100%; margin-top: 1rem;">Save Profile
+                Changes</button>
+        </form>
+    </div>
+</main>
+
+<style>
+    /* Minimal styles for the profile page specifically; global styles handle most of it */
+    .switch {
+        position: relative;
+        display: inline-block;
+        width: 50px;
+        height: 24px;
+    }
+
+    .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+
+    .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(255, 255, 255, 0.1);
+        transition: .4s;
+    }
+
+    .slider:before {
+        position: absolute;
+        content: "";
+        height: 16px;
+        width: 16px;
+        left: 4px;
+        bottom: 4px;
+        background-color: white;
+        transition: .4s;
+    }
+
+    input:checked+.slider {
+        background-color: var(--primary-color);
+    }
+
+    input:checked+.slider:before {
+        transform: translateX(26px);
+    }
+
+    .slider.round {
+        border-radius: 24px;
+    }
+
+    .slider.round:before {
+        border-radius: 50%;
+    }
+</style>
+
+<script>
+    document.addEventListener('DOMContentLoaded', async () => {
+        const myPlayerId = localStorage.getItem('nfl_wins_my_player_id');
+        if (!myPlayerId || myPlayerId === "null") {
+            window.location.href = '/wins-pool';
+            return;
+        }
+
+        // Fetch current profile data from the new secure endpoint
+        try {
+            const resp = await fetch(`/api/profile?playerId=${encodeURIComponent(myPlayerId)}`);
+            const data = await resp.json();
+
+            if (resp.ok) {
+                document.getElementById('full-name').value = data.fullName || '';
+                document.getElementById('nickname').value = data.nickname || '';
+                document.getElementById('email').value = data.email || '';
+                document.getElementById('mfa-enabled').checked = !!data.mfa_enabled;
+            }
+        } catch (err) {
+            console.error("Failed to load profile:", err);
+            // Fallback to localStorage if API fails
+            document.getElementById('full-name').value = localStorage.getItem('nfl_wins_playerName') || '';
+            document.getElementById('email').value = localStorage.getItem('nfl_wins_user_email') || '';
+        }
+
+        document.getElementById('profile-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const fullName = document.getElementById('full-name').value;
+            const nickname = document.getElementById('nickname').value;
+            const newEmail = document.getElementById('email').value;
+            const currentPassword = document.getElementById('current-password').value;
+            const newPassword = document.getElementById('new-password').value;
+            const confirmNew = document.getElementById('confirm-new-password').value;
+            const mfaEnabled = document.getElementById('mfa-enabled').checked;
+
+            if (newPassword && newPassword !== confirmNew) {
+                alert("New passwords do not match.");
+                return;
+            }
+
+            const payload = {
+                playerId: myPlayerId,
+                fullName,
+                nickname,
+                email: newEmail,
+                currentPassword,
+                newPassword: newPassword || null,
+                mfaEnabled
+            };
+
+            try {
+                const resp = await fetch('/api/profile/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await resp.json();
+
+                if (resp.ok) {
+                    alert("Profile updated successfully!");
+                    // Update display name in localStorage (prefer nickname if set)
+                    const displayName = nickname || fullName;
+                    localStorage.setItem('nfl_wins_playerName', displayName);
+                    localStorage.setItem('nfl_wins_user_email', newEmail);
+                    window.location.reload();
+                } else {
+                    alert("Error: " + (result.error || "Update failed"));
+                }
+            } catch (err) {
+                alert("Network error. Please try again.");
+            }
+        });
+    });
+</script>
+{% endblock %}

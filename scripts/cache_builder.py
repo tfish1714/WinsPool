@@ -13,6 +13,7 @@ import os
 import json
 import argparse
 import pathlib
+import time
 
 # Ensure project root is on the path
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -141,6 +142,16 @@ def main():
         yr_games = games[games['season'] == year].copy() if not games.empty else games
         build_year(yr_standings, yr_games, players, draft_order, draft_results,
                    draft_order_rules, year, current_year, force=args.force)
+
+    # Signal web server to invalidate in-memory cache
+    print("\n[cache_builder] Signaling global cache invalidation...")
+    try:
+        db = _fs.client()
+        db.collection("metadata").document("cache_control").set({
+            "last_update": time.time()
+        })
+    except Exception as e:
+        print(f"  [err] Failed to signal cache invalidation: {e}")
 
     print("\n[cache_builder] Done.")
 

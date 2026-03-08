@@ -79,10 +79,10 @@
                                     {% for p in picks | sort(attribute='total_wins', reverse=True) %}
                                     <div class="history-chip"
                                         title="{% for row in p.picks_list %}{{ row.season }} — {% if row.draftPick %}Pick #{{ row.draftPick }}{% else %}Undrafted{% endif %} | {{ row.wins }}W&#10;{% endfor %}🏆 Best: {{ p.best_year }} ({{ p.best_wins }}W)&#10;🧊 Worst: {{ p.worst_year }} ({{ p.worst_wins }}W)">
-                                        <div style="width:20px; text-align:center; display:flex; align-items:center;">
-                                            <img src="/static/logos/{{ p.team }}.png" alt="{{ p.team }}"
-                                                style="max-width:100%; max-height:20px;"
-                                                onerror="this.style.display='none'">
+                                        <div style="width:24px; text-align:center; display:flex; align-items:center;">
+                                            <img src="{{ get_team_logo(p.team) }}" alt="{{ p.team }}"
+                                                style="max-width:100%; max-height:24px;"
+                                                onerror="this.style.visibility='hidden'">
                                         </div>
                                         <span style="font-weight:600;">{{ p.team }}</span>
                                         <span class="chip-metric">{{ p.times_picked }}x ({{ p.total_wins }}W - {{
@@ -124,10 +124,10 @@
                             <td>
                                 <div
                                     style="display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.05rem;">
-                                    <div style="width:24px; text-align:center; display:flex; align-items:center;">
-                                        <img src="/static/logos/{{ team }}.png" alt="{{ team }}"
-                                            style="max-width:100%; max-height:24px;"
-                                            onerror="this.style.display='none'">
+                                    <div style="width:28px; text-align:center; display:flex; align-items:center;">
+                                        <img src="{{ get_team_logo(team) }}" alt="{{ team }}"
+                                            style="max-width:100%; max-height:28px;"
+                                            onerror="this.style.visibility='hidden'">
                                     </div>
                                     <div>
                                         {{ team }}

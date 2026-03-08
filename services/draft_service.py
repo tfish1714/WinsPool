@@ -10,16 +10,30 @@ NFL_DATA_GITHUB = "https://raw.githubusercontent.com/leesharpe/nfldata/master/da
 
 _CACHED_DRAFT_STATE = None
 
-def load_draft_state(connected_players: set) -> Dict[str, Any]:
+def sanitize_state(obj):
+    """Recursively replaces NaN/Inf with None to ensure JSON compliance."""
+    if isinstance(obj, dict):
+        return {k: sanitize_state(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_state(x) for x in obj]
+    elif isinstance(obj, float):
+        if obj != obj or obj == float('inf') or obj == float('-inf'): # NaN or Inf
+            return None
+    elif pd.isna(obj) and not isinstance(obj, (str, bytes)):
+        return None
+    return obj
+
+def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]:
     """
     Loads all players, draft order, rules, and existing results to construct the current draft board state.
     """
     global _CACHED_DRAFT_STATE
     import copy
     
-    if _CACHED_DRAFT_STATE is not None:
+    # If a specific year is requested, bypass cache
+    if year is None and _CACHED_DRAFT_STATE is not None:
         state = copy.deepcopy(_CACHED_DRAFT_STATE)
-        state["draft_ready"] = len(connected_players) >= len(state["all_players"])
+        state["draft_ready"] = True # No longer requires all players connected
         state["connected_players"] = list(connected_players)
         for p in state["all_players"]:
             p["connected"] = p["playerId"] in connected_players
@@ -30,8 +44,8 @@ def load_draft_state(connected_players: set) -> Dict[str, Any]:
     valid_players = players_df.dropna(subset=['playerId'])
     total_players = len(valid_players)
     
-    # Check if draft is ready to start
-    draft_ready = len(connected_players) >= total_players
+    # Draft is always ready if order exists
+    draft_ready = True
     # Load order and rules
     d_order = get_collection_df('draft_order')
     rules = get_collection_df('draft_order_rules')
@@ -39,20 +53,23 @@ def load_draft_state(connected_players: set) -> Dict[str, Any]:
     # Load results
     results = get_collection_df('draft_results')
     
-    # Determine the latest season (or hardcode to 2024 for testing)
-    season_val = d_order['season'].max()
-    if pd.isna(season_val):
-        # No draft order exists yet — return a safe empty state
-        return {
-            "season": None,
-            "draft_board": [],
-            "active_pick": 1,
-            "available_teams": [],
-            "draft_ready": False,
-            "connected_players": list(connected_players),
-            "all_players": [],
-        }
-    season = int(season_val)
+    # Determine the season
+    if year:
+        season = int(year)
+    else:
+        season_val = d_order['season'].max()
+        if pd.isna(season_val):
+            # No draft order exists yet — return a safe empty state
+            return {
+                "season": None,
+                "draft_board": [],
+                "active_pick": 1,
+                "available_teams": [],
+                "draft_ready": False,
+                "connected_players": list(connected_players),
+                "all_players": [],
+            }
+        season = int(season_val)
     
     d_order_season = d_order[d_order['season'] == season]
     rules_season = rules[rules['season'] == season]
@@ -79,38 +96,47 @@ def load_draft_state(connected_players: set) -> Dict[str, Any]:
     
     for _, row in melted.iterrows():
         try:
-            pick_num = int(row['draftPick'])
             pid = int(row['playerId'])
         except (ValueError, TypeError):
             continue  # skip any leftover NaN rows
-        pname = row['nickName']
+        
+        # Fallback logic for nickname
+        pname = row.get('nickName')
+        if pd.isna(pname) or not str(pname).strip():
+            pname = row.get('fullName', f"Player {pid}")
+            
         team = row['team'] if pd.notna(row['team']) else None
         
         if team:
             picked_teams.add(team)
             
         draft_board.append({
-            "pick": pick_num,
+            "pick": int(row['draftPick']),
             "playerId": pid,
             "playerName": pname,
             "team": team
         })
         
         if team is None and active_pick is None:
-            active_pick = pick_num
+            active_pick = int(row['draftPick'])
             
     # If all picks are taken
     if active_pick is None:
         active_pick = len(melted) + 1 # Draft is over
         
     # Fetch real team list for that season
+    nfl_standard_teams = ["ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CLE", "DAL", "DEN", "DET", "GB", "HOU", "IND", "JAX", "KC", "LV", "LAC", "LA", "MIA", "MIN", "NE", "NO", "NYG", "NYJ", "PHI", "PIT", "SF", "SEA", "TB", "TEN", "WAS"]
+    all_nfl_teams = []
     url = f"{NFL_DATA_GITHUB}teams.csv"
     try:
         teams_df = pd.read_csv(url)
         all_nfl_teams = sorted(teams_df[teams_df['season'] == season]['team'].tolist())
     except Exception:
-        # Fallback if request fails
-        all_nfl_teams = ["ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CLE", "DAL", "DEN", "DET", "GB", "HOU", "IND", "JAX", "KC", "LV", "LAC", "LA", "MIA", "MIN", "NE", "NO", "NYG", "NYJ", "PHI", "PIT", "SF", "SEA", "TB", "TEN", "WAS"]
+        pass
+    
+    # CRITICAL FALLBACK: If GitHub is empty for this season, use standard list
+    if not all_nfl_teams:
+        all_nfl_teams = sorted(nfl_standard_teams)
 
     # List of available teams
     available_teams = sorted(list(set(all_nfl_teams) - picked_teams))
@@ -141,10 +167,16 @@ def load_draft_state(connected_players: set) -> Dict[str, Any]:
         
         has_password = 'password_hash' in row and not pd.isna(row['password_hash']) and str(row['password_hash']).strip() != ''
 
+        # Robust name mapping
+        pname = row.get('nickName')
+        if pd.isna(pname) or not str(pname).strip():
+            pname = row.get('fullName', f"Player {pid}")
+
         all_players_info.append({
             "playerId": pid,
-            "playerName": row.get('nickName', ''),
+            "playerName": pname,
             "connected": pid in connected_players,
+            "role": row.get('role', 'user'),
             "has_phone": has_phone,
             "phone": masked_phone,
             "has_email": has_email,
@@ -166,6 +198,7 @@ def load_draft_state(connected_players: set) -> Dict[str, Any]:
     }
     
     import copy
+    state = sanitize_state(state)
     _CACHED_DRAFT_STATE = copy.deepcopy(state)
     return state
 

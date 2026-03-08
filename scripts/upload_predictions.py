@@ -1,6 +1,7 @@
 import os
 import sys
 import pathlib
+import time
 
 # Add the project root to sys.path so we can import services natively
 project_root = pathlib.Path(__file__).parent.parent
@@ -68,6 +69,16 @@ def upload_preseason_predictions():
         })
 
     batch.commit()
+    
+    # Signal web server to invalidate in-memory cache
+    print("Signaling cache invalidation...")
+    try:
+        db.collection("metadata").document("cache_control").set({
+            "last_update": time.time()
+        })
+    except Exception as e:
+        print(f"Error signaling cache invalidation: {e}")
+
     print("Preseason predictions seamlessly injected into Firestore!")
     return True
 

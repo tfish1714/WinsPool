@@ -3,10 +3,15 @@ let state = null;
 let selectedTeam = null;
 let myPlayerName = null;
 let myPlayerId = localStorage.getItem('nfl_wins_my_player_id') || null; // Track local user sign in
+let myUserRole = localStorage.getItem('nfl_wins_role') || 'user';
 
 const seasonDisplay = document.getElementById('season-display');
+const seasonDropdown = document.getElementById('season-dropdown');
+const adminYearSelector = document.getElementById('admin-year-selector');
+
 const statusBanner = document.getElementById('current-pick-status');
 const draftList = document.getElementById('draft-list');
+const adminMasterOverride = document.getElementById('admin-master-override');
 const teamsGrid = document.getElementById('teams-grid');
 const selectionPreview = document.getElementById('selection-preview');
 const selectedTeamName = document.getElementById('selected-team-name');
@@ -43,6 +48,21 @@ async function fetchDraftSummary() {
     }
 }
 
+/**
+ * Maps team codes to official high-resolution logo URLs.
+ */
+function getTeamLogo(teamCode) {
+    if (!teamCode) return '';
+    const code = teamCode.toUpperCase();
+    // Normalize codes for ESPN CDN if necessary
+    const mapping = {
+        'LA': 'LAR', // Rams fallback
+        'WAS': 'WSH', // Commanders fallback
+    };
+    const cdnCode = mapping[code] || code;
+    return `https://a.espncdn.com/i/teamlogos/nfl/500/${cdnCode}.png`;
+}
+
 function initWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
@@ -76,6 +96,18 @@ function initWebSocket() {
             ws.send(JSON.stringify({ action: 'reauthenticate', playerId: storedPlayerId }));
         }
     };
+
+    if (seasonDropdown) {
+        seasonDropdown.addEventListener('change', () => {
+            const year = seasonDropdown.value;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: 'switch_season', year: year }));
+                // Reset local selection as context has changed
+                selectedTeam = null;
+                render();
+            }
+        });
+    }
 }
 
 let timerInterval = null;
@@ -144,9 +176,16 @@ function renderBoard() {
         }
 
         li.innerHTML = `
-            <span class="pick-number">#${item.pick}</span>
-            <span class="pick-player">${item.playerName}</span>
-            ${item.team ? `<span class="pick-team">${item.team} ${badges}</span>` : ''}
+            <div class="pick-main">
+                <span class="pick-number">#${item.pick}</span>
+                <span class="pick-player">${item.playerName}</span>
+            </div>
+            ${item.team ? `
+                <div class="pick-result">
+                    <img src="${getTeamLogo(item.team)}" class="tiny-logo" alt="">
+                    <span class="pick-team">${item.team}</span>
+                    ${badges}
+                </div>` : ''}
         `;
         draftList.appendChild(li);
         if (item.pick === state.active_pick) li.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -166,16 +205,30 @@ function renderTeams() {
     }
 
     let teamsToRender = [...state.available_teams];
-    if (myPlayerName === "TFish" && state.preseason_predictions) {
+    if (myUserRole === "admin" && state.preseason_predictions) {
         teamsToRender.sort((a, b) => (state.preseason_predictions[b] || 0) - (state.preseason_predictions[a] || 0));
     }
 
     teamsToRender.forEach(team => {
         const div = document.createElement('div');
         div.className = 'team-card' + (selectedTeam === team ? ' selected' : '');
-        div.textContent = (myPlayerName === "TFish" && state.preseason_predictions && state.preseason_predictions[team]) ? `${team} (${state.preseason_predictions[team]}W)` : team;
+
+        const logoUrl = getTeamLogo(team);
+        const projection = (myUserRole === "admin" && state.preseason_predictions) ? state.preseason_predictions[team] : null;
+        const winsText = projection !== null
+            ? `<span class="preseason-wins" style="font-size: 0.8rem; color: var(--accent-gold);">${projection}W</span>`
+            : '';
+
+        div.innerHTML = `
+            <img src="${logoUrl}" class="team-card-logo" alt="${team}">
+            <div class="team-card-info">
+                <span class="team-name">${team}</span>
+                ${winsText}
+            </div>
+        `;
+
         if (state.team_schedules && state.team_schedules[team]) div.title = state.team_schedules[team].join('\n');
-        div.onclick = () => { selectedTeam = team; renderTeams(); showSelectionPreview(); };
+        div.onclick = () => { selectedTeam = team; render(); showSelectionPreview(); };
         teamsGrid.appendChild(div);
     });
 }
@@ -184,9 +237,19 @@ function showSelectionPreview() {
     if (selectedTeam && state.active_pick <= 30 && state.draft_ready) {
         const activeItem = state.draft_board.find(x => x.pick === state.active_pick);
         const isMe = activeItem && String(activeItem.playerId) === String(myPlayerId);
+        const isAdmin = (myUserRole === "admin");
+
         selectionPreview.classList.remove('hidden');
-        selectedTeamName.textContent = isMe ? selectedTeam : `${selectedTeam} (Not Your Turn!)`;
-        confirmBtn.disabled = !isMe;
+        if (isMe) {
+            selectedTeamName.textContent = selectedTeam;
+            confirmBtn.disabled = false;
+        } else if (isAdmin) {
+            selectedTeamName.textContent = `${selectedTeam} (ADMIN OVERRIDE)`;
+            confirmBtn.disabled = false;
+        } else {
+            selectedTeamName.textContent = `${selectedTeam} (Not Your Turn!)`;
+            confirmBtn.disabled = true;
+        }
     } else {
         selectionPreview.classList.add('hidden');
     }
@@ -253,10 +316,46 @@ if (authSubmitBtn) {
     authSubmitBtn.addEventListener('click', handleAuthSubmit);
 }
 
+const authMfaCode = document.getElementById('auth-mfa-code');
+
+async function handleMfaVerify(pid, code) {
+    try {
+        const res = await fetch('/api/mfa/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ playerId: pid, code: code })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+            processSuccessfulLogin(data);
+        } else {
+            authError.textContent = data.error || "MFA Verification failed.";
+            authError.classList.remove('hidden');
+        }
+    } catch (e) {
+        authError.textContent = "Network error during MFA.";
+        authError.classList.remove('hidden');
+    }
+}
+
+let mfaActivePlayerId = null;
+
 async function handleAuthSubmit() {
     const email = authEmail.value.trim();
     const password = authPassword.value;
     authError.classList.add('hidden');
+
+    // If we are currently in MFA stage
+    if (mfaActivePlayerId) {
+        const code = authMfaCode.value.trim();
+        if (code.length !== 6) {
+            authError.textContent = "Please enter a 6-digit code.";
+            authError.classList.remove('hidden');
+            return;
+        }
+        await handleMfaVerify(mfaActivePlayerId, code);
+        return;
+    }
 
     if (isClaiming) {
         const confirm = authConfirmPassword.value;
@@ -289,8 +388,21 @@ async function handleAuthSubmit() {
                 body: JSON.stringify({ email, password })
             });
             const data = await res.json();
-            if (res.ok) processSuccessfulLogin(data);
-            else { authError.textContent = data.error; authError.classList.remove('hidden'); }
+            if (res.ok) {
+                if (data.status === 'mfa_required') {
+                    // Switch to MFA view
+                    mfaActivePlayerId = data.playerId;
+                    authTitle.textContent = "Two-Factor Auth";
+                    authSubtitle.textContent = data.message;
+                    authEmail.style.display = 'none';
+                    authPassword.style.display = 'none';
+                    authMfaCode.style.display = 'block';
+                    authMfaCode.classList.remove('hidden');
+                    authSubmitBtn.textContent = "Verify & Login";
+                } else {
+                    processSuccessfulLogin(data);
+                }
+            } else { authError.textContent = data.error; authError.classList.remove('hidden'); }
         } catch (e) { authError.textContent = "Network error."; authError.classList.remove('hidden'); }
     }
 }
@@ -302,11 +414,12 @@ function render() {
         if (me) myPlayerName = me.playerName;
     }
 
-    const adminPanel = document.getElementById('tfish-admin-panel');
+    const adminMasterOverride = document.getElementById('admin-master-override');
     const forceTeamSelect = document.getElementById('force-team-select');
 
-    if (myPlayerName === "TFish") {
-        if (adminPanel) { adminPanel.classList.remove('hidden'); adminPanel.style.display = 'block'; }
+    if (myUserRole === "admin") {
+        if (adminMasterOverride) { adminMasterOverride.classList.remove('hidden'); adminMasterOverride.style.display = 'block'; }
+        if (adminYearSelector) adminYearSelector.classList.remove('hidden');
         if (forceTeamSelect && state.available_teams) {
             const currentVal = forceTeamSelect.value;
             forceTeamSelect.innerHTML = '<option value="">Force Pick...</option>';
@@ -318,7 +431,23 @@ function render() {
             forceTeamSelect.value = currentVal;
         }
     } else {
-        if (adminPanel) { adminPanel.classList.add('hidden'); adminPanel.style.display = 'none'; }
+        if (adminYearSelector) adminYearSelector.classList.add('hidden');
+        if (adminPanel) {
+            adminPanel.classList.add('hidden');
+            adminPanel.style.display = 'none';
+        }
+    }
+
+    if (seasonDisplay && state.season) {
+        seasonDisplay.textContent = `(${state.season})`;
+    }
+    if (seasonDropdown && state.season) {
+        // Sync dropdown to state IF it's one of the options
+        if (Array.from(seasonDropdown.options).some(opt => opt.value === String(state.season))) {
+            if (seasonDropdown.value !== String(state.season)) {
+                seasonDropdown.value = String(state.season);
+            }
+        }
     }
 
     const contentDiv = document.getElementById('content');
@@ -327,7 +456,7 @@ function render() {
         if (dashboardMain) dashboardMain.style.display = 'none';
         if (appNav) appNav.style.display = 'none';
         if (contentDiv) contentDiv.style.display = 'none';
-        if (seasonDisplay) seasonDisplay.textContent = `(${state.season}) - Sign In`;
+        if (seasonDisplay) seasonDisplay.textContent = `${state.season ? '(' + state.season + ')' : ''} - Sign In`;
         return;
     } else {
         document.documentElement.classList.remove('show-signin');
@@ -339,11 +468,13 @@ function render() {
         if (dashboardMain && window.location.pathname === '/draft') dashboardMain.style.display = 'grid';
     }
 
-    if (seasonDisplay) seasonDisplay.textContent = `(${state.season})`;
     if (dashboardMain) {
         processDraftData();
         renderBoard();
-        if (selectedTeam && !state.available_teams.includes(selectedTeam)) { selectedTeam = null; showSelectionPreview(); }
+        if (selectedTeam && !state.available_teams.includes(selectedTeam)) {
+            selectedTeam = null;
+            showSelectionPreview();
+        }
         renderTeams();
     }
 }
@@ -351,8 +482,11 @@ function render() {
 function processSuccessfulLogin(data) {
     myPlayerId = data.playerId;
     myPlayerName = data.playerName;
+    myUserRole = data.role || 'user';
     localStorage.setItem('nfl_wins_my_player_id', myPlayerId);
-    localStorage.setItem('nfl_wins_role', data.role);
+    localStorage.setItem('nfl_wins_playerName', myPlayerName);
+    localStorage.setItem('nfl_wins_user_email', data.email);
+    localStorage.setItem('nfl_wins_role', myUserRole);
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action: 'reauthenticate', playerId: myPlayerId }));
     render();
 }
@@ -366,6 +500,7 @@ if (confirmBtn) {
 
         ws.send(JSON.stringify({
             action: 'pick',
+            playerId: myPlayerId,
             team: selectedTeam
         }));
 
