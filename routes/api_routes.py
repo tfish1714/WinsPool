@@ -13,15 +13,19 @@ from services.db_service import (
     get_collection_df, add_draft_order, add_draft_rule, delete_draft_results_for_season,
     get_player_by_email, verify_password, get_password_hash, 
     update_player_credentials, increment_failed_setup_attempts,
-    update_player_profile, add_player, delete_season_data
+    update_player_profile, add_player, delete_season_data, get_player_role
 )
 from services.draft_service import load_draft_state, wipe_draft_cache, sanitize_state
+import services.analysis_service as analysis
+import services.recap_service as recap_service
+import services.ai_service as ai_service
+import services.email_service as email_service
 import time
 import re
 
 router = APIRouter(prefix="/api")
 
-ADMIN_CODE = os.environ.get("ADMIN_CODE", "admin_test")
+# ADMIN_CODE removed - using role-based auth viaplayerId
 
 
 @router.get("/progress/{season}/{week}")
@@ -59,6 +63,33 @@ def fetch_draft_summary():
             "best_overall": data.get("best_overall"),
             "best_by_round": data.get("best_by_round"),
         })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.get("/standings")
+def get_standings(year: int):
+    """Data for the standings table."""
+    try:
+        standings, _, _, players, _, draft_results, _ = load_data(year=year)
+        sorted_df = analysis.calculate_wins_pool_standings(standings, draft_results, players, year)
+        # Ensure we return expected keys for UiRenderer if it's being used
+        data = sorted_df.to_dict(orient="records")
+        for row in data:
+            row['entrant'] = row.get('fullName')
+            row['total_wins'] = row.get('TotalWins')
+        return JSONResponse(content=sanitize_state(data))
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.get("/schedule")
+def get_schedule(year: int):
+    """Data for the week-by-week schedule grid."""
+    try:
+        _, _, games, players, _, draft_results, _ = load_data(year=year)
+        schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
+        return JSONResponse(content=sanitize_state(schedule_enriched.to_dict(orient="records")))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -186,9 +217,11 @@ async def get_profile(playerId: str):
     
     player = doc.to_dict()
     return {
+        "playerId": str(playerId),
         "fullName": player.get("fullName"),
-        "nickname": player.get("nickName"),
+        "nickName": player.get("nickName"),
         "email": player.get("email"),
+        "role": player.get("role", "user"),
         "mfa_enabled": bool(player.get("mfa_enabled"))
     }
 
@@ -199,7 +232,7 @@ async def update_profile(request: Request):
         data = await request.json()
         pid = data.get("playerId")
         full_name = data.get("fullName", "").strip()
-        nickname = data.get("nickname", "").strip()
+        nickname = data.get("nickName", "").strip()
         new_email = data.get("email", "").strip().lower()
         curr_password = data.get("currentPassword")
         new_password = data.get("newPassword")
@@ -329,8 +362,9 @@ async def create_new_season(request: Request):
     """Generate a randomized draft order for a new season."""
     try:
         data = await request.json()
-        if data.get("admin_code") != ADMIN_CODE:
-            return JSONResponse(status_code=401, content={"error": "Unauthorized: Invalid admin code."})
+        pid = data.get("playerId")
+        if get_player_role(pid) != "admin":
+            return JSONResponse(status_code=401, content={"error": "Unauthorized: Admin role required."})
 
         season = int(data.get("season"))
         player_ids = data.get("playerIds", [])
@@ -364,9 +398,9 @@ async def create_new_season(request: Request):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @router.get("/admin/players")
-async def fetch_admin_players(admin_code: str):
+async def fetch_admin_players(playerId: str):
     """Retrieve all players for the admin selection grid."""
-    if admin_code != ADMIN_CODE:
+    if get_player_role(playerId) != "admin":
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
     try:
         players_df = get_collection_df("players")
@@ -376,12 +410,60 @@ async def fetch_admin_players(admin_code: str):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+@router.get("/admin/seasons")
+async def fetch_admin_seasons(playerId: str):
+    """Retrieve all years that have at least some draft data (order or results)."""
+    if get_player_role(playerId) != "admin":
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    try:
+        order_df = get_collection_df("draft_order")
+        results_df = get_collection_df("draft_results")
+        
+        seasons = set()
+        if not order_df.empty and "season" in order_df.columns:
+            seasons.update(order_df["season"].unique().tolist())
+        if not results_df.empty and "season" in results_df.columns:
+            seasons.update(results_df["season"].unique().tolist())
+            
+        return JSONResponse(content={"seasons": sorted([int(s) for s in seasons], reverse=True)})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.post("/admin/preview_draft_order")
+async def preview_draft_order(request: Request):
+    """Randomize the selected players and return the order for review without saving."""
+    try:
+        data = await request.json()
+        pid = data.get("playerId")
+        if get_player_role(pid) != "admin":
+            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+        player_ids = data.get("playerIds", [])
+        if not player_ids:
+            return JSONResponse(status_code=400, content={"error": "No players selected."})
+
+        # Shuffle
+        random.shuffle(player_ids)
+        
+        # Get player names for display
+        players_df = get_collection_df("players")
+        preview = []
+        for idx, pid in enumerate(player_ids):
+            p_row = players_df[players_df["playerId"] == int(pid)]
+            p_name = p_row["fullName"].iloc[0] if not p_row.empty else f"Unknown ({pid})"
+            preview.append({"order": idx + 1, "playerName": p_name, "playerId": int(pid)})
+            
+        return JSONResponse(content={"preview": preview})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 @router.post("/admin/create_player")
 async def create_player(request: Request):
     """Admin-only: Create a new player entrant."""
     try:
         data = await request.json()
-        if data.get("admin_code") != ADMIN_CODE:
+        pid = data.get("playerId")
+        if get_player_role(pid) != "admin":
             return JSONResponse(status_code=401, content={"error": "Unauthorized"})
         
         full_name = data.get("fullName")
@@ -401,7 +483,8 @@ async def delete_season(request: Request):
     """Wipes all draft data for a specific season."""
     try:
         data = await request.json()
-        if data.get("admin_code") != ADMIN_CODE:
+        pid = data.get("playerId")
+        if get_player_role(pid) != "admin":
             return JSONResponse(status_code=401, content={"error": "Unauthorized"})
         
         season = int(data.get("season"))
@@ -416,8 +499,9 @@ async def reset_draft(request: Request):
     """Admin sandbox feature to delete all draft results for a given season."""
     try:
         data = await request.json()
-        if data.get("admin_code") != ADMIN_CODE:
-            return JSONResponse(status_code=401, content={"error": "Unauthorized: Invalid admin code."})
+        pid = data.get("playerId")
+        if get_player_role(pid) != "admin":
+            return JSONResponse(status_code=401, content={"error": "Unauthorized: Admin role required."})
 
         season = int(data.get("season"))
         
@@ -437,8 +521,9 @@ async def scrape_predictions(request: Request):
     """Executes the Agentic Web Scraper to bind Preseason Vegas Odds to the database."""
     try:
         data = await request.json()
-        if data.get("admin_code") != ADMIN_CODE:
-            return JSONResponse(status_code=401, content={"error": "Unauthorized: Invalid admin code."})
+        pid = data.get("playerId")
+        if get_player_role(pid) != "admin":
+            return JSONResponse(status_code=401, content={"error": "Unauthorized: Admin role required."})
 
         script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts", "upload_predictions.py"))
         result = subprocess.run([sys.executable, script_path], capture_output=True, text=True)
@@ -447,6 +532,90 @@ async def scrape_predictions(request: Request):
             return JSONResponse(status_code=500, content={"error": result.stderr or "Script failed silently."})
         
         return JSONResponse(content={"message": "Vegas Odds successfully scraped and injected into Firestore!"})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.post("/admin/recap/preview_prompt")
+async def preview_recap_prompt(request: Request):
+    """Admin: Generate the data-only prompt for AI recap review."""
+    try:
+        data = await request.json()
+        pid = data.get("playerId")
+        if get_player_role(pid) != "admin":
+            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+        
+        year = int(data.get("year"))
+        week = int(data.get("week"))
+        
+        data_summary, _ = recap_service.extract_weekly_data(year, week)
+        if not data_summary:
+            return JSONResponse(status_code=404, content={"error": f"No game results found for {year} Week {week}."})
+        
+        full_prompt = ai_service.get_recap_prompt(data_summary)
+        return JSONResponse(content={"prompt": full_prompt})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.post("/admin/recap/generate")
+async def generate_admin_recap(request: Request):
+    """Admin: Send the prompt to AI and return the generated summary."""
+    try:
+        data = await request.json()
+        pid = data.get("playerId")
+        if get_player_role(pid) != "admin":
+            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+        
+        prompt_data = data.get("prompt_data")
+        if not prompt_data:
+            return JSONResponse(status_code=400, content={"error": "Prompt data is required."})
+            
+        summary = ai_service.generate_generic_content(prompt_data)
+        return JSONResponse(content={"summary": summary})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.post("/admin/recap/save_and_broadcast")
+async def save_and_broadcast_recap(request: Request):
+    """Admin: Save the summary to DB and email all players."""
+    try:
+        data = await request.json()
+        pid = data.get("playerId")
+        if get_player_role(pid) != "admin":
+            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+        
+        year = int(data.get("year"))
+        week = int(data.get("week"))
+        summary = data.get("summary")
+        
+        if not summary:
+            return JSONResponse(status_code=400, content={"error": "Summary text is required."})
+
+        # 1. Save to DB
+        from services.db_service import save_weekly_recap
+        save_weekly_recap(year, week, summary)
+        
+        # 2. Broadcast via Email
+        _, emails = recap_service.extract_weekly_data(year, week)
+        if emails:
+            html_body = f"""
+            <html>
+                <body style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px;">
+                    <div style="background-color: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1);">
+                        <h2 style="color: #333;">🏈 Weekly Recap: NFL Week {week}</h2>
+                        <div style="white-space: pre-wrap; color: #555; line-height: 1.6;">
+                            {summary}
+                        </div>
+                        <p style="margin-top: 20px; font-size: 0.8em; color: #888;">
+                            This recap was generated by Gemini AI for the Wins Pool. 
+                        </p>
+                    </div>
+                </body>
+            </html>
+            """
+            email_service.send_weekly_recap_email(emails, f"Week {week} Recap - Wins Pool", html_body)
+
+        return JSONResponse(content={"message": f"Week {week} recap saved and broadcast to {len(emails)} players."})
     except Exception as e:
         import traceback; traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})

@@ -1,0 +1,19 @@
+{
+    "preseason_projections": [
+        "https://www.bleacherreport.com/nfl",
+        "https://www.espn.com/nfl/fpi",
+        "https://www.si.com/nfl",
+        "https://www.nfl.com/news/projections",
+        "https://theathletic.com/nfl/",
+        "https://www.pff.com/nfl",
+        "https://www.usatoday.com/sports/nfl/",
+        "https://www.vegasinsider.com/nfl/odds/win-totals/",
+        "https://www.espn.com/nfl/insider/story/_/id/mike-clay-projections"
+    ],
+    "game_odds": [
+        "https://raw.githubusercontent.com/leesharpe/nfldata/master/data/nfl_games.csv"
+    ],
+    "teams_data": [
+        "https://raw.githubusercontent.com/leesharpe/nfldata/master/data/nfl_teams.csv"
+    ]
+}

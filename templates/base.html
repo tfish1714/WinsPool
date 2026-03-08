@@ -10,7 +10,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css?v=11">
     {% block head %}{% endblock %}
-
     <!-- Early Auth Detection to prevent flicker -->
     <script>
         (function () {
@@ -72,27 +71,33 @@
 
         <!-- Unified Global Navigation (Hidden until Authenticated) -->
         <div class="app-nav" id="app-nav">
-            <div class="nav-header">
+            <div class="nav-brand-container">
                 <div class="brand-box">
                     <img src="/static/fishbone.png" alt="Logo" class="nav-logo">
                     <h1>NFL Wins Pool</h1>
                 </div>
             </div>
-            <button class="hamburger-btn" onclick="document.getElementById('nav-links').classList.toggle('open')">☰
-                Menu</button>
+
             <nav class="nav-links" id="nav-links">
-                <a href="/draft" class="tab-btn">🏈 Live Draft Room</a>
-                <a href="/wins-pool" class="tab-btn">🏆 Overall Standings</a>
-                <a href="/wins-pool/{{ current_year|default(2024) }}/weekbyweek" class="tab-btn">📊 Week by Week</a>
-                <a href="/playoff-race" class="tab-btn">🏁 Playoff Race</a>
-                <a href="/draft-results" class="tab-btn">📝 Draft Results</a>
-                <a href="/draft/history" class="tab-btn">📖 Draft History</a>
-                <a href="/headtohead" class="tab-btn">🤝 Head-to-Head</a>
-                <a href="/history" class="tab-btn">👑 Overall History</a>
-                <a href="/profile" class="tab-btn">👤 My Profile</a>
-                <a href="/admin" id="admin-nav-link" class="tab-btn"
-                    style="display: none; color: var(--accent-orange); font-weight: bold;">⚙️ Admin Portal</a>
+                <a href="/draft" class="tab-btn">🏈 Draft</a>
+                <a href="/wins-pool" class="tab-btn">🏆 Standings</a>
+                <a href="/wins-pool/{{ current_year|default(2024) }}/weekbyweek" class="tab-btn">📊 Weeks</a>
+                <a href="/playoff-race" class="tab-btn">🏁 Race</a>
+                <a href="/draft-results" class="tab-btn">📝 Results</a>
+                <a href="/draft/history" class="tab-btn">📖 History</a>
+                <a href="/headtohead" class="tab-btn">🤝 H2H</a>
+                <a href="/history" class="tab-btn">👑 Overall</a>
+                <a href="/profile" class="tab-btn">👤 Profile</a>
+                <a href="/admin" id="admin-nav-link" class="tab-btn admin-link" style="display: none;">⚙️ Admin</a>
             </nav>
+
+            <div id="user-identity" class="user-identity hidden">
+                <span id="user-nickname-display"></span>
+                <button id="logout-btn" class="logout-btn">Logout</button>
+            </div>
+
+            <button class="hamburger-btn"
+                onclick="document.getElementById('nav-links').classList.toggle('open')">☰</button>
         </div>
 
         <!-- Dynamic Page Content -->
@@ -105,7 +110,7 @@
     <div id="toast" class="toast hidden"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="/static/script.js?v=7"></script>
+    <script type="module" src="/static/js/main.js"></script>
     {% block scripts %}{% endblock %}
 </body>
 

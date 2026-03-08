@@ -18,21 +18,31 @@ def get_recap_prompt(prompt_data: str) -> str:
     """Combines the system instruction with the week's data."""
     return f"{SYSTEM_INSTRUCTION}\n\nHere is the data for the week:\n{prompt_data}"
 
-def generate_weekly_summary(prompt_data: str) -> str:
+def generate_generic_content(prompt: str, system_instruction: str = None) -> str:
     """
-    Connects to Gemini Pro to generate a banterous weekly NFL wins pool summary.
+    Generic Gemini wrapper for non-recap tasks (e.g. projections, data analysis).
     """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        return "Error: GEMINI_API_KEY not found in environment."
+        return "Error: GEMINI_API_KEY not found."
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-
-    full_prompt = get_recap_prompt(prompt_data)
+    
+    config = {}
+    if system_instruction:
+        model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=system_instruction)
+    else:
+        model = genai.GenerativeModel('gemini-1.5-flash')
 
     try:
-        response = model.generate_content(full_prompt)
+        response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"Error generating summary: {str(e)}"
+        return f"Error: {str(e)}"
+
+def generate_weekly_summary(prompt_data: str) -> str:
+    """
+    Existing specialized recap generation using the defined sports commentator persona.
+    """
+    full_prompt = get_recap_prompt(prompt_data)
+    return generate_generic_content(full_prompt)

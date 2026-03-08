@@ -2,50 +2,96 @@
 
 {% block title %}NFL Wins Pool - Admin Panel{% endblock %}
 
+{% block head %}
+<style>
+    .tab-content.hidden {
+        display: none !important;
+    }
+</style>
+<script>console.log('[Admin] Template: Admin Panel initialized');</script>
+{% endblock %}
+
 {% block content %}
+<div class="container admin-container" style="max-width: 1000px; display: flex; flex-direction: column; gap: 1rem;">
+    <!-- Admin Sub-menu Tabs -->
+    <div class="admin-tabs"
+        style="display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--glass-border); padding-bottom: 0.5rem; overflow-x: auto;">
+        <button class="tab-btn active" data-tab="draft-section"
+            style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">Draft
+            Operations</button>
+        <button class="tab-btn" data-tab="player-section"
+            style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">Entrant
+            Management</button>
+        <button class="tab-btn" data-tab="recap-section"
+            style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">Weekly
+            AI Recaps</button>
+        <button class="tab-btn" data-tab="system-section"
+            style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">System
+            & AI Utilities</button>
+    </div>
 
-
-<div class="container admin-container" style="max-width: 1000px; display: flex; flex-direction: column; gap: 2rem;">
     <!-- Season Management Card -->
-    <div class="card-glass" style="height: auto;">
+    <div id="draft-section" class="tab-content card-glass" style="height: auto;">
         <h2 style="border-bottom: 1px solid var(--glass-border); padding-bottom: 0.5rem;">Season & Draft Management</h2>
         <p>Generate a new season with specific players or wipe existing seasonal data.</p>
 
         <div class="admin-form" style="display: flex; flex-direction: column; gap: 1.5rem; margin-top: 1rem;">
             <div style="display: flex; gap: 1rem;">
                 <input type="number" id="season-input" class="admin-input" placeholder="Season Year (e.g. 2026)"
-                    min="2000" max="2100" style="flex: 1;">
+                    min="2024" max="2100" style="flex: 1;">
                 <input type="password" id="admin-code-input" class="admin-input" placeholder="Admin Code"
                     style="flex: 1;">
             </div>
 
             <div id="player-selection-container"
                 style="border: 1px solid var(--glass-border); padding: 1rem; border-radius: 8px; background: rgba(0,0,0,0.2);">
-                <h4 style="margin-bottom: 0.5rem; color: var(--accent-gold);">Select Draft Entrants (Toggle 10)</h4>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <h4 style="margin: 0; color: var(--accent-gold);">Select Draft Entrants (Toggle 10)</h4>
+                    <span id="player-count" style="font-size: 0.8rem; color: var(--text-secondary);">Selected:
+                        0/10</span>
+                </div>
                 <div id="player-grid"
                     style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.5rem; max-height: 250px; overflow-y: auto; padding-right: 0.5rem;">
-                    <!-- Populated by JS -->
-                    <p style="color: var(--text-secondary);">Loading players...</p>
+                    <p id="player-loading-msg" style="color: var(--text-secondary); padding: 1rem; text-align: center;">
+                        Entering Admin Code to load players...</p>
                 </div>
             </div>
 
-            <div style="display: flex; gap: 1rem;">
-                <button id="generate-btn" class="btn-primary" style="flex: 1;">Generate Season</button>
-                <button id="delete-season-btn" class="btn-primary"
-                    style="flex: 1; background: var(--accent-red); border-color: var(--accent-red);">Wipe Season
-                    Data</button>
+            <!-- Draft Order Preview (Hidden by default) -->
+            <div id="draft-preview-container" class="hidden"
+                style="border: 1px solid var(--accent-gold); padding: 1rem; border-radius: 8px; background: rgba(251, 191, 36, 0.05);">
+                <h4 style="margin-bottom: 0.5rem; color: var(--accent-gold);">🎲 Randomized Order Preview</h4>
+                <ol id="preview-list" style="padding-left: 1.5rem; color: #fff; line-height: 1.6;">
+                    <!-- Populated by JS -->
+                </ol>
             </div>
 
-            <div style="border-top: 1px solid var(--glass-border); padding-top: 1rem;">
+            <div style="display: flex; gap: 1rem;">
+                <button id="preview-btn" class="btn-primary"
+                    style="flex: 1; background: #444; border-color: #666;">Preview Draft Order</button>
+                <button id="generate-btn" class="btn-primary" style="flex: 1;">Generate & Finalize Season</button>
+            </div>
+
+            <div
+                style="border-top: 1px solid var(--glass-border); padding-top: 1rem; display: flex; flex-direction: column; gap: 1rem;">
+                <h4 style="color: var(--accent-red);">Danger Zone: Wipe Seasonal Data</h4>
+                <div style="display: flex; gap: 1rem;">
+                    <select id="delete-season-select" class="admin-input" style="flex: 1;">
+                        <option value="">Select Season to Wipe...</option>
+                    </select>
+                    <button id="delete-season-btn" class="btn-primary"
+                        style="flex: 1; background: var(--accent-red); border-color: var(--accent-red);">Wipe
+                        Data</button>
+                </div>
                 <button id="reset-draft-btn" class="btn-primary"
-                    style="width: 100%; background: #444; border-color: #666;">Reset Draft Picks (Current Season
+                    style="width: 100%; background: #222; border-color: #444;">Reset Draft Picks (Current Season
                     Only)</button>
             </div>
         </div>
     </div>
 
     <!-- Player Creation Card -->
-    <div class="card-glass" style="height: auto;">
+    <div id="player-section" class="tab-content card-glass hidden" style="height: auto;">
         <h2>Entrant Management</h2>
         <p>Create new players to add to future seasons.</p>
 
@@ -59,15 +105,66 @@
         </div>
     </div>
 
+    <!-- Weekly Recap Manager Card -->
+    <div id="recap-section" class="tab-content card-glass hidden" style="height: auto;">
+        <h2>🎙️ Weekly AI Recap Manager</h2>
+        <p>Generate, review, and broadcast weekly sports summaries based on game results.</p>
+
+        <div class="admin-form" style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem;">
+            <div style="display: flex; gap: 1rem;">
+                <div style="flex: 1;">
+                    <label
+                        style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">Season
+                        Year</label>
+                    <input type="number" id="recap-year" class="admin-input" value="2025" min="2024" max="2100">
+                </div>
+                <div style="flex: 1;">
+                    <label
+                        style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">NFL
+                        Week</label>
+                    <input type="number" id="recap-week" class="admin-input" placeholder="Week #" min="1" max="22">
+                </div>
+            </div>
+
+            <button id="recap-preview-prompt-btn" class="btn-primary" style="background: #444; border-color: #666;">Step
+                1: Preview Data Prompt</button>
+
+            <div id="recap-prompt-preview-container" class="hidden"
+                style="border: 1px solid var(--glass-border); padding: 1rem; border-radius: 8px; background: rgba(0,0,0,0.3);">
+                <h4 style="margin: 0 0 0.5rem 0; color: var(--accent-gold);">Data Prompt (Gemini Input)</h4>
+                <textarea id="recap-prompt-text" readonly
+                    style="width: 100%; height: 150px; background: transparent; color: #ccc; border: none; font-family: monospace; font-size: 0.85rem; resize: vertical;"></textarea>
+                <button id="recap-generate-ai-btn" class="btn-primary" style="margin-top: 1rem; width: 100%;">Step
+                    2: Generate AI Summary</button>
+            </div>
+
+            <div id="recap-final-preview-container" class="hidden"
+                style="border: 1px solid var(--accent-green); padding: 1rem; border-radius: 8px; background: rgba(16, 185, 129, 0.05);">
+                <h4 style="margin: 0 0 0.5rem 0; color: var(--accent-green);">Final AI Summary</h4>
+                <textarea id="recap-final-text"
+                    style="width: 100%; height: 200px; background: rgba(0,0,0,0.2); color: #fff; border: 1px solid var(--glass-border); border-radius: 4px; padding: 0.5rem; font-family: inherit; line-height: 1.5; resize: vertical;"></textarea>
+                <p style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.5rem;">Review and edit the
+                    text above before broadcasting.</p>
+                <button id="recap-broadcast-btn" class="btn-primary"
+                    style="margin-top: 1rem; width: 100%; background: var(--accent-green); border-color: var(--accent-green);">Step
+                    3: Save & Broadcast to Players</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Utilities Card -->
-    <div class="card-glass" style="height: auto;">
+    <div id="system-section" class="tab-content card-glass hidden" style="height: auto;">
         <h2>System Utilities</h2>
-        <button id="scrape-predictions-btn" class="btn-primary"
-            style="width: 100%; background: #333; border-color: #555;">Run Preseason Predictor Agent</button>
+        <div style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem;">
+            <button id="scrape-predictions-btn" class="btn-primary"
+                style="width: 100%; background: #333; border-color: #555;">Run Preseason Predictor Agent</button>
+            <button id="test-connection-btn" class="btn-primary"
+                style="width: 100%; background: #222; border-color: #444;">Verify Data Connections</button>
+        </div>
     </div>
 
     <p id="admin-message" style="margin-top: 1rem; text-align: center; font-weight: 600;"></p>
 </div>
 
-<script src="/static/admin.js?v=5"></script>
+<script type="module" src="/static/js/admin_main.js"></script>
 {% endblock %}

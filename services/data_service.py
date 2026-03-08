@@ -11,21 +11,14 @@ import numpy as np
 import time
 from typing import Tuple, Dict, Any, List
 from services.db_service import get_collection_df
+from services.utils import get_team_logo_url
 
 # Constants
 NFL_DATA_GITHUB = "https://raw.githubusercontent.com/leesharpe/nfldata/master/data/"
 
 def get_team_logo(team_code: str) -> str:
     """Returns the official high-resolution logo URL for an NFL team."""
-    if not team_code or pd.isna(team_code):
-        return ""
-    code = str(team_code).upper()
-    mapping = {
-        'LA': 'LAR',
-        'WAS': 'WSH',
-    }
-    cdn_code = mapping.get(code, code)
-    return f"https://a.espncdn.com/i/teamlogos/nfl/500/{cdn_code}.png"
+    return get_team_logo_url(team_code)
 
 from services.cache_service import (
     _DATA_CACHE, _CACHE_TIMESTAMPS, _CACHE_TTL_SECONDS,

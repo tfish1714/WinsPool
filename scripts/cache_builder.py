@@ -33,6 +33,8 @@ if not firebase_admin._apps:
 from services.data_service import load_data, get_available_years, get_latest_week_for_year
 from services.cache_service import write_cache, is_cache_final
 import services.analysis_service as analysis
+import services.prediction_service as predictor
+import services.live_score_service as live_scores
 
 ANALYTICS = [
     'wins_pool_standings',
@@ -58,6 +60,14 @@ def build_year(standings, games, players, draft_order, draft_results,
     latest_week = get_latest_week_for_year(games, year)
     is_past_season = (year < current_year)
 
+    # If it's the current year, sync live scores from ESPN
+    if year == current_year:
+        print(f"  [live] Syncing ESPN scores for {year}...")
+        try:
+            games = live_scores.sync_live_scores_to_df(games)
+        except Exception as e:
+            print(f"  [warn] Live sync failed: {e}")
+
     # --- Wins Pool Standings ---
     analytic = 'wins_pool_standings'
     final_flag = is_past_season or (latest_week >= 18)  # 18 weeks in NFL regular season
@@ -78,9 +88,13 @@ def build_year(standings, games, players, draft_order, draft_results,
     else:
         try:
             schedule_df = analysis.get_enriched_schedule(games, draft_results, players, year)
+            # Add automated game predictions
+            schedule_df = predictor.enrich_schedule_with_predictions(schedule_df)
+            
             # Store only the columns the web app needs to avoid huge payloads
             cols = ['week', 'gameday', 'home_team', 'away_team', 'home_score', 'away_score',
-                    'result', 'fullName_home', 'fullName_away']
+                    'result', 'fullName_home', 'fullName_away', 'spread_line', 'total_line',
+                    'home_moneyline', 'home_spread_odds', 'pred_winner', 'pred_su_conf', 'pred_ats_pick']
             cols_present = [c for c in cols if c in schedule_df.columns]
             slim = schedule_df[cols_present].copy()
             write_cache(analytic, year, latest_week, slim.to_dict(orient='records'), is_final=final_flag)

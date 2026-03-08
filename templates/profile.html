@@ -132,7 +132,7 @@
 
             if (resp.ok) {
                 document.getElementById('full-name').value = data.fullName || '';
-                document.getElementById('nickname').value = data.nickname || '';
+                document.getElementById('nickname').value = data.nickName || '';
                 document.getElementById('email').value = data.email || '';
                 document.getElementById('mfa-enabled').checked = !!data.mfa_enabled;
             }
@@ -162,7 +162,7 @@
             const payload = {
                 playerId: myPlayerId,
                 fullName,
-                nickname,
+                nickName: nickname,
                 email: newEmail,
                 currentPassword,
                 newPassword: newPassword || null,
@@ -181,7 +181,8 @@
                     alert("Profile updated successfully!");
                     // Update display name in localStorage (prefer nickname if set)
                     const displayName = nickname || fullName;
-                    localStorage.setItem('nfl_wins_playerName', displayName);
+                    localStorage.setItem('nfl_wins_playerName', fullName);
+                    localStorage.setItem('nfl_wins_nickName', nickname);
                     localStorage.setItem('nfl_wins_user_email', newEmail);
                     window.location.reload();
                 } else {

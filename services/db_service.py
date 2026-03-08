@@ -62,6 +62,8 @@ def get_db():
 
 def signal_data_update():
     """Signals all application instances to invalidate their caches."""
+    if os.environ.get("USE_LOCAL_DATA", "False").lower() == "true":
+        return
     try:
         db = get_db()
         if db:
@@ -70,6 +72,40 @@ def signal_data_update():
             })
     except Exception as e:
         print(f"Warning: Failed to signal remote cache update: {e}")
+
+def _mutate_local(collection_name: str, doc_id: str, data: dict, action: str = "set"):
+    """Internal helper to reflect mutations onto local .pkl files when in local mode."""
+    if os.environ.get("USE_LOCAL_DATA", "False").lower() != "true":
+        return
+    
+    pkl_path = pathlib.Path(".local_db") / f"{collection_name}.pkl"
+    pkl_path.parent.mkdir(exist_ok=True)
+    
+    if pkl_path.exists():
+        try:
+            df = pd.read_pickle(pkl_path)
+        except Exception:
+            df = pd.DataFrame()
+    else:
+        df = pd.DataFrame()
+
+    if action == "set":
+        # Check if row exists by matching ID field or similar
+        # For simplicity in this project, we'll use doc_id matching if a column exists
+        if not df.empty and "id" in df.columns:
+             df = df[df["id"] != doc_id]
+        
+        # Convert dict to row
+        row = pd.DataFrame([data])
+        df = pd.concat([df, row], ignore_index=True)
+    elif action == "update":
+        # Find row and merge data
+        pass # Implement as needed for specific collections
+    elif action == "delete":
+        # Filter out the deleted doc
+        pass
+
+    df.to_pickle(pkl_path)
 
 
 def get_collection_df(collection_name: str, filters: list = None) -> pd.DataFrame:
@@ -109,6 +145,19 @@ def update_player_cell(player_id: int, cell: str):
     get_db().collection("players").document(str(player_id)).update({"cell": cell})
     clear_data_cache()
 
+def get_player_role(player_id: str) -> str:
+    """Helper to check player role (admin vs user) for secure operations."""
+    if not player_id:
+        return "user"
+    try:
+        db = get_db()
+        doc = db.collection("players").document(str(player_id)).get()
+        if doc.exists:
+            return doc.to_dict().get("role", "user")
+        return "user"
+    except Exception:
+        return "user"
+
 def get_player_by_email(email: str):
     """Retrieve a single player directly by their standardized email address."""
     db = get_db()
@@ -135,28 +184,40 @@ def increment_failed_setup_attempts(player_id: str, new_count: int, lockout_unti
         update_data["lockout_until"] = lockout_until
     get_db().collection("players").document(str(player_id)).update(update_data)
 
+def _save_df_to_local(collection_name: str, df: pd.DataFrame):
+    if os.environ.get("USE_LOCAL_DATA", "False").lower() != "true":
+        return
+    pkl_path = pathlib.Path(".local_db") / f"{collection_name}.pkl"
+    pkl_path.parent.mkdir(exist_ok=True)
+    df.to_pickle(pkl_path)
+
 def add_player(full_name: str, nick_name: str, email: str):
     """Creates a new player with a unique numeric ID."""
     db = get_db()
-    players = db.collection("players").get()
-    max_id = 0
-    for doc in players:
-        try:
-            val = int(doc.id)
-            if val > max_id:
-                max_id = val
-        except ValueError:
-            continue
+    players_df = get_collection_df("players")
     
-    new_id = max_id + 1
-    db.collection("players").document(str(new_id)).set({
+    max_id = 0
+    if not players_df.empty:
+        max_id = players_df["playerId"].max()
+    
+    new_id = int(max_id) + 1
+    data = {
         "playerId": new_id,
         "fullName": full_name,
         "nickName": nick_name,
         "email": email.strip().lower(),
         "role": "user",
         "failed_setup_attempts": 0,
-    })
+    }
+    
+    if db:
+        db.collection("players").document(str(new_id)).set(data)
+    
+    # Update local df
+    new_row = pd.DataFrame([data])
+    players_df = pd.concat([players_df, new_row], ignore_index=True)
+    _save_df_to_local("players", players_df)
+    
     clear_data_cache()
     signal_data_update()
     return new_id
@@ -175,31 +236,37 @@ def add_draft_result(season: int, draft_pick: int, player_id: int, team: str, ex
     if time_taken_seconds is not None:
         data["time_taken_seconds"] = time_taken_seconds
         
-    get_db().collection("draft_results").document(doc_id).set(data)
+    db = get_db()
+    if db:
+        db.collection("draft_results").document(doc_id).set(data)
+    
+    # Update local
+    results_df = get_collection_df("draft_results")
+    if not results_df.empty:
+        results_df = results_df[~((results_df["season"] == season) & (results_df["draftPick"] == draft_pick))]
+    results_df = pd.concat([results_df, pd.DataFrame([data])], ignore_index=True)
+    _save_df_to_local("draft_results", results_df)
+
     clear_data_cache()
 
 def delete_draft_pick(season: int, draft_pick: int):
     doc_id = f"{season}_{draft_pick}"
-    get_db().collection("draft_results").document(doc_id).delete()
+    db = get_db()
+    if db:
+        db.collection("draft_results").document(doc_id).delete()
+    
+    # Update local
+    results_df = get_collection_df("draft_results")
+    if not results_df.empty:
+        results_df = results_df[~((results_df["season"] == season) & (results_df["draftPick"] == draft_pick))]
+        _save_df_to_local("draft_results", results_df)
+
     clear_data_cache()
 
 def delete_draft_results_for_season(season: int):
     db = get_db()
-    docs = db.collection("draft_results").where(filter=FieldFilter("season", "==", season)).stream()
-    batch = db.batch()
-    count = 0
-    for doc in docs:
-        batch.delete(doc.reference)
-        count += 1
-    if count > 0:
-        batch.commit()
-    clear_data_cache()
-
-def delete_season_data(season: int):
-    """Wipes draft_order, draft_order_rules, and draft_results for a season."""
-    db = get_db()
-    for col in ["draft_order", "draft_order_rules", "draft_results"]:
-        docs = db.collection(col).where(filter=FieldFilter("season", "==", season)).stream()
+    if db:
+        docs = db.collection("draft_results").where(filter=FieldFilter("season", "==", season)).stream()
         batch = db.batch()
         count = 0
         for doc in docs:
@@ -207,35 +274,99 @@ def delete_season_data(season: int):
             count += 1
         if count > 0:
             batch.commit()
+    
+    # Update local
+    results_df = get_collection_df("draft_results")
+    if not results_df.empty:
+        results_df = results_df[results_df["season"] != season]
+        _save_df_to_local("draft_results", results_df)
+
+    clear_data_cache()
+
+def delete_season_data(season: int):
+    """Wipes draft_order, draft_order_rules, and draft_results for a season."""
+    db = get_db()
+    for col in ["draft_order", "draft_order_rules", "draft_results"]:
+        if db:
+            docs = db.collection(col).where(filter=FieldFilter("season", "==", season)).stream()
+            batch = db.batch()
+            count = 0
+            for doc in docs:
+                batch.delete(doc.reference)
+                count += 1
+            if count > 0:
+                batch.commit()
+        
+        # Update local
+        df = get_collection_df(col)
+        if not df.empty:
+            df = df[df["season"] != season]
+            _save_df_to_local(col, df)
+
     clear_data_cache()
     signal_data_update()
 
 
 def add_draft_order(season: int, draft_order: int, player_id: int):
     doc_id = f"{season}_{draft_order}"
-    get_db().collection("draft_order").document(doc_id).set({
+    data = {
         "season": season,
         "draftOrder": draft_order,
         "playerId": player_id,
-    })
+    }
+    db = get_db()
+    if db:
+        db.collection("draft_order").document(doc_id).set(data)
+    
+    # Update local
+    order_df = get_collection_df("draft_order")
+    if not order_df.empty:
+        order_df = order_df[~((order_df["season"] == season) & (order_df["draftOrder"] == draft_order))]
+    order_df = pd.concat([order_df, pd.DataFrame([data])], ignore_index=True)
+    _save_df_to_local("draft_order", order_df)
+
     clear_data_cache()
 
 
 def add_draft_rule(season: int, draft_order: int, pick_one: int, pick_two: int, pick_three: int):
     doc_id = f"{season}_{draft_order}"
-    get_db().collection("draft_order_rules").document(doc_id).set({
+    data = {
         "season": season,
         "draftOrder": draft_order,
         "pickOne": pick_one,
         "pickTwo": pick_two,
         "pickThree": pick_three,
-    })
+    }
+    db = get_db()
+    if db:
+        db.collection("draft_order_rules").document(doc_id).set(data)
+    
+    # Update local
+    rules_df = get_collection_df("draft_order_rules")
+    if not rules_df.empty:
+        rules_df = rules_df[~((rules_df["season"] == season) & (rules_df["draftOrder"] == draft_order))]
+    rules_df = pd.concat([rules_df, pd.DataFrame([data])], ignore_index=True)
+    _save_df_to_local("draft_order_rules", rules_df)
+
     clear_data_cache()
     signal_data_update()
 
 def update_player_profile(player_id: str, updates: dict):
     """Updates non-credential player fields (nickname, email, MFA) with cache invalidation."""
-    get_db().collection("players").document(str(player_id)).update(updates)
+    db = get_db()
+    if db:
+        db.collection("players").document(str(player_id)).update(updates)
+    
+    # Update local
+    players_df = get_collection_df("players")
+    if not players_df.empty:
+        # Match as string or int to be safe
+        mask = (players_df["playerId"].astype(str) == str(player_id))
+        if mask.any():
+            for k, v in updates.items():
+                players_df.loc[mask, k] = v
+            _save_df_to_local("players", players_df)
+
     clear_data_cache()
     signal_data_update()
 

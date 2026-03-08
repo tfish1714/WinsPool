@@ -239,12 +239,11 @@ header h1 {
 /* Available Teams */
 .teams-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
     gap: 1rem;
     overflow-y: auto;
     flex-grow: 1;
     margin-bottom: 1rem;
-    justify-content: center;
     padding: 0.5rem;
 }
 
@@ -475,18 +474,18 @@ tr:hover {
     width: 100%;
     position: sticky;
     top: 1rem;
-    z-index: 100;
+    z-index: 1000;
     display: flex;
-    flex-direction: row;
+    flex-flow: row wrap;
     align-items: center;
     justify-content: space-between;
     background: var(--glass-bg);
     border: 1px solid var(--glass-border);
     border-radius: 12px;
-    padding: 0.75rem 1.5rem;
-    /* Aligns internal logo with card content */
+    padding: 0.5rem 1.25rem;
     backdrop-filter: blur(12px);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    gap: 1rem;
 }
 
 .nav-header {
@@ -553,17 +552,44 @@ tr:hover {
     flex-direction: row;
     gap: 0.4rem;
     align-items: center;
-    justify-content: flex-end;
-    flex-wrap: nowrap;
+    flex: 1 1 auto;
+    justify-content: center;
+}
+
+.user-identity {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--accent-gold);
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding-left: 1rem;
+    border-left: 1px solid var(--glass-border);
+}
+
+.logout-btn {
+    background: rgba(248, 81, 73, 0.1);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+    color: var(--accent-red);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.logout-btn:hover {
+    background: var(--accent-red);
+    color: #fff;
 }
 
 .tab-btn {
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--glass-border);
     color: var(--text-secondary);
-    padding: 0.5rem 0.9rem;
+    padding: 0.4rem 0.75rem;
     border-radius: 8px;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     cursor: pointer;
     font-family: inherit;
     text-decoration: none;
@@ -581,6 +607,11 @@ tr:hover {
     color: #fff;
     border-color: var(--primary-color);
     box-shadow: 0 0 15px rgba(88, 166, 255, 0.3);
+}
+
+.admin-link {
+    color: var(--accent-gold) !important;
+    border-color: rgba(251, 191, 36, 0.3);
 }
 
 /* Progress Section */

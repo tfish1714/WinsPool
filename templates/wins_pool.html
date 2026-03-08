@@ -179,6 +179,34 @@
                         class="game-status-label {% if row['result'] != -1000 %}status-final{% else %}status-live{% endif %}">
                         {{ 'Final' if row['result'] != -1000 else 'Live' }}
                     </span>
+                    {% if row['spread_line'] is not none or row['total_line'] is not none %}
+                    <div class="game-odds"
+                        style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px;">
+                        {% if row['spread_line'] is not none %}
+                        <div>Line: {{ '+' if row['spread_line']|float > 0 else '' }}{{ row['spread_line'] }}</div>
+                        {% endif %}
+                        {% if row['total_line'] is not none %}
+                        <div>Total: {{ row['total_line'] }}</div>
+                        {% endif %}
+                        {% if row['home_moneyline'] is not none %}
+                        <div style="font-size: 0.7rem; opacity: 0.8;">ML: {{ '+' if row['home_moneyline']|float > 0 else
+                            '' }}{{ row['home_moneyline'] }}</div>
+                        {% endif %}
+
+                        {% if row['pred_winner'] %}
+                        <div class="game-prediction"
+                            style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1); color: var(--accent-gold); font-weight: 600;">
+                            <span title="AI Prediction Logic">✨ Predictor:</span>
+                            <div style="font-size: 0.75rem; color: #fff;">
+                                Win: {{ row['pred_winner'] }} ({{ row['pred_su_conf'] }}%)
+                            </div>
+                            <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: normal;">
+                                ATS: {{ row['pred_ats_pick'] }}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
                 </div>
             </div>
             {% endfor %}
@@ -200,13 +228,17 @@
 
 <div id="standings-cfg-data" style="display:none;" data-year="{{ year }}"
     data-orders="[{% for row in data %}{{ row.playerId }}{% if not loop.last %},{% endif %}{% endfor %}]"></div>
+{% endblock %}
+
+{% block scripts %}
 <script>
-    /* Safely parse Jinja data from HTML attributes to prevent auto-formatters from spacing out curly braces */
     const cfgEl = document.getElementById('standings-cfg-data');
-    window.STANDINGS_CONFIG = {
-        year: parseInt(cfgEl.dataset.year, 10),
-        standingsOrderIds: JSON.parse(cfgEl.dataset.orders)
-    };
+    if (cfgEl) {
+        window.STANDINGS_CONFIG = {
+            year: parseInt(cfgEl.dataset.year, 10),
+            standingsOrderIds: JSON.parse(cfgEl.dataset.orders)
+        };
+    }
 </script>
 <script src="/static/js/standings.js"></script>
 {% endblock %}
