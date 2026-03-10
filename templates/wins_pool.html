@@ -67,9 +67,9 @@
                         <td>{{ row['Tiebreaker1_WorstTeamWins'] }}</td>
                         <td>{{ row['Tiebreaker2_2ndWorstTeamWins'] }}</td>
                         <td>{{ row['Tiebreaker3_BestTeamWins'] }}</td>
-                        <td>{{ row['Tiebreaker4_WorstTeamPtDiff'] }}</td>
-                        <td>{{ row['Tiebreaker5_2ndWorstTeamPtDiff'] }}</td>
-                        <td>{{ row['Tiebreaker6_BestTeamPtDiff'] }}</td>
+                        <td>{{ row['Tiebreaker4_WorstTeamPtDiff'] or 0 }}</td>
+                        <td>{{ row['Tiebreaker5_2ndWorstTeamPtDiff'] or 0 }}</td>
+                        <td>{{ row['Tiebreaker6_BestTeamPtDiff'] or 0 }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>

@@ -70,6 +70,7 @@ def sync_live_scores_to_df(games_df: pd.DataFrame) -> pd.DataFrame:
         return games_df
         
     df = games_df.copy()
+    cache_needs_rebuild = False
     
     # We need to map ESPN abbreviations to repo abbreviations if they differ.
     # Usually they match (KC, SF, etc.), but sometimes (LAR vs LA, etc.)
@@ -108,7 +109,16 @@ def sync_live_scores_to_df(games_df: pd.DataFrame) -> pd.DataFrame:
                 df.at[idx, 'clock'] = update['clock']
                 df.at[idx, 'period'] = update['period']
             elif espn_status == 'STATUS_FINAL':
+                # Check if it was previously NOT final in our local DF logic
+                # (is_live usually tracks if the game has started but not ended)
+                if df.at[idx, 'is_live'] == True or pd.isna(df.at[idx, 'is_live']):
+                    cache_needs_rebuild = True
+                    
                 df.at[idx, 'is_live'] = False
                 df.at[idx, 'is_final_live'] = True # Marked as final via live sync
-                
+
+    if cache_needs_rebuild:
+        from services.db_service import signal_data_update
+        signal_data_update()
+        
     return df

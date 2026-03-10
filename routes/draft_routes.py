@@ -266,15 +266,19 @@ async def route_draft_results_by_year(request: Request, year: int):
     def calculate_draft_value(row):
         team = row.get("team")
         actual = float(row.get("TotalWinsBySeason", 0))
-        proj = preds.get(team)
-        if proj is not None and proj > 0:
-            return round(actual - proj, 1)
+        p_obj = preds.get(team)
+        if p_obj and isinstance(p_obj, dict):
+            proj = p_obj.get("projected_wins")
+            if proj is not None and proj > 0:
+                return round(actual - proj, 1)
         return None
 
     def get_proj(row):
         team = row.get("team")
-        proj = preds.get(team)
-        return proj if proj is not None and proj > 0 else None
+        p_obj = preds.get(team)
+        if p_obj and isinstance(p_obj, dict):
+            return p_obj.get("projected_wins")
+        return None
         
     merged["projected_wins"] = merged.apply(get_proj, axis=1)
     merged["draft_value"] = merged.apply(calculate_draft_value, axis=1)
@@ -410,6 +414,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 # Check permissions: Is it their turn OR are they an admin?
+                active_pick = state["active_pick"]
+                target_pid = next((x["playerId"] for x in state["draft_board"] if x["pick"] == active_pick), None)
                 try:
                     target_pid_int = int(target_pid) if target_pid is not None else None
                     pid_int = int(pid) if pid is not None else None

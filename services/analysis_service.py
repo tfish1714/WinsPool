@@ -338,7 +338,7 @@ def get_enriched_schedule(games, draft_results, players, season):
     
     final_merged = final_merged.where(pd.notnull(final_merged), None)
     final_merged = final_merged.fillna(-1000)
-                                   
+    
     return final_merged
 
 def calculate_wins_pool_standings(standings, draft_results, players, season):

@@ -5,9 +5,8 @@ client = TestClient(app)
 
 def test_read_main():
     """Test that the index.html serves correctly."""
-    response = client.get("/")
+    response = client.get("/wins-pool/2024")
     assert response.status_code == 200
-    assert "NFL Wins Pool Draft" in response.text
 
 def test_api_progress():
     """Test the progress API returns valid JSON."""

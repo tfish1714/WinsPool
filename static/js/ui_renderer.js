@@ -101,13 +101,31 @@ export const UiRenderer = {
 
         let sorted = [...teams];
         if (role === 'admin' && predictions) {
-            sorted.sort((a, b) => (predictions[b] || 0) - (predictions[a] || 0));
+            sorted.sort((a, b) => {
+                const pA = (predictions[a] && typeof predictions[a] === 'object') ? predictions[a].projected_wins : (predictions[a] || 0);
+                const pB = (predictions[b] && typeof predictions[b] === 'object') ? predictions[b].projected_wins : (predictions[b] || 0);
+                return pB - pA;
+            });
         }
 
         grid.innerHTML = sorted.map(team => {
             const isSelected = team === selectedTeam;
-            const projection = (role === 'admin' && predictions) ? predictions[team] : null;
+            const pred = (role === 'admin' && predictions) ? predictions[team] : null;
             const schedule = schedules && schedules[team] ? schedules[team].join('\n') : '';
+
+            let predHtml = '';
+            if (pred) {
+                if (typeof pred === 'object') {
+                    predHtml = `
+                        <div class="pred-details">
+                            <span class="preseason-wins">${pred.projected_wins}W</span>
+                            <span class="std-dev" title="Standard Deviation">±${pred.std_dev}</span>
+                        </div>
+                    `;
+                } else {
+                    predHtml = `<span class="preseason-wins">${pred}W</span>`;
+                }
+            }
 
             return `
                 <div class="team-card ${isSelected ? 'selected' : ''}" 
@@ -116,7 +134,7 @@ export const UiRenderer = {
                     <img src="${this.getTeamLogo(team)}" class="team-card-logo" alt="${team}">
                     <div class="team-card-info">
                         <span class="team-name">${team}</span>
-                        ${projection ? `<span class="preseason-wins">${projection}W</span>` : ''}
+                        ${predHtml}
                     </div>
                 </div>
             `;

@@ -1,88 +1,146 @@
 import os
-import sys
+import pandas as pd
+import numpy as np
+import firebase_admin
+from firebase_admin import credentials, firestore
 import pathlib
-import time
 
-# Add the project root to sys.path so we can import services natively
-project_root = pathlib.Path(__file__).parent.parent
-sys.path.append(str(project_root))
+# Initialize Firebase
+cred_path = os.environ.get("FIREBASE_CREDENTIALS", "firebase_credentials.json")
+if not firebase_admin._apps:
+    cred = credentials.Certificate(cred_path)
+    firebase_admin.initialize_app(cred)
 
-from services.db_service import get_db
+db = firestore.client()
 
-def upload_preseason_predictions():
-    # Base Vegas Odds to center the predictions around
-    base_odds = {
-        "ARI": 6.5, "ATL": 9.5, "BAL": 10.5, "BUF": 10.5, 
-        "CAR": 5.5, "CHI": 8.5, "CIN": 10.5, "CLE": 8.5, 
-        "DAL": 10.5, "DEN": 5.5, "DET": 10.5, "GB": 9.5, 
-        "HOU": 9.5, "IND": 8.5, "JAX": 8.5, "KC": 11.5, 
-        "LV": 6.5, "LAC": 8.5, "LAR": 8.5, "MIA": 9.5, 
-        "MIN": 6.5, "NE": 4.5, "NO": 7.5, "NYG": 6.5, 
-        "NYJ": 10.5, "PHI": 10.5, "PIT": 8.5, "SF": 11.5, 
-        "SEA": 7.5, "TB": 7.5, "TEN": 6.5, "WAS": 6.5
+def upload_predictions(excel_path: str):
+    print(f"Reading {excel_path}...")
+    df = pd.read_excel(excel_path)
+    
+    # We saw these columns: ['Team', 'BR', 'FPI', 'SI', 'ESPN', 'CBS', 'Athle', 'PFF', 'NFL', 'O/U', 'Clay', 'Unnamed: 11']
+    # 'Unnamed: 11' is season.
+    # 'Team' is full name like 'Dallas Cowboys'.
+    
+    if 'Unnamed: 11' in df.columns:
+        df = df.rename(columns={'Unnamed: 11': 'season'})
+    
+    # Filter out rows without a season
+    df = df.dropna(subset=['season'])
+    df['season'] = df['season'].astype(int)
+    
+    # Load team mapping from current standings or teams collection
+    # For now, let's use a robust heuristic or fetch from Firestore
+    print("Fetching team mapping...")
+    teams_ref = db.collection("nfl_teams").stream()
+    # Map name -> abbr
+    team_map = {}
+    for doc in teams_ref:
+        t = doc.to_dict()
+        # nfl_teams usually has 'team' (abbr) and 'team_name' (full)
+        team_map[t.get('team_name', '').lower()] = t.get('team')
+        # Also map city names and common variations
+        # (e.g. 'Dallas Cowboys' -> 'DAL', 'Cowboys' -> 'DAL')
+        full_name = t.get('team_name', '').lower()
+        if ' ' in full_name:
+            city = full_name.split(' ')[0]
+            nickname = full_name.split(' ')[-1]
+            team_map[city] = t.get('team')
+            team_map[nickname] = t.get('team')
+
+    # Hardcoded overrides for common edge cases
+    overrides = {
+        'dallas cowboys': 'DAL',
+        'philadelphia eagles': 'PHI',
+        'new york giants': 'NYG',
+        'washington commanders': 'WAS',
+        'washington redskins': 'WAS',
+        'washington football team': 'WAS',
+        'san francisco 49ers': 'SF',
+        'los angeles rams': 'LA',
+        'seattle seahawks': 'SEA',
+        'arizona cardinals': 'ARI',
+        'green bay packers': 'GB',
+        'detroit lions': 'DET',
+        'minnesota vikings': 'MIN',
+        'chicago bears': 'CHI',
+        'tampa bay buccaneers': 'TB',
+        'new orleans saints': 'NO',
+        'atlanta falcons': 'ATL',
+        'carolina panthers': 'CAR',
+        'kansas city chiefs': 'KC',
+        'las vegas raiders': 'LV',
+        'oakland raiders': 'LV',
+        'denver broncos': 'DEN',
+        'los angeles chargers': 'LAC',
+        'san diego chargers': 'LAC',
+        'buffalo bills': 'BUF',
+        'miami dolphins': 'MIA',
+        'new york jets': 'NYJ',
+        'new england patriots': 'NE',
+        'cincinnati bengals': 'CIN',
+        'baltimore ravens': 'BAL',
+        'pittburgh steelers': 'PIT', # Common typo
+        'pittsburgh steelers': 'PIT',
+        'cleveland browns': 'CLE',
+        'houston texans': 'HOU',
+        'jacksonville jaguars': 'JAX',
+        'indianapolis colts': 'IND',
+        'tennessee titans': 'TEN'
     }
+    team_map.update(overrides)
 
-    # Simulate realistic variations across the 9 requested sources
-    sources = [
-        "Bleacher Report", "ESPN FPI", "Sports Illustrated", "NFL.com",
-        "The Athletic", "PFF", "USA Today", "Gambling sites O/U", "ESPN Mike Clay"
-    ]
+    source_cols = ['BR', 'FPI', 'SI', 'ESPN', 'CBS', 'Athle', 'PFF', 'NFL', 'O/U', 'Clay']
     
-    import random
-    random.seed(2024) # Deterministic variation
-
-    predictions = {}
-    
-    for team, base in base_odds.items():
-        total = 0
-        for source in sources:
-            if source == "Gambling sites O/U":
-                val = base
-            else:
-                # Add slight realistic variance -0.5 to +0.5 to standard predictions
-                variance = random.choice([-0.5, 0, 0.5])
-                val = base + variance
-            total += val
+    count = 0
+    for _, row in df.iterrows():
+        name = str(row['Team']).lower().strip()
+        abbr = team_map.get(name)
         
-        # Calculate Consensus Average
-        consensus = round(total / len(sources), 2)
-        predictions[team] = consensus
-
-    db = get_db()
-    if db is None:
-        print("Error: Could not connect to Firestore Database.")
-        return False
-
-    collection = db.collection("preseason_predictions")
-    season = 2024  # Targeted injection for current active season
-
-    print(f"Uploading {len(predictions)} preseason predictions for season {season}...")
-    batch = db.batch()
-    
-    for team, projected_wins in predictions.items():
-        doc_id = f"{season}_{team}"
-        doc_ref = collection.document(doc_id)
-        batch.set(doc_ref, {
+        if not abbr:
+            # Try partial match
+            for k, v in team_map.items():
+                if k in name or name in k:
+                    abbr = v
+                    break
+        
+        if not abbr:
+            print(f"⚠️ Could not find abbreviation for team: {row['Team']}")
+            continue
+            
+        season = int(row['season'])
+        
+        # Extract sources that have values
+        sources = {}
+        values = []
+        for src in source_cols:
+            if src in row and pd.notna(row[src]):
+                val = float(row[src])
+                sources[src] = val
+                values.append(val)
+        
+        if not values:
+            continue
+            
+        avg = np.mean(values)
+        std = np.std(values) if len(values) > 1 else 0.0
+        
+        doc_id = f"{season}_{abbr}"
+        data = {
             "season": season,
-            "team": team,
-            "projected_wins": projected_wins
-        })
-
-    batch.commit()
-    
-    # Signal web server to invalidate in-memory cache
-    print("Signaling cache invalidation...")
-    try:
-        db.collection("metadata").document("cache_control").set({
-            "last_update": time.time()
-        })
-    except Exception as e:
-        print(f"Error signaling cache invalidation: {e}")
-
-    print("Preseason predictions seamlessly injected into Firestore!")
-    return True
+            "team": abbr,
+            "sources": sources,
+            "projected_wins": round(avg, 2), # Maintain compatibility
+            "std_dev": round(std, 2)
+        }
+        
+        db.collection("preseason_predictions").document(doc_id).set(data)
+        count += 1
+        
+    print(f"✅ Uploaded {count} predictions.")
 
 if __name__ == "__main__":
-    success = upload_preseason_predictions()
-    if not success:
-        sys.exit(1)
+    path = "debug/predictions.xlsx"
+    if os.path.exists(path):
+        upload_predictions(path)
+    else:
+        print(f"❌ File not found: {path}")

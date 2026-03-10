@@ -386,12 +386,21 @@ def get_season_progress(season: int, week: int) -> Dict[str, Any]:
         "standings": wins_pool_standings.to_dict(orient="records")
     }
 
-def get_preseason_predictions(season: int) -> Dict[str, float]:
-    """Retrieves Vegas Win Totals from the database."""
+def get_preseason_predictions(season: int) -> Dict[str, dict]:
+    """Retrieves Win Totals (including avg, std_dev, and sources) from the database."""
     preds_df = get_collection_df("preseason_predictions", filters=[("season", "==", season)])
     if preds_df.empty:
         return {}
-    return dict(zip(preds_df["team"], preds_df["projected_wins"]))
+    
+    # Return a map of team -> {projected_wins, std_dev, sources}
+    res = {}
+    for _, row in preds_df.iterrows():
+        res[row["team"]] = {
+            "projected_wins": float(row.get("projected_wins", 0)),
+            "std_dev": float(row.get("std_dev", 0)),
+            "sources": row.get("sources", {})
+        }
+    return res
 
 def get_team_schedule(team: str, games_df: pd.DataFrame, season: int) -> List[str]:
     """Extracts a team's sequential 17-game schedule from the NFL Games dataframe."""
