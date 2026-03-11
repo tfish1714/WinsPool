@@ -24,3 +24,6 @@ build/
 
 # Documentation
 docs/
+
+# Deployment Scripts
+deploy.ps1

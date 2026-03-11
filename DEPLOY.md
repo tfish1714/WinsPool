@@ -31,22 +31,33 @@ python -c "import base64; print(base64.b64encode(open('firebase_credentials.json
 echo -n "PASTE_OUTPUT_HERE" | gcloud secrets create FIREBASE_CREDENTIALS --data-file=-
 ```
 
-### Build & Deploy
-```bash
-# Build image
-gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/winspool
+### Build & Deploy (All-in-One Script)
 
-# Deploy
-gcloud run deploy winspool \
-  --image gcr.io/YOUR_PROJECT_ID/winspool \
-  --platform managed \
-  --region us-east1 \
-  --allow-unauthenticated \
-  --set-env-vars "USE_LOCAL_DATA=False" \
-  --set-secrets "FIREBASE_CREDENTIALS=FIREBASE_CREDENTIALS:latest" \
-  --set-env-vars "ROOM_CODE=your_room_code" \
-  --set-env-vars "ADMIN_CODE=your_admin_code"
+For Windows users, you can create a `deploy.ps1` script to handle the build and deploy pipeline in a single command. 
+
+Create a file named `deploy.ps1` in the root of your project:
+
+```powershell
+$PROJECT_ID = "YOUR_PROJECT_ID"
+$IMAGE_TAG = "gcr.io/$PROJECT_ID/winspool"
+
+Write-Host "🚧 Building Docker Image..."
+gcloud builds submit --tag $IMAGE_TAG
+
+Write-Host "🚀 Deploying to Cloud Run..."
+gcloud run deploy winspool `
+  --image $IMAGE_TAG `
+  --platform managed `
+  --region us-east1 `
+  --allow-unauthenticated `
+  --set-env-vars "USE_LOCAL_DATA=False" `
+  --set-secrets "FIREBASE_CREDENTIALS=FIREBASE_CREDENTIALS:latest" `
+  --set-env-vars "ROOM_CODE=your_room_code"
+
+Write-Host "✅ Deployment Complete!"
 ```
+
+Run this script by typing `.\deploy.ps1` in your PowerShell terminal.
 
 ### Scheduling the sync job (Cloud Scheduler)
 ```bash
@@ -59,69 +70,7 @@ gcloud scheduler jobs create http winspool-sync \
 
 > **Note:** You can also expose a `/api/trigger-sync` endpoint in `api_routes.py` that calls `sync_nfl_data()` directly, or run `daily_nfl_sync.py` from a separate Cloud Run Job.
 
----
 
-## Option 2 — PythonAnywhere (Familiar from prior app)
-
-PythonAnywhere supports FastAPI/ASGI apps via a WSGI adapter.
-
-### Setup
-1. Create a **Web App** — choose "Manual configuration", Python 3.11
-2. In the **WSGI config file** (`/var/www/yoursite_pythonanywhere_com_wsgi.py`):
-
-```python
-import sys
-sys.path.insert(0, '/home/yourusername/WinsPool')
-
-from asgiref.wsgi import WsgiToAsgi
-from main import app
-
-# PythonAnywhere needs a WSGI wrapper around the ASGI app
-application = WsgiToAsgi(app)
-```
-
-3. Install dependencies:
-```bash
-pip install fastapi uvicorn asgiref firebase-admin pandas
-```
-
-4. Set environment variables in the **"Environment variables"** tab of the web console.
-
-### Scheduling the sync
-Use **Always-on tasks** (paid) or the **Scheduled tasks** tab (free tier: once a day):
-```
-0 4 * * *  /home/yourusername/WinsPool/.venv/bin/python /home/yourusername/WinsPool/scripts/daily_nfl_sync.py
-```
-
----
-
-## Option 3 — Fly.io (Simplest CLI Deploy)
-
-Fly.io is the closest modern equivalent to old Heroku.
-
-```bash
-# Install flyctl: https://fly.io/docs/getting-started/installing-flyctl/
-fly auth login
-fly launch   # Detects the Dockerfile automatically, prompts for region/name
-```
-
-Set secrets (equivalent of env vars):
-```bash
-fly secrets set ROOM_CODE=your_code ADMIN_CODE=your_admin
-fly secrets set FIREBASE_CREDENTIALS="$(python -c "import base64; print(base64.b64encode(open('firebase_credentials.json','rb').read()).decode())")"
-```
-
-Deploy:
-```bash
-fly deploy
-```
-
-Scheduled sync (Fly Machines cron):
-```bash
-fly machine run . --command "python scripts/daily_nfl_sync.py" --schedule daily
-```
-
----
 
 ## Custom Domains (Google Cloud Run)
 
@@ -176,7 +125,6 @@ Format: `https://[PROJECT_ID].web.app` or `https://[PROJECT_ID].firebaseapp.com`
 |---|---|---|
 | `FIREBASE_CREDENTIALS` | Prod only | Base64-encoded `firebase_credentials.json` |
 | `ROOM_CODE` | Yes | Code players enter to join the draft room |
-| `ADMIN_CODE` | Yes | Code for the admin dashboard |
 | `USE_LOCAL_DATA` | Local only | `True` = use `.local_db/*.pkl`, `False` = Firestore |
 | `PORT` | Optional | Port to listen on (default 8000) |
 

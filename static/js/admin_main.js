@@ -1,6 +1,6 @@
-import { ApiService } from './api.js';
-import { UiRenderer } from './ui_renderer.js';
-import { AuthService } from './auth_service.js';
+import { ApiService } from './api.js?v=1.1';
+import { UiRenderer } from './ui_renderer.js?v=1.1';
+import { AuthService } from './auth_service.js?v=1.1';
 
 /**
  * WinsPool Admin Application Module (Refactored)
@@ -81,6 +81,16 @@ class AdminApp {
         document.getElementById('scrape-predictions-btn')?.addEventListener('click', () => this.scrapePredictions());
 
         // Recap Handlers
+        document.getElementById('recap-type')?.addEventListener('change', (e) => {
+            const weekContainer = document.getElementById('recap-week-container');
+            if (weekContainer) {
+                if (e.target.value === 'draft') {
+                    weekContainer.classList.add('hidden');
+                } else {
+                    weekContainer.classList.remove('hidden');
+                }
+            }
+        });
         document.getElementById('recap-preview-prompt-btn')?.addEventListener('click', () => this.previewRecapPrompt());
         document.getElementById('recap-generate-ai-btn')?.addEventListener('click', () => this.generateRecapAI());
         document.getElementById('recap-broadcast-btn')?.addEventListener('click', () => this.broadcastRecap());
@@ -155,17 +165,25 @@ class AdminApp {
 
     async previewRecapPrompt() {
         console.log('[Admin] Requesting recap prompt preview...');
+        const type = document.getElementById('recap-type').value;
         const year = document.getElementById('recap-year').value;
         const week = document.getElementById('recap-week').value;
-        if (!year || !week) {
-            alert('Please specify Year and Week.');
+
+        if (!year) {
+            alert('Please specify Year.');
             return;
         }
 
         try {
-            const { prompt } = await ApiService.previewRecapPrompt(this.playerId, year, week);
+            let res;
+            if (type === 'draft') {
+                res = await ApiService.previewDraftRecapPrompt(this.playerId, year);
+            } else {
+                if (!week) return alert('Please specify Week.');
+                res = await ApiService.previewRecapPrompt(this.playerId, year, week);
+            }
             const textEl = document.getElementById('recap-prompt-text');
-            if (textEl) textEl.value = prompt;
+            if (textEl) textEl.value = res.prompt;
             document.getElementById('recap-prompt-preview-container')?.classList.remove('hidden');
             console.log('[Admin] Preview prompt received.');
         } catch (e) {
@@ -198,11 +216,13 @@ class AdminApp {
     }
 
     async broadcastRecap() {
+        const type = document.getElementById('recap-type').value;
         const year = document.getElementById('recap-year').value;
-        const week = document.getElementById('recap-week').value;
+        const week = type === 'draft' ? 0 : document.getElementById('recap-week').value;
         const summary = document.getElementById('recap-final-text').value;
 
-        if (!summary || !confirm(`Broadcast Week ${week} recap to all players?`)) return;
+        const title = type === 'draft' ? 'Season Preview / Draft Recap' : `Week ${week} recap`;
+        if (!summary || !confirm(`Broadcast ${title} to all players?`)) return;
 
         try {
             const btn = document.getElementById('recap-broadcast-btn');

@@ -575,6 +575,50 @@ async def generate_admin_recap(request: Request):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+@router.post("/admin/draft_recap/preview_prompt")
+async def preview_draft_recap_prompt(request: Request):
+    """Admin: Generate the data-only prompt for the post-draft season preview."""
+    try:
+        data = await request.json()
+        pid = data.get("playerId")
+        if get_player_role(pid) != "admin":
+            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+        
+        year = int(data.get("year"))
+        
+        # 1. Fetch Draft Results
+        from services.db_service import get_collection_df
+        import pandas as pd
+        results_df = get_collection_df("draft_results")
+        if results_df.empty or "season" not in results_df.columns:
+            return JSONResponse(status_code=404, content={"error": "No draft results found."})
+            
+        season_draft = results_df[results_df["season"] == year].copy()
+        if season_draft.empty:
+            return JSONResponse(status_code=404, content={"error": f"No draft results found for {year}."})
+            
+        players_df = get_collection_df("players")
+        season_draft = pd.merge(season_draft, players_df, on="playerId", how="left")
+        season_draft = season_draft.sort_values(by="draftPick")
+        
+        draft_str = f"DRAFT RESULTS ({year}):\n"
+        for _, row in season_draft.iterrows():
+            draft_str += f"Pick {row['draftPick']}: {row.get('fullName', row['playerId'])} drafted {row['team']} (Projected Wins: {row.get('projected_wins', 'N/A')})\n"
+            
+        # 2. Fetch User Predictions & Consensus
+        preds_df = get_collection_df("preseason_predictions")
+        preds_str = f"PRESEASON PREDICTIONS & CONSENSUS ({year}):\n"
+        if not preds_df.empty and "season" in preds_df.columns:
+            season_preds = preds_df[preds_df["season"] == year]
+            for _, row in season_preds.iterrows():
+                preds_str += f"Team: {row['team']} | Projected Wins: {row.get('projected_wins', 'N/A')} | Std Dev/Spread: {row.get('std_dev', 'N/A')}\n"
+        
+        full_prompt = ai_service.get_draft_recap_prompt(preds_str, draft_str)
+        return JSONResponse(content={"prompt": full_prompt})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 @router.post("/admin/recap/save_and_broadcast")
 async def save_and_broadcast_recap(request: Request):
     """Admin: Save the summary to DB and email all players."""
@@ -596,13 +640,21 @@ async def save_and_broadcast_recap(request: Request):
         save_weekly_recap(year, week, summary)
         
         # 2. Broadcast via Email
-        _, emails = recap_service.extract_weekly_data(year, week)
+        if week == 0:
+            from services.db_service import get_collection_df
+            players_df = get_collection_df("players")
+            emails = list(players_df['email'].dropna().unique()) if not players_df.empty else []
+            title = f"NFL Draft Recap & Season Preview ({year})"
+        else:
+            _, emails = recap_service.extract_weekly_data(year, week)
+            title = f"Weekly Recap: NFL Week {week}"
+
         if emails:
             html_body = f"""
             <html>
                 <body style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px;">
                     <div style="background-color: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1);">
-                        <h2 style="color: #333;">🏈 Weekly Recap: NFL Week {week}</h2>
+                        <h2 style="color: #333;">🏈 {title}</h2>
                         <div style="white-space: pre-wrap; color: #555; line-height: 1.6;">
                             {summary}
                         </div>
@@ -613,7 +665,8 @@ async def save_and_broadcast_recap(request: Request):
                 </body>
             </html>
             """
-            email_service.send_weekly_recap_email(emails, f"Week {week} Recap - Wins Pool", html_body)
+            subject_line = title + " - Wins Pool"
+            email_service.send_weekly_recap_email(emails, subject_line, html_body)
 
         return JSONResponse(content={"message": f"Week {week} recap saved and broadcast to {len(emails)} players."})
     except Exception as e:

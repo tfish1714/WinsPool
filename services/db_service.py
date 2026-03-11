@@ -2,9 +2,15 @@ import os
 import sys
 import pathlib
 import pandas as pd
+
+print("[BOOT] db_service: importing firebase_admin...", flush=True)
 import firebase_admin
+print("[BOOT] db_service: importing credentials/firestore...", flush=True)
 from firebase_admin import credentials, firestore
+print("[BOOT] db_service: importing FieldFilter...", flush=True)
 from google.cloud.firestore_v1.base_query import FieldFilter
+print("[BOOT] db_service: firebase imports done", flush=True)
+
 import hashlib
 import time
 from services.cache_service import clear_data_cache

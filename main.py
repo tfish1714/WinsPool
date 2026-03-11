@@ -5,17 +5,41 @@ All route logic lives in the routes/ package.
 This file only wires the app together.
 """
 import os
+import sys
 import pathlib
+
+print("[BOOT] main.py loading...", flush=True)
+
+print("[BOOT] Importing uvicorn...", flush=True)
 import uvicorn
+print("[BOOT] Importing FastAPI...", flush=True)
 from fastapi import FastAPI
+print("[BOOT] Importing StaticFiles...", flush=True)
 from fastapi.staticfiles import StaticFiles
+print("[BOOT] Importing RedirectResponse...", flush=True)
 from fastapi.responses import RedirectResponse
 
+print("[BOOT] Importing data_service...", flush=True)
 from services.data_service import load_data, get_active_season, get_team_logo
+print("[BOOT] data_service OK", flush=True)
+
+print("[BOOT] Importing standings_routes...", flush=True)
 from routes.standings_routes import router as standings_router, templates as standings_templates
+print("[BOOT] standings_routes OK", flush=True)
+
+print("[BOOT] Importing history_routes...", flush=True)
 from routes.history_routes import router as history_router, templates as history_templates
+print("[BOOT] history_routes OK", flush=True)
+
+print("[BOOT] Importing draft_routes...", flush=True)
 from routes.draft_routes import router as draft_router, templates as draft_templates
+print("[BOOT] draft_routes OK", flush=True)
+
+print("[BOOT] Importing api_routes...", flush=True)
 from routes.api_routes import router as api_router
+print("[BOOT] api_routes OK", flush=True)
+
+print("[BOOT] All imports complete.", flush=True)
 
 app = FastAPI(title="WinsPool")
 

@@ -29,47 +29,85 @@
 
         <!-- Desktop Table -->
         <div class="table-container desktop-only-table">
-            <table>
+            <table style="border-collapse: collapse; width: 100%;">
                 <thead>
                     <tr>
-                        <th>Rank</th>
-                        <th>Name</th>
-                        <th>Total Wins</th>
-                        <th>Team 1</th>
-                        <th>Team 2</th>
-                        <th>Team 3</th>
-                        <th>TB1</th>
-                        <th>TB2</th>
-                        <th>TB3</th>
-                        <th>TB4</th>
-                        <th>TB5</th>
-                        <th>TB6</th>
+                        <th style="width: 300px; text-align: left; padding-left: 1.5rem;">Player Profile</th>
+                        <th style="text-align: left;">Team 1</th>
+                        <th style="text-align: left;">Team 2</th>
+                        <th style="text-align: left;">Team 3</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in data %}
-                    <tr>
-                        <td>{{ row['Rank'] }}</td>
-                        <td>{{ row['fullName'] }}</td>
-                        <td>{{ row['TotalWins'] }}</td>
-                        <td>
-                            <img src="{{ get_team_logo(row['team1']) }}" class="tiny-logo" alt="">
-                            {{ row['team1'] }} ({{ row['wins1'] }} W, {{ row['ptDiff1'] }} diff)
+                    <!-- Primary Data Row -->
+                    <tr style="border-bottom: none;">
+                        <td rowspan="2" class="master-cell"
+                            style="vertical-align: top; border-bottom: 1px solid var(--glass-border); padding: 1.5rem;">
+                            <div style="font-size: 1.3rem; font-weight: 700; color: #fff;">
+                                <span style="display:inline-block; width: 32px; color: var(--text-secondary);">#{{
+                                    row['Rank'] }}</span>
+                                {{ row['fullName'] }}
+                            </div>
+                            <div
+                                style="font-size: 1rem; color: var(--accent-gold); margin-top: 0.5rem; margin-left: 36px; font-weight: 600;">
+                                {{ row['TotalWins'] }} Total Wins
+                            </div>
                         </td>
-                        <td>
-                            <img src="{{ get_team_logo(row['team2']) }}" class="tiny-logo" alt="">
-                            {{ row['team2'] }} ({{ row['wins2'] }} W, {{ row['ptDiff2'] }} diff)
+                        <td style="border-bottom: none; padding-bottom: 0;">
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <img src="{{ get_team_logo(row['team1']) }}" class="small-logo" alt=""
+                                    style="width: 32px; height: 32px; object-fit: contain;">
+                                <div>
+                                    <div style="font-weight: 600; font-size: 1.1rem; color: #fff;">{{ row['team1'] }}
+                                    </div>
+                                    <div style="font-size: 0.9rem; color: var(--accent-green); font-weight: 600;">{{
+                                        row['wins1'] }} W</div>
+                                </div>
+                            </div>
                         </td>
-                        <td>
-                            <img src="{{ get_team_logo(row['team3']) }}" class="tiny-logo" alt="">
-                            {{ row['team3'] }} ({{ row['wins3'] }} W, {{ row['ptDiff3'] }} diff)
+                        <td style="border-bottom: none; padding-bottom: 0;">
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <img src="{{ get_team_logo(row['team2']) }}" class="small-logo" alt=""
+                                    style="width: 32px; height: 32px; object-fit: contain;">
+                                <div>
+                                    <div style="font-weight: 600; font-size: 1.1rem; color: #fff;">{{ row['team2'] }}
+                                    </div>
+                                    <div style="font-size: 0.9rem; color: var(--accent-green); font-weight: 600;">{{
+                                        row['wins2'] }} W</div>
+                                </div>
+                            </div>
                         </td>
-                        <td>{{ row['Tiebreaker1_WorstTeamWins'] }}</td>
-                        <td>{{ row['Tiebreaker2_2ndWorstTeamWins'] }}</td>
-                        <td>{{ row['Tiebreaker3_BestTeamWins'] }}</td>
-                        <td>{{ row['Tiebreaker4_WorstTeamPtDiff'] or 0 }}</td>
-                        <td>{{ row['Tiebreaker5_2ndWorstTeamPtDiff'] or 0 }}</td>
-                        <td>{{ row['Tiebreaker6_BestTeamPtDiff'] or 0 }}</td>
+                        <td style="border-bottom: none; padding-bottom: 0;">
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <img src="{{ get_team_logo(row['team3']) }}" class="small-logo" alt=""
+                                    style="width: 32px; height: 32px; object-fit: contain;">
+                                <div>
+                                    <div style="font-weight: 600; font-size: 1.1rem; color: #fff;">{{ row['team3'] }}
+                                    </div>
+                                    <div style="font-size: 0.9rem; color: var(--accent-green); font-weight: 600;">{{
+                                        row['wins3'] }} W</div>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    <!-- Secondary Tiebreaker Row -->
+                    <tr class="tiebreaker-subrow" style="border-bottom: 1px solid var(--glass-border);">
+                        <td style="font-size: 0.75rem; color: var(--text-secondary); padding-top: 0.25rem;">
+                            <span style="opacity: 0.7;">TB1 (Wins): <strong style="color:#aaa;">{{
+                                    row['Tiebreaker1_WorstTeamWins'] }}</strong> | TB2 (Wins): <strong
+                                    style="color:#aaa;">{{ row['Tiebreaker2_2ndWorstTeamWins'] }}</strong></span>
+                        </td>
+                        <td style="font-size: 0.75rem; color: var(--text-secondary); padding-top: 0.25rem;">
+                            <span style="opacity: 0.7;">TB3 (Wins): <strong style="color:#aaa;">{{
+                                    row['Tiebreaker3_BestTeamWins'] }}</strong> | TB4 (Diff): <strong
+                                    style="color:#aaa;">{{ row['Tiebreaker4_WorstTeamPtDiff'] or 0 }}</strong></span>
+                        </td>
+                        <td style="font-size: 0.75rem; color: var(--text-secondary); padding-top: 0.25rem;">
+                            <span style="opacity: 0.7;">TB5 (Diff): <strong style="color:#aaa;">{{
+                                    row['Tiebreaker5_2ndWorstTeamPtDiff'] or 0 }}</strong> | TB6 (Diff): <strong
+                                    style="color:#aaa;">{{ row['Tiebreaker6_BestTeamPtDiff'] or 0 }}</strong></span>
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -151,11 +189,29 @@
                         <img src="{{ get_team_logo(row['away_team']) }}" class="tiny-logo" alt="">
                         <div class="team-name-box">
                             <span class="team-name-text">{{ row['away_team'] }}</span>
+                            <span class="team-record-text"
+                                style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 2px;">
+                                {{ row['away_record'] if row['away_record'] else '0-0' }}
+                            </span>
                             <span class="player-name-text">
                                 {{ row['fullName_away'] if row['fullName_away'] not in (none, -1000, '-1000') else '—'
                                 }}
                             </span>
                         </div>
+                        {% if row['spread_line'] is not none and row['spread_line']|float > 0 %}
+                        <div class="favored-odds"
+                            style="font-size: 0.8rem; color: var(--accent-gold); margin-left: auto; padding-right: 1rem; text-align: right;">
+                            <div>-{{ row['spread_line'] }}</div>
+                            {% if row['total_line'] is not none %}<div
+                                style="font-size: 0.7rem; color: var(--text-secondary);">O/U {{ row['total_line'] }}
+                            </div>{% endif %}
+                        </div>
+                        {% elif row['spread_line'] is not none and row['spread_line']|float == 0 %}
+                        <div class="favored-odds"
+                            style="font-size: 0.8rem; color: var(--accent-gold); margin-left: auto; padding-right: 1rem; text-align: right;">
+                            <div>PK</div>
+                        </div>
+                        {% endif %}
                         <span class="score-text">{{ row['away_score'] if row['away_score'] not in (none, -1000) else '—'
                             }}</span>
                     </div>
@@ -165,63 +221,61 @@
                         <img src="{{ get_team_logo(row['home_team']) }}" class="tiny-logo" alt="">
                         <div class="team-name-box">
                             <span class="team-name-text">{{ row['home_team'] }}</span>
+                            <span class="team-record-text"
+                                style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 2px;">
+                                {{ row['home_record'] if row['home_record'] else '0-0' }}
+                            </span>
                             <span class="player-name-text">
                                 {{ row['fullName_home'] if row['fullName_home'] not in (none, -1000, '-1000') else '—'
                                 }}
                             </span>
                         </div>
-                        <span class="score-text">{{ row['home_score'] if row['home_score'] not in (none, -1000) else '—'
-                            }}</span>
-                    </div>
-                </div>
-                <div class="game-info-aside">
-                    <span
-                        class="game-status-label {% if row['result'] != -1000 %}status-final{% else %}status-live{% endif %}">
-                        {{ 'Final' if row['result'] != -1000 else 'Live' }}
-                    </span>
-                    {% if row['spread_line'] is not none or row['total_line'] is not none %}
-                    <div class="game-odds"
-                        style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px;">
-                        {% if row['spread_line'] is not none %}
-                        <div>Line: {{ '+' if row['spread_line']|float > 0 else '' }}{{ row['spread_line'] }}</div>
-                        {% endif %}
-                        {% if row['total_line'] is not none %}
-                        <div>Total: {{ row['total_line'] }}</div>
-                        {% endif %}
-                        {% if row['home_moneyline'] is not none %}
-                        <div style="font-size: 0.7rem; opacity: 0.8;">ML: {{ '+' if row['home_moneyline']|float > 0 else
-                            '' }}{{ row['home_moneyline'] }}</div>
-                        {% endif %}
-
-                        {% if row['pred_winner'] %}
-                        <div class="game-prediction"
-                            style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1); color: var(--accent-gold); font-weight: 600;">
-                            <span title="AI Prediction Logic">✨ Predictor:</span>
-                            <div style="font-size: 0.75rem; color: #fff;">
-                                Win: {{ row['pred_winner'] }} ({{ row['pred_su_conf'] }}%)
-                            </div>
-                            <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: normal;">
-                                ATS: {{ row['pred_ats_pick'] }}
-                            </div>
-                        </div>
-                        {% endif %}
+                        {% if row['spread_line'] is not none and row['spread_line']|float < 0 %} <div
+                            class="favored-odds"
+                            style="font-size: 0.8rem; color: var(--accent-gold); margin-left: auto; padding-right: 1rem; text-align: right;">
+                            <div>{{ row['spread_line'] }}</div>
+                            {% if row['total_line'] is not none %}<div
+                                style="font-size: 0.7rem; color: var(--text-secondary);">O/U {{ row['total_line'] }}
+                            </div>{% endif %}
                     </div>
                     {% endif %}
+                    <span class="score-text">{{ row['home_score'] if row['home_score'] not in (none, -1000) else '—'
+                        }}</span>
                 </div>
             </div>
-            {% endfor %}
-        </div>
-        {% endif %}
+            <div class="game-info-aside">
+                <span
+                    class="game-status-label {% if row['result'] != -1000 %}status-final{% else %}status-live{% endif %}">
+                    {{ 'Final' if row['result'] != -1000 else 'Live' }}
+                </span>
 
-        <!-- Tiebreaker key + refresh note -->
-        <div class="tiebreaker-note">
-            <strong>Tiebreakers:</strong>
-            TB1 = worst team wins · TB2 = 2nd-worst team wins · TB3 = best team wins ·
-            TB4 = worst team pt diff · TB5 = 2nd-worst pt diff · TB6 = best team pt diff
+                {% if row['pred_winner'] %}
+                <div class="game-prediction"
+                    style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1); color: var(--accent-gold); font-weight: 600;">
+                    <span title="AI Prediction Logic">✨ Predictor:</span>
+                    <div style="font-size: 0.75rem; color: #fff;">
+                        Win: {{ row['pred_winner'] }} ({{ row['pred_su_conf'] }}%)
+                    </div>
+                    <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: normal;">
+                        ATS: {{ row['pred_ats_pick'] }}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
         </div>
-        {% if refreshTime %}
-        <div class="refresh-note">Data refreshed: {{ refreshTime }}</div>
-        {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Tiebreaker key + refresh note -->
+    <div class="tiebreaker-note">
+        <strong>Tiebreakers:</strong>
+        TB1 = worst team wins · TB2 = 2nd-worst team wins · TB3 = best team wins ·
+        TB4 = worst team pt diff · TB5 = 2nd-worst pt diff · TB6 = best team pt diff
+    </div>
+    {% if refreshTime %}
+    <div class="refresh-note">Data refreshed: {{ refreshTime }}</div>
+    {% endif %}
 
     </div>
 </main>
