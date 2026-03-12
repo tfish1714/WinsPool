@@ -184,8 +184,17 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
             "has_password": has_password
         })
     
+    # Seasons with any draft data
+    seasons = set()
+    if not d_order.empty and 'season' in d_order.columns:
+        seasons.update(d_order['season'].dropna().unique().tolist())
+    if not results.empty and 'season' in results.columns:
+        seasons.update(results['season'].dropna().unique().tolist())
+    available_seasons = sorted([int(s) for s in seasons], reverse=True)
+
     state = {
         "season": int(season),
+        "available_seasons": available_seasons,
         "draft_board": draft_board,
         "active_pick": active_pick,
         "available_teams": available_teams,

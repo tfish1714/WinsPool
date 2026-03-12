@@ -69,12 +69,10 @@ class App {
             // Show admin elements on draft page if admin
             if (role === 'admin') {
                 const yearSelector = document.getElementById('admin-year-selector');
-                const masterOverride = document.getElementById('admin-master-override');
+                const undoBtn = document.getElementById('undo-pick-btn');
                 if (yearSelector) yearSelector.classList.remove('hidden');
-                if (masterOverride) {
-                    masterOverride.classList.remove('hidden');
-                    masterOverride.style.display = 'block';
-                    masterOverride.style.gridColumn = '1 / -1';
+                if (undoBtn) {
+                    undoBtn.style.display = 'block';
                 }
                 console.log('[App] Admin UI enabled.');
             }
@@ -136,7 +134,17 @@ class App {
 
         // Sync Dropdown
         const dropdown = document.getElementById('season-dropdown');
-        if (dropdown && season) dropdown.value = String(season);
+        if (dropdown && state.available_seasons) {
+            const current = String(season);
+            // Only rebuild if options changed or empty to avoid flickering
+            if (dropdown.options.length !== state.available_seasons.length) {
+                dropdown.innerHTML = state.available_seasons.map(s =>
+                    `<option value="${s}" ${String(s) === current ? 'selected' : ''}>${s}</option>`
+                ).join('');
+            } else {
+                dropdown.value = current;
+            }
+        }
 
         // Update Banner
         this.processDraftBanners(state);
@@ -147,15 +155,10 @@ class App {
         // Render Teams
         UiRenderer.renderTeamGrid(available_teams, this.selectedTeam, this.user.role, preseason_predictions, team_schedules);
 
-        // Setup Admin Overrides (Dropdown updates for forcing picks)
+        // Setup Admin Overrides (Cleanup old select if it exists)
         if (this.user.role === 'admin') {
-            const forceSelect = document.getElementById('force-team-select');
-            if (forceSelect) {
-                const current = forceSelect.value;
-                forceSelect.innerHTML = '<option value="">Force Pick...</option>' +
-                    available_teams.map(t => `<option value="${t}">${t}</option>`).join('');
-                forceSelect.value = current;
-            }
+            const undoBtn = document.getElementById('undo-pick-btn');
+            if (undoBtn) undoBtn.style.display = 'block';
         }
 
         // Setup individual card clicks
@@ -265,13 +268,6 @@ class App {
         document.getElementById('undo-pick-btn')?.addEventListener('click', () => {
             if (confirm("Undo last pick permanently?")) {
                 this.ws.send({ action: 'undo_pick', playerId: this.user.playerId });
-            }
-        });
-
-        document.getElementById('force-pick-btn')?.addEventListener('click', () => {
-            const team = document.getElementById('force-team-select')?.value;
-            if (team && confirm(`Force pick ${team}?`)) {
-                this.ws.send({ action: 'force_pick', playerId: this.user.playerId, team: team });
             }
         });
     }
