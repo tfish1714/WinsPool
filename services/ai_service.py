@@ -1,4 +1,3 @@
-import google.generativeai as genai
 import os
 from dotenv import load_dotenv
 
@@ -17,6 +16,10 @@ SYSTEM_INSTRUCTION = (
 def get_recap_prompt(prompt_data: str) -> str:
     """Combines the system instruction with the week's data."""
     return f"{SYSTEM_INSTRUCTION}\n\nHere is the data for the week:\n{prompt_data}"
+    
+def get_draft_recap_prompt(prompt_data: str) -> str:
+    """Combines the system instruction with the preseason draft data."""
+    return f"{SYSTEM_INSTRUCTION}\n\nHere is the preseason draft data (including projected total wins for each player's roster). Roast their picks!\n{prompt_data}"
 
 def generate_generic_content(prompt: str, system_instruction: str = None) -> str:
     """
@@ -26,6 +29,7 @@ def generate_generic_content(prompt: str, system_instruction: str = None) -> str
     if not api_key:
         return "Error: GEMINI_API_KEY not found."
 
+    import google.generativeai as genai
     genai.configure(api_key=api_key)
     
     config = {}

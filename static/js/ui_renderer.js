@@ -92,7 +92,12 @@ export const UiRenderer = {
 
         // Auto-scroll to active
         const activeItem = list.querySelector('.active');
-        if (activeItem) activeItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (activeItem && list) {
+            list.scrollTo({
+                top: activeItem.offsetTop - (list.clientHeight / 2) + (activeItem.clientHeight / 2),
+                behavior: 'smooth'
+            });
+        }
     },
 
     renderTeamGrid(teams, selectedTeam, role, predictions, schedules) {

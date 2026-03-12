@@ -35,6 +35,7 @@ COLLECTIONS = [
     ("nfl_teams",          None),
     ("nfl_standings",      None),
     ("nfl_games",          None),
+    ("weekly_recaps",      None),
 ]
 
 

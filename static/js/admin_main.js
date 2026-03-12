@@ -81,6 +81,7 @@ class AdminApp {
         document.getElementById('scrape-predictions-btn')?.addEventListener('click', () => this.scrapePredictions());
 
         // Recap Handlers
+        document.getElementById('draft-recap-preview-btn')?.addEventListener('click', () => this.previewDraftRecapPrompt());
         document.getElementById('recap-preview-prompt-btn')?.addEventListener('click', () => this.previewRecapPrompt());
         document.getElementById('recap-generate-ai-btn')?.addEventListener('click', () => this.generateRecapAI());
         document.getElementById('recap-broadcast-btn')?.addEventListener('click', () => this.broadcastRecap());
@@ -168,6 +169,25 @@ class AdminApp {
             if (textEl) textEl.value = prompt;
             document.getElementById('recap-prompt-preview-container')?.classList.remove('hidden');
             console.log('[Admin] Preview prompt received.');
+        } catch (e) {
+            alert(`Preview failed: ${e.message}`);
+        }
+    }
+
+    async previewDraftRecapPrompt() {
+        console.log('[Admin] Requesting draft recap prompt preview...');
+        const year = document.getElementById('recap-year').value;
+        if (!year) {
+            alert('Please specify Year.');
+            return;
+        }
+
+        try {
+            const { prompt } = await ApiService.previewDraftRecapPrompt(this.playerId, year);
+            const textEl = document.getElementById('recap-prompt-text');
+            if (textEl) textEl.value = prompt;
+            document.getElementById('recap-prompt-preview-container')?.classList.remove('hidden');
+            console.log('[Admin] Draft Preview prompt received.');
         } catch (e) {
             alert(`Preview failed: ${e.message}`);
         }

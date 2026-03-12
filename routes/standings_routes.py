@@ -37,7 +37,7 @@ async def wins_pool_by_year(request: Request, year: int):
         standings, _, games, players, _, draft_results, _ = load_data(year=year)
         _, _, all_games, _, _, all_draft_results, _ = load_data()
 
-        sorted_df = analysis.calculate_wins_pool_standings(standings, draft_results, players, year)
+        sorted_df = analysis.calculate_wins_pool_standings(standings, draft_results, players, year, games)
         current_year = _current_year(games)
         available_years = get_available_years(all_draft_results, all_games)
 

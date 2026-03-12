@@ -23,8 +23,8 @@
             style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">Entrant
             Management</button>
         <button class="tab-btn" data-tab="recap-section"
-            style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">Weekly
-            AI Recaps</button>
+            style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">AI
+            Recaps</button>
         <button class="tab-btn" data-tab="system-section"
             style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">System
             & AI Utilities</button>
@@ -39,8 +39,6 @@
             <div style="display: flex; gap: 1rem;">
                 <input type="number" id="season-input" class="admin-input" placeholder="Season Year (e.g. 2026)"
                     min="2024" max="2100" style="flex: 1;">
-                <input type="password" id="admin-code-input" class="admin-input" placeholder="Admin Code"
-                    style="flex: 1;">
             </div>
 
             <div id="player-selection-container"
@@ -52,8 +50,6 @@
                 </div>
                 <div id="player-grid"
                     style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.5rem; max-height: 250px; overflow-y: auto; padding-right: 0.5rem;">
-                    <p id="player-loading-msg" style="color: var(--text-secondary); padding: 1rem; text-align: center;">
-                        Entering Admin Code to load players...</p>
                 </div>
             </div>
 
@@ -105,9 +101,9 @@
         </div>
     </div>
 
-    <!-- Weekly Recap Manager Card -->
+    <!-- AI Recap Manager Card -->
     <div id="recap-section" class="tab-content card-glass hidden" style="height: auto;">
-        <h2>🎙️ Weekly AI Recap Manager</h2>
+        <h2>🎙️ AI Recap Manager</h2>
         <p>Generate, review, and broadcast weekly sports summaries based on game results.</p>
 
         <div class="admin-form" style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem;">
@@ -126,8 +122,18 @@
                 </div>
             </div>
 
-            <button id="recap-preview-prompt-btn" class="btn-primary" style="background: #444; border-color: #666;">Step
-                1: Preview Data Prompt</button>
+            <div style="display: flex; gap: 1rem; margin-top: 0.5rem;">
+                <!-- Draft Recap specific flow -->
+                <button id="draft-recap-preview-btn" class="btn-primary"
+                    style="flex: 1; background: #6b4c9a; border-color: #5a3c85;">
+                    Generate Preseason Draft Recap
+                </button>
+                <!-- Weekly Recap flow -->
+                <button id="recap-preview-prompt-btn" class="btn-primary"
+                    style="flex: 1; background: #444; border-color: #666;">
+                    Generate Weekly Recap
+                </button>
+            </div>
 
             <div id="recap-prompt-preview-container" class="hidden"
                 style="border: 1px solid var(--glass-border); padding: 1rem; border-radius: 8px; background: rgba(0,0,0,0.3);">

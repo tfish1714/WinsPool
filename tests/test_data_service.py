@@ -46,3 +46,12 @@ def test_get_season_progress():
     assert isinstance(res["player_chart"]["labels"], list)
     assert isinstance(res["team_chart"]["datasets"], list)
     assert len(res["standings"]) > 0
+
+def test_load_data_with_debug_flag(monkeypatch):
+    """Verify load_data() still succeeds and returns all dataframes with debug flag enabled."""
+    monkeypatch.setenv("DEBUG_PAGE_LOAD", "True")
+    res = load_data()
+    assert len(res) == 7
+    for df in res:
+        assert isinstance(df, pd.DataFrame)
+        assert not df.empty

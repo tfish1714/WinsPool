@@ -1,5 +1,5 @@
 import pandas as pd
-from services.data_service import load_data
+from services.data_service import load_data, get_preseason_predictions
 from services.analysis_service import get_enriched_schedule
 from services.ai_service import generate_weekly_summary, get_recap_prompt
 from services.db_service import save_weekly_recap
@@ -8,6 +8,10 @@ def extract_weekly_data(year, week):
     """
     Fetches results for the given week and identifies winners/bad beats, 
     while also including overall season-to-date records.
+    
+    Beat Definitions:
+      Bad Beat: Lost by <= 3 points OR scored >= 30 and still lost.
+      Good Beat: Won by >= 17 points OR scored < 14 and still won.
     """
     standings, _, games, players, _, draft_results, _ = load_data(year=year)
     schedule = get_enriched_schedule(games, draft_results, players, year)
@@ -108,6 +112,60 @@ def extract_weekly_data(year, week):
             data_summary += "BAD BEATS THIS WEEK:\n"
             for beat in stats['bad_beats']:
                 data_summary += f" - {beat}\n"
+        data_summary += "\n"
+        
+    return data_summary, list(players['email'].dropna().unique())
+
+def extract_draft_data(year):
+    """
+    Builds the context string for the preseason Draft AI recap.
+    It includes drafted teams per player, consensus Win Totals (if available), 
+    and general season context.
+    """
+    
+    standings, teams, games, players, draft_order, draft_results, draft_order_rules = load_data(year=year)
+    preds = get_preseason_predictions(year)
+    
+    if draft_results.empty:
+        return None, []
+    
+    # Filter draft results for the requested season
+    draft_results = draft_results[draft_results['season'] == year]
+    if draft_results.empty:
+        return None, []
+
+    pid_to_name = dict(zip(players['playerId'], players['fullName']))
+    
+    data_summary = f"NFL {year} PRESEASON DRAFT RECAP\n"
+    data_summary += "---------------------------------\n\n"
+    
+    # Group drafted teams by Player
+    player_rosters = {}
+    for _, row in draft_results.iterrows():
+        pid = row['playerId']
+        team = row['team']
+        if pid not in player_rosters:
+            player_rosters[pid] = []
+        player_rosters[pid].append(team)
+        
+    for pid, name in pid_to_name.items():
+        if pid not in player_rosters:
+            continue
+            
+        roster = player_rosters[pid]
+        data_summary += f"PLAYER: {name}\n"
+        data_summary += f"DRAFTED TEAMS: {', '.join(roster)}\n"
+        
+        # Calculate projected wins for this player's roster
+        proj_wins = 0.0
+        for team in roster:
+            if team in preds:
+                val = preds[team].get('projected_wins', 0)
+                proj_wins += float(val)
+                
+        if proj_wins > 0:
+            data_summary += f"ROSTER PROJECTED WINS (Vegas Average): {proj_wins:.1f}\n"
+            
         data_summary += "\n"
         
     return data_summary, list(players['email'].dropna().unique())

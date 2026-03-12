@@ -5,9 +5,11 @@ All route logic lives in the routes/ package.
 This file only wires the app together.
 """
 import os
+import time
+import logging
 import pathlib
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 
@@ -18,6 +20,18 @@ from routes.draft_routes import router as draft_router, templates as draft_templ
 from routes.api_routes import router as api_router
 
 app = FastAPI(title="WinsPool")
+
+# ── Middleware ────────────────────────────────────────────────────────────────
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    if os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true":
+        start_time = time.time()
+        print(f"[DEBUG_PAGE_LOAD] Started {request.method} {request.url.path}")
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        print(f"[DEBUG_PAGE_LOAD] Completed {request.method} {request.url.path} in {process_time:.4f} secs")
+        return response
+    return await call_next(request)
 
 # Register Jinja2 globals
 for t in [standings_templates, history_templates, draft_templates]:

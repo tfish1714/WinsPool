@@ -34,6 +34,9 @@ def fetch_progress(season: str, week: str):
     try:
         _, _, games, _, _, _, _ = load_data()
 
+        if games.empty or "season" not in games.columns:
+            return JSONResponse(content={"labels": [], "datasets": []})
+
         if season.lower() == "latest":
             target_season, _ = get_latest_season_and_week(games)
         else:
@@ -169,20 +172,25 @@ async def login(request: Request):
         password = data.get("password")
 
         player = get_player_by_email(email)
+        print(f"DEBUG LOGIN: Searching for email '{email}'. Found player: {player is not None}")
+        
         if not player:
             return JSONResponse(status_code=401, content={"error": "Invalid email or password."})
 
         if not player.get("password_hash"):
+            print(f"DEBUG LOGIN: Player {email} has no password set.")
             return JSONResponse(status_code=400, content={"error": "Account not claimed yet. Please set a password."})
 
-        if not verify_password(password, player.get("password_hash")):
+        is_valid = verify_password(password, player.get("password_hash"))
+        print(f"DEBUG LOGIN: Password check for {email} resolved to: {is_valid}")
+        if not is_valid:
             return JSONResponse(status_code=401, content={"error": "Invalid email or password."})
 
         # Check for MFA
         if player.get("mfa_enabled"):
             import random
             mfa_code = "".join([str(random.randint(0, 9)) for _ in range(6)])
-            get_db().collection("players").document(str(player["playerId"])).update({
+            update_player_profile(str(player["playerId"]), {
                 "mfa_token": mfa_code,
                 "mfa_expiry": time.time() + 600
             })
@@ -210,12 +218,11 @@ async def login(request: Request):
 @router.get("/profile")
 async def get_profile(playerId: str):
     """Fetch current player profile data for pre-filling the form."""
-    from services.db_service import get_db
-    doc = get_db().collection("players").document(str(playerId)).get()
-    if not doc.exists:
+    from services.db_service import get_player_by_id
+    player = get_player_by_id(playerId)
+    if not player:
         return JSONResponse(status_code=404, content={"error": "Player not found."})
     
-    player = doc.to_dict()
     return {
         "playerId": str(playerId),
         "fullName": player.get("fullName"),
@@ -242,13 +249,10 @@ async def update_profile(request: Request):
             return JSONResponse(status_code=400, content={"error": "Missing player ID or current password."})
 
         # 1. Fetch current player (not by email, but by ID to be safe during email change)
-        from services.db_service import get_db
-        db = get_db()
-        doc = db.collection("players").document(str(pid)).get()
-        if not doc.exists:
+        from services.db_service import get_player_by_id
+        player = get_player_by_id(pid)
+        if not player:
             return JSONResponse(status_code=404, content={"error": "Player not found."})
-        
-        player = doc.to_dict()
         
         # 2. Verify current password
         if not verify_password(curr_password, player.get("password_hash")):
@@ -297,13 +301,10 @@ async def verify_mfa(request: Request):
         if not pid or not code:
              return JSONResponse(status_code=400, content={"error": "Missing player ID or verification code."})
 
-        from services.db_service import get_db
-        db = get_db()
-        doc = db.collection("players").document(str(pid)).get()
-        if not doc.exists:
+        from services.db_service import get_player_by_id
+        player = get_player_by_id(pid)
+        if not player:
              return JSONResponse(status_code=404, content={"error": "Player not found."})
-
-        player = doc.to_dict()
         stored_code = player.get("mfa_token")
         expiry = player.get("mfa_expiry", 0)
 
@@ -314,7 +315,7 @@ async def verify_mfa(request: Request):
             return JSONResponse(status_code=401, content={"error": "Incorrect verification code."})
 
         # Clear code on success
-        db.collection("players").document(str(pid)).update({
+        update_player_profile(pid, {
             "mfa_token": None,
             "mfa_expiry": 0
         })
@@ -553,6 +554,26 @@ async def preview_recap_prompt(request: Request):
             return JSONResponse(status_code=404, content={"error": f"No game results found for {year} Week {week}."})
         
         full_prompt = ai_service.get_recap_prompt(data_summary)
+        return JSONResponse(content={"prompt": full_prompt})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.post("/admin/recap/preview_draft_prompt")
+async def preview_draft_recap_prompt(request: Request):
+    """Admin: Generate the data-only prompt for AI draft recap review."""
+    try:
+        data = await request.json()
+        pid = data.get("playerId")
+        if get_player_role(pid) != "admin":
+            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+        
+        year = int(data.get("year"))
+        
+        data_summary, _ = recap_service.extract_draft_data(year)
+        if not data_summary:
+            return JSONResponse(status_code=404, content={"error": f"No draft data found for {year}."})
+        
+        full_prompt = ai_service.get_draft_recap_prompt(data_summary)
         return JSONResponse(content={"prompt": full_prompt})
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})

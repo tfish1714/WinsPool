@@ -30,14 +30,24 @@ def load_data(year: int = None):
     """
     Loads data for the given season year with smart caching.
     """
+    is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
+    use_local = os.environ.get('USE_LOCAL_DATA', 'False').lower() == 'true'
+    
+    if is_debug:
+        print(f"[DEBUG_PAGE_LOAD] load_data(year={year}) called. USE_LOCAL_DATA={use_local}")
+
     # 1. Check for remote invalidation signals if it's been a while
     current_time = time.time()
     
     # We need to access and potentially update the module-level globals in cache_service
     import services.cache_service as cs
     
-    if (current_time - cs._LAST_REMOTE_CHECK) > cs._REMOTE_CHECK_INTERVAL:
+    # Only check remote cache control if we are NOT using local data.
+    # Checking remote Firestore when using local data forces SDK initialization, causing a 12s hang.
+    if not use_local and (current_time - cs._LAST_REMOTE_CHECK) > cs._REMOTE_CHECK_INTERVAL:
         cs._LAST_REMOTE_CHECK = current_time
+        if is_debug:
+            print("[DEBUG_PAGE_LOAD] Triggering remote Firestore cache_control check...")
         try:
             # We use a raw Firestore fetch here to avoid circular dependencies
             from services.db_service import get_db
@@ -51,15 +61,22 @@ def load_data(year: int = None):
                     local_ts = _CACHE_TIMESTAMPS.get(key, 0)
                     if remote_ts > local_ts:
                         print(f"Log: Remote invalidation detected (Remote: {remote_ts}, Local: {local_ts}). Clearing cache.")
+                        if is_debug:
+                            print(f"[DEBUG_PAGE_LOAD] Remote cache newer. Invalidating local memory cache.")
                         clear_data_cache()
         except Exception as e:
             print(f"Warning: Failed to check remote cache control: {e}")
+            if is_debug:
+                print(f"[DEBUG_PAGE_LOAD] Failed checking remote cache control: {e}")
+    elif is_debug and use_local:
+        print("[DEBUG_PAGE_LOAD] Skipped remote Firestore cache_control check because USE_LOCAL_DATA=True.")
 
     key = _cache_key(year)
     if key in _DATA_CACHE and (current_time - _CACHE_TIMESTAMPS.get(key, 0) < _CACHE_TTL_SECONDS):
+        if is_debug:
+            print(f"[DEBUG_PAGE_LOAD] Returning load_data() from memory cache (_DATA_CACHE) instantly.")
         return _DATA_CACHE[key]
 
-    use_local = os.environ.get('USE_LOCAL_DATA', 'False').lower() == 'true'
     local_dir = pathlib.Path('.local_db')
 
     if use_local and not local_dir.exists():
@@ -140,6 +157,10 @@ def load_data(year: int = None):
     res = (standings, teams, games, players, draft_order, draft_results, draft_order_rules)
     _DATA_CACHE[key] = res
     _CACHE_TIMESTAMPS[key] = current_time
+    
+    if is_debug:
+        print(f"[DEBUG_PAGE_LOAD] load_data(year={year}) completed fetching and caching data.")
+        
     return res
 
 def get_active_season(games: pd.DataFrame, draft_results: pd.DataFrame = None) -> int:

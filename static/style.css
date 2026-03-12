@@ -677,8 +677,123 @@ tr:hover {
     font-weight: 600;
 }
 
-.standings-table tr:hover {
-    background: rgba(255, 255, 255, 0.05);
+/* Master-Detail Split-Row Standings Layout */
+.standings-row-primary {
+    border-bottom: none !important;
+}
+
+.standings-row-primary:hover {
+    background: transparent !important;
+}
+
+.master-cell {
+    border-right: 1px solid var(--glass-border);
+    vertical-align: top;
+    padding-top: 1.5rem !important;
+    background: rgba(0, 0, 0, 0.15);
+    border-bottom: 1px solid var(--glass-border) !important;
+}
+
+.master-rank {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    font-weight: 700;
+    margin-bottom: 0.2rem;
+}
+
+.master-name {
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+    line-height: 1.2;
+}
+
+.master-score {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--accent-gold);
+}
+
+.teams-cell {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 1rem !important;
+    border-bottom: none !important;
+}
+
+.team-block {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    flex: 1;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 0.75rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.small-logo {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.5));
+}
+
+.team-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.team-id {
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+.team-stats {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.standings-row-secondary td {
+    padding-top: 0 !important;
+    padding-bottom: 1.5rem !important;
+    border-bottom: 1px solid var(--glass-border) !important;
+}
+
+.tb-cell {
+    background: transparent;
+}
+
+.tb-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.5rem;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 0.6rem 1rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+    text-align: center;
+}
+
+.tb-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    opacity: 0.7;
+    margin-right: 0.3rem;
+    font-weight: 700;
+}
+
+.standings-table tr.standings-row-primary:hover+tr.standings-row-secondary .tb-cell,
+.standings-table tr.standings-row-primary:hover .teams-cell,
+.standings-table tr.standings-row-primary:hover .master-cell {
+    background: rgba(88, 166, 255, 0.05);
 }
 
 .best-pick-badge {
@@ -1712,6 +1827,26 @@ tr:hover {
     gap: 0.75rem;
 }
 
+.team-record-sub {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+    margin-left: 4px;
+    opacity: 0.8;
+}
+
+.odds-chip {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--bg-dark);
+    background: var(--text-secondary);
+    padding: 1px 4px;
+    border-radius: 4px;
+    margin-left: 6px;
+    vertical-align: middle;
+    display: inline-block;
+}
+
 .team-row img.tiny-logo {
     width: 28px;
     height: 28px;
@@ -1734,6 +1869,26 @@ tr:hover {
     font-size: 0.75rem;
     color: var(--text-secondary);
     font-weight: 400;
+}
+
+.team-record-sub {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+    margin-left: 0.25rem;
+}
+
+.odds-chip {
+    display: inline-block;
+    background: rgba(251, 191, 36, 0.15);
+    color: var(--accent-gold);
+    font-size: 0.7rem;
+    font-weight: 800;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    margin-left: 0.35rem;
+    vertical-align: middle;
+    border: 1px solid rgba(251, 191, 36, 0.3);
 }
 
 .score-text {

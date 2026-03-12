@@ -184,6 +184,8 @@ def calculate_playoff_race(schedule, standings_df):
 
 
 def player_winlossmatrix(schedule):
+    if schedule.empty or not all(c in schedule.columns for c in ['fullName_away', 'fullName_home', 'result']):
+        return pd.DataFrame()
     df = schedule[['fullName_away', 'fullName_home', 'result']].copy()
     # Replace the -1000 sentinel (from get_enriched_schedule fillna) with 'Undrafted'
     df['fullName_away'] = df['fullName_away'].replace(-1000, 'Undrafted').replace('-1000', 'Undrafted')
@@ -258,14 +260,14 @@ def player_winlossmatrix(schedule):
 
 def reshape_wins_pool_standings(df):
     grouped = df.groupby(['playerId', 'fullName', 'season']).apply(
-        lambda x: x[['team', 'wins', 'ptDiff']].values.flatten()
+        lambda x: x[['team', 'wins', 'ptDiff', 'global_record']].values.flatten()
     )
     if grouped.empty: return pd.DataFrame()
-    num_teams = len(grouped.iloc[0]) // 3
+    num_teams = len(grouped.iloc[0]) // 4
     reshaped_df = pd.DataFrame(grouped.tolist(), index=grouped.index)
     
     reshaped_df.columns = [
-        f'{label}{i//3+1}' for i, label in enumerate(['team', 'wins', 'ptDiff'] * num_teams)
+        f'{label}{i//4+1}' for i, label in enumerate(['team', 'wins', 'ptDiff', 'global_record'] * num_teams)
     ]
     reshaped_df['TotalWins'] = reshaped_df[[f'wins{i+1}' for i in range(num_teams)]].sum(axis=1)
     reshaped_df = reshaped_df.reset_index()
@@ -336,12 +338,44 @@ def get_enriched_schedule(games, draft_results, players, season):
     # Sort chronologically by week and gameday
     final_merged = final_merged.sort_values(['week', 'gameday'], ascending=[True, True])
     
+    # Calculate Global Team Records (Wins-Losses-Ties) for the season
+    team_records = {}
+    played_games = games[(games['season'] == season) & (games['result'].notna()) & (games['result'] != -1000)]
+    
+    for _, row in played_games.iterrows():
+        away = row['away_team']
+        home = row['home_team']
+        res = row['result']
+        
+        if away not in team_records: team_records[away] = {'W': 0, 'L': 0, 'T': 0}
+        if home not in team_records: team_records[home] = {'W': 0, 'L': 0, 'T': 0}
+        
+        if res < 0: # Away Win
+            team_records[away]['W'] += 1
+            team_records[home]['L'] += 1
+        elif res > 0: # Home Win
+            team_records[home]['W'] += 1
+            team_records[away]['L'] += 1
+        elif res == 0: # Tie
+            team_records[home]['T'] += 1
+            team_records[away]['T'] += 1
+            
+    # Helper to stringify record
+    def fmt_rec(t):
+        if t not in team_records: return "0-0"
+        r = team_records[t]
+        if r['T'] > 0: return f"{r['W']}-{r['L']}-{r['T']}"
+        return f"{r['W']}-{r['L']}"
+        
+    final_merged['away_record'] = final_merged['away_team'].apply(fmt_rec)
+    final_merged['home_record'] = final_merged['home_team'].apply(fmt_rec)
+    
     final_merged = final_merged.where(pd.notnull(final_merged), None)
     final_merged = final_merged.fillna(-1000)
     
     return final_merged
 
-def calculate_wins_pool_standings(standings, draft_results, players, season):
+def calculate_wins_pool_standings(standings, draft_results, players, season, games=None):
     if draft_results.empty or 'season' not in draft_results.columns:
         return pd.DataFrame()
     today_standings = standings[standings['season'] == season].copy() if not standings.empty and 'season' in standings.columns else pd.DataFrame()
@@ -355,6 +389,28 @@ def calculate_wins_pool_standings(standings, draft_results, players, season):
         wins_pool_standings['ptDiff'] = 0
         
     wins_pool_standings = pd.merge(wins_pool_standings, players, on='playerId', how='inner')
+    
+    # Optional: Attach global team records if games DF is passed
+    if games is not None and not games.empty:
+        team_records = {}
+        played_games = games[(games['season'] == season) & (games['result'].notna()) & (games['result'] != -1000)]
+        for _, row in played_games.iterrows():
+            away, home, res = row['away_team'], row['home_team'], row['result']
+            if away not in team_records: team_records[away] = {'W': 0, 'L': 0, 'T': 0}
+            if home not in team_records: team_records[home] = {'W': 0, 'L': 0, 'T': 0}
+            if res < 0: team_records[away]['W'] += 1; team_records[home]['L'] += 1
+            elif res > 0: team_records[home]['W'] += 1; team_records[away]['L'] += 1
+            elif res == 0: team_records[home]['T'] += 1; team_records[away]['T'] += 1
+            
+        def fmt_rec(t):
+            if t not in team_records: return "0-0"
+            r = team_records[t]
+            if r['T'] > 0: return f"{r['W']}-{r['L']}-{r['T']}"
+            return f"{r['W']}-{r['L']}"
+            
+        wins_pool_standings['global_record'] = wins_pool_standings['team'].apply(fmt_rec)
+    else:
+        wins_pool_standings['global_record'] = "0-0"
     
     reshaped_df = reshape_wins_pool_standings(wins_pool_standings)
     sorted_df = apply_tiebreakers(reshaped_df)

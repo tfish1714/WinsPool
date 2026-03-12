@@ -84,6 +84,12 @@ export const ApiService = {
             body: JSON.stringify({ playerId, year, week })
         });
     },
+    async previewDraftRecapPrompt(playerId, year) {
+        return fetchWithTimeout(`${API_BASE}/admin/recap/preview_draft_prompt`, {
+            method: 'POST',
+            body: JSON.stringify({ playerId, year })
+        });
+    },
     async generateRecapAI(playerId, prompt_data) {
         return fetchWithTimeout(`${API_BASE}/admin/recap/generate`, {
             method: 'POST',

@@ -27,3 +27,16 @@ def test_generate_summary_handles_exceptions(mock_gemini):
     result = generate_weekly_summary("Analyze this fake week.")
     
     assert "Error: Google AI Overloaded" in result
+
+def test_get_recap_prompt():
+    from services.ai_service import get_recap_prompt
+    result = get_recap_prompt("Fake data summary")
+    assert "You are a witty, slightly sarcastic" in result
+    assert "Fake data summary" in result
+
+def test_get_draft_recap_prompt():
+    from services.ai_service import get_draft_recap_prompt
+    result = get_draft_recap_prompt("Fake draft data")
+    assert "You are a witty, slightly sarcastic" in result
+    assert "Fake draft data" in result
+    assert "projected total wins" in result

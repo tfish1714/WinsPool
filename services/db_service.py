@@ -2,9 +2,6 @@ import os
 import sys
 import pathlib
 import pandas as pd
-import firebase_admin
-from firebase_admin import credentials, firestore
-from google.cloud.firestore_v1.base_query import FieldFilter
 import hashlib
 import time
 from services.cache_service import clear_data_cache
@@ -25,6 +22,8 @@ def _init_firebase():
     1. FIREBASE_CREDENTIALS env var (base64-encoded JSON) — for Cloud Run / CI.
     2. firebase_credentials.json in project root — for local development.
     """
+    import firebase_admin
+    from firebase_admin import credentials, firestore
     if firebase_admin._apps:
         return firestore.client()
 
@@ -56,8 +55,12 @@ if not use_local_env:
 
 
 def get_db():
+    if use_local_env:
+        return None
+    import firebase_admin
     if not firebase_admin._apps:
         _init_firebase()
+    from firebase_admin import firestore
     return firestore.client()
 
 def signal_data_update():
@@ -134,6 +137,7 @@ def get_collection_df(collection_name: str, filters: list = None) -> pd.DataFram
 
     query = db.collection(collection_name)
     if filters:
+        from google.cloud.firestore_v1.base_query import FieldFilter
         for col, op, val in filters:
             query = query.where(filter=FieldFilter(col, op, val))
 
@@ -142,47 +146,49 @@ def get_collection_df(collection_name: str, filters: list = None) -> pd.DataFram
 
 
 def update_player_cell(player_id: int, cell: str):
-    get_db().collection("players").document(str(player_id)).update({"cell": cell})
-    clear_data_cache()
+    update_player_profile(str(player_id), {"cell": cell})
 
 def get_player_role(player_id: str) -> str:
     """Helper to check player role (admin vs user) for secure operations."""
     if not player_id:
         return "user"
-    try:
-        db = get_db()
-        doc = db.collection("players").document(str(player_id)).get()
-        if doc.exists:
-            return doc.to_dict().get("role", "user")
-        return "user"
-    except Exception:
-        return "user"
+    player = get_player_by_id(player_id)
+    if player:
+        return player.get("role", "user")
+    return "user"
 
 def get_player_by_email(email: str):
     """Retrieve a single player directly by their standardized email address."""
-    db = get_db()
-    docs = db.collection("players").where(filter=FieldFilter("email", "==", email)).stream()
-    for doc in docs:
-        data = doc.to_dict()
-        data["playerId"] = doc.id
-        return data
+    players_df = get_collection_df("players")
+    if not players_df.empty and "email" in players_df.columns:
+        match = players_df[players_df["email"].astype(str).str.lower() == email.lower()]
+        if not match.empty:
+            return match.iloc[0].to_dict()
+    return None
+
+def get_player_by_id(player_id: str):
+    """Retrieve a single player directly by their ID."""
+    players_df = get_collection_df("players")
+    if not players_df.empty and "playerId" in players_df.columns:
+        match = players_df[players_df["playerId"].astype(str) == str(player_id)]
+        if not match.empty:
+            return match.iloc[0].to_dict()
     return None
 
 def update_player_credentials(player_id: str, password_hash: str):
     """Binds the active bcrypt password_hash natively onto the User Document."""
-    get_db().collection("players").document(str(player_id)).update({
+    update_player_profile(player_id, {
         "password_hash": password_hash,
         "failed_setup_attempts": 0,
         "lockout_until": None
     })
-    clear_data_cache()
 
 def increment_failed_setup_attempts(player_id: str, new_count: int, lockout_until: float = None):
     """Applies the 5-Attempt rate limiter lockouts physically onto the Database."""
     update_data = {"failed_setup_attempts": new_count}
     if lockout_until:
         update_data["lockout_until"] = lockout_until
-    get_db().collection("players").document(str(player_id)).update(update_data)
+    update_player_profile(player_id, update_data)
 
 def _save_df_to_local(collection_name: str, df: pd.DataFrame):
     if os.environ.get("USE_LOCAL_DATA", "False").lower() != "true":
@@ -371,16 +377,50 @@ def update_player_profile(player_id: str, updates: dict):
     signal_data_update()
 
 def save_weekly_recap(year: int, week: int, summary: str):
-    """Saves an AI-generated weekly summary to Firestore."""
-    doc_id = f"{year}_{week}"
-    get_db().collection("weekly_recaps").document(doc_id).set({
+    """Saves an AI-generated weekly summary to Firestore and/or local cache."""
+    data = {
         "year": year,
         "week": week,
         "summary": summary,
         "timestamp": time.time()
-    })
+    }
+    
+    db = get_db()
+    if db:
+        doc_id = f"{year}_{week}"
+        db.collection("weekly_recaps").document(doc_id).set(data)
+    
+    # Update local cache if in local mode
+    if os.environ.get("USE_LOCAL_DATA", "False").lower() == "true":
+        local_path = pathlib.Path(".local_db") / "weekly_recaps.pkl"
+        try:
+            if local_path.exists():
+                df = pd.read_pickle(local_path)
+                # Remove existing if present
+                mask = (df['year'] == year) & (df['week'] == week)
+                df = df[~mask]
+                df = pd.concat([df, pd.DataFrame([data])], ignore_index=True)
+            else:
+                df = pd.DataFrame([data])
+            _save_df_to_local("weekly_recaps", df)
+        except Exception as e:
+            print(f"Warning: Failed to persist recap locally: {e}")
 
 def get_weekly_recap(year: int, week: int):
     """Retrieves a specific weekly recap from Firestore."""
-    doc = get_db().collection("weekly_recaps").document(f"{year}_{week}").get()
+    db = get_db()
+    if not db:
+        # We are offline / local data mode
+        local_path = pathlib.Path(".local_db") / "weekly_recaps.pkl"
+        if local_path.exists():
+            try:
+                recaps_df = pd.read_pickle(local_path)
+                match = recaps_df[(recaps_df['year'] == year) & (recaps_df['week'] == week)]
+                if not match.empty:
+                    return match.iloc[0].to_dict()
+            except Exception:
+                pass
+        return None
+        
+    doc = db.collection("weekly_recaps").document(f"{year}_{week}").get()
     return doc.to_dict() if doc.exists else None

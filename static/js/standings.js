@@ -15,8 +15,13 @@
         document.querySelectorAll('.week-item').forEach(item => {
             if (String(item.dataset.week) === String(week)) {
                 item.classList.add('active');
-                // Scroll the active item into view within the horizontal carousel
-                item.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                // Safely scroll within the horizontal carousel parent to prevent page jumping
+                if (item.parentElement) {
+                    item.parentElement.scrollTo({
+                        left: item.offsetLeft - (item.parentElement.clientWidth / 2) + (item.clientWidth / 2),
+                        behavior: 'smooth'
+                    });
+                }
             } else {
                 item.classList.remove('active');
             }
