@@ -424,3 +424,43 @@ def get_weekly_recap(year: int, week: int):
         
     doc = db.collection("weekly_recaps").document(f"{year}_{week}").get()
     return doc.to_dict() if doc.exists else None
+
+def save_metadata(doc_id: str, data: dict):
+    """Saves arbitrary metadata to Firestore and local cache."""
+    db = get_db()
+    if db:
+        db.collection("metadata").document(doc_id).set(data)
+    
+    if os.environ.get("USE_LOCAL_DATA", "False").lower() == "true":
+        local_path = pathlib.Path(".local_db") / "metadata.pkl"
+        try:
+            if local_path.exists():
+                df = pd.read_pickle(local_path)
+                df = df[df['id'] != doc_id]
+                new_row = pd.DataFrame([{"id": doc_id, **data}])
+                df = pd.concat([df, new_row], ignore_index=True)
+            else:
+                df = pd.DataFrame([{"id": doc_id, **data}])
+            _save_df_to_local("metadata", df)
+        except Exception as e:
+            print(f"Warning: Failed to persist metadata locally: {e}")
+
+def get_metadata(doc_id: str):
+    """Retrieves arbitrary metadata from Firestore or local cache."""
+    db = get_db()
+    if not db:
+        local_path = pathlib.Path(".local_db") / "metadata.pkl"
+        if local_path.exists():
+            try:
+                df = pd.read_pickle(local_path)
+                match = df[df['id'] == doc_id]
+                if not match.empty:
+                    res = match.iloc[0].to_dict()
+                    res.pop('id', None)
+                    return res
+            except Exception:
+                pass
+        return None
+        
+    doc = db.collection("metadata").document(doc_id).get()
+    return doc.to_dict() if doc.exists else None

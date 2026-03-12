@@ -192,6 +192,23 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
         seasons.update(results['season'].dropna().unique().tolist())
     available_seasons = sorted([int(s) for s in seasons], reverse=True)
 
+    # Persistent Pick Start Time Map (survives restarts and supports undo)
+    from services.db_service import get_metadata, save_metadata
+    pick_start_time = int(time.time())
+    if season and active_pick <= 30:
+        meta_id = f"draft_timer_{season}"
+        meta = get_metadata(meta_id) or {"picks": {}}
+        picks = meta.get("picks", {})
+        
+        pick_key = str(active_pick)
+        if pick_key in picks:
+            pick_start_time = int(picks[pick_key])
+        else:
+            # First time seeing this pick
+            pick_start_time = int(time.time())
+            picks[pick_key] = pick_start_time
+            save_metadata(meta_id, {"picks": picks})
+
     state = {
         "season": int(season),
         "available_seasons": available_seasons,
@@ -201,7 +218,7 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
         "draft_ready": draft_ready,
         "connected_players": list(connected_players),
         "all_players": all_players_info,
-        "pick_start_time": int(time.time()),
+        "pick_start_time": pick_start_time,
         "preseason_predictions": preseason_predictions,
         "team_schedules": team_schedules,
     }
