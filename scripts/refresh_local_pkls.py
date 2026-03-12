@@ -33,9 +33,10 @@ COLLECTIONS = [
     ("draft_order",        None),
     ("draft_order_rules",  None),
     ("nfl_teams",          None),
-    ("nfl_standings",      None),
-    ("nfl_games",          None),
-    ("weekly_recaps",      None),
+    ("nfl_standings",      "season"),
+    ("nfl_games",          "season"),
+    ("weekly_recaps",      "year"),
+    ("preseason_predictions", "season"),
 ]
 
 

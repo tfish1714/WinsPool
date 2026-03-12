@@ -154,17 +154,22 @@ def extract_draft_data(year):
             
         roster = player_rosters[pid]
         data_summary += f"PLAYER: {name}\n"
-        data_summary += f"DRAFTED TEAMS: {', '.join(roster)}\n"
         
-        # Calculate projected wins for this player's roster
+        # Build roster string with projections and calculate total
+        formatted_roster = []
         proj_wins = 0.0
         for team in roster:
             if team in preds:
-                val = preds[team].get('projected_wins', 0)
-                proj_wins += float(val)
+                val = float(preds[team].get('projected_wins', 0))
+                formatted_roster.append(f"{team} ({val})")
+                proj_wins += val
+            else:
+                formatted_roster.append(team)
+
+        data_summary += f"DRAFTED TEAMS: {', '.join(formatted_roster)}\n"
                 
         if proj_wins > 0:
-            data_summary += f"ROSTER PROJECTED WINS (Vegas Average): {proj_wins:.1f}\n"
+            data_summary += f"ROSTER PROJECTED WINS (Average): {proj_wins:.1f}\n"
             
         data_summary += "\n"
         

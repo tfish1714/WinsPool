@@ -19,7 +19,7 @@ def get_recap_prompt(prompt_data: str) -> str:
     
 def get_draft_recap_prompt(prompt_data: str) -> str:
     """Combines the system instruction with the preseason draft data."""
-    return f"{SYSTEM_INSTRUCTION}\n\nHere is the preseason draft data (including projected total wins for each player's roster). Roast their picks!\n{prompt_data}"
+    return f"{SYSTEM_INSTRUCTION}\n\nHere is the preseason draft data (including projected total wins for each player's roster). Roast their picks and give each player a draft grade!\n{prompt_data}"
 
 def generate_generic_content(prompt: str, system_instruction: str = None) -> str:
     """

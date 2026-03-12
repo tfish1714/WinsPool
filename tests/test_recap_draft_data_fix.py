@@ -26,18 +26,23 @@ def test_extract_draft_data_filters_by_year(mock_preds, mock_load):
     
     # Other returned values don't matter much for this specific logic check
     mock_load.return_value = (None, None, None, players, None, draft_results, None)
-    mock_preds.return_value = {} # No preds needed for this test
+    mock_preds.return_value = {
+        "SEA": {"projected_wins": 8.5},
+        "CHI": {"projected_wins": 9.0},
+        "CIN": {"projected_wins": 10.5},
+    }
 
     # Act
     summary, emails = extract_draft_data(2024)
 
     # Assert
     assert "PLAYER: Tom Fischer" in summary
-    assert "DRAFTED TEAMS: SEA, CHI, CIN" in summary
+    assert "DRAFTED TEAMS: SEA (8.5), CHI (9.0), CIN (10.5)" in summary
     assert "NYG" not in summary
     assert "BUF" not in summary
     assert "SF" not in summary
     
     # Verify exact match for drafted teams line to ensure no extra commas or items
-    expected_line = "DRAFTED TEAMS: SEA, CHI, CIN"
+    expected_line = "DRAFTED TEAMS: SEA (8.5), CHI (9.0), CIN (10.5)"
     assert expected_line in summary
+    assert "ROSTER PROJECTED WINS (Vegas Average): 28.0" in summary
