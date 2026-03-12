@@ -411,6 +411,10 @@ def calculate_wins_pool_standings(standings, draft_results, players, season, gam
         wins_pool_standings['global_record'] = wins_pool_standings['team'].apply(fmt_rec)
     else:
         wins_pool_standings['global_record'] = "0-0"
+
+    # Sort by draftPick to ensure team1, team2, etc. are in draft order
+    if 'draftPick' in wins_pool_standings.columns:
+        wins_pool_standings = wins_pool_standings.sort_values(by=['playerId', 'draftPick'])
     
     reshaped_df = reshape_wins_pool_standings(wins_pool_standings)
     sorted_df = apply_tiebreakers(reshaped_df)
