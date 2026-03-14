@@ -34,8 +34,14 @@ async def wins_pool_redirect():
 @router.get("/wins-pool/{year}")
 async def wins_pool_by_year(request: Request, year: int):
     try:
-        standings, _, games, players, _, draft_results, _ = load_data(year=year)
-        _, _, all_games, _, _, all_draft_results, _ = load_data()
+        # Load ALL data once — data_service will cache this master set.
+        # Sub-calls for available_years etc. will now be instant memory hits.
+        all_st, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
+
+        # Filter for the specific year in-memory
+        standings = all_st[all_st['season'] == year] if not all_st.empty else all_st
+        games = all_games[all_games['season'] == year] if not all_games.empty else all_games
+        draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
 
         sorted_df = analysis.calculate_wins_pool_standings(standings, draft_results, players, year, games)
         current_year = _current_year(games)
@@ -73,8 +79,12 @@ async def wins_pool_by_year(request: Request, year: int):
 
 @router.get("/wins-pool/{year}/weekbyweek")
 async def wins_pool_weekbyweek(request: Request, year: int):
-    standings_df, _, games, players, _, draft_results, _ = load_data(year=year)
-    _, _, all_games, _, _, all_draft_results, _ = load_data()
+    all_st, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
+
+    # Filter for the specific year in-memory
+    standings_df = all_st[all_st['season'] == year] if not all_st.empty else all_st
+    games = all_games[all_games['season'] == year] if not all_games.empty else all_games
+    draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
 
     # Calculate standings to get the ranked player order
     standings_ranked = analysis.calculate_wins_pool_standings(standings_df, draft_results, players, year)
@@ -100,8 +110,12 @@ async def playoff_race_redirect():
 
 @router.get("/playoff-race/{year}")
 async def playoff_race_by_year(request: Request, year: int):
-    standings, _, games, players, _, draft_results, _ = load_data(year=year)
-    _, _, all_games, _, _, all_draft_results, _ = load_data()
+    all_st, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
+
+    # Filter for the specific year in-memory
+    standings = all_st[all_st['season'] == year] if not all_st.empty else all_st
+    games = all_games[all_games['season'] == year] if not all_games.empty else all_games
+    draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
 
     try:
         schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)

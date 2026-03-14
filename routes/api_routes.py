@@ -417,7 +417,7 @@ async def fetch_admin_players(playerId: str):
     if get_player_role(playerId) != "admin":
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
     try:
-        players_df = get_collection_df("players")
+        _, _, _, players_df, _, _, _ = load_data()
         players = players_df.to_dict(orient="records")
         # Ensure standard JSON
         return JSONResponse(content=sanitize_state(players))
@@ -430,14 +430,13 @@ async def fetch_admin_seasons(playerId: str):
     if get_player_role(playerId) != "admin":
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
     try:
-        order_df = get_collection_df("draft_order")
-        results_df = get_collection_df("draft_results")
+        standings_df, _, games_df, _, draft_order_df, draft_results_df, _ = load_data()
         
         seasons = set()
-        if not order_df.empty and "season" in order_df.columns:
-            seasons.update(order_df["season"].unique().tolist())
-        if not results_df.empty and "season" in results_df.columns:
-            seasons.update(results_df["season"].unique().tolist())
+        if not draft_order_df.empty and "season" in draft_order_df.columns:
+            seasons.update(draft_order_df["season"].unique().tolist())
+        if not draft_results_df.empty and "season" in draft_results_df.columns:
+            seasons.update(draft_results_df["season"].unique().tolist())
             
         return JSONResponse(content={"seasons": sorted([int(s) for s in seasons], reverse=True)})
     except Exception as e:
@@ -460,7 +459,7 @@ async def preview_draft_order(request: Request):
         random.shuffle(player_ids)
         
         # Get player names for display
-        players_df = get_collection_df("players")
+        _, _, _, players_df, _, _, _ = load_data()
         preview = []
         for idx, pid in enumerate(player_ids):
             p_row = players_df[players_df["playerId"] == int(pid)]

@@ -81,10 +81,39 @@ def load_data(year: int = None):
         print("[DEBUG_PAGE_LOAD] Skipped remote Firestore cache_control check because USE_LOCAL_DATA=True.")
 
     key = _cache_key(year)
+    master_key = _cache_key(None)
+
+    # 2. Check if we already have the memory cache for this specific key
     if key in _DATA_CACHE and (current_time - _CACHE_TIMESTAMPS.get(key, 0) < _CACHE_TTL_SECONDS):
         if is_debug:
-            print(f"[DEBUG_PAGE_LOAD] Returning load_data() from memory cache (_DATA_CACHE) instantly.")
+            print(f"[DEBUG_PAGE_LOAD] Returning load_data(year={year}) from memory cache instantly.")
         return _DATA_CACHE[key]
+
+    # 3. Smart deriving: If requesting a specific year, check if the MASTER (all seasons) cache is available.
+    # Deriving from existing master data is much faster than hitting Pickle or Firestore.
+    if year is not None and master_key in _DATA_CACHE:
+        if (current_time - _CACHE_TIMESTAMPS.get(master_key, 0) < _CACHE_TTL_SECONDS):
+            if is_debug:
+                print(f"[DEBUG_PAGE_LOAD] load_data(year={year}) deriving from cached master data.")
+            
+            # Unpack the master data
+            m_standings, m_teams, m_games, m_players, m_order, m_results, m_rules = _DATA_CACHE[master_key]
+            
+            # Slice only what needs slicing
+            try:
+                s_year = m_standings[m_standings['season'] == year].copy() if not m_standings.empty else m_standings
+                g_year = m_games[m_games['season'] == year].copy() if not m_games.empty else m_games
+                
+                res = (s_year, m_teams, g_year, m_players, m_order, m_results, m_rules)
+                
+                # Optionally update the specific year cache for next time
+                _DATA_CACHE[key] = res
+                _CACHE_TIMESTAMPS[key] = current_time
+                return res
+            except Exception as e:
+                if is_debug:
+                    print(f"[DEBUG_PAGE_LOAD] Failed deriving slice for {year}: {e}")
+                # Fall through to standard loading if slicing fails
 
     local_dir = pathlib.Path('.local_db')
 
@@ -139,18 +168,44 @@ def load_data(year: int = None):
     season_filter = [('season', '==', year)] if year is not None else None
     yr_suffix = f'_{year}' if year is not None else ''
 
-    # NFL game data — filtered by year for web routes, unfiltered for cache_builder
-    standings = fetch_or_load('nfl_standings', season_filter, yr_suffix)
-    teams     = fetch_or_load('nfl_teams', None, '')      # No season filter — teams rarely change
-    games     = fetch_or_load('nfl_games', season_filter, yr_suffix)
+    from concurrent.futures import ThreadPoolExecutor
 
+    # Define the datasets we need to fetch
+    fetch_tasks = [
+        ('nfl_standings',    season_filter, yr_suffix),
+        ('nfl_teams',        None,          ''),
+        ('nfl_games',        season_filter, yr_suffix),
+        ('players',          None,          ''),
+        ('draft_order',      None,          ''),
+        ('draft_results',    None,          ''),
+        ('draft_order_rules',None,          '')
+    ]
 
-    # User-managed data — lives in Firestore (seeded via scripts/upload_configfiles.py)
-    # These span all seasons, so no year filter needed
-    players           = fetch_or_load('players')           # shared across seasons
-    draft_order       = fetch_or_load('draft_order')
-    draft_results     = fetch_or_load('draft_results')
-    draft_order_rules = fetch_or_load('draft_order_rules')
+    if is_debug:
+        print(f"[DEBUG_PAGE_LOAD] Starting parallel fetch of {len(fetch_tasks)} collections...")
+
+    with ThreadPoolExecutor(max_workers=len(fetch_tasks)) as executor:
+        # Map task tuples to fetch_or_load
+        futures = {executor.submit(fetch_or_load, *task): task[0] for task in fetch_tasks}
+        
+        # Collect results into a dictionary for easy access
+        results = {}
+        for future in futures:
+            collection_name = futures[future]
+            try:
+                results[collection_name] = future.result()
+            except Exception as e:
+                print(f"[ERROR] Parallel fetch failed for {collection_name}: {e}")
+                results[collection_name] = pd.DataFrame()
+
+    # Unpack results in the correct order
+    standings         = results['nfl_standings']
+    teams             = results['nfl_teams']
+    games             = results['nfl_games']
+    players           = results['players']
+    draft_order       = results['draft_order']
+    draft_results     = results['draft_results']
+    draft_order_rules = results['draft_order_rules']
 
     # Schema Healing — Ensure MixedCase column names for downstream logic
     RENAME_MAP = {

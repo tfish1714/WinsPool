@@ -207,8 +207,13 @@ async def route_draft_history(request: Request):
 
 @router.get("/draft/{year}")
 async def route_draft_results_by_year(request: Request, year: int):
-    standings, _, games, players, _, draft_results, _ = load_data(year=year)
-    _, _, _, _, _, all_draft_results, _ = load_data()
+    # Load Master Data once
+    all_st, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
+
+    # Filter for the year in-memory
+    standings = all_st[all_st['season'] == year] if not all_st.empty else all_st
+    games = all_games[all_games['season'] == year] if not all_games.empty else all_games
+    draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
 
     dr_year = draft_results[draft_results["season"] == year].copy()
     merged = pd.merge(dr_year, players, on="playerId", how="inner")

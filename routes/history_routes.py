@@ -50,9 +50,17 @@ async def overall_history(request: Request):
     if undrafted_worst["wins"] == 999:
         undrafted_worst["wins"] = 0
 
-    for yr in get_available_years(all_draft_results, all_games):
+    # available_years derived once
+    available_years = get_available_years(all_draft_results, all_games)
+
+    for yr in available_years:
         try:
-            standings, _, games, players, _, draft_results, _ = load_data(year=yr)
+            # Derived from master data in-memory
+            standings = standings_master[standings_master["season"] == yr] if not standings_master.empty else standings_master
+            games = all_games[all_games["season"] == yr] if not all_games.empty else all_games
+            draft_results = all_draft_results[all_draft_results["season"] == yr] if not all_draft_results.empty else all_draft_results
+            
+            # players, teams, draft_order, and rules are already "all" data
             yr_standings = analysis.calculate_wins_pool_standings(standings, draft_results, players, yr)
             if yr_standings.empty:
                 continue
@@ -109,15 +117,22 @@ async def headtohead_redirect():
 
 @router.get("/headtohead/history")
 async def headtohead_history(request: Request):
-    _, _, all_games, _, _, all_draft_results, _ = load_data()
+    # Load Master Data once
+    standings_master, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
     current_year = _current_year(all_games)
 
     all_h2h = []
     all_schedules = []
 
-    for yr in get_available_years(all_draft_results, all_games):
+    available_years = get_available_years(all_draft_results, all_games)
+
+    for yr in available_years:
         try:
-            standings, _, games, players, _, draft_results, _ = load_data(year=yr)
+            # Deriving from master data in-memory
+            standings = standings_master[standings_master["season"] == yr] if not standings_master.empty else standings_master
+            games = all_games[all_games["season"] == yr] if not all_games.empty else all_games
+            draft_results = all_draft_results[all_draft_results["season"] == yr] if not all_draft_results.empty else all_draft_results
+            
             sched = analysis.get_enriched_schedule(games, draft_results, players, yr)
             if not sched.empty:
                 all_schedules.append(sched)
@@ -147,8 +162,13 @@ async def headtohead_history(request: Request):
 
 @router.get("/headtohead/{year}")
 async def headtohead_by_year(request: Request, year: int):
-    standings, _, games, players, _, draft_results, _ = load_data(year=year)
-    _, _, all_games, _, _, all_draft_results, _ = load_data()
+    # Load master data once
+    all_st, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
+
+    # Filter in-memory
+    standings = all_st[all_st['season'] == year] if not all_st.empty else all_st
+    games = all_games[all_games['season'] == year] if not all_games.empty else all_games
+    draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
 
     try:
         sched = analysis.get_enriched_schedule(games, draft_results, players, year)
