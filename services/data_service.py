@@ -29,7 +29,13 @@ from services.cache_service import (
 def load_data(year: int = None):
     """
     Loads data for the given season year with smart caching.
+    
+    Caching Hierarchy:
+    1. Memory Cache (_DATA_CACHE): Instant return if within TTL.
+    2. Local Pickle Cache (.local_db): Returns from disk if memory cache is cold.
+    3. Firestore (get_collection_df): Remote fetch if all else fails.
     """
+    start_total = time.time()
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     use_local = os.environ.get('USE_LOCAL_DATA', 'False').lower() == 'true'
     
@@ -53,7 +59,8 @@ def load_data(year: int = None):
             from services.db_service import get_db
             db = get_db()
             if db:
-                ctrl = db.collection("metadata").document("cache_control").get()
+                # Add a timeout to prevent hanging the whole request if Firestore is slow
+                ctrl = db.collection("metadata").document("cache_control").get(timeout=5)
                 if ctrl.exists:
                     remote_ts = ctrl.to_dict().get("last_update", 0)
                     # If remote signal is newer than our local cache creation for this key
@@ -64,6 +71,8 @@ def load_data(year: int = None):
                         if is_debug:
                             print(f"[DEBUG_PAGE_LOAD] Remote cache newer. Invalidating local memory cache.")
                         clear_data_cache()
+                elif is_debug:
+                    print("[DEBUG_PAGE_LOAD] Remote cache_control document not found.")
         except Exception as e:
             print(f"Warning: Failed to check remote cache control: {e}")
             if is_debug:
@@ -83,6 +92,7 @@ def load_data(year: int = None):
         local_dir.mkdir(parents=True, exist_ok=True)
 
     def fetch_or_load(collection_name, filters=None, pkl_suffix=''):
+        """Helper to fetch from Disk (Pickle) or Remote (Firestore) or Local-Slice."""
         pkl_name = f"{collection_name}{pkl_suffix}.pkl"
         pkl_path = local_dir / pkl_name
         if use_local and pkl_path.exists():
@@ -115,7 +125,11 @@ def load_data(year: int = None):
             # In local mode never call Firestore — return empty if no pkl found
             return pd.DataFrame()
 
+        start_io = time.time()
         df = get_collection_df(collection_name, filters)
+        if is_debug:
+            print(f"[DEBUG_PAGE_LOAD] Firestore read '{collection_name}' took {time.time() - start_io:.3f}s")
+
         if use_local and not df.empty:
             df.to_pickle(pkl_path)
         return df
@@ -138,16 +152,33 @@ def load_data(year: int = None):
     draft_results     = fetch_or_load('draft_results')
     draft_order_rules = fetch_or_load('draft_order_rules')
 
-    # Standardize column casing for downstream joins (Removed per user request)
+    # Schema Healing — Ensure MixedCase column names for downstream logic
+    RENAME_MAP = {
+        'playerid': 'playerId',
+        'fullname': 'fullName',
+        'draftpick': 'draftPick',
+        'draftorder': 'draftOrder',
+        'teamid': 'teamId',
+        'nickname': 'nickName',
+        'score': 'TotalWinsBySeason' # Handle specific draft_results differences if any
+    }
 
     # Ensure numeric columns are correctly typed
     for df in [standings, teams, games, players, draft_order, draft_results, draft_order_rules]:
-        if not df.empty and 'season' in df.columns:
-            df['season'] = pd.to_numeric(df['season'], errors='coerce')
-        if not df.empty and 'week' in df.columns:
-            df['week'] = pd.to_numeric(df['week'], errors='coerce')
-        if not df.empty and 'playerId' in df.columns:
-            df['playerId'] = pd.to_numeric(df['playerId'], errors='coerce')
+        if not df.empty:
+            # Heal columns first
+            df.rename(columns={k: v for k, v in RENAME_MAP.items() if k in df.columns}, inplace=True)
+            
+            if 'season' in df.columns:
+                df['season'] = pd.to_numeric(df['season'], errors='coerce').fillna(0).astype(int)
+            if 'week' in df.columns:
+                df['week'] = pd.to_numeric(df['week'], errors='coerce').fillna(0).astype(int)
+            if 'playerId' in df.columns:
+                df['playerId'] = pd.to_numeric(df['playerId'], errors='coerce').fillna(0).astype(int)
+            if 'draftPick' in df.columns:
+                df['draftPick'] = pd.to_numeric(df['draftPick'], errors='coerce').fillna(0).astype(int)
+            if 'draftOrder' in df.columns:
+                df['draftOrder'] = pd.to_numeric(df['draftOrder'], errors='coerce').fillna(0).astype(int)
 
     # Deduplicate players — old Firestore auto-ID records can cause duplicates
     if not players.empty and 'playerId' in players.columns:
@@ -159,7 +190,7 @@ def load_data(year: int = None):
     _CACHE_TIMESTAMPS[key] = current_time
     
     if is_debug:
-        print(f"[DEBUG_PAGE_LOAD] load_data(year={year}) completed fetching and caching data.")
+        print(f"[DEBUG_PAGE_LOAD] load_data(year={year}) total execution took {time.time() - start_total:.3f}s")
         
     return res
 
@@ -288,6 +319,8 @@ def get_season_progress(season: int, week: int) -> Dict[str, Any]:
     Computes player and team wins for a specific season up to a specific week.
     Returns a dictionary suitable for JSON serialization.
     """
+    is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
+    start_op = time.time()
     standings, teams, games, players, draft_order, draft_results, draft_order_rules = load_data()
     games = process_games_data(games)
     
@@ -397,6 +430,9 @@ def get_season_progress(season: int, week: int) -> Dict[str, Any]:
     else:
         best_by_round_teams = {}
     
+    if is_debug:
+        print(f"[DEBUG_PAGE_LOAD] get_season_progress(week={week}) processing took {time.time() - start_op:.3f}s")
+
     return {
         "season": season,
         "week": week,

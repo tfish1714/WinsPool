@@ -31,6 +31,8 @@ router = APIRouter(prefix="/api")
 @router.get("/progress/{season}/{week}")
 def fetch_progress(season: str, week: str):
     """Chart data: cumulative player wins by week for the given season."""
+    is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
+    start_route = time.time()
     try:
         _, _, games, _, _, _, _ = load_data()
 
@@ -48,7 +50,10 @@ def fetch_progress(season: str, week: str):
         else:
             target_week = int(week)
 
-        return JSONResponse(content=get_season_progress(target_season, target_week))
+        res = get_season_progress(target_season, target_week)
+        if is_debug:
+            print(f"[DEBUG_PAGE_LOAD] /api/progress route total took {time.time() - start_route:.3f}s")
+        return JSONResponse(content=res)
     except Exception as e:
         import traceback; traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -73,6 +78,8 @@ def fetch_draft_summary():
 @router.get("/standings")
 def get_standings(year: int):
     """Data for the standings table."""
+    is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
+    start_route = time.time()
     try:
         standings, _, _, players, _, draft_results, _ = load_data(year=year)
         sorted_df = analysis.calculate_wins_pool_standings(standings, draft_results, players, year)
@@ -81,6 +88,8 @@ def get_standings(year: int):
         for row in data:
             row['entrant'] = row.get('fullName')
             row['total_wins'] = row.get('TotalWins')
+        if is_debug:
+            print(f"[DEBUG_PAGE_LOAD] /api/standings route total took {time.time() - start_route:.3f}s")
         return JSONResponse(content=sanitize_state(data))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -89,9 +98,13 @@ def get_standings(year: int):
 @router.get("/schedule")
 def get_schedule(year: int):
     """Data for the week-by-week schedule grid."""
+    is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
+    start_route = time.time()
     try:
         _, _, games, players, _, draft_results, _ = load_data(year=year)
         schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
+        if is_debug:
+            print(f"[DEBUG_PAGE_LOAD] /api/schedule route total took {time.time() - start_route:.3f}s")
         return JSONResponse(content=sanitize_state(schedule_enriched.to_dict(orient="records")))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})

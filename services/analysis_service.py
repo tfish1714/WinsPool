@@ -115,6 +115,9 @@ def calculate_playoff_race(schedule, standings_df):
     
     Returns a list of dicts sorted by current_wins descending.
     """
+    import time
+    is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
+    start_op = time.time()
     # Build per-player current wins & remaining from the schedule
     all_players = pd.concat([
         schedule['fullName_away'],
@@ -180,6 +183,8 @@ def calculate_playoff_race(schedule, standings_df):
         rec['race'] = race_info
         rec['rank'] = i + 1
 
+    if is_debug:
+        print(f"[DEBUG_PAGE_LOAD] calculate_playoff_race processing took {time.time() - start_op:.3f}s")
     return records
 
 
@@ -307,6 +312,9 @@ def apply_tiebreakers(reshaped_df):
     return sorted_df[cols]
 
 def get_enriched_schedule(games, draft_results, players, season):
+    import time
+    is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
+    start_op = time.time()
     if games.empty or draft_results.empty or 'season' not in draft_results.columns:
         return pd.DataFrame()
     today_games = games[(games['season'] == season) & (games.get('game_type', pd.Series(['REG']*len(games))).eq('REG'))].copy() if 'game_type' in games.columns else games[games['season'] == season].copy()
@@ -373,9 +381,12 @@ def get_enriched_schedule(games, draft_results, players, season):
     final_merged = final_merged.where(pd.notnull(final_merged), None)
     final_merged = final_merged.fillna(-1000)
     
+    if is_debug:
+        print(f"[DEBUG_PAGE_LOAD] get_enriched_schedule processing took {time.time() - start_op:.3f}s")
     return final_merged
 
 def calculate_wins_pool_standings(standings, draft_results, players, season, games=None):
+    is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     if draft_results.empty or 'season' not in draft_results.columns:
         return pd.DataFrame()
     today_standings = standings[standings['season'] == season].copy() if not standings.empty and 'season' in standings.columns else pd.DataFrame()
@@ -388,6 +399,21 @@ def calculate_wins_pool_standings(standings, draft_results, players, season, gam
     else:
         wins_pool_standings['ptDiff'] = 0
         
+    if 'team' not in wins_pool_standings.columns or 'season' not in wins_pool_standings.columns:
+        if is_debug:
+            print(f"[ERROR] wins_pool_standings missing merge keys: {wins_pool_standings.columns.tolist()}")
+        return pd.DataFrame()
+
+    if 'playerId' not in wins_pool_standings.columns:
+        if is_debug:
+            print(f"[ERROR] wins_pool_standings missing 'playerId'. Cols: {wins_pool_standings.columns.tolist()}")
+        return pd.DataFrame()
+
+    if 'playerId' not in players.columns:
+        if is_debug:
+            print(f"[ERROR] 'players' DF missing 'playerId'. Cols: {players.columns.tolist()}")
+        return pd.DataFrame()
+
     wins_pool_standings = pd.merge(wins_pool_standings, players, on='playerId', how='inner')
     
     # Optional: Attach global team records if games DF is passed
