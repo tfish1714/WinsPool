@@ -8,7 +8,7 @@
 <main class="dashboard-main">
     <div class="card-glass page-card">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
-            <h2>🏁 Playoff Race — {{ year }}</h2>
+            <h2><i data-lucide="flag"></i> Playoff Race — {{ year }}</h2>
             <div class="year-selector">
                 <label for="year-pick">Season:</label>
                 <select id="year-pick" onchange="window.location='/playoff-race/' + this.value">
@@ -29,7 +29,7 @@
                     <span class="race-rank">#{{ rec.rank }}</span>
                     <span class="race-name">{{ rec.player }}</span>
                     {% if rec.rank == 1 %}
-                    <span class="leader-tag">🥇 Current Leader</span>
+                    <span class="leader-tag"><i data-lucide="award"></i> Current Leader</span>
                     {% endif %}
                     {# Check if fully eliminated — can't pass anyone above them #}
                     {% set can_pass_anyone = namespace(v=false) %}
@@ -52,7 +52,8 @@
                     {% for r in rec.race %}
                     {% if r.gap > 0 %}
                     <span class="target-badge {% if r.can_pass %}can-pass{% else %}eliminated{% endif %}">
-                        {% if r.can_pass %}✅{% else %}❌{% endif %}
+                        {% if r.can_pass %}<i data-lucide="check-circle" style="width:14px;height:14px;"></i>{% else
+                        %}<i data-lucide="x-circle" style="width:14px;height:14px;"></i>{% endif %}
                         Catch #{{ r.position }} {{ r.target_player }}
                         ({{ '+' if r.gap > 0 else '' }}{{ r.gap }} wins needed)
                     </span>

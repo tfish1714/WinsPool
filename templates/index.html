@@ -40,10 +40,16 @@
         <section class="draft-board-section card-glass">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                 <h2 style="margin: 0;">Draft Board</h2>
-                <button id="undo-pick-btn" class="btn-primary"
-                    style="background: var(--accent-red); border-color: var(--accent-red); padding: 0.3rem 0.8rem; font-size: 0.8rem; display: none;">
-                    Undo Last Pick
-                </button>
+                <div class="admin-controls" style="display: flex; gap: 0.5rem;">
+                    <button id="undo-pick-btn" class="btn-primary"
+                        style="background: var(--accent-gold); border-color: var(--accent-gold); padding: 0.3rem 0.8rem; font-size: 0.8rem; display: none;">
+                        Undo Pick
+                    </button>
+                    <button id="reset-pick-btn" class="btn-primary"
+                        style="background: var(--accent-red); border-color: var(--accent-red); padding: 0.3rem 0.8rem; font-size: 0.8rem; display: none;">
+                        Reset Pick
+                    </button>
+                </div>
             </div>
             <div class="board-container">
                 <ul class="draft-list" id="draft-list">

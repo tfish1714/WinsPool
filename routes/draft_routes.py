@@ -9,7 +9,7 @@ from fastapi.templating import Jinja2Templates
 from services.data_service import (
     load_data, get_available_years, get_draft_years, get_active_season,
 )
-from services.draft_service import load_draft_state, save_pick, undo_pick
+from services.draft_service import load_draft_state, save_pick, undo_pick, reset_pick
 from services.db_service import get_collection_df, add_draft_order, add_draft_rule
 import services.analysis_service as analysis
 
@@ -371,6 +371,28 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
                 
                 undo_pick(state["season"], last_pick_num)
+                await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
+
+            elif action == "reset_pick":
+                pid = msg.get("playerId")
+                state = load_draft_state(connected_players, year=target_year)
+                
+                player = next((p for p in state["all_players"] if p["playerId"] == int(pid)), None)
+                if not player or player.get("role") != "admin":
+                    await websocket.send_json({"type": "error", "message": "Unauthorized: Admin access required."})
+                    continue
+                
+                active_pick = state["active_pick"]
+                # Reset can happen on current active pick (just reset timer)
+                # or previous pick (undo + reset timer)
+                target_pick = msg.get("pick") or active_pick
+                
+                # If target_pick > active_pick, it's invalid
+                if target_pick > active_pick:
+                    await websocket.send_json({"type": "error", "message": "Cannot reset a future pick."})
+                    continue
+                
+                reset_pick(state["season"], target_pick)
                 await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
 
             elif action == "force_pick":

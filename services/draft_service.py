@@ -243,6 +243,27 @@ def undo_pick(season: int, draft_pick: int):
     delete_draft_pick(season, draft_pick)
     _CACHED_DRAFT_STATE = None
 
+def reset_pick(season: int, draft_pick: int):
+    """
+    Undoes a pick if it exists, and resets the timer for that pick slot.
+    """
+    global _CACHED_DRAFT_STATE
+    # 1. Delete result if it exists
+    delete_draft_pick(season, draft_pick)
+    
+    # 2. Reset timer for this specific pick in metadata
+    from services.db_service import get_metadata, save_metadata
+    meta_id = f"draft_timer_{season}"
+    meta = get_metadata(meta_id) or {"picks": {}}
+    picks = meta.get("picks", {})
+    
+    # Set to current time
+    picks[str(draft_pick)] = int(time.time())
+    save_metadata(meta_id, {"picks": picks})
+    
+    # 3. Clear cache to force reload
+    _CACHED_DRAFT_STATE = None
+
 def update_player_phone(player_id: int, phone: str):
     """Updates a player's phone number."""
     global _CACHED_DRAFT_STATE

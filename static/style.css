@@ -245,6 +245,7 @@ header h1 {
     flex-grow: 1;
     margin-bottom: 1rem;
     padding: 0.5rem;
+    align-content: start;
 }
 
 .team-card {
@@ -476,16 +477,16 @@ tr:hover {
     top: 1rem;
     z-index: 1000;
     display: flex;
-    flex-flow: row wrap;
+    flex-flow: row nowrap;
     align-items: center;
     justify-content: space-between;
     background: var(--glass-bg);
     border: 1px solid var(--glass-border);
     border-radius: 12px;
-    padding: 0.5rem 1.25rem;
+    padding: 0.5rem 1rem;
     backdrop-filter: blur(12px);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    gap: 1rem;
+    gap: 0.5rem;
 }
 
 .nav-header {
@@ -499,6 +500,8 @@ tr:hover {
     gap: 0.8rem;
     transition: transform 0.3s ease;
     cursor: pointer;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 .brand-box:hover {
@@ -516,7 +519,8 @@ tr:hover {
     filter: drop-shadow(0 0 15px rgba(88, 166, 255, 0.6));
 }
 
-.nav-header h1 {
+.nav-header h1,
+.brand-box h1 {
     font-size: 1.6rem;
     font-weight: 800;
     background: linear-gradient(135deg, #58a6ff, #a371f7);
@@ -550,21 +554,32 @@ tr:hover {
 .nav-links {
     display: flex;
     flex-direction: row;
-    gap: 0.4rem;
+    gap: 0.25rem;
     align-items: center;
     flex: 1 1 auto;
     justify-content: center;
+    margin: 0 0.5rem;
 }
 
 .user-identity {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.5rem;
     color: var(--accent-gold);
     font-weight: 600;
     font-size: 0.9rem;
     padding-left: 1rem;
     border-left: 1px solid var(--glass-border);
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.user-identity i {
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .logout-btn {
@@ -587,14 +602,32 @@ tr:hover {
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--glass-border);
     color: var(--text-secondary);
-    padding: 0.4rem 0.75rem;
-    border-radius: 8px;
-    font-size: 0.8rem;
+    padding: 0.2rem 0.5rem;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    font-size: 0.7rem;
+    font-weight: 500;
     cursor: pointer;
     font-family: inherit;
     text-decoration: none;
     transition: all 0.2s;
-    white-space: nowrap;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.1;
+    max-width: 85px;
+    border-radius: 6px;
+}
+
+.tab-btn i {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .tab-btn:hover {

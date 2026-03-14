@@ -79,25 +79,27 @@
             </div>
 
             <nav class="nav-links" id="nav-links">
-                <a href="/draft" class="tab-btn">🏈 Draft</a>
-                <a href="/wins-pool" class="tab-btn">🏆 Standings</a>
-                <a href="/wins-pool/{{ current_year|default(2024) }}/weekbyweek" class="tab-btn">📊 Weeks</a>
-                <a href="/playoff-race" class="tab-btn">🏁 Race</a>
-                <a href="/draft-results" class="tab-btn">📝 Results</a>
-                <a href="/draft/history" class="tab-btn">📖 History</a>
-                <a href="/headtohead" class="tab-btn">🤝 H2H</a>
-                <a href="/history" class="tab-btn">👑 Overall</a>
-                <a href="/profile" class="tab-btn">👤 Profile</a>
-                <a href="/admin" id="admin-nav-link" class="tab-btn admin-link" style="display: none;">⚙️ Admin</a>
+                <a href="/draft" class="tab-btn"><i data-lucide="football"></i> Draft</a>
+                <a href="/wins-pool" class="tab-btn"><i data-lucide="trophy"></i> Wins Pool</a>
+                <a href="/wins-pool/{{ current_year|default(2024) }}/weekbyweek" class="tab-btn"><i
+                        data-lucide="bar-chart-3"></i> Weekly Progress</a>
+                <a href="/playoff-race" class="tab-btn"><i data-lucide="flag"></i> Playoff Race</a>
+                <a href="/draft-results" class="tab-btn"><i data-lucide="clipboard-list"></i> Draft Results</a>
+                <a href="/draft/history" class="tab-btn"><i data-lucide="book-open"></i> Draft History</a>
+                <a href="/headtohead" class="tab-btn"><i data-lucide="users"></i> H2H</a>
+                <a href="/history" class="tab-btn"><i data-lucide="crown"></i> All-Time History</a>
+                <a href="/profile" class="tab-btn"><i data-lucide="user"></i> Profile</a>
+                <a href="/admin" id="admin-nav-link" class="tab-btn admin-link" style="display: none;"><i
+                        data-lucide="settings"></i> Admin Portal</a>
             </nav>
 
             <div id="user-identity" class="user-identity hidden">
-                <span id="user-nickname-display"></span>
+                <i data-lucide="user"></i> <span id="user-nickname-display"></span>
                 <button id="logout-btn" class="logout-btn">Logout</button>
             </div>
 
-            <button class="hamburger-btn"
-                onclick="document.getElementById('nav-links').classList.toggle('open')">☰</button>
+            <button class="hamburger-btn" onclick="document.getElementById('nav-links').classList.toggle('open')"><i
+                    data-lucide="menu"></i></button>
         </div>
 
         <!-- Dynamic Page Content -->
@@ -110,7 +112,15 @@
     <div id="toast" class="toast hidden"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
     <script type="module" src="/static/js/main.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
+        });
+    </script>
     {% block scripts %}{% endblock %}
 </body>
 

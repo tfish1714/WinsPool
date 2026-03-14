@@ -39,7 +39,7 @@ export const UiRenderer = {
                 ${game.is_live ? `<div class="live-badge">LIVE - Q${game.period} ${game.clock}</div>` : ''}
                 ${game.pred_winner ? `
                     <div class="ai-prediction">
-                        ✨ Win: ${game.pred_winner} (${game.pred_su_conf}%)
+                        Win: ${game.pred_winner} (${game.pred_su_conf}%)
                     </div>
                 ` : ''}
             </div>
@@ -70,8 +70,8 @@ export const UiRenderer = {
             let badges = '';
             if (isCompleted && draftSummary) {
                 const rd = Math.ceil(item.pick / totalPlayers);
-                if (draftSummary.best_overall === item.team) badges += `<span class="best-pick-badge">🏆 BEST OVERALL UNIT</span>`;
-                else if (draftSummary.best_by_round && draftSummary.best_by_round[rd] === item.team) badges += `<span class="best-pick-badge">🌟 Best in Rd ${rd}</span>`;
+                if (draftSummary.best_overall === item.team) badges += `<span class="best-pick-badge"><i data-lucide="award" style="width:12px;height:12px;display:inline-block;vertical-align:middle;margin-right:4px;"></i> BEST OVERALL UNIT</span>`;
+                else if (draftSummary.best_by_round && draftSummary.best_by_round[rd] === item.team) badges += `<span class="best-pick-badge"><i data-lucide="target" style="width:12px;height:12px;display:inline-block;vertical-align:middle;margin-right:4px;"></i> Best in Rd ${rd}</span>`;
             }
 
             return `

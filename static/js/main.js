@@ -34,6 +34,7 @@ class App {
 
         // 2. Setup Navigation & Global UI
         this.initGlobalUI();
+        if (typeof lucide !== 'undefined') lucide.createIcons();
 
         // 2. Auth Logic
         this.setupAuthHandlers();
@@ -58,21 +59,27 @@ class App {
             if (identityBox) {
                 identityBox.style.display = 'flex';
                 identityBox.classList.remove('hidden');
-                if (nicknameEl) nicknameEl.textContent = `👤 ${nickName || playerName}`;
+                if (nicknameEl) nicknameEl.textContent = nickName || playerName;
             }
 
             const adminLink = document.getElementById('admin-nav-link');
             if (adminLink) {
-                adminLink.style.display = (role === 'admin') ? 'inline-block' : 'none';
+                adminLink.style.display = (role === 'admin') ? 'flex' : 'none';
             }
 
             // Show admin elements on draft page if admin
             if (role === 'admin') {
                 const yearSelector = document.getElementById('admin-year-selector');
                 const undoBtn = document.getElementById('undo-pick-btn');
+                const resetBtn = document.getElementById('reset-pick-btn');
                 if (yearSelector) yearSelector.classList.remove('hidden');
                 if (undoBtn) {
-                    undoBtn.style.display = 'block';
+                    undoBtn.style.display = 'flex';
+                    undoBtn.onclick = () => this.undoPick();
+                }
+                if (resetBtn) {
+                    resetBtn.style.display = 'flex';
+                    resetBtn.onclick = () => this.resetPick();
                 }
                 console.log('[App] Admin UI enabled.');
             }
@@ -158,11 +165,16 @@ class App {
         // Setup Admin Overrides (Cleanup old select if it exists)
         if (this.user.role === 'admin') {
             const undoBtn = document.getElementById('undo-pick-btn');
-            if (undoBtn) undoBtn.style.display = 'block';
+            const resetBtn = document.getElementById('reset-pick-btn');
+            if (undoBtn) undoBtn.style.display = 'flex';
+            if (resetBtn) resetBtn.style.display = 'flex';
         }
 
         // Setup individual card clicks
         this.attachTeamCardClickHandlers();
+
+        // Refresh icons for dynamic content
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
     processDraftBanners(state) {
@@ -180,7 +192,7 @@ class App {
             const item = state.draft_board.find(x => x.pick === state.active_pick);
             if (item) {
                 const isMe = String(item.playerId) === String(this.user.playerId);
-                const txt = isMe ? `🚨 <strong>Your Pick!</strong> (Pick ${item.pick})` : `<strong>${item.playerName}</strong> is picking...`;
+                const txt = isMe ? `<strong>Your Pick!</strong> (Pick ${item.pick})` : `<strong>${item.playerName}</strong> is picking...`;
                 banner.innerHTML = `<span class="pulse-dot"></span>${txt} <span id="pick-timer"></span>`;
                 this.startTimer(state.pick_start_time);
             }
@@ -198,7 +210,7 @@ class App {
             const h = Math.floor(elapsed / 3600).toString().padStart(2, '0');
             const m = Math.floor((elapsed % 3600) / 60).toString().padStart(2, '0');
             const s = (elapsed % 60).toString().padStart(2, '0');
-            timerEl.textContent = `[⏱️ ${h}:${m}:${s}]`;
+            timerEl.textContent = `[${h}:${m}:${s}]`;
         }, 1000);
     }
 
@@ -242,6 +254,36 @@ class App {
         }
     }
 
+    undoPick() {
+        if (!confirm('Permanently undo the last pick? (Timer will NOT be reset)')) return;
+
+        let pick = this.lastDraftState?.active_pick;
+        if (!pick || pick <= 1) return;
+        if (pick > 30) pick = 30;
+        else pick = pick - 1;
+
+        this.ws.send({
+            action: 'undo_pick',
+            playerId: this.user.playerId,
+            pick: pick
+        });
+    }
+
+    resetPick() {
+        if (!confirm('Undo the last pick and RESTART the timer?')) return;
+
+        let pick = this.lastDraftState?.active_pick;
+        if (!pick || pick <= 1) return;
+        if (pick > 30) pick = 30;
+        else pick = pick - 1;
+
+        this.ws.send({
+            action: 'reset_pick',
+            playerId: this.user.playerId,
+            pick: pick
+        });
+    }
+
     setupDraftListeners() {
         const confirmBtn = document.getElementById('confirm-pick-btn');
         if (confirmBtn) {
@@ -264,12 +306,7 @@ class App {
             };
         }
 
-        // Admin Master Controls
-        document.getElementById('undo-pick-btn')?.addEventListener('click', () => {
-            if (confirm("Undo last pick permanently?")) {
-                this.ws.send({ action: 'undo_pick', playerId: this.user.playerId });
-            }
-        });
+        // Admin Master Controls - handled in initGlobalUI for reset-pick-btn
     }
 
     // --- Auth Logic ---

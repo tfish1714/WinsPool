@@ -1,35 +1,35 @@
-# 🏈 WinsPool: The Ultimate NFL Draft Tracker
+# WinsPool: The Ultimate NFL Draft Tracker
 
 WinsPool is a premium, real-time web application designed for friend groups to manage their NFL team draft pools. Players draft a set of teams at the start of the season, and the leaderboard is determined by the cumulative regular-season wins of their selected roster.
 
 ![Logo](static/fishbone.png)
 
-## ✨ Key Features
+## Key Features
 
-### 🎙️ AI Weekly Recaps
+### AI Weekly Recaps
 Get a professional (and slightly roasting) summary of every NFL week. 
 - **Persona**: A witty, high-energy sports commentator.
 - **Admin Control**: Admins can preview, refine, and broadcast summaries to all players via email.
 - **Data-Driven**: Summaries are generated using Gemini AI based on the latest game results.
 
-### 📈 Live Draft Room
+### Live Draft Room
 A real-time, WebSocket-powered interface for the big day.
 - **Live Sync**: See picks as they happen across all devices.
 - **Admin Overrides**: Force or undo picks to keep the draft moving.
 - **Analytics**: Integrated preseason projections and win-total confidence scores to help you make the best pick.
 
-### 🏆 Dynamic Standings & Analytics
+### Dynamic Standings & Analytics
 - **Live Leaderboards**: Track group rankings with automated win/loss updates.
 - **What-If Scenarios**: A matrix view to see how future outcomes affect the pool.
 - **Historical Context**: Full support for switching between the current season and historical data (2024 and earlier).
 
-### 🎨 Premium Design
+### Premium Design
 - **Glassmorphism**: A sleek, modern dark-mode aesthetic with frosted-glass components and vibrant accents.
 - **Responsive**: Fully optimized for both desktop data-gazing and mobile updates.
 
 ---
 
-## 🛠️ Technology Stack
+## Technology Stack
 
 | Layer | Technology |
 |---|---|
@@ -42,7 +42,7 @@ A real-time, WebSocket-powered interface for the big day.
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - Python 3.11+
@@ -70,7 +70,7 @@ To access the Admin Portal (`/admin`), your player ID must be assigned the `admi
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```text
 WinsPool/
@@ -85,11 +85,9 @@ WinsPool/
 
 ---
 
-## 📝 Rules & Configuration
+## Rules & Configuration
 - Each player drafts **3 NFL teams** (Configurable in `draft_order_rules`).
 - Rankings are determined by the sum of wins.
 - Standard tiebreakers include Head-to-Head and specific round-robin results.
 
 ---
-
-*Built with ❤️ for the Wins Pool community.*

@@ -11,7 +11,7 @@
         <!-- Header + Year Selector -->
         <div
             style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem; margin-bottom:1.5rem;">
-            <h2>📝 Draft Results — {{ year }}</h2>
+            <h2><i data-lucide="bar-chart-3"></i> Weekly Progress — {{ year }}</h2>
             <div class="year-selector">
                 <label for="year-pick">Season:</label>
                 <select id="year-pick" onchange="window.location='/draft/' + this.value">
@@ -24,11 +24,11 @@
 
         <!-- Best Pick Badges -->
         {% if best_overall or best_by_round %}
-        <h3 class="section-title">🏅 Best Picks — {{ year }}</h3>
+        <h3 class="section-title"><i data-lucide="award"></i> Best Picks — {{ year }}</h3>
         <div class="best-picks-grid">
             {% if best_overall %}
             <div class="best-pick-card gold">
-                <div class="best-pick-label">🥇 Best Overall</div>
+                <div class="best-pick-label"><i data-lucide="award"></i> Best Overall</div>
                 <div class="best-pick-name">{{ best_overall.player }}</div>
                 <div class="best-pick-team">
                     <img src="{{ get_team_logo(best_overall.team) }}" class="tiny-logo" alt="">
@@ -41,7 +41,7 @@
             {% if best_by_round[rnum] is defined %}
             {% set r = best_by_round[rnum] %}
             <div class="best-pick-card">
-                <div class="best-pick-label">🎯 {{ r.label }}</div>
+                <div class="best-pick-label"><i data-lucide="target"></i> {{ r.label }}</div>
                 <div class="best-pick-name">{{ r.player }}</div>
                 <div class="best-pick-team">
                     <img src="{{ get_team_logo(r.team) }}" class="tiny-logo" alt="">
@@ -53,25 +53,27 @@
             {% endfor %}
             {% if quickest %}
             <div class="best-pick-card" style="border-top-color: var(--accent-green);">
-                <div class="best-pick-label">⚡ Quickest Pick</div>
+                <div class="best-pick-label"><i data-lucide="zap"></i> Quickest Pick</div>
                 <div class="best-pick-name">{{ quickest.player }}</div>
                 <div class="best-pick-team">{{ quickest.team }}</div>
-                <div class="best-pick-detail">⏱️ {{ quickest.time }} seconds</div>
+                <div class="best-pick-detail"><i data-lucide="clock" style="width:12px;height:12px;"></i> {{
+                    quickest.time }} seconds</div>
             </div>
             {% endif %}
             {% if slowest %}
             <div class="best-pick-card" style="border-top-color: var(--accent-red);">
-                <div class="best-pick-label">🐢 Slowest Pick</div>
+                <div class="best-pick-label"><i data-lucide="snail"></i> Slowest Pick</div>
                 <div class="best-pick-name">{{ slowest.player }}</div>
                 <div class="best-pick-team">{{ slowest.team }}</div>
-                <div class="best-pick-detail">⏱️ {{ slowest.time }} seconds</div>
+                <div class="best-pick-detail"><i data-lucide="clock" style="width:12px;height:12px;"></i> {{
+                    slowest.time }} seconds</div>
             </div>
             {% endif %}
         </div>
         {% endif %}
 
         <!-- Draft Results Table -->
-        <h3 class="section-title">📋 All Picks</h3>
+        <h3 class="section-title"><i data-lucide="list"></i> All Picks</h3>
         <div class="table-container">
             <table>
                 <thead>

@@ -6,7 +6,7 @@
 <main class="dashboard-main" style="display:block;">
     <div style="max-width: 1400px; margin: 0 auto;">
         <div style="text-align: center; margin-bottom: 2rem;">
-            <h2>📜 All-Time Draft History</h2>
+            <h2><i data-lucide="book-open"></i> All-Time Draft History</h2>
             <p style="color:var(--text-secondary); font-size:.95rem; margin-bottom: 1rem;">
                 A comprehensive view of draft tendencies and total wins. Hover over any team/player chip to see their
                 Best and Worst seasons.
@@ -68,7 +68,8 @@
                                 > 0 %}
                                 <div
                                     style="font-size:0.75rem; color:var(--accent-green); font-weight:600; margin-top:4px;">
-                                    🏆 {{ player_first_picks[player] }}x #1 Picks
+                                    <i data-lucide="trophy" style="width:14px;height:14px;"></i> {{
+                                    player_first_picks[player] }}x #1 Picks
                                 </div>
                                 {% endif %}
                             </td>
@@ -78,7 +79,7 @@
                                 <div style="display:flex; flex-wrap:wrap; gap:8px;">
                                     {% for p in picks | sort(attribute='total_wins', reverse=True) %}
                                     <div class="history-chip"
-                                        title="{% for row in p.picks_list %}{{ row.season }} — {% if row.draftPick %}Pick #{{ row.draftPick }}{% else %}Undrafted{% endif %} | {{ row.wins }}W&#10;{% endfor %}🏆 Best: {{ p.best_year }} ({{ p.best_wins }}W)&#10;🧊 Worst: {{ p.worst_year }} ({{ p.worst_wins }}W)">
+                                        title="{% for row in p.picks_list %}{{ row.season }} — {% if row.draftPick %}Pick #{{ row.draftPick }}{% else %}Undrafted{% endif %} | {{ row.wins }}W&#10;{% endfor %}Best: {{ p.best_year }} ({{ p.best_wins }}W)&#10;Worst: {{ p.worst_year }} ({{ p.worst_wins }}W)">
                                         <div style="width:24px; text-align:center; display:flex; align-items:center;">
                                             <img src="{{ get_team_logo(p.team) }}" alt="{{ p.team }}"
                                                 style="max-width:100%; max-height:24px;"
@@ -135,7 +136,8 @@
                                         0 %}
                                         <div
                                             style="font-size:0.75rem; color:var(--accent-green); font-weight:600; margin-top:3px;">
-                                            🏆 {{ team_first_picks[team] }}x #1 Overall
+                                            <i data-lucide="trophy" style="width:14px;height:14px;"></i> {{
+                                            team_first_picks[team] }}x #1 Overall
                                         </div>
                                         {% endif %}
                                     </div>
@@ -150,7 +152,7 @@
                                 <div style="display:flex; flex-wrap:wrap; gap:8px;">
                                     {% for p in picks | sort(attribute='total_wins', reverse=True) %}
                                     <div class="history-chip blue-chip"
-                                        title="{% for row in p.picks_list %}{{ row.season }} — {% if row.draftPick %}Pick #{{ row.draftPick }}{% else %}Undrafted{% endif %} | {{ row.wins }}W&#10;{% endfor %}🏆 Best: {{ p.best_year }} ({{ p.best_wins }}W)&#10;🧊 Worst: {{ p.worst_year }} ({{ p.worst_wins }}W)">
+                                        title="{% for row in p.picks_list %}{{ row.season }} — {% if row.draftPick %}Pick #{{ row.draftPick }}{% else %}Undrafted{% endif %} | {{ row.wins }}W&#10;{% endfor %}Best: {{ p.best_year }} ({{ p.best_wins }}W)&#10;Worst: {{ p.worst_year }} ({{ p.worst_wins }}W)">
                                         <span style="font-weight:600;">{{ p.fullName }}</span>
                                         <span class="chip-metric">{{ p.times_picked }}x ({{ p.total_wins }}W - {{
                                             (p.total_wins / p.times_picked)|round(1) }} Avg)</span>

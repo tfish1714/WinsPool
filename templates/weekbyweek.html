@@ -7,7 +7,7 @@
 <main class="dashboard-main">
     <div class="card-glass page-card weekbyweek-wrap">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
-            <h2>📊 Wins by Week — {{ year }}</h2>
+            <h2><i data-lucide="bar-chart-3"></i> Weekly Progress — {{ year }}</h2>
             <div class="year-selector">
                 <label for="year-pick">Season:</label>
                 <select id="year-pick" onchange="window.location='/wins-pool/' + this.value + '/weekbyweek'">

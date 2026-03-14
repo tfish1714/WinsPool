@@ -3,7 +3,7 @@
 {% block content %}
 <main class="dashboard-main" style="display:block;">
     <div class="card-glass" style="height:auto; overflow:visible;">
-        <h2>👑 Overall Wins Pool History</h2>
+        <h2><i data-lucide="crown"></i> All-Time History</h2>
         <p style="color:var(--text-secondary); margin-bottom:1.5rem; font-size:.9rem;">
             All-time metrics for every player across all seasons.
         </p>
@@ -49,7 +49,8 @@
             <div>
                 <h4
                     style="color: var(--text-secondary); margin-bottom: 0.5rem; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1px;">
-                    🔥 All-Time Best Undrafted Team</h4>
+                    <i data-lucide="flame"></i> All-Time Best Undrafted Team
+                </h4>
                 <div style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.25rem;">
                     <img src="{{ get_team_logo(undrafted_best.team) }}" class="tiny-logo"
                         style="height: 32px; vertical-align: middle; margin-right: 8px;" alt="">
@@ -63,7 +64,8 @@
             <div>
                 <h4
                     style="color: var(--text-secondary); margin-bottom: 0.5rem; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1px;">
-                    🧊 All-Time Worst Undrafted Team</h4>
+                    <i data-lucide="snowflake"></i> All-Time Worst Undrafted Team
+                </h4>
                 <div style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.25rem;">
                     <img src="{{ get_team_logo(undrafted_worst.team) }}" class="tiny-logo"
                         style="height: 32px; vertical-align: middle; margin-right: 8px;" alt="">
@@ -77,7 +79,8 @@
         <div class="two-col" style="margin-top: 3rem;">
             <!-- Top 10 Seasons -->
             <div>
-                <h3 style="color:var(--primary-color); margin-bottom: 1rem;">🔥 Top 10 Best Seasons</h3>
+                <h3 style="color:var(--primary-color); margin-bottom: 1rem;"><i data-lucide="flame"></i> Top 10 Best
+                    Seasons</h3>
                 <table style="font-size: 0.88rem; width:100%;">
                     <thead>
                         <tr>
@@ -106,7 +109,8 @@
 
             <!-- Bottom 10 Seasons -->
             <div>
-                <h3 style="color:#ff6b6b; margin-bottom: 1rem;">🧊 Top 10 Worst Seasons</h3>
+                <h3 style="color:#ff6b6b; margin-bottom: 1rem;"><i data-lucide="snowflake"></i> Top 10 Worst Seasons
+                </h3>
                 <table style="font-size: 0.88rem; width:100%;">
                     <thead>
                         <tr>

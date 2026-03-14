@@ -10,7 +10,7 @@
 
         <!-- Header + Year Selector -->
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
-            <h2>🏆 Wins Pool Standings</h2>
+            <h2><i data-lucide="trophy"></i> Wins Pool Standings</h2>
             <div class="year-selector">
                 <label for="year-pick">Season:</label>
                 <select id="year-pick" onchange="window.location='/wins-pool/' + this.value">
@@ -128,7 +128,7 @@
         {% if recap %}
         <div class="recap-card-glass">
             <h3 class="recap-title">
-                <span class="sparkle">✨</span> Weekly AI Recap: Week {{ current_week }}
+                <i data-lucide="sparkles" class="sparkle"></i> Weekly AI Recap: Week {{ current_week }}
             </h3>
             <div class="recap-content">
                 {{ recap | safe }}
@@ -223,7 +223,7 @@
                         {% if row['pred_winner'] %}
                         <div class="game-prediction"
                             style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1); color: var(--accent-gold); font-weight: 600;">
-                            <span title="AI Prediction Logic">✨ Predictor:</span>
+                            <span title="AI Prediction Logic"><i data-lucide="sparkles"></i> Predictor:</span>
                             <div style="font-size: 0.75rem; color: #fff;">
                                 Win: {{ row['pred_winner'] }} ({{ row['pred_su_conf'] }}%)
                             </div>
