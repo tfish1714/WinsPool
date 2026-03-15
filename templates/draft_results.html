@@ -11,7 +11,7 @@
         <!-- Header + Year Selector -->
         <div
             style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem; margin-bottom:1.5rem;">
-            <h2><i data-lucide="bar-chart-3"></i> Weekly Progress — {{ year }}</h2>
+            <h2><i data-lucide="bar-chart-3"></i> Draft Results — {{ year }}</h2>
             <div class="year-selector">
                 <label for="year-pick">Season:</label>
                 <select id="year-pick" onchange="window.location='/draft/' + this.value">
@@ -57,7 +57,7 @@
                 <div class="best-pick-name">{{ quickest.player }}</div>
                 <div class="best-pick-team">{{ quickest.team }}</div>
                 <div class="best-pick-detail"><i data-lucide="clock" style="width:12px;height:12px;"></i> {{
-                    quickest.time }} seconds</div>
+                    quickest.time }}</div>
             </div>
             {% endif %}
             {% if slowest %}
@@ -66,7 +66,7 @@
                 <div class="best-pick-name">{{ slowest.player }}</div>
                 <div class="best-pick-team">{{ slowest.team }}</div>
                 <div class="best-pick-detail"><i data-lucide="clock" style="width:12px;height:12px;"></i> {{
-                    slowest.time }} seconds</div>
+                    slowest.time }}</div>
             </div>
             {% endif %}
         </div>
@@ -75,15 +75,13 @@
         <!-- Draft Results Table -->
         <h3 class="section-title"><i data-lucide="list"></i> All Picks</h3>
         <div class="table-container">
-            <table>
+            <table class="stacked-table">
                 <thead>
                     <tr>
-                        <th style="text-align: center;">Pick</th>
-                        <th style="text-align: left;">Player</th>
-                        <th style="text-align: left;">Team</th>
+                        <th style="text-align: left;">Pick</th>
                         <th style="text-align: center;">Projected (Consensus)</th>
                         <th style="text-align: center;">Actual Wins</th>
-                        <th style="text-align: center;">Value (Δ)</th>
+                        <th style="text-align: center;">Value (Delta)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -95,19 +93,27 @@
                     {% set delta = (actual - proj) | round(1) %}
                     <tr {% if best_overall and row['team']==best_overall.team
                         %}style="border-left: 3px solid #f5c542; background: rgba(245, 197, 66, 0.05);" {% endif %}>
-                        <td style="text-align: center;"><strong>#{{ row['draftPick'] | int }}</strong></td>
-                        <td>{{ row['fullName'] }}</td>
-                        <td>
+                        <td class="stacked-header-cell" style="text-align: center;">
+                            <strong>#{{ row['draftPick'] | int }}</strong> {{ row['fullName'] }}
+                            — <img src="{{ get_team_logo(row['team']) }}" class="tiny-logo" alt="">
+                            <strong>{{ row['team'] }}</strong>
+                        </td>
+                        <td style="display:none;"><span class="stacked-label">Player</span>{{ row['fullName'] }}</td>
+                        <td style="display:none;">
+                            <span class="stacked-label">Team</span>
                             <img src="{{ get_team_logo(row['team']) }}" class="tiny-logo" alt="">
                             <strong>{{ row['team'] }}</strong>
                         </td>
                         <td style="text-align: center; opacity: 0.8;">
+                            <span class="stacked-label">Projected</span>
                             {% if row['projected_wins'] is not none %}{{ row['projected_wins'] }}{% else %}-{% endif %}
                         </td>
-                        <td style="text-align: center;">{{ row['TotalWinsBySeason'] | int }}</td>
+                        <td style="text-align: center;"><span class="stacked-label">Actual</span>{{
+                            row['TotalWinsBySeason'] | int }}</td>
 
                         <td style="text-align: center; font-weight: bold;"
                             class="{% if proj > 0 %}{% if delta > 0 %}value-positive{% elif delta < 0 %}value-negative{% endif %}{% endif %}">
+                            <span class="stacked-label">Value</span>
                             {% if proj > 0 %}
                             {% if delta > 0 %}+{% endif %}{{ delta }}
                             {% else %}-{% endif %}

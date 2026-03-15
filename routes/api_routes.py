@@ -472,7 +472,7 @@ async def preview_draft_order(request: Request):
 
 @router.post("/admin/create_player")
 async def create_player(request: Request):
-    """Admin-only: Create a new player entrant."""
+    """Admin-only: Create a new player."""
     try:
         data = await request.json()
         pid = data.get("playerId")
@@ -482,12 +482,91 @@ async def create_player(request: Request):
         full_name = data.get("fullName")
         nick_name = data.get("nickName")
         email = data.get("email")
+        phone = data.get("phone", "")
 
         if not full_name or not nick_name or not email:
-            return JSONResponse(status_code=400, content={"error": "All fields are required."})
+            return JSONResponse(status_code=400, content={"error": "Name, Nickname, and Email are required."})
 
-        new_id = add_player(full_name, nick_name, email)
+        new_id = add_player(full_name, nick_name, email, phone=phone)
         return JSONResponse(content={"message": f"Player created with ID {new_id}", "playerId": new_id})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.post("/admin/update_player")
+async def admin_update_player(request: Request):
+    """Admin-only: Update an existing player's profile fields."""
+    try:
+        data = await request.json()
+        pid = data.get("playerId")
+        if get_player_role(pid) != "admin":
+            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+        target_id = data.get("targetPlayerId")
+        if not target_id:
+            return JSONResponse(status_code=400, content={"error": "targetPlayerId is required."})
+
+        allowed_fields = {"fullName", "nickName", "email", "cell"}
+        updates = {k: v for k, v in data.get("fields", {}).items() if k in allowed_fields}
+        if not updates:
+            return JSONResponse(status_code=400, content={"error": "No valid fields to update."})
+
+        if "email" in updates:
+            updates["email"] = updates["email"].strip().lower()
+
+        update_player_profile(str(target_id), updates)
+        return JSONResponse(content={"message": "Player updated successfully."})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.post("/admin/reset_password")
+async def admin_reset_password(request: Request):
+    """Admin-only: Trigger a password reset by clearing the stored hash."""
+    try:
+        data = await request.json()
+        pid = data.get("playerId")
+        if get_player_role(pid) != "admin":
+            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+        target_id = data.get("targetPlayerId")
+        if not target_id:
+            return JSONResponse(status_code=400, content={"error": "targetPlayerId is required."})
+
+        # Clear the password hash so the player is forced to set up again on next login
+        update_player_profile(str(target_id), {
+            "password_hash": None,
+            "failed_setup_attempts": 0,
+            "lockout_until": None,
+            "mfa_secret": None,
+            "mfa_enabled": False
+        })
+        return JSONResponse(content={"message": "Password reset. Player will be prompted to set a new password on next login."})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.post("/admin/set_temp_password")
+async def admin_set_temp_password(request: Request):
+    """Admin-only: Set a temporary password for a player."""
+    try:
+        data = await request.json()
+        pid = data.get("playerId")
+        if get_player_role(pid) != "admin":
+            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+        target_id = data.get("targetPlayerId")
+        temp_password = data.get("tempPassword")
+
+        if not target_id or not temp_password:
+            return JSONResponse(status_code=400, content={"error": "targetPlayerId and tempPassword are required."})
+
+        if len(temp_password) < 8:
+            return JSONResponse(status_code=400, content={"error": "Temporary password must be at least 8 characters."})
+
+        hashed = get_password_hash(temp_password)
+        update_player_credentials(str(target_id), hashed)
+        return JSONResponse(content={"message": "Temporary password set. Player should change it after logging in."})
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 

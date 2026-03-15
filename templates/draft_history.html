@@ -44,7 +44,7 @@
         <div class="card-glass page-card" style="padding: 1.5rem;">
             <!-- ================= PLAYER VIEW ================= -->
             <div id="player-view">
-                <table class="dense-history-table">
+                <table class="dense-history-table stacked-table">
                     <thead>
                         <tr>
                             <th style="width: 15%;">Player</th>
@@ -62,7 +62,8 @@
                         {% set picks = grouped_players.get(player, []) %}
                         {% set overall_wins = picks | sum(attribute='total_wins') %}
                         <tr>
-                            <td style="font-weight:700; font-size:1.05rem; color:var(--text-primary);">
+                            <td class="stacked-header-cell"
+                                style="font-weight:700; font-size:1.05rem; color:var(--text-primary);">
                                 {{ player }}
                                 {% if player_first_picks and player in player_first_picks and player_first_picks[player]
                                 > 0 %}
@@ -72,14 +73,20 @@
                                     player_first_picks[player] }}x #1 Picks
                                 </div>
                                 {% endif %}
+                                <span
+                                    style="font-weight:800; color:var(--primary-color); font-size:1.1rem; margin-left:0.5rem;">{{
+                                    overall_wins }}W</span>
                             </td>
-                            <td style="font-weight:800; color:var(--primary-color); font-size:1.1rem;">{{ overall_wins
+                            <td style="font-weight:800; color:var(--primary-color); font-size:1.1rem;"><span
+                                    class="stacked-label">Total Wins</span>{{ overall_wins
                                 }}</td>
                             <td>
                                 <div style="display:flex; flex-wrap:wrap; gap:8px;">
                                     {% for p in picks | sort(attribute='total_wins', reverse=True) %}
                                     <div class="history-chip"
-                                        title="{% for row in p.picks_list %}{{ row.season }} — {% if row.draftPick %}Pick #{{ row.draftPick }}{% else %}Undrafted{% endif %} | {{ row.wins }}W&#10;{% endfor %}Best: {{ p.best_year }} ({{ p.best_wins }}W)&#10;Worst: {{ p.worst_year }} ({{ p.worst_wins }}W)">
+                                        title="{% for row in p.picks_list %}{{ row.season }} — {% if row.draftPick %}Pick #{{ row.draftPick }}{% else %}Undrafted{% endif %} | {{ row.wins }}W&#10;{% endfor %}Best: {{ p.best_year }} ({{ p.best_wins }}W)&#10;Worst: {{ p.worst_year }} ({{ p.worst_wins }}W)"
+                                        data-bs-title="{{ p.team }} — {{ player }}"
+                                        data-bs-content="{% for row in p.picks_list %}{{ row.season }}: {% if row.draftPick %}Pick #{{ row.draftPick }}{% else %}Undrafted{% endif %} — {{ row.wins }}W|{% endfor %}Best: {{ p.best_year }} ({{ p.best_wins }}W)|Worst: {{ p.worst_year }} ({{ p.worst_wins }}W)">
                                         <div style="width:24px; text-align:center; display:flex; align-items:center;">
                                             <img src="{{ get_team_logo(p.team) }}" alt="{{ p.team }}"
                                                 style="max-width:100%; max-height:24px;"
@@ -98,9 +105,8 @@
                 </table>
             </div>
 
-            <!-- ================= TEAM VIEW ================= -->
             <div id="team-view" style="display: none;">
-                <table class="dense-history-table">
+                <table class="dense-history-table stacked-table">
                     <thead>
                         <tr>
                             <th style="width: 15%;">Team</th>
@@ -122,7 +128,7 @@
                         {% set times_drafted = picks | rejectattr('fullName', 'equalto', 'Undrafted Teams') |
                         sum(attribute='times_picked') %}
                         <tr>
-                            <td>
+                            <td class="stacked-header-cell">
                                 <div
                                     style="display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.05rem;">
                                     <div style="width:28px; text-align:center; display:flex; align-items:center;">
@@ -141,18 +147,25 @@
                                         </div>
                                         {% endif %}
                                     </div>
+                                    <span style="margin-left:auto; font-weight:800; color:#4aa8ff;">{{ overall_wins
+                                        }}W</span>
                                 </div>
                             </td>
-                            <td style="font-weight:600; color:var(--text-secondary); font-size:0.95rem;">{{
+                            <td style="font-weight:600; color:var(--text-secondary); font-size:0.95rem;"><span
+                                    class="stacked-label">Times Drafted</span>{{
                                 times_drafted }}x</td>
-                            <td style="font-weight:700; color:var(--accent-green); font-size:0.95rem;">{{
+                            <td style="font-weight:700; color:var(--accent-green); font-size:0.95rem;"><span
+                                    class="stacked-label">#1 Picks</span>{{
                                 team_first_picks[team] if team_first_picks and team in team_first_picks else 0 }}x</td>
-                            <td style="font-weight:800; color:#4aa8ff; font-size:1.1rem;">{{ overall_wins }}</td>
+                            <td style="font-weight:800; color:#4aa8ff; font-size:1.1rem;"><span
+                                    class="stacked-label">Total Wins</span>{{ overall_wins }}</td>
                             <td>
                                 <div style="display:flex; flex-wrap:wrap; gap:8px;">
                                     {% for p in picks | sort(attribute='total_wins', reverse=True) %}
                                     <div class="history-chip blue-chip"
-                                        title="{% for row in p.picks_list %}{{ row.season }} — {% if row.draftPick %}Pick #{{ row.draftPick }}{% else %}Undrafted{% endif %} | {{ row.wins }}W&#10;{% endfor %}Best: {{ p.best_year }} ({{ p.best_wins }}W)&#10;Worst: {{ p.worst_year }} ({{ p.worst_wins }}W)">
+                                        title="{% for row in p.picks_list %}{{ row.season }} — {% if row.draftPick %}Pick #{{ row.draftPick }}{% else %}Undrafted{% endif %} | {{ row.wins }}W&#10;{% endfor %}Best: {{ p.best_year }} ({{ p.best_wins }}W)&#10;Worst: {{ p.worst_year }} ({{ p.worst_wins }}W)"
+                                        data-bs-title="{{ team }} — {{ p.fullName }}"
+                                        data-bs-content="{% for row in p.picks_list %}{{ row.season }}: {% if row.draftPick %}Pick #{{ row.draftPick }}{% else %}Undrafted{% endif %} — {{ row.wins }}W|{% endfor %}Best: {{ p.best_year }} ({{ p.best_wins }}W)|Worst: {{ p.worst_year }} ({{ p.worst_wins }}W)">
                                         <span style="font-weight:600;">{{ p.fullName }}</span>
                                         <span class="chip-metric">{{ p.times_picked }}x ({{ p.total_wins }}W - {{
                                             (p.total_wins / p.times_picked)|round(1) }} Avg)</span>

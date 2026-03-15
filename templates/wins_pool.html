@@ -33,7 +33,7 @@
                 <thead>
                     <tr>
                         <th style="width: 25%;">Player</th>
-                        <th>Drafted Teams & Tiebreakers</th>
+                        <th>Drafted Teams &amp; Tiebreakers</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -97,32 +97,53 @@
             </table>
         </div>
 
-        <!-- Mobile Cards -->
-        <!-- TODO: Refactor Mobile view in next pass -->
-        <div class="card-container">
+        <!-- Mobile Stacked Row Cards (hidden on desktop, shown at <= 768px) -->
+        <div class="standings-stacked">
             {% for row in data %}
-            <div class="card">
-                <div class="card-header">
-                    {{ row['Rank'] }} — {{ row['fullName'] }} ({{ row['TotalWins'] }} Wins)
+            <div class="standings-stacked-card">
+                <div class="standings-stacked-card__header">
+                    <span class="standings-stacked-card__rank">#{{ row['Rank'] }}</span>
+                    <span class="standings-stacked-card__name">{{ row['fullName'] }}</span>
+                    <span class="standings-stacked-card__score">{{ row['TotalWins'] }}W</span>
                 </div>
-                <button class="expand-button" onclick="toggleCard(this)">Show Details</button>
-                <div class="card-content">
-                    <p><strong>Team 1:</strong> <img src="{{ get_team_logo(row['team1']) }}" class="tiny-logo" alt="">
-                        {{ row['team1'] }} ({{ row['wins1'] }} W, {{ row['ptDiff1'] }} diff)</p>
-                    <p><strong>Team 2:</strong> <img src="{{ get_team_logo(row['team2']) }}" class="tiny-logo" alt="">
-                        {{ row['team2'] }} ({{ row['wins2'] }} W, {{ row['ptDiff2'] }} diff)</p>
-                    <p><strong>Team 3:</strong> <img src="{{ get_team_logo(row['team3']) }}" class="tiny-logo" alt="">
-                        {{ row['team3'] }} ({{ row['wins3'] }} W, {{ row['ptDiff3'] }} diff)</p>
-                    <p><strong>TB 1:</strong> {{ row['Tiebreaker1_WorstTeamWins'] }} &nbsp; <strong>TB 2:</strong> {{
-                        row['Tiebreaker2_2ndWorstTeamWins'] }} &nbsp; <strong>TB 3:</strong> {{
-                        row['Tiebreaker3_BestTeamWins'] }}</p>
-                    <p><strong>TB 4:</strong> {{ row['Tiebreaker4_WorstTeamPtDiff'] }} &nbsp; <strong>TB 5:</strong> {{
-                        row['Tiebreaker5_2ndWorstTeamPtDiff'] }} &nbsp; <strong>TB 6:</strong> {{
-                        row['Tiebreaker6_BestTeamPtDiff'] }}</p>
+                <div class="standings-stacked-card__teams">
+                    <div class="standings-stacked-card__team">
+                        <img src="{{ get_team_logo(row['team1']) }}" alt="">
+                        <div class="standings-stacked-card__team-info">
+                            <div class="standings-stacked-card__team-name">{{ row['team1'] }}</div>
+                            <div class="standings-stacked-card__team-stats">{{ row['wins1'] }}W ({{ row['ptDiff1'] }})
+                            </div>
+                        </div>
+                    </div>
+                    <div class="standings-stacked-card__team">
+                        <img src="{{ get_team_logo(row['team2']) }}" alt="">
+                        <div class="standings-stacked-card__team-info">
+                            <div class="standings-stacked-card__team-name">{{ row['team2'] }}</div>
+                            <div class="standings-stacked-card__team-stats">{{ row['wins2'] }}W ({{ row['ptDiff2'] }})
+                            </div>
+                        </div>
+                    </div>
+                    <div class="standings-stacked-card__team">
+                        <img src="{{ get_team_logo(row['team3']) }}" alt="">
+                        <div class="standings-stacked-card__team-info">
+                            <div class="standings-stacked-card__team-name">{{ row['team3'] }}</div>
+                            <div class="standings-stacked-card__team-stats">{{ row['wins3'] }}W ({{ row['ptDiff3'] }})
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="standings-stacked-card__tb">
+                    <span><span class="tb-label">TB1</span> {{ row['Tiebreaker1_WorstTeamWins'] }}</span>
+                    <span><span class="tb-label">TB2</span> {{ row['Tiebreaker2_2ndWorstTeamWins'] }}</span>
+                    <span><span class="tb-label">TB3</span> {{ row['Tiebreaker3_BestTeamWins'] }}</span>
+                    <span><span class="tb-label">TB4</span> {{ row['Tiebreaker4_WorstTeamPtDiff'] or 0 }}</span>
+                    <span><span class="tb-label">TB5</span> {{ row['Tiebreaker5_2ndWorstTeamPtDiff'] or 0 }}</span>
+                    <span><span class="tb-label">TB6</span> {{ row['Tiebreaker6_BestTeamPtDiff'] or 0 }}</span>
                 </div>
             </div>
             {% endfor %}
         </div>
+
 
         <!-- ── Weekly AI Recap ────────────────────────── -->
         {% if recap %}

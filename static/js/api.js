@@ -66,10 +66,28 @@ export const ApiService = {
             body: JSON.stringify({ playerId, playerIds })
         });
     },
-    async createPlayer(playerId, fullName, nickName, email) {
+    async createPlayer(playerId, fullName, nickName, email, phone) {
         return fetchWithTimeout(`${API_BASE}/admin/create_player`, {
             method: 'POST',
-            body: JSON.stringify({ playerId, fullName, nickName, email })
+            body: JSON.stringify({ playerId, fullName, nickName, email, phone })
+        });
+    },
+    async updatePlayer(playerId, targetPlayerId, fields) {
+        return fetchWithTimeout(`${API_BASE}/admin/update_player`, {
+            method: 'POST',
+            body: JSON.stringify({ playerId, targetPlayerId, fields })
+        });
+    },
+    async resetPassword(playerId, targetPlayerId) {
+        return fetchWithTimeout(`${API_BASE}/admin/reset_password`, {
+            method: 'POST',
+            body: JSON.stringify({ playerId, targetPlayerId })
+        });
+    },
+    async setTempPassword(playerId, targetPlayerId, tempPassword) {
+        return fetchWithTimeout(`${API_BASE}/admin/set_temp_password`, {
+            method: 'POST',
+            body: JSON.stringify({ playerId, targetPlayerId, tempPassword })
         });
     },
     async scrapePredictions(playerId) {

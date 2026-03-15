@@ -21,6 +21,20 @@ def _current_year(games, draft_results=None) -> int:
     return get_active_season(games, draft_results)
 
 
+def _format_pick_time(seconds: int) -> str:
+    """Convert raw seconds to a human-readable duration string."""
+    if seconds >= 3600:
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        return f"{h}h {m}m {s}s"
+    if seconds >= 60:
+        m = seconds // 60
+        s = seconds % 60
+        return f"{m}m {s}s"
+    return f"{seconds}s"
+
+
 # ─── Draft board (live WebSocket) ─────────────────────────────────────────────
 
 class ConnectionManager:
@@ -258,11 +272,11 @@ async def route_draft_results_by_year(request: Request, year: int):
             s_row = sorted_times.iloc[-1]
             quickest = {
                 "player": q_row.get("fullName", ""), "team": q_row.get("team", ""),
-                "time": int(q_row.get("time_taken_seconds", 0))
+                "time": _format_pick_time(int(q_row.get("time_taken_seconds", 0)))
             }
             slowest = {
                 "player": s_row.get("fullName", ""), "team": s_row.get("team", ""),
-                "time": int(s_row.get("time_taken_seconds", 0))
+                "time": _format_pick_time(int(s_row.get("time_taken_seconds", 0)))
             }
 
     # Draft Value Calculus

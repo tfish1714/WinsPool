@@ -9,15 +9,16 @@
         </p>
 
         <div class="table-container">
-            <table class="data-table">
+            <table class="stacked-table">
                 <thead>
                     <tr>
                         <th style="text-align:left;">Player</th>
                         <th>Seasons Played</th>
                         <th>Total Wins</th>
-                        <th>🥇 1st</th>
-                        <th>🥈 2nd</th>
-                        <th>🥉 3rd</th>
+                        <th>1st</th>
+                        <th>2nd</th>
+                        <th>3rd</th>
+                        <th>Last Place</th>
                         <th>Avg Wins</th>
                         <th>Best Season</th>
                         <th>Worst Season</th>
@@ -26,17 +27,24 @@
                 <tbody>
                     {% for stat in stats %}
                     <tr>
-                        <td style="text-align:left; font-weight:700; color:var(--text-primary);">{{ stat.name }}</td>
-                        <td>{{ stat.seasons_played }}</td>
-                        <td style="font-weight:700; color:var(--primary-color);">{{ stat.total_wins }}</td>
-                        <td>{{ stat['1st'] if stat['1st'] > 0 else '-' }}</td>
-                        <td>{{ stat['2nd'] if stat['2nd'] > 0 else '-' }}</td>
-                        <td>{{ stat['3rd'] if stat['3rd'] > 0 else '-' }}</td>
-                        <td>{{ (stat.total_wins / stat.seasons_played)|round(1) if stat.seasons_played > 0 else 0 }}
+                        <td class="stacked-header-cell"
+                            style="text-align:left; font-weight:700; color:var(--text-primary);">{{ stat.name }}</td>
+                        <td><span class="stacked-label">Seasons</span>{{ stat.seasons_played }}</td>
+                        <td style="font-weight:700; color:var(--primary-color);"><span class="stacked-label">Total
+                                Wins</span>{{ stat.total_wins }}</td>
+                        <td><span class="stacked-label">1st</span>{{ stat['1st'] if stat['1st'] > 0 else '-' }}</td>
+                        <td><span class="stacked-label">2nd</span>{{ stat['2nd'] if stat['2nd'] > 0 else '-' }}</td>
+                        <td><span class="stacked-label">3rd</span>{{ stat['3rd'] if stat['3rd'] > 0 else '-' }}</td>
+                        <td><span class="stacked-label">Last Place</span>{{ stat['10th'] if stat['10th'] > 0 else '-' }}
                         </td>
-                        <td style="font-size:0.85rem;"><span style="color:var(--primary-color);font-weight:600;">{{
+                        <td><span class="stacked-label">Avg Wins</span>{{ (stat.total_wins /
+                            stat.seasons_played)|round(1) if stat.seasons_played > 0 else 0 }}
+                        </td>
+                        <td style="font-size:0.85rem;"><span class="stacked-label">Best</span><span
+                                style="color:var(--primary-color);font-weight:600;">{{
                                 stat.best.year }}</span> ({{ stat.best.wins }}W, #{{ stat.best.rank }})</td>
-                        <td style="font-size:0.85rem;"><span style="color:#ff6b6b;font-weight:600;">{{ stat.worst.year
+                        <td style="font-size:0.85rem;"><span class="stacked-label">Worst</span><span
+                                style="color:#ff6b6b;font-weight:600;">{{ stat.worst.year
                                 }}</span> ({{ stat.worst.wins }}W, #{{ stat.worst.rank }})</td>
                     </tr>
                     {% endfor %}
@@ -44,7 +52,8 @@
             </table>
         </div>
 
-        <div
+
+        <div class="undrafted-stats-panel"
             style="background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); border-radius: 12px; padding: 1.5rem; margin-top: 2rem; display: flex; justify-content: space-around; text-align: center;">
             <div>
                 <h4

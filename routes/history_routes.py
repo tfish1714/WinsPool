@@ -19,7 +19,7 @@ def _current_year(games, draft_results=None) -> int:
 
 @router.get("/history")
 async def overall_history(request: Request):
-    standings_master, _, all_games, _, _, all_draft_results, _ = load_data()
+    standings_master, _, all_games, players, _, all_draft_results, _ = load_data()
     current_year = _current_year(all_games)
 
     player_stats: dict = {}
@@ -74,7 +74,7 @@ async def overall_history(request: Request):
                 if p_name not in player_stats:
                     player_stats[p_name] = {
                         "name": p_name, "total_wins": 0, "seasons_played": 0,
-                        "1st": 0, "2nd": 0, "3rd": 0,
+                        "1st": 0, "2nd": 0, "3rd": 0, "10th": 0,
                         "best": {"year": None, "wins": -1, "rank": 999},
                         "worst": {"year": None, "wins": 999, "rank": -1},
                     }
@@ -84,6 +84,7 @@ async def overall_history(request: Request):
                 if rank == 1: ps["1st"] += 1
                 elif rank == 2: ps["2nd"] += 1
                 elif rank == 3: ps["3rd"] += 1
+                elif rank == 10: ps["10th"] += 1
 
                 if wins > ps["best"]["wins"] or (wins == ps["best"]["wins"] and rank < ps["best"]["rank"]):
                     ps["best"] = {"year": yr, "wins": wins, "rank": rank}

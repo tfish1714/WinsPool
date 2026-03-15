@@ -104,7 +104,7 @@ def upload_predictions(excel_path: str):
                     break
         
         if not abbr:
-            print(f"⚠️ Could not find abbreviation for team: {row['Team']}")
+            print(f"Could not find abbreviation for team: {row['Team']}")
             continue
             
         season = int(row['season'])
@@ -136,11 +136,11 @@ def upload_predictions(excel_path: str):
         db.collection("preseason_predictions").document(doc_id).set(data)
         count += 1
         
-    print(f"✅ Uploaded {count} predictions.")
+    print(f"Uploaded {count} predictions.")
 
 if __name__ == "__main__":
     path = "debug/predictions.xlsx"
     if os.path.exists(path):
         upload_predictions(path)
     else:
-        print(f"❌ File not found: {path}")
+        print(f"File not found: {path}")

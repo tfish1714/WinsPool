@@ -8,7 +8,7 @@
     <!-- Use the primary glassmorphism design system -->
     <link rel="icon" href="/static/fishbone.png" type="image/png">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=11">
+    <link rel="stylesheet" href="/static/style.css?v=13">
     {% block head %}{% endblock %}
     <!-- Early Auth Detection to prevent flicker -->
     <script>
@@ -79,7 +79,7 @@
             </div>
 
             <nav class="nav-links" id="nav-links">
-                <a href="/draft" class="tab-btn"><i data-lucide="football"></i> Draft</a>
+                <a href="/draft" class="tab-btn"><i data-lucide="hourglass"></i>Live Draft</a>
                 <a href="/wins-pool" class="tab-btn"><i data-lucide="trophy"></i> Wins Pool</a>
                 <a href="/wins-pool/{{ current_year|default(2024) }}/weekbyweek" class="tab-btn"><i
                         data-lucide="bar-chart-3"></i> Weekly Progress</a>
@@ -98,9 +98,36 @@
                 <button id="logout-btn" class="logout-btn">Logout</button>
             </div>
 
-            <button class="hamburger-btn" onclick="document.getElementById('nav-links').classList.toggle('open')"><i
+            <button class="hamburger-btn" id="drawer-toggle" aria-label="Open navigation menu"><i
                     data-lucide="menu"></i></button>
         </div>
+
+        <!-- Mobile Navigation Drawer -->
+        <div class="nav-drawer-overlay" id="nav-drawer-overlay"></div>
+        <aside class="nav-drawer" id="nav-drawer">
+            <div class="nav-drawer__header">
+                <img src="/static/fishbone.png" alt="Logo" class="nav-logo">
+                <span class="nav-drawer__title">NFL Wins Pool</span>
+                <button class="nav-drawer__close" id="drawer-close" aria-label="Close navigation"><i
+                        data-lucide="x"></i></button>
+            </div>
+            <nav class="nav-drawer__links">
+                <a href="/draft"><i data-lucide="hourglass"></i> Live Draft</a>
+                <a href="/wins-pool"><i data-lucide="trophy"></i> Wins Pool</a>
+                <a href="/wins-pool/{{ current_year|default(2024) }}/weekbyweek"><i data-lucide="bar-chart-3"></i>
+                    Weekly Progress</a>
+                <a href="/playoff-race"><i data-lucide="flag"></i> Playoff Race</a>
+                <a href="/draft-results"><i data-lucide="clipboard-list"></i> Draft Results</a>
+                <a href="/draft/history"><i data-lucide="book-open"></i> Draft History</a>
+                <a href="/headtohead"><i data-lucide="users"></i> H2H</a>
+                <a href="/history"><i data-lucide="crown"></i> All-Time History</a>
+                <a href="/profile"><i data-lucide="user"></i> Profile</a>
+                <a href="/admin" id="admin-nav-link-drawer" class="admin-link" style="display: none;"><i
+                        data-lucide="settings"></i> Admin Portal</a>
+            </nav>
+            <div class="nav-drawer__footer" id="drawer-user-identity"></div>
+        </aside>
+
 
         <!-- Dynamic Page Content -->
         <div id="content">
@@ -114,6 +141,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script type="module" src="/static/js/main.js"></script>
+    <script src="/static/js/responsive.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             if (typeof lucide !== 'undefined') {

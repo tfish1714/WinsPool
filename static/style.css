@@ -1125,14 +1125,20 @@ tr:hover {
     .app-nav {
         margin-top: 0;
         top: 1rem;
-        flex-direction: column;
-        padding: 1rem;
-        gap: 1rem;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.75rem 1rem;
+        gap: 0.75rem;
     }
 
     .brand-box {
-        justify-content: center;
-        width: 100%;
+        justify-content: flex-start;
+        width: auto;
+    }
+
+    .brand-box h1 {
+        font-size: 1.1rem;
     }
 
     .nav-header h1 {
@@ -1140,22 +1146,24 @@ tr:hover {
     }
 
     .hamburger-btn {
-        display: block;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         margin: 0;
-        width: 100%;
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        padding: 0;
     }
 
+    /* Hide the desktop horizontal nav links on mobile */
     .nav-links {
         display: none !important;
-        flex-direction: column;
-        width: 100%;
-        gap: 0.5rem;
-        padding-top: 0.5rem;
-        border-top: 1px solid var(--glass-border);
     }
 
-    .nav-links.open {
-        display: flex !important;
+    /* Hide the desktop user identity on mobile (shown in drawer instead) */
+    .user-identity {
+        display: none !important;
     }
 
     .tab-btn {
@@ -1173,6 +1181,165 @@ tr:hover {
         height: 400px;
         padding: 0.5rem;
     }
+
+    /* Admin tabs: stack vertically on mobile */
+    .admin-tabs {
+        flex-direction: column !important;
+        gap: 0.35rem !important;
+    }
+
+    .admin-tabs .tab-btn {
+        width: 100%;
+        text-align: left;
+    }
+}
+
+/* =============================================================
+   Navigation Drawer (Mobile)
+   ============================================================= */
+
+.nav-drawer-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    z-index: 9998;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.nav-drawer-overlay.open {
+    display: block;
+    opacity: 1;
+}
+
+.nav-drawer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    max-width: 85vw;
+    background: rgba(10, 10, 30, 0.95);
+    border-right: 1px solid var(--glass-border);
+    backdrop-filter: blur(20px);
+    z-index: 9999;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.nav-drawer.open {
+    transform: translateX(0);
+}
+
+.nav-drawer__header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1.25rem 1rem;
+    border-bottom: 1px solid var(--glass-border);
+}
+
+.nav-drawer__title {
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    flex: 1;
+}
+
+.nav-drawer__close {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    transition: background 0.2s;
+}
+
+.nav-drawer__close:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.nav-drawer__links {
+    display: flex;
+    flex-direction: column;
+    padding: 0.75rem 0;
+    flex: 1;
+}
+
+.nav-drawer__links a {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.85rem 1.25rem;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.95rem;
+    font-weight: 500;
+    transition: background 0.2s, color 0.2s;
+    min-height: 44px;
+}
+
+.nav-drawer__links a:hover,
+.nav-drawer__links a:active {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+}
+
+.nav-drawer__links a i {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.nav-drawer__footer {
+    padding: 1rem 1.25rem;
+    border-top: 1px solid var(--glass-border);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.nav-drawer__footer .drawer-user-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.nav-drawer__footer .drawer-logout-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--glass-border);
+    color: var(--text-secondary);
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    width: 100%;
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    transition: background 0.2s;
+    min-height: 44px;
+}
+
+.nav-drawer__footer .drawer-logout-btn:hover {
+    background: rgba(255, 59, 48, 0.15);
+    color: #ff6b6b;
+}
+
+/* Hide drawer elements on desktop */
+@media (min-width: 769px) {
+
+    .nav-drawer,
+    .nav-drawer-overlay {
+        display: none !important;
+    }
 }
 
 /* =====================================================
@@ -1187,12 +1354,12 @@ tr:hover {
 }
 
 .table-container table {
-    min-width: 800px;
+    width: 100%;
     white-space: nowrap;
 }
 
 .desktop-only-table table {
-    min-width: 1200px;
+    width: 100%;
 }
 
 /* Mobile cards: hidden by default, shown on small screens */
@@ -1200,7 +1367,7 @@ tr:hover {
     display: none;
 }
 
-@media (max-width: 850px) {
+@media (max-width: 768px) {
     .desktop-only-table {
         display: none !important;
     }
@@ -2104,4 +2271,441 @@ tr:hover {
     color: var(--text-secondary);
     font-style: italic;
     margin-top: -2px;
+}
+
+/* =============================================================
+   Stacked Row Responsive System
+   =============================================================
+   Desktop (> 768px): Renders as standard horizontal table rows.
+   Mobile  (<= 768px): Each row reflows into a vertical card with
+                        a prominent header and label/value pairs.
+   ============================================================= */
+
+.stacked-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.stacked-table thead {
+    display: table-header-group;
+}
+
+.stacked-table th {
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--glass-border);
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    text-align: left;
+}
+
+.stacked-table td {
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--glass-border);
+    vertical-align: middle;
+}
+
+.stacked-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+/* Mobile label: hidden on desktop, shown on mobile */
+.stacked-label {
+    display: none;
+}
+
+@media (max-width: 768px) {
+
+    .stacked-table,
+    .stacked-table thead,
+    .stacked-table tbody,
+    .stacked-table th,
+    .stacked-table td,
+    .stacked-table tr {
+        display: block;
+    }
+
+    .stacked-table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        border: 0;
+    }
+
+    .stacked-table tbody tr {
+        background: var(--glass-bg);
+        border: 1px solid var(--glass-border);
+        border-radius: 12px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 1rem;
+        backdrop-filter: blur(12px);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+
+    .stacked-table tbody tr:hover {
+        background: var(--glass-bg);
+    }
+
+    .stacked-table td {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        text-align: right;
+        gap: 1rem;
+    }
+
+    .stacked-table td:last-child {
+        border-bottom: none;
+    }
+
+    /* The first td in each row is the "card header" */
+    .stacked-table td.stacked-header-cell {
+        display: block;
+        text-align: left;
+        font-weight: 800;
+        font-size: 1.1rem;
+        color: var(--text-primary);
+        padding-bottom: 0.75rem;
+        margin-bottom: 0.25rem;
+        border-bottom: 1px solid var(--glass-border);
+    }
+
+    .stacked-label {
+        display: inline;
+        color: var(--text-secondary);
+        font-weight: 600;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        text-align: left;
+        flex-shrink: 0;
+    }
+
+    /* Undrafted stats panel stacking */
+    .undrafted-stats-panel {
+        flex-direction: column !important;
+        gap: 1.5rem;
+    }
+
+    .undrafted-stats-panel>div:nth-child(2) {
+        display: none;
+    }
+}
+
+/* =============================================================
+   Stacked Row: Wins Pool Standings (Special Master-Detail)
+   =============================================================
+   The wins pool uses a more complex card layout on mobile where
+   each player's 3 teams are shown as sub-cards within the row.
+   ============================================================= */
+
+@media (max-width: 768px) {
+
+    /* Hide the desktop table wrapper, show the stacked version */
+    .desktop-only-table {
+        display: none !important;
+    }
+
+    .standings-stacked {
+        display: flex !important;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .standings-stacked-card {
+        background: var(--glass-bg);
+        border: 1px solid var(--glass-border);
+        border-radius: 14px;
+        padding: 1.25rem;
+        backdrop-filter: blur(12px);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+
+    .standings-stacked-card__header {
+        display: flex;
+        align-items: baseline;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--glass-border);
+    }
+
+    .standings-stacked-card__rank {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        font-weight: 700;
+    }
+
+    .standings-stacked-card__name {
+        font-size: 1.15rem;
+        font-weight: 800;
+        color: var(--text-primary);
+        flex: 1;
+    }
+
+    .standings-stacked-card__score {
+        font-size: 1.3rem;
+        font-weight: 800;
+        color: var(--accent-gold);
+    }
+
+    .standings-stacked-card__teams {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .standings-stacked-card__team {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        background: rgba(255, 255, 255, 0.03);
+        padding: 0.6rem 0.75rem;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .standings-stacked-card__team img {
+        width: 28px;
+        height: 28px;
+        object-fit: contain;
+        filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.5));
+    }
+
+    .standings-stacked-card__team-info {
+        flex: 1;
+    }
+
+    .standings-stacked-card__team-name {
+        font-weight: 700;
+        font-size: 0.95rem;
+    }
+
+    .standings-stacked-card__team-stats {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+    }
+
+    .standings-stacked-card__tb {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.35rem;
+        background: rgba(0, 0, 0, 0.2);
+        padding: 0.6rem 0.75rem;
+        border-radius: 6px;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        border: 1px dashed rgba(255, 255, 255, 0.1);
+    }
+
+    .standings-stacked-card__tb .tb-label {
+        font-size: 0.6rem;
+    }
+}
+
+/* Hide on desktop, show on mobile */
+.standings-stacked {
+    display: none;
+}
+
+/* =============================================================
+   Bottom Sheet Component (Touch Tooltip Replacement)
+   =============================================================
+   Replaces hover tooltips on touch devices. Activated via tap on
+   .info-trigger elements. Slides up from the bottom of the
+   viewport with a glassmorphism backdrop.
+   ============================================================= */
+
+.bottom-sheet-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 9998;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.bottom-sheet-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.bottom-sheet {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 20px 20px 0 0;
+    padding: 1rem 1.5rem 2rem;
+    z-index: 9999;
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    backdrop-filter: blur(20px);
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.4);
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.bottom-sheet.active {
+    transform: translateY(0);
+}
+
+.bottom-sheet__handle {
+    width: 40px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 2px;
+    margin: 0 auto 1rem;
+}
+
+.bottom-sheet__title {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    margin-bottom: 1rem;
+}
+
+.bottom-sheet__content {
+    color: var(--text-secondary);
+    line-height: 1.8;
+    font-size: 0.95rem;
+}
+
+.bottom-sheet__content .detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.bottom-sheet__content .detail-row:last-child {
+    border-bottom: none;
+}
+
+.info-trigger {
+    display: none;
+    background: rgba(88, 166, 255, 0.15);
+    border: 1px solid rgba(88, 166, 255, 0.3);
+    color: var(--primary-color);
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+    align-items: center;
+    justify-content: center;
+}
+
+.info-trigger:active {
+    background: rgba(88, 166, 255, 0.3);
+    transform: scale(0.95);
+}
+
+@media (max-width: 768px) {
+    .info-trigger {
+        display: inline-flex;
+    }
+}
+
+/* =============================================================
+   Responsive Pandas-Generated Tables (weekbyweek, h2h-table)
+   =============================================================
+   These tables are rendered server-side by pandas .to_html().
+   The JS controller injects data-label attributes on each <td>
+   at runtime so CSS can display them as mobile row labels.
+   ============================================================= */
+
+@media (max-width: 768px) {
+    .weekbyweek-wrap .table-container table {
+        min-width: 0;
+    }
+
+    .weekbyweek-wrap .table-container table,
+    .weekbyweek-wrap .table-container table thead,
+    .weekbyweek-wrap .table-container table tbody,
+    .weekbyweek-wrap .table-container table th,
+    .weekbyweek-wrap .table-container table td,
+    .weekbyweek-wrap .table-container table tr {
+        display: block;
+    }
+
+    .weekbyweek-wrap .table-container table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        border: 0;
+    }
+
+    .weekbyweek-wrap .table-container table tbody tr {
+        background: var(--glass-bg);
+        border: 1px solid var(--glass-border);
+        border-radius: 12px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 1rem;
+        backdrop-filter: blur(12px);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+
+    .weekbyweek-wrap .table-container table td {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.4rem 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        text-align: right;
+        white-space: normal;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .weekbyweek-wrap .table-container table td:last-child {
+        border-bottom: none;
+    }
+
+    .weekbyweek-wrap .table-container table td::before {
+        content: attr(data-label);
+        color: var(--text-secondary);
+        font-weight: 600;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        text-align: left;
+        flex-shrink: 0;
+        margin-right: 1rem;
+    }
+
+    /* First cell in the row is the player name header */
+    .weekbyweek-wrap .table-container table td:first-child {
+        font-weight: 800;
+        font-size: 1rem;
+        text-align: left;
+        border-bottom: 1px solid var(--glass-border);
+        padding-bottom: 0.6rem;
+        margin-bottom: 0.25rem;
+    }
+
+    .weekbyweek-wrap .table-container table td:first-child::before {
+        display: none;
+    }
 }

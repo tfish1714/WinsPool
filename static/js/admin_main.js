@@ -27,7 +27,7 @@ class AdminApp {
     }
 
     setupTabHandlers() {
-        const tabBtns = document.querySelectorAll('.tab-btn');
+        const tabBtns = document.querySelectorAll('.admin-tabs .tab-btn');
         const tabContents = document.querySelectorAll('.tab-content');
 
         tabBtns.forEach(btn => {
@@ -58,6 +58,7 @@ class AdminApp {
             this.players = players;
             UiRenderer.renderPlayerSelectionGrid(players, () => this.updatePlayerCount());
             UiRenderer.renderAdminSeasonDropdown(seasons);
+            this.renderPlayerList(players);
         } catch (e) {
             alert(`Fetch failed: ${e.message}`);
         }
@@ -86,6 +87,173 @@ class AdminApp {
         document.getElementById('recap-generate-ai-btn')?.addEventListener('click', () => this.generateRecapAI());
         document.getElementById('recap-broadcast-btn')?.addEventListener('click', () => this.broadcastRecap());
     }
+
+    /* ------------------------------------------------------------------
+       Player List Rendering
+       ------------------------------------------------------------------ */
+
+    renderPlayerList(players) {
+        const container = document.getElementById('admin-player-list');
+        if (!container) return;
+
+        if (!players || players.length === 0) {
+            container.innerHTML = '<p style="color: var(--text-secondary); font-size: 0.9rem;">No players found.</p>';
+            return;
+        }
+
+        container.innerHTML = '';
+        players.forEach(p => {
+            const card = document.createElement('div');
+            card.className = 'player-mgmt-card';
+            card.style.cssText = 'border: 1px solid var(--glass-border); border-radius: 8px; padding: 0.75rem 1rem; background: rgba(0,0,0,0.15);';
+            card.setAttribute('data-player-id', p.playerId);
+
+            // Display mode
+            const displayHtml = `
+                <div class="player-mgmt-display" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                    <div>
+                        <strong style="color: var(--text-primary);">${this._esc(p.fullName)}</strong>
+                        <span style="color: var(--text-secondary); font-size: 0.85rem; margin-left: 0.5rem;">(${this._esc(p.nickName || '')})</span>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">
+                            ${this._esc(p.email || '')}${p.cell ? ' | ' + this._esc(p.cell) : ''}
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+                        <button class="btn-edit-player btn-primary" style="padding: 0.35rem 0.75rem; font-size: 0.8rem; min-height: 44px; background: #444; border-color: #666;">Edit</button>
+                        <button class="btn-reset-pw btn-primary" style="padding: 0.35rem 0.75rem; font-size: 0.8rem; min-height: 44px; background: #6b4c9a; border-color: #5a3c85;">Reset Password</button>
+                        <button class="btn-temp-pw btn-primary" style="padding: 0.35rem 0.75rem; font-size: 0.8rem; min-height: 44px; background: var(--accent-red); border-color: var(--accent-red);">Set Temp Password</button>
+                    </div>
+                </div>
+            `;
+
+            // Edit mode (hidden by default)
+            const editHtml = `
+                <div class="player-mgmt-edit" style="display: none; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem;">
+                    <input type="text" class="admin-input edit-fullname" placeholder="Full Name" value="${this._esc(p.fullName)}">
+                    <input type="text" class="admin-input edit-nickname" placeholder="Nickname" value="${this._esc(p.nickName || '')}">
+                    <input type="email" class="admin-input edit-email" placeholder="Email" value="${this._esc(p.email || '')}">
+                    <input type="tel" class="admin-input edit-phone" placeholder="Phone" value="${this._esc(p.cell || '')}">
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn-save-edit btn-primary" style="flex: 1; min-height: 44px;">Save Changes</button>
+                        <button class="btn-cancel-edit btn-primary" style="flex: 1; min-height: 44px; background: #333; border-color: #555;">Cancel</button>
+                    </div>
+                </div>
+            `;
+
+            // Temp password input (hidden)
+            const tempPwHtml = `
+                <div class="player-mgmt-temppw" style="display: none; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem;">
+                    <input type="text" class="admin-input temp-pw-input" placeholder="Temporary Password (min 8 chars)">
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn-confirm-temppw btn-primary" style="flex: 1; min-height: 44px; background: var(--accent-red); border-color: var(--accent-red);">Confirm Set Password</button>
+                        <button class="btn-cancel-temppw btn-primary" style="flex: 1; min-height: 44px; background: #333; border-color: #555;">Cancel</button>
+                    </div>
+                </div>
+            `;
+
+            card.innerHTML = displayHtml + editHtml + tempPwHtml;
+            container.appendChild(card);
+
+            // Wire events
+            const editBtn = card.querySelector('.btn-edit-player');
+            const resetBtn = card.querySelector('.btn-reset-pw');
+            const tempPwBtn = card.querySelector('.btn-temp-pw');
+            const saveBtn = card.querySelector('.btn-save-edit');
+            const cancelBtn = card.querySelector('.btn-cancel-edit');
+            const confirmTempBtn = card.querySelector('.btn-confirm-temppw');
+            const cancelTempBtn = card.querySelector('.btn-cancel-temppw');
+            const editPanel = card.querySelector('.player-mgmt-edit');
+            const tempPwPanel = card.querySelector('.player-mgmt-temppw');
+
+            editBtn.addEventListener('click', () => {
+                editPanel.style.display = 'flex';
+                tempPwPanel.style.display = 'none';
+            });
+
+            cancelBtn.addEventListener('click', () => {
+                editPanel.style.display = 'none';
+            });
+
+            saveBtn.addEventListener('click', () => this.savePlayerEdit(p.playerId, card));
+
+            resetBtn.addEventListener('click', () => this.resetPlayerPassword(p.playerId, p.fullName));
+
+            tempPwBtn.addEventListener('click', () => {
+                tempPwPanel.style.display = 'flex';
+                editPanel.style.display = 'none';
+            });
+
+            cancelTempBtn.addEventListener('click', () => {
+                tempPwPanel.style.display = 'none';
+            });
+
+            confirmTempBtn.addEventListener('click', () => this.setTempPassword(p.playerId, card));
+        });
+    }
+
+    _esc(str) {
+        const el = document.createElement('span');
+        el.textContent = str || '';
+        return el.innerHTML;
+    }
+
+    /* ------------------------------------------------------------------
+       CRUD Actions
+       ------------------------------------------------------------------ */
+
+    async savePlayerEdit(targetPlayerId, card) {
+        const fields = {
+            fullName: card.querySelector('.edit-fullname').value.trim(),
+            nickName: card.querySelector('.edit-nickname').value.trim(),
+            email: card.querySelector('.edit-email').value.trim(),
+            cell: card.querySelector('.edit-phone').value.trim()
+        };
+
+        if (!fields.fullName || !fields.email) {
+            alert('Name and Email are required.');
+            return;
+        }
+
+        try {
+            await ApiService.updatePlayer(this.playerId, targetPlayerId, fields);
+            alert('Player updated successfully.');
+            this.fetchInitialData();
+        } catch (e) {
+            alert(`Update failed: ${e.message}`);
+        }
+    }
+
+    async resetPlayerPassword(targetPlayerId, playerName) {
+        if (!confirm(`Reset password for ${playerName}? They will be prompted to set a new password on next login.`)) return;
+
+        try {
+            const data = await ApiService.resetPassword(this.playerId, targetPlayerId);
+            alert(data.message);
+        } catch (e) {
+            alert(`Reset failed: ${e.message}`);
+        }
+    }
+
+    async setTempPassword(targetPlayerId, card) {
+        const pw = card.querySelector('.temp-pw-input').value;
+        if (!pw || pw.length < 8) {
+            alert('Temporary password must be at least 8 characters.');
+            return;
+        }
+
+        try {
+            const data = await ApiService.setTempPassword(this.playerId, targetPlayerId, pw);
+            alert(data.message);
+            card.querySelector('.player-mgmt-temppw').style.display = 'none';
+            card.querySelector('.temp-pw-input').value = '';
+        } catch (e) {
+            alert(`Failed: ${e.message}`);
+        }
+    }
+
+    /* ------------------------------------------------------------------
+       Existing Admin Actions
+       ------------------------------------------------------------------ */
 
     async generateSeason() {
         const season = document.getElementById('season-input').value;
@@ -132,12 +300,19 @@ class AdminApp {
         const fullName = document.getElementById('new-player-name').value;
         const nickName = document.getElementById('new-player-nick').value;
         const email = document.getElementById('new-player-email').value;
+        const phone = document.getElementById('new-player-phone')?.value || '';
 
         if (!fullName || !email) return;
 
         try {
-            await ApiService.createPlayer(this.playerId, fullName, nickName, email);
+            await ApiService.createPlayer(this.playerId, fullName, nickName, email, phone);
             alert('Player created!');
+            document.getElementById('new-player-name').value = '';
+            document.getElementById('new-player-nick').value = '';
+            document.getElementById('new-player-email').value = '';
+            if (document.getElementById('new-player-phone')) {
+                document.getElementById('new-player-phone').value = '';
+            }
             this.fetchInitialData();
         } catch (e) {
             alert(`Creation failed: ${e.message}`);
@@ -201,7 +376,7 @@ class AdminApp {
         try {
             if (btn) {
                 btn.disabled = true;
-                btn.textContent = '🤖 Calling Gemini...';
+                btn.textContent = 'Calling Gemini...';
             }
             const { summary } = await ApiService.generateRecapAI(this.playerId, prompt_data);
             const textEl = document.getElementById('recap-final-text');
@@ -228,7 +403,7 @@ class AdminApp {
             const btn = document.getElementById('recap-broadcast-btn');
             if (btn) {
                 btn.disabled = true;
-                btn.textContent = '📨 Broadcasting...';
+                btn.textContent = 'Broadcasting...';
             }
             const data = await ApiService.saveAndBroadcastRecap(this.playerId, year, week, summary);
             alert(data.message);

@@ -197,7 +197,7 @@ def _save_df_to_local(collection_name: str, df: pd.DataFrame):
     pkl_path.parent.mkdir(exist_ok=True)
     df.to_pickle(pkl_path)
 
-def add_player(full_name: str, nick_name: str, email: str):
+def add_player(full_name: str, nick_name: str, email: str, phone: str = ""):
     """Creates a new player with a unique numeric ID."""
     db = get_db()
     players_df = get_collection_df("players")
@@ -212,6 +212,7 @@ def add_player(full_name: str, nick_name: str, email: str):
         "fullName": full_name,
         "nickName": nick_name,
         "email": email.strip().lower(),
+        "cell": phone.strip() if phone else "",
         "role": "user",
         "failed_setup_attempts": 0,
     }

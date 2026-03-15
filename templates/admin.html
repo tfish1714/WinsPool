@@ -20,14 +20,14 @@
             style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">Draft
             Operations</button>
         <button class="tab-btn" data-tab="player-section"
-            style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">Entrant
+            style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">Player
             Management</button>
         <button class="tab-btn" data-tab="recap-section"
             style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">AI
             Recaps</button>
         <button class="tab-btn" data-tab="system-section"
             style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">System
-            & AI Utilities</button>
+            Operations</button>
     </div>
 
     <!-- Season Management Card -->
@@ -87,18 +87,33 @@
         </div>
     </div>
 
-    <!-- Player Creation Card -->
+    <!-- Player Management Card -->
     <div id="player-section" class="tab-content card-glass hidden" style="height: auto;">
-        <h2>Entrant Management</h2>
-        <p>Create new players to add to future seasons.</p>
+        <h2>Player Management</h2>
+        <p>Create new players, edit profiles, and manage credentials.</p>
 
-        <div class="admin-form" style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem;">
-            <input type="text" id="new-player-name" class="admin-input" placeholder="Full Name">
-            <input type="text" id="new-player-nick" class="admin-input" placeholder="Nickname">
-            <input type="email" id="new-player-email" class="admin-input" placeholder="Email Address">
-            <button id="create-player-btn" class="btn-primary"
-                style="background: var(--accent-purple); border-color: var(--accent-purple);">Add New Player
-                Entrant</button>
+        <!-- Create New Player -->
+        <div
+            style="border: 1px solid var(--glass-border); padding: 1rem; border-radius: 8px; background: rgba(0,0,0,0.2); margin-top: 1rem;">
+            <h4 style="margin: 0 0 0.75rem 0; color: var(--accent-gold);">Add New Player</h4>
+            <div class="admin-form" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                <input type="text" id="new-player-name" class="admin-input" placeholder="Full Name">
+                <input type="text" id="new-player-nick" class="admin-input" placeholder="Nickname">
+                <input type="email" id="new-player-email" class="admin-input" placeholder="Email Address">
+                <input type="tel" id="new-player-phone" class="admin-input" placeholder="Phone Number">
+                <button id="create-player-btn" class="btn-primary"
+                    style="background: var(--accent-purple); border-color: var(--accent-purple);">Add New
+                    Player</button>
+            </div>
+        </div>
+
+        <!-- Existing Players Table -->
+        <div style="margin-top: 1.5rem;">
+            <h4 style="margin: 0 0 0.75rem 0; color: var(--text-primary);">Existing Players</h4>
+            <div id="admin-player-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                <!-- Populated by admin_main.js -->
+                <p style="color: var(--text-secondary); font-size: 0.9rem;">Loading players...</p>
+            </div>
         </div>
     </div>
 
@@ -161,9 +176,10 @@
         </div>
     </div>
 
-    <!-- Utilities Card -->
+    <!-- System Operations Card -->
     <div id="system-section" class="tab-content card-glass hidden" style="height: auto;">
-        <h2>System Utilities</h2>
+        <h2>System Operations</h2>
+        <p>Developer and operations utilities for data management.</p>
         <div style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem;">
             <button id="scrape-predictions-btn" class="btn-primary"
                 style="width: 100%; background: #333; border-color: #555;">Run Preseason Predictor Agent</button>

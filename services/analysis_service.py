@@ -48,6 +48,17 @@ def player_winsbyWeek(schedule, sorted_players=None):
     record_by_week['Total'] = total_wins_losses
     result_df = record_by_week.T
 
+    # Sort so latest week is at the top (descending), with Total first
+    def _week_sort_key(label):
+        if label == 'Total':
+            return (0, 0)
+        try:
+            num = int(label.replace('Week ', ''))
+            return (1, -num)
+        except ValueError:
+            return (2, 0)
+    result_df = result_df.reindex(sorted(result_df.index, key=_week_sort_key))
+
     # Rename the undrafted sentinel index (−1000) to a human-readable label.
     result_df = result_df.rename(columns=lambda c: 'Undrafted' if str(c) in ('-1000', '-1000.0') else c)
 
@@ -348,7 +359,7 @@ def get_enriched_schedule(games, draft_results, players, season):
     
     # Calculate Global Team Records (Wins-Losses-Ties) for the season
     team_records = {}
-    played_games = games[(games['season'] == season) & (games['result'].notna()) & (games['result'] != -1000)]
+    played_games = games[(games['season'] == season) & (games['result'].notna()) & (games['result'] != -1000) & (games['game_type'].eq('REG'))]
     
     for _, row in played_games.iterrows():
         away = row['away_team']
