@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block title %}NFL Game Schedule — {{ year }}{% endblock %}
+
+{% block content %}
+<main class="dashboard-main">
+    <div class="card-glass page-card">
+
+        <!-- Header + Year Selector -->
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
+            <h2><i data-lucide="calendar"></i> Game Schedule — {{ year }}</h2>
+            <div class="year-selector">
+                <label for="year-pick">Season:</label>
+                <select id="year-pick" onchange="window.location='/schedule/' + this.value">
+                    {% for y in available_years %}
+                    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        {% if schedule %}
+        <!-- Week Carousel -->
+        <div class="week-carousel-container" style="margin-top: 2rem;">
+            <div class="week-carousel" id="week-carousel">
+                {% for w in unique_weeks %}
+                <div class="week-item {% if w==current_week %}active{% endif %}" data-week="{{ w }}"
+                    onclick="filterByWeek('{{ w }}')">
+                    Week {{ w }}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="schedule-container" id="schedule-container" style="margin-top: 1.5rem;">
+            {% set ns = namespace(last_date=none) %}
+            {% for row in schedule %}
+            {% set current_date = row['gameday'].strftime('%A, %b %d') if row['gameday'] and row['gameday'] != -1000
+            else 'Unknown Date' %}
+
+            {% if current_date != ns.last_date %}
+            <div class="date-group-header" data-week="{{ row['week'] }}">
+                {{ current_date }}
+            </div>
+            {% set ns.last_date = current_date %}
+            {% endif %}
+
+            <div class="game-card" data-week="{{ row['week'] }}">
+                <div class="game-teams">
+                    <!-- Away Team -->
+                    <div
+                        class="team-row {% if row['result'] is number and row['result'] < 0 and row['result'] != -1000 %}winner-highlight{% endif %}">
+                        <img src="{{ get_team_logo(row['away_team']) }}" class="tiny-logo" alt="">
+                        <div class="team-name-box">
+                            <span class="team-name-text">
+                                {{ row['away_team'] }} <span class="team-record-sub">({{ row['away_record'] }})</span>
+                                {% if row['spread_line'] is not none and row['spread_line']|float < 0 %} <span
+                                    class="odds-chip"> {{ row['spread_line'] }}</span>
+                            {% elif row['spread_line'] == 0 or row['spread_line'] == 'PK' %}
+                            <span class="odds-chip">PK</span>
+                            {% endif %}
+                            </span>
+                            <span class="player-name-text">
+                                {{ row['fullName_away'] if row['fullName_away'] not in (none, -1000, '-1000') else '—'
+                                }}
+                            </span>
+                        </div>
+                        <span class="score-text">{{ row['away_score'] if row['away_score'] not in (none, -1000) else '—'
+                            }}</span>
+                    </div>
+                    <!-- Home Team -->
+                    <div
+                        class="team-row {% if row['result'] is number and row['result'] > 0 and row['result'] != -1000 %}winner-highlight{% endif %}">
+                        <img src="{{ get_team_logo(row['home_team']) }}" class="tiny-logo" alt="">
+                        <div class="team-name-box">
+                            <span class="team-name-text">
+                                {{ row['home_team'] }} <span class="team-record-sub">({{ row['home_record'] }})</span>
+                                {% if row['spread_line'] is not none and row['spread_line']|float > 0 %}
+                                <span class="odds-chip"> -{{ row['spread_line'] }}</span>
+                                {% endif %}
+                            </span>
+                            <span class="player-name-text">
+                                {{ row['fullName_home'] if row['fullName_home'] not in (none, -1000, '-1000') else '—'
+                                }}
+                            </span>
+                        </div>
+                        <span class="score-text">{{ row['home_score'] if row['home_score'] not in (none, -1000) else '—'
+                            }}</span>
+                    </div>
+                </div>
+                <div class="game-info-aside">
+                    <span
+                        class="game-status-label {% if row['result'] != -1000 %}status-final{% else %}status-live{% endif %}">
+                        {{ 'Final' if row['result'] != -1000 else 'Live' }}
+                    </span>
+                    {% if row['spread_line'] is not none or row['total_line'] is not none %}
+                    <div class="game-odds"
+                        style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px;">
+                        {% if row['total_line'] is not none %}
+                        <div>O/U: {{ row['total_line'] }}</div>
+                        {% endif %}
+
+                        {% if row['pred_winner'] %}
+                        <div class="game-prediction"
+                            style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1); color: var(--accent-gold); font-weight: 600;">
+                            <span title="AI Prediction Logic"><i data-lucide="sparkles"></i> Predictor:</span>
+                            <div style="font-size: 0.75rem; color: #fff;">
+                                Win: {{ row['pred_winner'] }} ({{ row['pred_su_conf'] }}%)
+                            </div>
+                            <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: normal;">
+                                ATS: {{ row['pred_ats_pick'] }}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state" style="margin-top: 2rem; text-align: center; color: var(--text-secondary);">
+            <i data-lucide="calendar-x" style="width: 48px; height: 48px; opacity: 0.5; margin-bottom: 1rem;"></i>
+            <p>No games found for the {{ year }} season.</p>
+        </div>
+        {% endif %}
+
+    </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/standings.js"></script>
+{% endblock %}

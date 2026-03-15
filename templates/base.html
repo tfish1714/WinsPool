@@ -8,7 +8,7 @@
     <!-- Use the primary glassmorphism design system -->
     <link rel="icon" href="/static/fishbone.png" type="image/png">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=13">
+    <link rel="stylesheet" href="/static/style.css?v=15">
     {% block head %}{% endblock %}
     <!-- Early Auth Detection to prevent flicker -->
     <script>
@@ -81,6 +81,7 @@
             <nav class="nav-links" id="nav-links">
                 <a href="/draft" class="tab-btn"><i data-lucide="hourglass"></i>Live Draft</a>
                 <a href="/wins-pool" class="tab-btn"><i data-lucide="trophy"></i> Wins Pool</a>
+                <a href="/schedule" class="tab-btn"><i data-lucide="calendar"></i> Schedule</a>
                 <a href="/wins-pool/{{ current_year|default(2024) }}/weekbyweek" class="tab-btn"><i
                         data-lucide="bar-chart-3"></i> Weekly Progress</a>
                 <a href="/playoff-race" class="tab-btn"><i data-lucide="flag"></i> Playoff Race</a>
@@ -114,6 +115,7 @@
             <nav class="nav-drawer__links">
                 <a href="/draft"><i data-lucide="hourglass"></i> Live Draft</a>
                 <a href="/wins-pool"><i data-lucide="trophy"></i> Wins Pool</a>
+                <a href="/schedule"><i data-lucide="calendar"></i> Schedule</a>
                 <a href="/wins-pool/{{ current_year|default(2024) }}/weekbyweek"><i data-lucide="bar-chart-3"></i>
                     Weekly Progress</a>
                 <a href="/playoff-race"><i data-lucide="flag"></i> Playoff Race</a>

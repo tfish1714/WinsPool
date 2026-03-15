@@ -65,9 +65,6 @@ async def wins_pool_by_year(request: Request, year: int):
             "current_year": current_year,
             "year": year,
             "available_years": available_years,
-            "schedule": schedule_enriched.to_dict(orient="records") if not schedule_enriched.empty else [],
-            "unique_weeks": unique_weeks,
-            "current_week": latest_week,
             "recap": recap["summary"] if recap else None,
             "h2h_html": h2h_df.to_html(classes="table table-striped", border=0) if not h2h_df.empty else "",
         })
@@ -129,4 +126,34 @@ async def playoff_race_by_year(request: Request, year: int):
         "year": year,
         "current_year": _current_year(games),
         "available_years": get_available_years(all_draft_results, all_games),
+    })
+@router.get("/schedule")
+async def schedule_redirect():
+    _, _, games, _, _, _, _ = load_data()
+    s, _ = get_latest_season_and_week(games)
+    return RedirectResponse(f"/schedule/{s}")
+
+
+@router.get("/schedule/{year}")
+async def schedule_by_year(request: Request, year: int):
+    all_st, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
+
+    games = all_games[all_games['season'] == year] if not all_games.empty else all_games
+    draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
+
+    schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
+    latest_week = get_latest_week_for_year(games, year)
+    unique_weeks = (
+        sorted(schedule_enriched["week"].dropna().astype(int).unique().tolist())
+        if not schedule_enriched.empty and "week" in schedule_enriched.columns else []
+    )
+
+    return templates.TemplateResponse("schedule.html", {
+        "request": request,
+        "schedule": schedule_enriched.to_dict(orient="records") if not schedule_enriched.empty else [],
+        "unique_weeks": unique_weeks,
+        "current_week": latest_week,
+        "year": year,
+        "available_years": get_available_years(all_draft_results, all_games),
+        "current_year": _current_year(all_games),
     })
