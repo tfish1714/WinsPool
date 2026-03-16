@@ -47,15 +47,14 @@ def _init_firebase():
     return firestore.client()
 
 
-use_local_env = os.environ.get("USE_LOCAL_DATA", "False").lower() == "true"
+def _get_project_root() -> pathlib.Path:
+    return pathlib.Path(__file__).parent.parent
 
-# Only initialize Firebase when not in local-data mode
-if not use_local_env:
-    _init_firebase()
-
+def _is_local() -> bool:
+    return os.environ.get("USE_LOCAL_DATA", "False").lower() == "true"
 
 def get_db():
-    if use_local_env:
+    if _is_local():
         return None
     import firebase_admin
     if not firebase_admin._apps:
@@ -78,10 +77,10 @@ def signal_data_update():
 
 def _mutate_local(collection_name: str, doc_id: str, data: dict, action: str = "set"):
     """Internal helper to reflect mutations onto local .pkl files when in local mode."""
-    if os.environ.get("USE_LOCAL_DATA", "False").lower() != "true":
+    if not _is_local():
         return
     
-    pkl_path = pathlib.Path(".local_db") / f"{collection_name}.pkl"
+    pkl_path = _get_project_root() / ".local_db" / f"{collection_name}.pkl"
     pkl_path.parent.mkdir(exist_ok=True)
     
     if pkl_path.exists():
@@ -117,9 +116,8 @@ def get_collection_df(collection_name: str, filters: list = None) -> pd.DataFram
     Falls back to local .pkl cache when USE_LOCAL_DATA=True.
     filters: list of (field, operator, value) tuples, e.g. [('season', '==', 2024)]
     """
-    use_local = os.environ.get("USE_LOCAL_DATA", "False").lower() == "true"
-    if use_local:
-        pkl_path = pathlib.Path(".local_db") / f"{collection_name}.pkl"
+    if _is_local():
+        pkl_path = _get_project_root() / ".local_db" / f"{collection_name}.pkl"
         if pkl_path.exists():
             try:
                 df = pd.read_pickle(pkl_path)
@@ -191,9 +189,9 @@ def increment_failed_setup_attempts(player_id: str, new_count: int, lockout_unti
     update_player_profile(player_id, update_data)
 
 def _save_df_to_local(collection_name: str, df: pd.DataFrame):
-    if os.environ.get("USE_LOCAL_DATA", "False").lower() != "true":
+    if not _is_local():
         return
-    pkl_path = pathlib.Path(".local_db") / f"{collection_name}.pkl"
+    pkl_path = _get_project_root() / ".local_db" / f"{collection_name}.pkl"
     pkl_path.parent.mkdir(exist_ok=True)
     df.to_pickle(pkl_path)
 
@@ -427,38 +425,33 @@ def get_weekly_recap(year: int, week: int):
     return doc.to_dict() if doc.exists else None
 
 def save_metadata(doc_id: str, data: dict):
-    """Saves arbitrary metadata to Firestore and local cache."""
+    """Saves arbitrary metadata to Firestore and local JSON cache."""
     db = get_db()
     if db:
         db.collection("metadata").document(doc_id).set(data)
     
-    if os.environ.get("USE_LOCAL_DATA", "False").lower() == "true":
-        local_path = pathlib.Path(".local_db") / "metadata.pkl"
+    if _is_local():
+        import json
+        meta_dir = _get_project_root() / ".local_db" / "metadata"
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        json_path = meta_dir / f"{doc_id}.json"
+        
         try:
-            if local_path.exists():
-                df = pd.read_pickle(local_path)
-                df = df[df['id'] != doc_id]
-                new_row = pd.DataFrame([{"id": doc_id, **data}])
-                df = pd.concat([df, new_row], ignore_index=True)
-            else:
-                df = pd.DataFrame([{"id": doc_id, **data}])
-            _save_df_to_local("metadata", df)
+            with open(json_path, 'w') as f:
+                json.dump(data, f, indent=2, default=str)
         except Exception as e:
             print(f"Warning: Failed to persist metadata locally: {e}")
 
 def get_metadata(doc_id: str):
-    """Retrieves arbitrary metadata from Firestore or local cache."""
+    """Retrieves arbitrary metadata from Firestore or local JSON cache."""
     db = get_db()
     if not db:
-        local_path = pathlib.Path(".local_db") / "metadata.pkl"
-        if local_path.exists():
+        import json
+        json_path = _get_project_root() / ".local_db" / "metadata" / f"{doc_id}.json"
+        if json_path.exists():
             try:
-                df = pd.read_pickle(local_path)
-                match = df[df['id'] == doc_id]
-                if not match.empty:
-                    res = match.iloc[0].to_dict()
-                    res.pop('id', None)
-                    return res
+                with open(json_path, 'r') as f:
+                    return json.load(f)
             except Exception:
                 pass
         return None

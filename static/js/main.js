@@ -39,10 +39,34 @@ class App {
         // 2. Auth Logic
         this.setupAuthHandlers();
 
-        // 3. Page Routing
+        // 3. Page Routing & Data Bundles
         const path = window.location.pathname;
+        await this.handleDataBundles(path);
+
         if (path === '/draft') {
             await this.initDraftPage();
+        }
+    }
+
+    /**
+     * Checks if the current year/season is optimized with a Data Bundle.
+     * If so, loads it into the local cache proactively.
+     */
+    async handleDataBundles(path) {
+        try {
+            const config = await ApiService.fetchDropdownConfig();
+            this.bundledSeasons = config.bundled_seasons || [];
+
+            // Extract year from path (e.g., /wins-pool/2024 or /schedule/2024)
+            const match = path.match(/\/(?:wins-pool|schedule|draft-results|h2h|week-by-week|playoff-race)\/(\d{4})/);
+            const currentYear = match ? parseInt(match[1]) : null;
+
+            if (currentYear && this.bundledSeasons.includes(currentYear)) {
+                console.log(`[App] Current year ${currentYear} is optimized. Loading Data Bundle...`);
+                await BundleService.loadSeasonBundle(currentYear);
+            }
+        } catch (e) {
+            console.warn('[App] Failed to initialize bundles/metadata', e);
         }
     }
 

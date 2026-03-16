@@ -7,7 +7,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from services.data_service import (
-    load_data, get_available_years, get_draft_years, get_active_season,
+    load_data, get_dropdown_config,
 )
 from services.draft_service import load_draft_state, save_pick, undo_pick, reset_pick
 from services.db_service import get_collection_df, add_draft_order, add_draft_rule
@@ -17,8 +17,9 @@ router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
 
-def _current_year(games, draft_results=None) -> int:
-    return get_active_season(games, draft_results)
+def _current_year() -> int:
+    config = get_dropdown_config()
+    return config.get("latest_season", 2024) if config else 2024
 
 
 def _format_pick_time(seconds: int) -> str:
@@ -68,8 +69,9 @@ async def serve_draft_board(request: Request):
 
 @router.get("/draft-results")
 async def draft_results_redirect():
-    _, _, games, _, _, draft_results, _ = load_data()
-    return RedirectResponse(f"/draft/{_current_year(games)}")
+    config = get_dropdown_config()
+    s = config.get("latest_season", 2024) if config else 2024
+    return RedirectResponse(f"/draft/{s}")
 
 
 @router.get("/admin")
@@ -213,7 +215,7 @@ async def route_draft_history(request: Request):
         "sorted_teams": sorted_teams,
         "player_first_picks": player_first_picks,
         "team_first_picks": team_first_picks,
-        "current_year": _current_year(games),
+        "current_year": _current_year(),
     })
 
 
@@ -302,12 +304,14 @@ async def route_draft_results_by_year(request: Request, year: int):
     merged["projected_wins"] = merged.apply(get_proj, axis=1)
     merged["draft_value"] = merged.apply(calculate_draft_value, axis=1)
 
+    config = get_dropdown_config()
+
     return templates.TemplateResponse("draft_results.html", {
         "request": request,
         "data": merged.to_dict(orient="records"),
         "year": year,
-        "current_year": _current_year(games),
-        "available_years": get_draft_years(all_draft_results),
+        "current_year": _current_year(),
+        "available_years": config.get("available_seasons", [2024]) if config else [2024],
         "best_overall": best_overall,
         "best_by_round": best_by_round,
         "quickest": quickest,

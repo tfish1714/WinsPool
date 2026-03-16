@@ -72,6 +72,16 @@ def main():
     for collection, season_col in COLLECTIONS:
         dump_collection(collection, season_col)
 
+    # Finally, run the dropdown metadata optimization to ensure local and remote
+    # dropdown_config documents are up to date with the fresh data.
+    log.info("\nUpdating dropdown metadata optimization...")
+    try:
+        from scripts.update_metadata_dropdowns import update_dropdown_metadata
+        update_dropdown_metadata()
+        log.info("  ✓ Dropdown metadata updated.")
+    except Exception as e:
+        log.error(f"  ✗ Failed to update dropdown metadata: {e}")
+
     log.info("\nLocal cache refresh complete.")
     log.info(f"Files written to: {LOCAL_DB.resolve()}")
 

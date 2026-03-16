@@ -10,7 +10,30 @@ import pandas as pd
 import numpy as np
 import time
 from typing import Tuple, Dict, Any, List
-from services.db_service import get_collection_df
+from services.db_service import get_collection_df, get_metadata
+
+def get_dropdown_config():
+    """FETCH ONLY the thin metadata document for dropdowns. No over-fetching."""
+    return get_metadata("dropdown_config")
+
+def is_season_bundled(year: int) -> bool:
+    """Checks if a season's data has been optimized into a local bundle + analysis file."""
+    bundle_path = os.path.join("static", "bundles", f"{year}_season_bundle.txt")
+    analysis_path = os.path.join("static", "bundles", f"{year}_analysis.json")
+    return os.path.exists(bundle_path) and os.path.exists(analysis_path)
+
+def get_bundled_analysis(year: int) -> Dict[str, Any]:
+    """Loads pre-computed standings and schedule data from the local bundle cache."""
+    import json
+    path = os.path.join("static", "bundles", f"{year}_analysis.json")
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading bundled analysis for {year}: {e}")
+    return {}
+
 from services.utils import get_team_logo_url
 
 # Constants
@@ -439,7 +462,15 @@ def get_season_progress(season: int, week: int) -> Dict[str, Any]:
         })
         
     # Current Standings & Best Picks
-    wins_pool_standings = pd.merge(today_standings, today_draft_results, on=['team', 'season'])
+    if today_draft_results.empty or 'team' not in today_draft_results.columns:
+        wins_pool_standings = pd.DataFrame()
+    elif today_standings.empty or 'team' not in today_standings.columns:
+        wins_pool_standings = today_draft_results.copy()
+        wins_pool_standings['wins'] = 0
+        wins_pool_standings['scored'] = 0
+        wins_pool_standings['allowed'] = 0
+    else:
+        wins_pool_standings = pd.merge(today_standings, today_draft_results, on=['team', 'season'])
     
     if not wins_pool_standings.empty and 'scored' in wins_pool_standings.columns and 'allowed' in wins_pool_standings.columns:
         wins_pool_standings['ptDiff'] = wins_pool_standings['scored'] - wins_pool_standings['allowed']

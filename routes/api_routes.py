@@ -8,12 +8,14 @@ from fastapi.responses import JSONResponse
 
 from services.data_service import (
     load_data, get_latest_season_and_week, get_season_progress,
+    is_season_bundled, get_bundled_analysis
 )
 from services.db_service import (
     get_collection_df, add_draft_order, add_draft_rule, delete_draft_results_for_season,
     get_player_by_email, verify_password, get_password_hash, 
     update_player_credentials, increment_failed_setup_attempts,
-    update_player_profile, add_player, delete_season_data, get_player_role
+    update_player_profile, add_player, delete_season_data, get_player_role,
+    get_metadata
 )
 from services.draft_service import load_draft_state, wipe_draft_cache, sanitize_state
 import services.analysis_service as analysis
@@ -25,6 +27,23 @@ import re
 
 router = APIRouter(prefix="/api")
 
+@router.get("/config/firebase")
+async def get_firebase_config():
+    """Returns the public Firebase configuration for the frontend."""
+    return {
+        "apiKey": os.environ.get("FIREBASE_API_KEY", ""),
+        "authDomain": os.environ.get("FIREBASE_AUTH_DOMAIN", ""),
+        "projectId": os.environ.get("FIREBASE_PROJECT_ID", ""),
+        "storageBucket": os.environ.get("FIREBASE_STORAGE_BUCKET", ""),
+        "messagingSenderId": os.environ.get("FIREBASE_MESSAGING_SENDER_ID", ""),
+        "appId": os.environ.get("FIREBASE_APP_ID", "")
+    }
+
+@router.get("/metadata/dropdown_config")
+async def fetch_dropdown_config():
+    """Retrieve pre-computed dropdown metadata (seasons, weeks, bundled list)."""
+    return get_metadata("dropdown_config")
+
 # ADMIN_CODE removed - using role-based auth viaplayerId
 
 
@@ -34,15 +53,26 @@ def fetch_progress(season: str, week: str):
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_route = time.time()
     try:
+        # Determine target season first to check Fast Path
+        # We need dropdown_config for 'latest' resolution
+        config = get_metadata("dropdown_config")
+        
+        if season.lower() == "latest":
+            target_season = config.get("latest_season", 2024)
+        else:
+            target_season = int(season)
+
+        # FAST PATH: Check for pre-computed analysis JSON (Zero-cost)
+        if is_season_bundled(target_season):
+            bundled = get_bundled_analysis(target_season)
+            if bundled and "standings_progress" in bundled:
+                return JSONResponse(content=bundled["standings_progress"])
+
+        # Fallback to dynamic calculation (requires full data load)
         _, _, games, _, _, _, _ = load_data()
 
         if games.empty or "season" not in games.columns:
             return JSONResponse(content={"labels": [], "datasets": []})
-
-        if season.lower() == "latest":
-            target_season, _ = get_latest_season_and_week(games)
-        else:
-            target_season = int(season)
 
         if week.lower() == "latest":
             s_games = games[games["season"] == target_season]
@@ -81,6 +111,13 @@ def get_standings(year: int):
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_route = time.time()
     try:
+        # FAST PATH: Standings table data
+        if is_season_bundled(year):
+            bundled = get_bundled_analysis(year)
+            if bundled and "standings_progress" in bundled:
+                # Analysis JSON stores standings as records already
+                return JSONResponse(content=sanitize_state(bundled["standings_progress"]["standings"]))
+
         standings, _, _, players, _, draft_results, _ = load_data(year=year)
         sorted_df = analysis.calculate_wins_pool_standings(standings, draft_results, players, year)
         # Ensure we return expected keys for UiRenderer if it's being used
@@ -101,6 +138,12 @@ def get_schedule(year: int):
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_route = time.time()
     try:
+        # FAST PATH: Schedule grid data
+        if is_season_bundled(year):
+            bundled = get_bundled_analysis(year)
+            if bundled and "full_schedule" in bundled:
+                return JSONResponse(content=sanitize_state(bundled["full_schedule"]))
+
         _, _, games, players, _, draft_results, _ = load_data(year=year)
         schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
         if is_debug:

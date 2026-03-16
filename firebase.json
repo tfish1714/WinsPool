@@ -33,5 +33,17 @@
                 "destination": "/index.html"
             }
         ]
-    }
+    },
+    "functions": [
+        {
+            "source": "functions",
+            "codebase": "default",
+            "ignore": [
+                ".venv",
+                "**/.*",
+                "**/node_modules/**"
+            ],
+            "runtime": "python311"
+        }
+    ]
 }

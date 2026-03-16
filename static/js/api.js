@@ -40,6 +40,9 @@ export const ApiService = {
     async generateRecap(year, week) {
         return fetchWithTimeout(`${API_BASE}/ai/recap?year=${year}&week=${week}`);
     },
+    async fetchDropdownConfig() {
+        return fetchWithTimeout(`${API_BASE}/metadata/dropdown_config`);
+    },
 
     // --- Admin API ---
     async fetchPlayers(playerId) {

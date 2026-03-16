@@ -142,6 +142,18 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Firebase SDK (v10+) -->
+    <script type="importmap">
+    {
+      "imports": {
+        "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"
+      }
+    }
+    </script>
+    <script type="module" src="/static/js/firebase_init.js"></script>
+    <script type="module" src="/static/js/bundle_service.js"></script>
     <script type="module" src="/static/js/main.js"></script>
     <script src="/static/js/responsive.js"></script>
     <script>

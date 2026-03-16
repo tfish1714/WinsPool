@@ -1,0 +1,4 @@
+# Firebase Functions requirements
+firebase-functions~=0.1.0
+firebase-admin~=6.2.0
+pandas~=2.0.0

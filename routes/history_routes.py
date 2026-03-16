@@ -4,15 +4,16 @@ from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from services.data_service import load_data, get_available_years, get_active_season
+from services.data_service import load_data, get_dropdown_config
 import services.analysis_service as analysis
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
 
-def _current_year(games, draft_results=None) -> int:
-    return get_active_season(games, draft_results)
+def _current_year() -> int:
+    config = get_dropdown_config()
+    return config.get("latest_season", 2024) if config else 2024
 
 
 # ─── Overall History ──────────────────────────────────────────────────────────
@@ -20,7 +21,7 @@ def _current_year(games, draft_results=None) -> int:
 @router.get("/history")
 async def overall_history(request: Request):
     standings_master, _, all_games, players, _, all_draft_results, _ = load_data()
-    current_year = _current_year(all_games)
+    current_year = _current_year()
 
     player_stats: dict = {}
     season_records: list = []
@@ -51,7 +52,8 @@ async def overall_history(request: Request):
         undrafted_worst["wins"] = 0
 
     # available_years derived once
-    available_years = get_available_years(all_draft_results, all_games)
+    config = get_dropdown_config()
+    available_years = config.get("available_seasons", []) if config else []
 
     for yr in available_years:
         try:
@@ -112,20 +114,22 @@ async def overall_history(request: Request):
 
 @router.get("/headtohead")
 async def headtohead_redirect():
-    _, _, games, _, _, draft_results, _ = load_data()
-    return RedirectResponse(f"/headtohead/{get_active_season(games, draft_results)}")
+    config = get_dropdown_config()
+    s = config.get("latest_season", 2024) if config else 2024
+    return RedirectResponse(f"/headtohead/{s}")
 
 
 @router.get("/headtohead/history")
 async def headtohead_history(request: Request):
     # Load Master Data once
     standings_master, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
-    current_year = _current_year(all_games)
+    current_year = _current_year()
 
     all_h2h = []
     all_schedules = []
 
-    available_years = get_available_years(all_draft_results, all_games)
+    config = get_dropdown_config()
+    available_years = config.get("available_seasons", []) if config else []
 
     for yr in available_years:
         try:
@@ -177,10 +181,12 @@ async def headtohead_by_year(request: Request, year: int):
     except Exception:
         h2h_html = ""
 
+    config = get_dropdown_config()
+
     return templates.TemplateResponse("headtohead.html", {
         "request": request,
         "h2h_html": h2h_html,
         "year": year,
-        "current_year": _current_year(games),
-        "available_years": get_available_years(all_draft_results, all_games),
+        "current_year": _current_year(),
+        "available_years": config.get("available_seasons", [2024]) if config else [2024],
     })

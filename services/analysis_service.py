@@ -326,28 +326,44 @@ def get_enriched_schedule(games, draft_results, players, season):
     import time
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_op = time.time()
-    if games.empty or draft_results.empty or 'season' not in draft_results.columns:
+    if games is None or games.empty or draft_results is None or draft_results.empty or 'season' not in draft_results.columns:
         return pd.DataFrame()
     today_games = games[(games['season'] == season) & (games.get('game_type', pd.Series(['REG']*len(games))).eq('REG'))].copy() if 'game_type' in games.columns else games[games['season'] == season].copy()
     today_draft_results = draft_results[draft_results['season'] == season].copy()
     
+    # Defensive check: ensure merge keys exist
+    if 'team' not in today_draft_results.columns or 'season' not in today_draft_results.columns:
+        return pd.DataFrame()
+    if 'away_team' not in today_games.columns or 'home_team' not in today_games.columns:
+        return pd.DataFrame()
+
     # Add away team player logic
     away_merged = pd.merge(today_games, today_draft_results, left_on=['away_team','season'], right_on=['team','season'], how='left')
-    away_merged = pd.merge(away_merged, players, on='playerId', how='left')
-    away_merged.rename(columns={'fullName': 'fullName_away'}, inplace=True)
+    if 'playerId' in away_merged.columns and 'playerId' in players.columns:
+        away_merged = pd.merge(away_merged, players, on='playerId', how='left')
+    if 'fullName' in away_merged.columns:
+        away_merged.rename(columns={'fullName': 'fullName_away'}, inplace=True)
+    else:
+        away_merged['fullName_away'] = "Unknown"
     
     # Add home team player logic
     final_merged = pd.merge(away_merged, today_draft_results, left_on=['home_team','season'], right_on=['team','season'], how='left', suffixes=('', '_home_draft'))
-    final_merged = pd.merge(final_merged, players, left_on='playerId_home_draft', right_on='playerId', how='left', suffixes=('', '_home_player'))
-    final_merged.rename(columns={'fullName': 'fullName_home'}, inplace=True)
+    if 'playerId_home_draft' in final_merged.columns and 'playerId' in players.columns:
+        final_merged = pd.merge(final_merged, players, left_on='playerId_home_draft', right_on='playerId', how='left', suffixes=('', '_home_player'))
+    if 'fullName' in final_merged.columns:
+        final_merged.rename(columns={'fullName': 'fullName_home'}, inplace=True)
+    else:
+        final_merged['fullName_home'] = "Unknown"
     
     # Calculate winner mapping
     final_merged['winning_team'] = np.where(final_merged['result'] > 0, final_merged['home_team'], 
                                    np.where(final_merged['result'] < 0, final_merged['away_team'], np.nan))
                                    
     final_merged = pd.merge(final_merged, today_draft_results, left_on=['winning_team','season'],right_on=['team','season'], how='left', suffixes=('', '_winner'))
-    final_merged = pd.merge(final_merged, players, left_on='playerId_winner', right_on='playerId', how='left', suffixes=('', '_winner_player'))
-    final_merged.rename(columns={'fullName': 'fullName'}, inplace=True)
+    if 'playerId_winner' in final_merged.columns and 'playerId' in players.columns:
+        final_merged = pd.merge(final_merged, players, left_on='playerId_winner', right_on='playerId', how='left', suffixes=('', '_winner_player'))
+    if 'fullName' in final_merged.columns:
+        final_merged.rename(columns={'fullName': 'fullName'}, inplace=True)
     
     # UI Formatting requirements from the user's legacy Flask code
     final_merged['gameday'] = pd.to_datetime(final_merged['gameday'], format='%Y-%m-%d', errors='coerce')
@@ -398,12 +414,22 @@ def get_enriched_schedule(games, draft_results, players, season):
 
 def calculate_wins_pool_standings(standings, draft_results, players, season, games=None):
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
-    if draft_results.empty or 'season' not in draft_results.columns:
+    if draft_results is None or draft_results.empty or 'season' not in draft_results.columns:
         return pd.DataFrame()
-    today_standings = standings[standings['season'] == season].copy() if not standings.empty and 'season' in standings.columns else pd.DataFrame()
+    today_standings = standings[standings['season'] == season].copy() if standings is not None and not standings.empty and 'season' in standings.columns else pd.DataFrame()
     today_draft_results = draft_results[draft_results['season'] == season].copy()
     
-    wins_pool_standings = pd.merge(today_standings, today_draft_results, on=['team', 'season'])
+    # Defensive check: ensure merge keys exist
+    if 'team' not in today_draft_results.columns or 'season' not in today_draft_results.columns:
+        return pd.DataFrame()
+    # In some years, there might not be a 'standings' table yet; handle gracefully
+    if standings is None or standings.empty or 'team' not in today_standings.columns:
+        wins_pool_standings = today_draft_results.copy()
+        wins_pool_standings['wins'] = 0
+        wins_pool_standings['scored'] = 0
+        wins_pool_standings['allowed'] = 0
+    else:
+        wins_pool_standings = pd.merge(today_standings, today_draft_results, on=['team', 'season'])
     
     if 'scored' in wins_pool_standings.columns and 'allowed' in wins_pool_standings.columns:
         wins_pool_standings['ptDiff'] = wins_pool_standings['scored'] - wins_pool_standings['allowed']
