@@ -100,7 +100,7 @@ export const UiRenderer = {
         }
     },
 
-    renderTeamGrid(teams, selectedTeam, role, predictions, schedules) {
+    renderTeamGrid(teams, selectedTeam, role, predictions, schedules, eloPredictions) {
         const grid = document.getElementById('teams-grid');
         if (!grid) return;
 
@@ -117,6 +117,7 @@ export const UiRenderer = {
             const isSelected = team === selectedTeam;
             const pred = (role === 'admin' && predictions) ? predictions[team] : null;
             const schedule = schedules && schedules[team] ? schedules[team].join('\n') : '';
+            const eloPred = (role === 'admin' && eloPredictions) ? eloPredictions[team] : null;
 
             let predHtml = '';
             if (pred) {
@@ -131,6 +132,10 @@ export const UiRenderer = {
                     predHtml = `<span class="preseason-wins">${pred}W</span>`;
                 }
             }
+            let eloHtml = '';
+            if (eloPred !== null && eloPred !== undefined) {
+                eloHtml = `<div class="elo-projection" style="font-size:0.7rem; color:var(--accent-blue, #60a5fa); margin-top:2px;" title="Elo + Pythagorean Model Projection">Proj: ${eloPred}W</div>`;
+            }
 
             return `
                 <div class="team-card ${isSelected ? 'selected' : ''}" 
@@ -140,6 +145,7 @@ export const UiRenderer = {
                     <div class="team-card-info">
                         <span class="team-name">${team}</span>
                         ${predHtml}
+                        ${eloHtml}
                     </div>
                 </div>
             `;

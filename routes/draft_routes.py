@@ -242,15 +242,36 @@ async def route_draft_results_by_year(request: Request, year: int):
     if "draftPick" in merged.columns:
         merged = merged.sort_values("draftPick")
 
+    # Compute Win Rank: sort by wins descending, rank 1 = most wins.
+    # Pick Value = draftPick - winRank. Positive = overperformed for draft slot.
+    if not merged.empty and "TotalWinsBySeason" in merged.columns:
+        ranked = merged.sort_values(
+            ["TotalWinsBySeason", "draftPick"], ascending=[False, True]
+        ).reset_index(drop=False)
+        ranked["win_rank"] = range(1, len(ranked) + 1)
+        ranked["pick_value"] = ranked["draftPick"].astype(int) - ranked["win_rank"]
+        # Map back to merged via original index
+        merged["win_rank"] = ranked.set_index("index")["win_rank"]
+        merged["pick_value"] = ranked.set_index("index")["pick_value"]
+        merged = merged.sort_values("draftPick")
+    else:
+        merged["win_rank"] = None
+        merged["pick_value"] = None
+
     best_overall = None
     best_by_round = {}
     if not merged.empty:
-        sorted_awards = merged.sort_values(["TotalWinsBySeason", "draftPick"], ascending=[False, False])
-        br = sorted_awards.iloc[0]
+        # Best Overall: highest pick_value (best value relative to draft slot)
+        best_value_sorted = merged.sort_values("pick_value", ascending=False)
+        bv = best_value_sorted.iloc[0]
         best_overall = {
-            "player": br.get("fullName", ""), "team": br.get("team", ""),
-            "pick": int(br.get("draftPick", 0)), "wins": int(br.get("TotalWinsBySeason", 0)),
+            "player": bv.get("fullName", ""), "team": bv.get("team", ""),
+            "pick": int(bv.get("draftPick", 0)), "wins": int(bv.get("TotalWinsBySeason", 0)),
+            "pick_value": int(bv.get("pick_value", 0)),
+            "win_rank": int(bv.get("win_rank", 0)),
         }
+        # Best by round: still uses raw wins (most wins in that round)
+        sorted_awards = merged.sort_values(["TotalWinsBySeason", "draftPick"], ascending=[False, False])
         for rnum, label, lo, hi in [(1, "Round 1 (Picks 1-10)", 1, 10),
                                      (2, "Round 2 (Picks 11-20)", 11, 20),
                                      (3, "Round 3 (Picks 21-30)", 21, 30)]:
@@ -302,6 +323,28 @@ async def route_draft_results_by_year(request: Request, year: int):
     merged["projected_wins"] = merged.apply(get_proj, axis=1)
     merged["draft_value"] = merged.apply(calculate_draft_value, axis=1)
 
+    # Compute undrafted teams
+    nfl_standard_teams = {"ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CLE", "DAL", "DEN", "DET", "GB", "HOU", "IND", "JAX", "KC", "LV", "LAC", "LA", "MIA", "MIN", "NE", "NO", "NYG", "NYJ", "PHI", "PIT", "SF", "SEA", "TB", "TEN", "WAS"}
+    # Use teams from game data if available, fallback to standard list
+    if not games.empty:
+        season_teams = set(games["home_team"].unique()) | set(games["away_team"].unique())
+    else:
+        season_teams = nfl_standard_teams
+    drafted_teams = set(dr_year["team"].dropna().tolist()) if not dr_year.empty else set()
+    undrafted_team_abbrs = sorted(season_teams - drafted_teams)
+
+    undrafted_teams = []
+    for team in undrafted_team_abbrs:
+        team_standings = st_year[st_year["team"] == team]
+        actual_wins = int(team_standings["wins"].iloc[0]) if not team_standings.empty and "wins" in team_standings.columns else 0
+        p_obj = preds.get(team)
+        proj = p_obj.get("projected_wins") if p_obj and isinstance(p_obj, dict) else None
+        undrafted_teams.append({
+            "team": team,
+            "actual_wins": actual_wins,
+            "projected_wins": proj,
+        })
+
     return templates.TemplateResponse("draft_results.html", {
         "request": request,
         "data": merged.to_dict(orient="records"),
@@ -311,7 +354,8 @@ async def route_draft_results_by_year(request: Request, year: int):
         "best_overall": best_overall,
         "best_by_round": best_by_round,
         "quickest": quickest,
-        "slowest": slowest
+        "slowest": slowest,
+        "undrafted_teams": undrafted_teams,
     })
 
 

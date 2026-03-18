@@ -33,7 +33,7 @@ if not firebase_admin._apps:
 from services.data_service import load_data, get_available_years, get_latest_week_for_year
 from services.cache_service import write_cache, is_cache_final
 import services.analysis_service as analysis
-import services.prediction_service as predictor
+from services.prediction_service import enrich_schedule_with_predictions, PredictionService
 import services.live_score_service as live_scores
 
 ANALYTICS = [
@@ -53,8 +53,12 @@ def week_is_complete(games, year: int, week: int) -> bool:
 
 
 def build_year(standings, games, players, draft_order, draft_results,
-               draft_order_rules, year: int, current_year: int, force: bool = False):
+               draft_order_rules, year: int, current_year: int,
+               all_games=None, force: bool = False):
     print(f"\n[cache_builder] Building year {year}...")
+
+    # Use full multi-season games for Elo history (falls back to year-filtered)
+    full_games = all_games if all_games is not None else games
 
     # Determine latest week for this year
     latest_week = get_latest_week_for_year(games, year)
@@ -88,8 +92,8 @@ def build_year(standings, games, players, draft_order, draft_results,
     else:
         try:
             schedule_df = analysis.get_enriched_schedule(games, draft_results, players, year)
-            # Add automated game predictions
-            schedule_df = predictor.enrich_schedule_with_predictions(schedule_df)
+            # Add Elo + Pythagorean game predictions (needs full games for history)
+            schedule_df = enrich_schedule_with_predictions(schedule_df, full_games, year)
             
             # Store only the columns the web app needs to avoid huge payloads
             cols = ['week', 'gameday', 'home_team', 'away_team', 'home_score', 'away_score',
@@ -134,6 +138,39 @@ def build_year(standings, games, players, draft_order, draft_results,
         except Exception as e:
             print(f"  [err]  {analytic}: {e}")
 
+    # --- Prediction Snapshot (portfolio projections for each player) ---
+    analytic = 'prediction_snapshot'
+    if not force and is_past_season and is_cache_final(analytic, year, latest_week):
+        print(f"  [skip] {analytic} year={year} already final")
+    else:
+        try:
+            svc = PredictionService()
+            svc.initialize(full_games, year)
+            team_projections = svc.get_team_projected_wins(full_games)
+
+            # Build per-player portfolio projections
+            yr_drafts = draft_results[draft_results['season'] == year]
+            player_projections = []
+            if not yr_drafts.empty and 'playerId' in yr_drafts.columns and 'team' in yr_drafts.columns:
+                for pid in yr_drafts['playerId'].dropna().unique():
+                    pid = int(pid)
+                    teams = yr_drafts[yr_drafts['playerId'] == pid]['team'].dropna().tolist()
+                    if not teams:
+                        continue
+                    proj = svc.project_portfolio_wins(teams, year, full_games, n_simulations=500)
+                    proj['playerId'] = pid
+                    proj['teams'] = teams
+                    player_projections.append(proj)
+
+            snapshot = {
+                'team_projections': team_projections,
+                'player_projections': player_projections,
+            }
+            write_cache(analytic, year, latest_week, snapshot, is_final=final_flag)
+            print(f"  [ok]   {analytic} year={year} week={latest_week} is_final={final_flag}")
+        except Exception as e:
+            print(f"  [err]  {analytic}: {e}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Pre-compute analytics into cache")
@@ -155,7 +192,7 @@ def main():
         yr_standings = standings[standings['season'] == year].copy() if not standings.empty else standings
         yr_games = games[games['season'] == year].copy() if not games.empty else games
         build_year(yr_standings, yr_games, players, draft_order, draft_results,
-                   draft_order_rules, year, current_year, force=args.force)
+                   draft_order_rules, year, current_year, all_games=games, force=args.force)
 
     # Signal web server to invalidate in-memory cache
     print("\n[cache_builder] Signaling global cache invalidation...")

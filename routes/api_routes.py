@@ -731,3 +731,161 @@ async def save_and_broadcast_recap(request: Request):
     except Exception as e:
         import traceback; traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Prediction Engine Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/predictions/game")
+def get_game_prediction(home_team: str, away_team: str, season: int = 2025):
+    """Public: Blended win probability for a single matchup.
+
+    Query Params:
+        home_team: Home team abbreviation (e.g. "KC").
+        away_team: Away team abbreviation (e.g. "BUF").
+        season: NFL season year for Elo context (default 2025).
+    """
+    try:
+        from services.prediction_service import PredictionService
+        _, _, games, _, _, _, _ = load_data()
+        svc = PredictionService()
+        svc.initialize(games, season)
+        result = svc.game_win_probability(home_team, away_team)
+        return JSONResponse(content=sanitize_state(result))
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.get("/predictions/portfolio")
+def get_portfolio_projection(season: int, playerId: int):
+    """Public: Monte Carlo projected wins for a player's 3-team portfolio.
+
+    Query Params:
+        season: NFL season year.
+        playerId: The player whose drafted teams to project.
+    """
+    try:
+        from services.prediction_service import PredictionService
+        _, _, games, _, _, draft_results, _ = load_data()
+
+        player_teams = draft_results[
+            (draft_results["season"] == season) &
+            (draft_results["playerId"] == playerId)
+        ]["team"].tolist()
+
+        if not player_teams:
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"No teams drafted by player {playerId} in {season}."}
+            )
+
+        svc = PredictionService()
+        svc.initialize(games, season)
+        result = svc.project_portfolio_wins(player_teams, season, games)
+        return JSONResponse(content=sanitize_state(result))
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.get("/predictions/ratings")
+def get_elo_ratings(season: int = 2025):
+    """Public: Current Elo power ratings for all NFL teams.
+
+    Query Params:
+        season: NFL season year for Elo context (default 2025).
+    """
+    try:
+        from services.prediction_service import PredictionService
+        _, _, games, _, _, _, _ = load_data()
+        svc = PredictionService()
+        svc.initialize(games, season)
+        ratings = svc.get_all_ratings()
+        return JSONResponse(content=sanitize_state(ratings))
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.get("/admin/predictions/confidence")
+def get_draft_confidence(season: int, playerId: str):
+    """Admin-only: Confidence scores ranking all NFL teams for the draft room.
+
+    Query Params:
+        season: NFL season year.
+        playerId: Admin player ID (for auth).
+    """
+    if get_player_role(playerId) != "admin":
+        return JSONResponse(status_code=401, content={"error": "Unauthorized: Admin role required."})
+    try:
+        from services.prediction_service import PredictionService
+        _, _, games, _, _, draft_results, _ = load_data()
+
+        # Identify teams already drafted this season
+        season_drafts = draft_results[draft_results["season"] == season]
+        drafted_teams = season_drafts["team"].tolist() if not season_drafts.empty and "team" in season_drafts.columns else []
+
+        svc = PredictionService()
+        svc.initialize(games, season)
+        scores = svc.generate_draft_confidence_scores(season, games, drafted_teams)
+        return JSONResponse(content=sanitize_state(scores))
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.get("/admin/predictions/config")
+def get_prediction_config(playerId: str):
+    """Admin-only: Read the current model configuration (blend weights)."""
+    if get_player_role(playerId) != "admin":
+        return JSONResponse(status_code=401, content={"error": "Unauthorized: Admin role required."})
+    try:
+        from services.prediction_service import PredictionService
+        svc = PredictionService()
+        config = svc.load_config()
+        return JSONResponse(content=sanitize_state(config))
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.post("/admin/predictions/config")
+async def update_prediction_config(request: Request):
+    """Admin-only: Update the model blend weights.
+
+    Request Body:
+        { "playerId": "string", "elo_weight": float, "simulations": int }
+    """
+    try:
+        data = await request.json()
+        pid = data.get("playerId")
+        if get_player_role(pid) != "admin":
+            return JSONResponse(status_code=401, content={"error": "Unauthorized: Admin role required."})
+
+        elo_weight = float(data.get("elo_weight", 0.7))
+        simulations = int(data.get("simulations", 1000))
+
+        if not (0.0 <= elo_weight <= 1.0):
+            return JSONResponse(
+                status_code=400,
+                content={"error": "elo_weight must be between 0.0 and 1.0."}
+            )
+        if simulations < 100 or simulations > 10000:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "simulations must be between 100 and 10,000."}
+            )
+
+        from services.prediction_service import PredictionService
+        PredictionService.save_config(elo_weight, simulations)
+
+        return JSONResponse(content={
+            "message": "Prediction model configuration updated.",
+            "elo_weight": elo_weight,
+            "pythagorean_weight": round(1.0 - elo_weight, 2),
+            "simulations": simulations,
+        })
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})

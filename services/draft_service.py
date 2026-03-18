@@ -209,6 +209,20 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
             picks[pick_key] = pick_start_time
             save_metadata(meta_id, {"picks": picks})
 
+    # Elo-based projected wins for admin draft guidance
+    # Must use full multi-season games for Elo history (not year-filtered games_df)
+    elo_predictions = {}
+    try:
+        from services.prediction_service import PredictionService
+        _, _, all_games_df, _, _, _, _ = load_data()
+        pred_svc = PredictionService()
+        pred_svc.initialize(all_games_df, int(season))
+        elo_predictions = pred_svc.get_team_projected_wins(all_games_df)
+        print(f"  [elo] Computed {len(elo_predictions)} team projections for season {season}")
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        print(f"  [warn] Failed to compute Elo predictions for draft: {e}")
+
     state = {
         "season": int(season),
         "available_seasons": available_seasons,
@@ -221,6 +235,7 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
         "pick_start_time": pick_start_time,
         "preseason_predictions": preseason_predictions,
         "team_schedules": team_schedules,
+        "elo_predictions": elo_predictions,
     }
     
     import copy

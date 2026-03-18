@@ -133,7 +133,7 @@ class App {
     // --- Draft Logic ---
 
     renderDraftState(state) {
-        const { active_pick, draft_board, available_teams, draft_ready, preseason_predictions, team_schedules, season } = state;
+        const { active_pick, draft_board, available_teams, draft_ready, preseason_predictions, team_schedules, season, elo_predictions } = state;
 
         // Update Year Context
         const yearDisplay = document.getElementById('season-display');
@@ -160,7 +160,7 @@ class App {
         UiRenderer.renderDraftBoard(draft_board, active_pick, this.user.playerId, this.draftSummary);
 
         // Render Teams
-        UiRenderer.renderTeamGrid(available_teams, this.selectedTeam, this.user.role, preseason_predictions, team_schedules);
+        UiRenderer.renderTeamGrid(available_teams, this.selectedTeam, this.user.role, preseason_predictions, team_schedules, elo_predictions);
 
         // Setup Admin Overrides (Cleanup old select if it exists)
         if (this.user.role === 'admin') {
