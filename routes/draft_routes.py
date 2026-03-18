@@ -242,17 +242,29 @@ async def route_draft_results_by_year(request: Request, year: int):
     if "draftPick" in merged.columns:
         merged = merged.sort_values("draftPick")
 
-    # Compute Win Rank: sort by wins descending, rank 1 = most wins.
-    # Pick Value = draftPick - winRank. Positive = overperformed for draft slot.
-    if not merged.empty and "TotalWinsBySeason" in merged.columns:
-        ranked = merged.sort_values(
-            ["TotalWinsBySeason", "draftPick"], ascending=[False, True]
-        ).reset_index(drop=False)
-        ranked["win_rank"] = range(1, len(ranked) + 1)
-        ranked["pick_value"] = ranked["draftPick"].astype(int) - ranked["win_rank"]
-        # Map back to merged via original index
-        merged["win_rank"] = ranked.set_index("index")["win_rank"]
-        merged["pick_value"] = ranked.set_index("index")["pick_value"]
+    # Compute League-Wide Win Rank: rank ALL 32 teams by wins, 1 = most wins.
+    # Pick Value = draftPick - leagueWinRank. Positive = overperformed for draft slot.
+    nfl_standard_teams = {"ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CLE", "DAL", "DEN", "DET", "GB", "HOU", "IND", "JAX", "KC", "LV", "LAC", "LA", "MIA", "MIN", "NE", "NO", "NYG", "NYJ", "PHI", "PIT", "SF", "SEA", "TB", "TEN", "WAS"}
+    if not games.empty:
+        season_teams = set(games["home_team"].unique()) | set(games["away_team"].unique())
+    else:
+        season_teams = nfl_standard_teams
+    drafted_teams_set = set(dr_year["team"].dropna().tolist()) if not dr_year.empty else set()
+
+    # Build full league standings for ranking
+    league_rows = []
+    for team in season_teams:
+        team_st = st_year[st_year["team"] == team]
+        wins = int(team_st["wins"].iloc[0]) if not team_st.empty and "wins" in team_st.columns else 0
+        league_rows.append({"team": team, "wins": wins})
+    league_df = pd.DataFrame(league_rows).sort_values("wins", ascending=False).reset_index(drop=True)
+    league_df["win_rank"] = range(1, len(league_df) + 1)
+    rank_map = dict(zip(league_df["team"], league_df["win_rank"]))
+
+    # Apply league-wide win rank to drafted teams
+    if not merged.empty:
+        merged["win_rank"] = merged["team"].map(rank_map)
+        merged["pick_value"] = merged["draftPick"].astype(int) - merged["win_rank"].fillna(0).astype(int)
         merged = merged.sort_values("draftPick")
     else:
         merged["win_rank"] = None
@@ -323,16 +335,8 @@ async def route_draft_results_by_year(request: Request, year: int):
     merged["projected_wins"] = merged.apply(get_proj, axis=1)
     merged["draft_value"] = merged.apply(calculate_draft_value, axis=1)
 
-    # Compute undrafted teams
-    nfl_standard_teams = {"ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CLE", "DAL", "DEN", "DET", "GB", "HOU", "IND", "JAX", "KC", "LV", "LAC", "LA", "MIA", "MIN", "NE", "NO", "NYG", "NYJ", "PHI", "PIT", "SF", "SEA", "TB", "TEN", "WAS"}
-    # Use teams from game data if available, fallback to standard list
-    if not games.empty:
-        season_teams = set(games["home_team"].unique()) | set(games["away_team"].unique())
-    else:
-        season_teams = nfl_standard_teams
-    drafted_teams = set(dr_year["team"].dropna().tolist()) if not dr_year.empty else set()
-    undrafted_team_abbrs = sorted(season_teams - drafted_teams)
-
+    # Undrafted teams with league-wide win rank
+    undrafted_team_abbrs = sorted(season_teams - drafted_teams_set)
     undrafted_teams = []
     for team in undrafted_team_abbrs:
         team_standings = st_year[st_year["team"] == team]
@@ -343,7 +347,9 @@ async def route_draft_results_by_year(request: Request, year: int):
             "team": team,
             "actual_wins": actual_wins,
             "projected_wins": proj,
+            "win_rank": rank_map.get(team),
         })
+    undrafted_teams.sort(key=lambda x: x.get("win_rank") or 99)
 
     return templates.TemplateResponse("draft_results.html", {
         "request": request,
