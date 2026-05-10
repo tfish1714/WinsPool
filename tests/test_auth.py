@@ -11,9 +11,9 @@ from main import app
 client = TestClient(app)
 
 def test_api_check_player_nonexistent():
-    """Verify that a nonexistent player returns 404."""
+    """Verify that a nonexistent player returns 200 with exists=False (anti-enumeration)."""
     response = client.get("/api/check_player?email=ghost_stability@example.com")
-    assert response.status_code == 404
+    assert response.status_code == 200
     assert response.json()["exists"] is False
 
 def test_api_profile_undefined_handling():

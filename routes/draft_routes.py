@@ -418,6 +418,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 if pid and str(pid).strip().lower() != "null":
                     try:
                         pid = int(pid)
+                        # SEC-H4: Validate the playerId against the database
+                        # before trusting the client-supplied identity.
+                        from services.db_service import get_player_by_id
+                        player = get_player_by_id(str(pid))
+                        if not player or not player.get("password_hash"):
+                            await websocket.send_json({"type": "error", "message": "Session expired. Please log in again."})
+                            continue
                         connected_players.add(pid)
                         await websocket.send_json({"type": "verified", "playerId": pid})
                         await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})

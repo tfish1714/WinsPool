@@ -27,13 +27,16 @@ from firebase_admin import credentials, firestore as _fs
 if not firebase_admin._apps:
     _creds_path = pathlib.Path(__file__).parent.parent / 'firebase_credentials.json'
     if not _creds_path.exists():
-        _creds_path = pathlib.Path(r'G:\Other computers\My Laptop (1)\Gambling\WinsPool\firebase_credentials.json')
+        print(f"ERROR: firebase_credentials.json not found at {_creds_path}. "
+              f"Set FIREBASE_CREDENTIALS env var or place the file in the project root.")
+        sys.exit(1)
     firebase_admin.initialize_app(credentials.Certificate(str(_creds_path)))
 
 from services.data_service import load_data, get_available_years, get_latest_week_for_year
 from services.cache_service import write_cache, is_cache_final
 import services.analysis_service as analysis
-from services.prediction_service import enrich_schedule_with_predictions, PredictionService
+from services.prediction_service import PredictionService
+from services.nn_projection_engine import NNProjectionEngine, enrich_schedule_with_nn_predictions
 import services.live_score_service as live_scores
 
 ANALYTICS = [
@@ -92,8 +95,8 @@ def build_year(standings, games, players, draft_order, draft_results,
     else:
         try:
             schedule_df = analysis.get_enriched_schedule(games, draft_results, players, year)
-            # Add Elo + Pythagorean game predictions (needs full games for history)
-            schedule_df = enrich_schedule_with_predictions(schedule_df, full_games, year)
+            # Add Neural Network game predictions
+            schedule_df = enrich_schedule_with_nn_predictions(schedule_df, year)
             
             # Store only the columns the web app needs to avoid huge payloads
             cols = ['week', 'gameday', 'home_team', 'away_team', 'home_score', 'away_score',
@@ -144,9 +147,11 @@ def build_year(standings, games, players, draft_order, draft_results,
         print(f"  [skip] {analytic} year={year} already final")
     else:
         try:
-            svc = PredictionService()
-            svc.initialize(full_games, year)
-            team_projections = svc.get_team_projected_wins(full_games)
+            engine = NNProjectionEngine()
+            engine.initialize(year)
+            
+            yr_games = full_games[full_games['season'] == year].copy() if not full_games.empty else pd.DataFrame()
+            team_projections = engine.get_team_projected_wins(yr_games, n_sims=5000)
 
             # Build per-player portfolio projections
             yr_drafts = draft_results[draft_results['season'] == year]
@@ -157,7 +162,7 @@ def build_year(standings, games, players, draft_order, draft_results,
                     teams = yr_drafts[yr_drafts['playerId'] == pid]['team'].dropna().tolist()
                     if not teams:
                         continue
-                    proj = svc.project_portfolio_wins(teams, year, full_games, n_simulations=500)
+                    proj = engine.project_portfolio_wins(teams, yr_games, n_sims=500)
                     proj['playerId'] = pid
                     proj['teams'] = teams
                     player_projections.append(proj)

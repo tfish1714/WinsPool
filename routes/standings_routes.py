@@ -138,15 +138,26 @@ async def schedule_redirect():
 async def schedule_by_year(request: Request, year: int):
     all_st, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
 
-    games = all_games[all_games['season'] == year] if not all_games.empty else all_games
-    draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
+    available_years = get_available_years(all_draft_results, all_games)
+    
+    if 2026 not in available_years:
+        available_years.append(2026)
+        
+    if year == 2026:
+        from services.sandbox_service import get_sandbox_2026_schedule
+        schedule_enriched = get_sandbox_2026_schedule()
+        latest_week = 1
+        unique_weeks = sorted(schedule_enriched["week"].dropna().astype(int).unique().tolist())
+    else:
+        games = all_games[all_games['season'] == year] if not all_games.empty else all_games
+        draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
 
-    schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
-    latest_week = get_latest_week_for_year(games, year)
-    unique_weeks = (
-        sorted(schedule_enriched["week"].dropna().astype(int).unique().tolist())
-        if not schedule_enriched.empty and "week" in schedule_enriched.columns else []
-    )
+        schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
+        latest_week = get_latest_week_for_year(games, year)
+        unique_weeks = (
+            sorted(schedule_enriched["week"].dropna().astype(int).unique().tolist())
+            if not schedule_enriched.empty and "week" in schedule_enriched.columns else []
+        )
 
     return templates.TemplateResponse("schedule.html", {
         "request": request,

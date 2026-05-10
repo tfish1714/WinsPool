@@ -58,7 +58,7 @@ export const UiRenderer = {
         `).join('');
     },
 
-    renderDraftBoard(board, activePick, myPlayerId, draftSummary, totalPlayers = 10) {
+    renderDraftBoard(board, activePick, myPlayerId, draftSummary, totalPlayers = 10, role = null, preseasonPredictions = null, eloPredictions = null) {
         const list = document.getElementById('draft-list');
         if (!list) return;
 
@@ -85,6 +85,12 @@ export const UiRenderer = {
                             <img src="${this.getTeamLogo(item.team)}" class="tiny-logo" alt="">
                             <span class="pick-team">${item.team}</span>
                             ${badges}
+                            ${role === 'admin' ? `
+                                <div class="admin-draft-pred" style="font-size: 0.75rem; color: #aaa; margin-top: 2px;">
+                                    ${preseasonPredictions && preseasonPredictions[item.team] ? `<span style="margin-right:8px;">Base: ${typeof preseasonPredictions[item.team] === 'object' ? preseasonPredictions[item.team].projected_wins : preseasonPredictions[item.team]}W</span>` : ''}
+                                    ${eloPredictions && eloPredictions[item.team] !== undefined ? `<span style="color:var(--accent-blue);">NN: ${eloPredictions[item.team]}W</span>` : ''}
+                                </div>
+                            ` : ''}
                         </div>` : ''}
                 </li>
             `;
@@ -98,6 +104,92 @@ export const UiRenderer = {
                 behavior: 'smooth'
             });
         }
+    },
+
+    renderAdminPortfolio(draftBoard, allPlayers, eloPredictions, preseasonPredictions) {
+        const container = document.getElementById('admin-portfolio-content');
+        if (!container) return;
+
+        if (!allPlayers || allPlayers.length === 0) {
+            container.innerHTML = '<p>No players available.</p>';
+            return;
+        }
+
+        // Initialize tracking only for players with picks in this draft
+        const activePlayerIds = new Set(draftBoard.map(pick => String(pick.playerId)));
+        const portfolios = {};
+        allPlayers.forEach(p => {
+            if (!activePlayerIds.has(String(p.playerId))) return;
+            portfolios[p.playerId] = {
+                playerName: p.playerName,
+                teams: [],
+                totalNN: 0.0,
+                totalBase: 0.0
+            };
+        });
+
+        // Tally drafted teams
+        draftBoard.forEach(pick => {
+            if (pick.team && portfolios[pick.playerId]) {
+                const team = pick.team;
+                let nnWins = 0;
+                let baseWins = 0;
+
+                if (eloPredictions && eloPredictions[team] !== undefined) {
+                    nnWins = parseFloat(eloPredictions[team]);
+                }
+                if (preseasonPredictions && preseasonPredictions[team]) {
+                    baseWins = typeof preseasonPredictions[team] === 'object' ? parseFloat(preseasonPredictions[team].projected_wins) : parseFloat(preseasonPredictions[team]);
+                }
+
+                portfolios[pick.playerId].teams.push({
+                    team: team,
+                    nn: nnWins,
+                    base: baseWins
+                });
+                portfolios[pick.playerId].totalNN += nnWins;
+                portfolios[pick.playerId].totalBase += baseWins;
+            }
+        });
+
+        // Convert to array and sort by total NN wins descending
+        const sortedPortfolios = Object.values(portfolios).sort((a, b) => b.totalNN - a.totalNN);
+
+        // Render Table
+        let html = `
+            <table class="wins-table" style="width: 100%; border-collapse: collapse; text-align: left;">
+                <thead>
+                    <tr>
+                        <th style="padding: 0.5rem; border-bottom: 1px solid var(--glass-border);">Player</th>
+                        <th style="padding: 0.5rem; border-bottom: 1px solid var(--glass-border);">Teams</th>
+                        <th style="padding: 0.5rem; border-bottom: 1px solid var(--glass-border); text-align: right;">Total Base Proj</th>
+                        <th style="padding: 0.5rem; border-bottom: 1px solid var(--glass-border); text-align: right; color: var(--accent-blue);">Total NN Proj</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        sortedPortfolios.forEach(p => {
+            const teamStrings = p.teams.map(t => `<span style="display:inline-block; padding: 2px 6px; background:rgba(255,255,255,0.1); border-radius:4px; margin:2px; font-size:0.8rem;">
+                <img src="${this.getTeamLogo(t.team)}" style="width:14px;height:14px;vertical-align:middle;margin-right:4px;">${t.team} (${t.nn.toFixed(1)}W)
+            </span>`).join('');
+
+            html += `
+                <tr>
+                    <td style="padding: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); font-weight: bold;">${p.playerName}</td>
+                    <td style="padding: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.05);">${teamStrings || '<span style="color:#666;">No teams yet</span>'}</td>
+                    <td style="padding: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); text-align: right;">${p.totalBase.toFixed(1)}</td>
+                    <td style="padding: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); text-align: right; font-weight: bold; color: var(--accent-blue);">${p.totalNN.toFixed(1)}</td>
+                </tr>
+            `;
+        });
+
+        html += `
+                </tbody>
+            </table>
+        `;
+
+        container.innerHTML = html;
     },
 
     renderTeamGrid(teams, selectedTeam, role, predictions, schedules, eloPredictions) {
@@ -132,9 +224,9 @@ export const UiRenderer = {
                     predHtml = `<span class="preseason-wins">${pred}W</span>`;
                 }
             }
-            let eloHtml = '';
+            let nnHtml = '';
             if (eloPred !== null && eloPred !== undefined) {
-                eloHtml = `<div class="elo-projection" style="font-size:0.7rem; color:var(--accent-blue, #60a5fa); margin-top:2px;" title="Elo + Pythagorean Model Projection">Proj: ${eloPred}W</div>`;
+                nnHtml = `<div class="nn-projection" style="font-size:0.7rem; color:var(--accent-blue, #60a5fa); margin-top:2px;" title="Neural Network + Monte Carlo Projection">NN Proj: ${eloPred}W</div>`;
             }
 
             return `
@@ -145,7 +237,7 @@ export const UiRenderer = {
                     <div class="team-card-info">
                         <span class="team-name">${team}</span>
                         ${predHtml}
-                        ${eloHtml}
+                        ${nnHtml}
                     </div>
                 </div>
             `;

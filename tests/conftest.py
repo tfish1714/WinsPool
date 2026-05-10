@@ -31,8 +31,10 @@ def mock_gemini():
     """
     Centralized mock for the Google Generative AI Gemini API.
     Isolates AI logic from internet dependencies.
+    Patches the google.generativeai module that ai_service imports at call time.
     """
-    with patch("services.ai_service.genai.GenerativeModel") as mock_model:
+    with patch("google.generativeai.configure"), \
+         patch("google.generativeai.GenerativeModel") as mock_model:
         mock_instance = MagicMock()
         mock_response = MagicMock()
         mock_response.text = "Mocked AI Weekly Summary Result."

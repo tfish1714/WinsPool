@@ -4,15 +4,55 @@ import pathlib
 import pandas as pd
 import hashlib
 import time
+import bcrypt
 from services.cache_service import clear_data_cache
 
+# Bcrypt work factor: 12 rounds = ~250ms per hash on modern hardware.
+# Balances security against brute-force with acceptable login latency.
+_BCRYPT_ROUNDS = 12
+
+
 def get_password_hash(password: str) -> str:
-    """Hash the password securely using SHA-256 to bypass bcrypt's 72-byte strict limit limit."""
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+    """Hash the password using bcrypt with a random salt.
+
+    Returns a bcrypt hash string (60 characters, starting with '$2b$').
+    """
+    return bcrypt.hashpw(
+        password.encode("utf-8"), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)
+    ).decode("utf-8")
+
+
+def _is_legacy_sha256(hashed_password: str) -> bool:
+    """Detect legacy SHA-256 hex digests (64 hex chars, no '$' prefix)."""
+    return (
+        len(hashed_password) == 64
+        and not hashed_password.startswith("$")
+        and all(c in "0123456789abcdef" for c in hashed_password)
+    )
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verifies the plain_password matching against the SHA-256 hash."""
-    return hashlib.sha256(plain_password.encode("utf-8")).hexdigest() == hashed_password
+    """Verify a password against a stored hash.
+
+    Supports both bcrypt hashes and legacy SHA-256 hex digests.
+    When a legacy SHA-256 hash is verified successfully, the caller should
+    upgrade the stored hash to bcrypt via update_player_credentials().
+
+    Returns:
+        True if the password matches the stored hash.
+    """
+    if not hashed_password:
+        return False
+    # Legacy migration path: SHA-256 hex digest (64 chars, no salt)
+    if _is_legacy_sha256(hashed_password):
+        return hashlib.sha256(plain_password.encode("utf-8")).hexdigest() == hashed_password
+    # Standard bcrypt verification
+    try:
+        return bcrypt.checkpw(
+            plain_password.encode("utf-8"), hashed_password.encode("utf-8")
+        )
+    except (ValueError, TypeError):
+        return False
 
 def _init_firebase():
     """
@@ -102,11 +142,18 @@ def _mutate_local(collection_name: str, doc_id: str, data: dict, action: str = "
         row = pd.DataFrame([data])
         df = pd.concat([df, row], ignore_index=True)
     elif action == "update":
-        # Find row and merge data
-        pass # Implement as needed for specific collections
+        # Merge update fields into existing rows matching the doc_id
+        if not df.empty and "id" in df.columns:
+            mask = df["id"] == doc_id
+            for key, value in data.items():
+                df.loc[mask, key] = value
+        else:
+            # If no id column, treat as set (append)
+            row = pd.DataFrame([data])
+            df = pd.concat([df, row], ignore_index=True)
     elif action == "delete":
-        # Filter out the deleted doc
-        pass
+        if not df.empty and "id" in df.columns:
+            df = df[df["id"] != doc_id]
 
     df.to_pickle(pkl_path)
 
@@ -176,7 +223,7 @@ def get_player_by_id(player_id: str):
     return None
 
 def update_player_credentials(player_id: str, password_hash: str):
-    """Binds the active bcrypt password_hash natively onto the User Document."""
+    """Stores the given password hash on the player document and resets lockout state."""
     update_player_profile(player_id, {
         "password_hash": password_hash,
         "failed_setup_attempts": 0,
@@ -254,7 +301,7 @@ def add_draft_result(season: int, draft_pick: int, player_id: int, team: str, ex
     results_df = pd.concat([results_df, pd.DataFrame([data])], ignore_index=True)
     _save_df_to_local("draft_results", results_df)
 
-    clear_data_cache()
+    clear_data_cache(season)
 
 def delete_draft_pick(season: int, draft_pick: int):
     doc_id = f"{season}_{draft_pick}"
@@ -268,11 +315,12 @@ def delete_draft_pick(season: int, draft_pick: int):
         results_df = results_df[~((results_df["season"] == season) & (results_df["draftPick"] == draft_pick))]
         _save_df_to_local("draft_results", results_df)
 
-    clear_data_cache()
+    clear_data_cache(season)
 
 def delete_draft_results_for_season(season: int):
     db = get_db()
     if db:
+        from google.cloud.firestore_v1.base_query import FieldFilter
         docs = db.collection("draft_results").where(filter=FieldFilter("season", "==", season)).stream()
         batch = db.batch()
         count = 0
@@ -295,6 +343,7 @@ def delete_season_data(season: int):
     db = get_db()
     for col in ["draft_order", "draft_order_rules", "draft_results"]:
         if db:
+            from google.cloud.firestore_v1.base_query import FieldFilter
             docs = db.collection(col).where(filter=FieldFilter("season", "==", season)).stream()
             batch = db.batch()
             count = 0

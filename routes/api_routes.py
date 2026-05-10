@@ -3,6 +3,7 @@ import os
 import random
 import sys
 import subprocess
+import html as html_module
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
@@ -11,7 +12,7 @@ from services.data_service import (
 )
 from services.db_service import (
     get_collection_df, add_draft_order, add_draft_rule, delete_draft_results_for_season,
-    get_player_by_email, verify_password, get_password_hash, 
+    get_player_by_email, verify_password, get_password_hash, _is_legacy_sha256,
     update_player_credentials, increment_failed_setup_attempts,
     update_player_profile, add_player, delete_season_data, get_player_role
 )
@@ -101,18 +102,35 @@ def get_schedule(year: int):
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_route = time.time()
     try:
-        _, _, games, players, _, draft_results, _ = load_data(year=year)
-        schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
+        # 2026 Sandbox UI Intercept
+        if year == 2026:
+            from services.sandbox_service import get_sandbox_2026_schedule
+            schedule_enriched = get_sandbox_2026_schedule()
+            
+            # For JSON serialization, gameday datetime needs string formatting
+            import pandas as pd
+            if not schedule_enriched.empty and pd.api.types.is_datetime64_any_dtype(schedule_enriched['gameday']):
+                schedule_enriched['gameday'] = schedule_enriched['gameday'].dt.strftime('%Y-%m-%d')
+        else:
+            _, _, games, players, _, draft_results, _ = load_data(year=year)
+            schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
+            
         if is_debug:
             print(f"[DEBUG_PAGE_LOAD] /api/schedule route total took {time.time() - start_route:.3f}s")
         return JSONResponse(content=sanitize_state(schedule_enriched.to_dict(orient="records")))
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @router.get("/check_player")
 async def check_player(email: str):
-    """Checks if a player exists and if they already have a password set."""
+    """Checks if a player exists and if they already have a password set.
+
+    Always returns HTTP 200 to prevent email enumeration. If the email is
+    not found, returns exists=False with no additional metadata.
+    """
     if not email:
         return JSONResponse(status_code=400, content={"error": "Email is required."})
     
@@ -120,13 +138,13 @@ async def check_player(email: str):
     player = get_player_by_email(email)
     
     if not player:
-        return JSONResponse(status_code=404, content={"exists": False})
+        return JSONResponse(content={"exists": False})
     
-    return {
+    return JSONResponse(content={
         "exists": True,
         "has_password": bool(player.get("password_hash")),
         "playerName": player.get("fullName")
-    }
+    })
 
 @router.post("/set_password")
 async def set_password(request: Request):
@@ -185,29 +203,57 @@ async def login(request: Request):
         password = data.get("password")
 
         player = get_player_by_email(email)
-        print(f"DEBUG LOGIN: Searching for email '{email}'. Found player: {player is not None}")
-        
         if not player:
             return JSONResponse(status_code=401, content={"error": "Invalid email or password."})
 
         if not player.get("password_hash"):
-            print(f"DEBUG LOGIN: Player {email} has no password set.")
             return JSONResponse(status_code=400, content={"error": "Account not claimed yet. Please set a password."})
 
+        # SEC-H5: Enforce login rate limiting (5 attempts, 30-min lockout)
+        lockout = player.get("lockout_until")
+        if lockout and time.time() < lockout:
+            rem = int((lockout - time.time()) // 60)
+            return JSONResponse(status_code=429, content={"error": f"Account locked. Try again in {rem} minutes."})
+
         is_valid = verify_password(password, player.get("password_hash"))
-        print(f"DEBUG LOGIN: Password check for {email} resolved to: {is_valid}")
         if not is_valid:
+            # Increment failed login attempts and apply lockout if threshold reached
+            fails = int(player.get("failed_login_attempts", 0)) + 1
+            lockout_ts = time.time() + 1800 if fails >= 5 else None
+            update_player_profile(str(player["playerId"]), {
+                "failed_login_attempts": fails,
+                **(({"lockout_until": lockout_ts}) if lockout_ts else {})
+            })
+            if lockout_ts:
+                return JSONResponse(status_code=429, content={"error": "Too many failed login attempts. Account locked for 30 minutes."})
             return JSONResponse(status_code=401, content={"error": "Invalid email or password."})
+
+        # Successful login: reset failed attempt counter
+        reset_fields = {"failed_login_attempts": 0, "lockout_until": None}
+
+        # SEC-H1: Transparent bcrypt upgrade for legacy SHA-256 hashes
+        stored_hash = player.get("password_hash", "")
+        if _is_legacy_sha256(stored_hash):
+            new_hash = get_password_hash(password)
+            reset_fields["password_hash"] = new_hash
+
+        update_player_profile(str(player["playerId"]), reset_fields)
+
+        # SEC-H6: Check if this is a temp password that must be changed
+        if player.get("must_change_password"):
+            return JSONResponse(content={
+                "status": "must_change_password",
+                "playerId": str(player["playerId"]),
+                "message": "You must change your temporary password before continuing."
+            })
 
         # Check for MFA
         if player.get("mfa_enabled"):
-            import random
             mfa_code = "".join([str(random.randint(0, 9)) for _ in range(6)])
             update_player_profile(str(player["playerId"]), {
                 "mfa_token": mfa_code,
                 "mfa_expiry": time.time() + 600
             })
-            print(f"DEBUG: MFA Code for {email} is {mfa_code}")
             return JSONResponse(content={
                 "status": "mfa_required",
                 "playerId": str(player["playerId"]),
@@ -548,7 +594,11 @@ async def admin_reset_password(request: Request):
 
 @router.post("/admin/set_temp_password")
 async def admin_set_temp_password(request: Request):
-    """Admin-only: Set a temporary password for a player."""
+    """Admin-only: Set a temporary password for a player.
+
+    Enforces minimum complexity and sets a must_change_password flag so the
+    player is forced to update the password on their next login.
+    """
     try:
         data = await request.json()
         pid = data.get("playerId")
@@ -561,12 +611,18 @@ async def admin_set_temp_password(request: Request):
         if not target_id or not temp_password:
             return JSONResponse(status_code=400, content={"error": "targetPlayerId and tempPassword are required."})
 
-        if len(temp_password) < 8:
-            return JSONResponse(status_code=400, content={"error": "Temporary password must be at least 8 characters."})
+        # Enforce minimum complexity: 12+ chars, mixed case, digit, symbol
+        pw_regex = r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$"
+        if not re.match(pw_regex, temp_password):
+            return JSONResponse(status_code=400, content={
+                "error": "Temporary password must be 12+ characters with uppercase, lowercase, number, and symbol."
+            })
 
         hashed = get_password_hash(temp_password)
         update_player_credentials(str(target_id), hashed)
-        return JSONResponse(content={"message": "Temporary password set. Player should change it after logging in."})
+        # Flag the account so the user is forced to change on next login
+        update_player_profile(str(target_id), {"must_change_password": True})
+        return JSONResponse(content={"message": "Temporary password set. Player will be required to change it on next login."})
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -716,7 +772,7 @@ async def save_and_broadcast_recap(request: Request):
                     <div style="background-color: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1);">
                         <h2 style="color: #333;">🏈 Weekly Recap: NFL Week {week}</h2>
                         <div style="white-space: pre-wrap; color: #555; line-height: 1.6;">
-                            {summary}
+                            {html_module.escape(summary)}
                         </div>
                         <p style="margin-top: 20px; font-size: 0.8em; color: #888;">
                             This recap was generated by Gemini AI for the Wins Pool. 
@@ -749,8 +805,7 @@ def get_game_prediction(home_team: str, away_team: str, season: int = 2025):
     try:
         from services.prediction_service import PredictionService
         _, _, games, _, _, _, _ = load_data()
-        svc = PredictionService()
-        svc.initialize(games, season)
+        svc = PredictionService.get_initialized(games, season)
         result = svc.game_win_probability(home_team, away_team)
         return JSONResponse(content=sanitize_state(result))
     except Exception as e:
@@ -781,8 +836,7 @@ def get_portfolio_projection(season: int, playerId: int):
                 content={"error": f"No teams drafted by player {playerId} in {season}."}
             )
 
-        svc = PredictionService()
-        svc.initialize(games, season)
+        svc = PredictionService.get_initialized(games, season)
         result = svc.project_portfolio_wins(player_teams, season, games)
         return JSONResponse(content=sanitize_state(result))
     except Exception as e:
@@ -800,8 +854,7 @@ def get_elo_ratings(season: int = 2025):
     try:
         from services.prediction_service import PredictionService
         _, _, games, _, _, _, _ = load_data()
-        svc = PredictionService()
-        svc.initialize(games, season)
+        svc = PredictionService.get_initialized(games, season)
         ratings = svc.get_all_ratings()
         return JSONResponse(content=sanitize_state(ratings))
     except Exception as e:
@@ -827,8 +880,7 @@ def get_draft_confidence(season: int, playerId: str):
         season_drafts = draft_results[draft_results["season"] == season]
         drafted_teams = season_drafts["team"].tolist() if not season_drafts.empty and "team" in season_drafts.columns else []
 
-        svc = PredictionService()
-        svc.initialize(games, season)
+        svc = PredictionService.get_initialized(games, season)
         scores = svc.generate_draft_confidence_scores(season, games, drafted_teams)
         return JSONResponse(content=sanitize_state(scores))
     except Exception as e:

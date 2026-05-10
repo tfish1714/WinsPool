@@ -1,6 +1,6 @@
 import { ApiService } from './api.js';
 import { AuthService } from './auth_service.js';
-import { UiRenderer } from './ui_renderer.js';
+import { UiRenderer } from './ui_renderer.js?v=2';
 import { WebSocketService } from './websocket_service.js';
 
 /**
@@ -157,7 +157,18 @@ class App {
         this.processDraftBanners(state);
 
         // Render Board
-        UiRenderer.renderDraftBoard(draft_board, active_pick, this.user.playerId, this.draftSummary);
+        UiRenderer.renderDraftBoard(draft_board, active_pick, this.user.playerId, this.draftSummary, state.all_players ? state.all_players.length : 10, this.user.role, preseason_predictions, elo_predictions);
+
+        // Render Admin Portfolio
+        if (this.user.role === 'admin') {
+            const adminPanel = document.getElementById('admin-portfolio-section');
+            if (adminPanel) adminPanel.style.display = 'block';
+            UiRenderer.renderAdminPortfolio(draft_board, state.all_players, elo_predictions, preseason_predictions);
+        } else {
+            const adminPanel = document.getElementById('admin-portfolio-section');
+            if (adminPanel) adminPanel.style.display = 'none';
+        }
+
 
         // Render Teams
         UiRenderer.renderTeamGrid(available_teams, this.selectedTeam, this.user.role, preseason_predictions, team_schedules, elo_predictions);

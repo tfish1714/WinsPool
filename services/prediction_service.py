@@ -99,6 +99,8 @@ def _get_season_teams(games_df: pd.DataFrame, season: int) -> set:
     Returns:
         Set of team abbreviation strings.
     """
+    if games_df is None or games_df.empty or "season" not in games_df.columns:
+        return set()
     season_games = games_df[games_df["season"] == season]
     if season_games.empty:
         return set()
@@ -303,15 +305,42 @@ def pythagorean_projected_wins(points_for: float, points_against: float,
 # PredictionService (stateful, caches Elo ratings for a season)
 # ---------------------------------------------------------------------------
 
+_SERVICE_CACHE: Dict[int, 'PredictionService'] = {}
+
 class PredictionService:
     """Orchestrates the blended Elo + Pythagorean prediction model.
 
     Usage:
-        svc = PredictionService()
-        svc.initialize(games_df, season=2024)
+        svc = PredictionService.get_initialized(games_df, season=2024)
         prob = svc.game_win_probability("KC", "BUF")
         proj = svc.project_portfolio_wins(["KC", "BUF", "DET"], season=2024)
     """
+
+    @classmethod
+    def get_initialized(cls, games_df: Optional[pd.DataFrame], season: int) -> 'PredictionService':
+        """Singleton-like accessor that returns a precached, initialized service for a season."""
+        global _SERVICE_CACHE
+        if season in _SERVICE_CACHE:
+            return _SERVICE_CACHE[season]
+        
+        if games_df is None:
+            raise ValueError(f"PredictionService for season {season} is not initialized and no games_df provided.")
+            
+        svc = cls()
+        svc.initialize(games_df, season)
+        _SERVICE_CACHE[season] = svc
+        return svc
+
+    @classmethod
+    def is_initialized(cls, season: int) -> bool:
+        """Check if a service for the given season is already in the global cache."""
+        global _SERVICE_CACHE
+        return season in _SERVICE_CACHE
+
+    @staticmethod
+    def clear_cache():
+        global _SERVICE_CACHE
+        _SERVICE_CACHE.clear()
 
     def __init__(self):
         self._elo_ratings: Dict[str, float] = {}
@@ -838,8 +867,11 @@ class PredictionService:
         """
         if games_df is None:
             games_df = self._games_df
-
-        season_teams = _get_season_teams(games_df, self._season) if games_df is not None and self._season else set()
+ 
+        # Extract active teams for the season. Fallback to standard 32 if no games found yet.
+        season_teams = _get_season_teams(games_df, self._season) if games_df is not None and not games_df.empty else set()
+        if not season_teams:
+            season_teams = {"ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CLE", "DAL", "DEN", "DET", "GB", "HOU", "IND", "JAX", "KC", "LV", "LAC", "LA", "MIA", "MIN", "NE", "NO", "NYG", "NYJ", "PHI", "PIT", "SF", "SEA", "TB", "TEN", "WAS"}
         result = {}
 
         for team, elo in self._elo_ratings.items():

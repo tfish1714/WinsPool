@@ -1,0 +1,531 @@
+"""services/nn_prediction_service.py -- Neural Network NFL Prediction Service.
+
+Provides a TensorFlow/Keras feedforward neural network for predicting NFL
+game outcomes (home win probability) and projecting season win totals.
+
+Architecture: Input(27) -> Dense(96,ReLU) -> Dropout(0.3) ->
+              Dense(48,ReLU) -> Dropout(0.3) -> Dense(24,ReLU) -> Dense(1,Sigmoid)
+Loss: Focal Loss (gamma=2.0, alpha=0.25)
+
+This service is entirely additive; the existing PredictionService
+(Elo + Pythagorean) is not modified.
+"""
+
+import logging
+import os
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+# Attempt TensorFlow import with graceful fallback
+try:
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+    import tensorflow as tf
+    from tensorflow import keras
+    from tensorflow.keras import layers, callbacks
+    TF_AVAILABLE = True
+except ImportError:
+    TF_AVAILABLE = False
+    tf = None
+    logger.warning("TensorFlow not installed. NNPredictionService will be unavailable.")
+
+try:
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.metrics import r2_score, mean_absolute_error, accuracy_score
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+MODEL_DIR = Path(__file__).parent.parent / "models"
+DEFAULT_MODEL_PATH = MODEL_DIR / "nn_v1.keras"
+
+from services.nn_feature_engine import FEATURE_COLUMNS
+
+LABEL_COLUMN = "home_win"
+
+# Training hyperparameters
+EPOCHS = 200
+BATCH_SIZE = 64
+LEARNING_RATE = 0.001
+DROPOUT_RATE = 0.3
+EARLY_STOP_PATIENCE = 15
+VALIDATION_SPLIT_WEEK = 14  # 2025 weeks 1-14 for validation
+TEST_SPLIT_WEEK = 15         # 2025 weeks 15+ for testing
+
+
+# ---------------------------------------------------------------------------
+# Focal Loss Definition
+# ---------------------------------------------------------------------------
+
+def _build_focal_loss(gamma=2.0, alpha=0.25):
+    """Build a focal loss function.
+
+    Focal loss down-weights easy well-classified examples, forcing the
+    model to focus on hard examples and produce more confident outputs.
+
+    FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
+
+    When gamma > 1, the loss aggressively penalizes under-confident
+    predictions where the model 'knows' the answer but outputs ~0.5.
+    """
+    if not TF_AVAILABLE:
+        return "binary_crossentropy"
+
+    def focal_loss(y_true, y_pred):
+        y_pred = tf.clip_by_value(y_pred, 1e-7, 1.0 - 1e-7)
+        p_t = y_true * y_pred + (1.0 - y_true) * (1.0 - y_pred)
+        alpha_t = y_true * alpha + (1.0 - y_true) * (1.0 - alpha)
+        loss = -alpha_t * tf.pow(1.0 - p_t, gamma) * tf.math.log(p_t)
+        return tf.reduce_mean(loss)
+
+    return focal_loss
+
+
+# ---------------------------------------------------------------------------
+# NNPredictionService
+# ---------------------------------------------------------------------------
+
+class NNPredictionService:
+    """Feedforward Neural Network for NFL game prediction.
+
+    Usage:
+        svc = NNPredictionService()
+        metrics = svc.train(feature_table)
+        prob = svc.predict_game(home_features, away_features)
+        svc.save_model()
+    """
+
+    def __init__(self):
+        self.model: Optional[object] = None
+        self.scaler: Optional[object] = None
+        self._train_history: Optional[dict] = None
+        self._eval_metrics: Optional[dict] = None
+        self._is_trained = False
+
+    # ------------------------------------------------------------------
+    # Model Architecture
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_model(input_dim: int) -> object:
+        """Construct the 96-48-24 feedforward neural network with focal loss.
+
+        Focal loss penalizes under-confident predictions, forcing the model
+        to output more extreme probabilities when the evidence supports it.
+
+        Args:
+            input_dim: Number of input features.
+
+        Returns:
+            Compiled Keras Sequential model.
+        """
+        if not TF_AVAILABLE:
+            raise RuntimeError("TensorFlow is required but not installed.")
+
+        model = keras.Sequential([
+            layers.Input(shape=(input_dim,)),
+            layers.Dense(96, activation="relu",
+                         kernel_regularizer=keras.regularizers.l2(1e-4)),
+            layers.Dropout(DROPOUT_RATE),
+            layers.Dense(48, activation="relu",
+                         kernel_regularizer=keras.regularizers.l2(1e-4)),
+            layers.Dropout(DROPOUT_RATE),
+            layers.Dense(24, activation="relu",
+                         kernel_regularizer=keras.regularizers.l2(1e-4)),
+            layers.Dense(1, activation="sigmoid"),
+        ])
+
+        model.compile(
+            optimizer=keras.optimizers.Adam(learning_rate=LEARNING_RATE),
+            loss=_build_focal_loss(gamma=2.0, alpha=0.25),
+            metrics=["accuracy"],
+        )
+        return model
+
+    # ------------------------------------------------------------------
+    # Data Splitting (Chronological)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _split_data(df: pd.DataFrame) -> Tuple[
+        pd.DataFrame, pd.DataFrame, pd.DataFrame
+    ]:
+        """Split the feature table chronologically.
+
+        Train: seasons < 2025
+        Validation: season == 2025, week <= 14
+        Test: season == 2025, week > 14
+
+        Args:
+            df: The Master Feature Table.
+
+        Returns:
+            (train_df, val_df, test_df)
+        """
+        train = df[df["season"] < 2025].copy()
+        val = df[(df["season"] == 2025) & (df["week"] <= VALIDATION_SPLIT_WEEK)].copy()
+        test = df[(df["season"] == 2025) & (df["week"] > VALIDATION_SPLIT_WEEK)].copy()
+
+        logger.info("Split sizes: train=%d, val=%d, test=%d",
+                     len(train), len(val), len(test))
+        return train, val, test
+
+    # ------------------------------------------------------------------
+    # Training
+    # ------------------------------------------------------------------
+
+    def train(self, feature_table: pd.DataFrame) -> dict:
+        """Train the NN on the provided feature table.
+
+        Args:
+            feature_table: DataFrame from build_master_feature_table().
+
+        Returns:
+            Dict of evaluation metrics including season-level R2.
+        """
+        if not TF_AVAILABLE:
+            raise RuntimeError("TensorFlow is required but not installed.")
+        if not SKLEARN_AVAILABLE:
+            raise RuntimeError("scikit-learn is required but not installed.")
+
+        # Split
+        train_df, val_df, test_df = self._split_data(feature_table)
+
+        if train_df.empty:
+            raise ValueError("Training set is empty. Check season range.")
+
+        # Extract features and labels
+        X_train = train_df[FEATURE_COLUMNS].values.astype(np.float32)
+        y_train = train_df[LABEL_COLUMN].values.astype(np.float32)
+
+        X_val = val_df[FEATURE_COLUMNS].values.astype(np.float32) if not val_df.empty else None
+        y_val = val_df[LABEL_COLUMN].values.astype(np.float32) if not val_df.empty else None
+
+        X_test = test_df[FEATURE_COLUMNS].values.astype(np.float32) if not test_df.empty else None
+        y_test = test_df[LABEL_COLUMN].values.astype(np.float32) if not test_df.empty else None
+
+        # Scale
+        self.scaler = StandardScaler()
+        X_train = self.scaler.fit_transform(X_train)
+        if X_val is not None:
+            X_val = self.scaler.transform(X_val)
+        if X_test is not None:
+            X_test = self.scaler.transform(X_test)
+
+        # Build model
+        self.model = self._build_model(len(FEATURE_COLUMNS))
+
+        # Callbacks
+        cb = [
+            callbacks.EarlyStopping(
+                monitor="val_loss" if X_val is not None else "loss",
+                patience=EARLY_STOP_PATIENCE,
+                restore_best_weights=True,
+                verbose=1,
+            ),
+        ]
+
+        # Train
+        logger.info("Training NN: %d samples, %d features", len(X_train), len(FEATURE_COLUMNS))
+        print(f"\n{'='*60}")
+        print(f"  NFL Neural Network Training (Focal Loss)")
+        print(f"  Architecture: {len(FEATURE_COLUMNS)}-96-48-24-1")
+        print(f"  Train samples: {len(X_train)}")
+        print(f"  Val samples: {len(X_val) if X_val is not None else 0}")
+        print(f"  Test samples: {len(X_test) if X_test is not None else 0}")
+        print(f"{'='*60}\n")
+
+        validation_data = (X_val, y_val) if X_val is not None else None
+
+        history = self.model.fit(
+            X_train, y_train,
+            validation_data=validation_data,
+            epochs=EPOCHS,
+            batch_size=BATCH_SIZE,
+            callbacks=cb,
+            verbose=1,
+        )
+        self._train_history = history.history
+        self._is_trained = True
+
+        # Game-level evaluation
+        metrics = self._evaluate(X_train, y_train, X_test, y_test)
+
+        # Season-level evaluation (the proper Pythagorean comparison)
+        season_metrics = self._evaluate_season_level(train_df, feature_table)
+        metrics.update(season_metrics)
+
+        self._eval_metrics = metrics
+        return metrics
+
+    def _evaluate(
+        self,
+        X_train: np.ndarray, y_train: np.ndarray,
+        X_test: Optional[np.ndarray], y_test: Optional[np.ndarray],
+    ) -> dict:
+        """Compute evaluation metrics on the test set.
+
+        Returns:
+            Dict with r2, mae, accuracy, train_r2, epochs_trained.
+        """
+        metrics = {
+            "epochs_trained": len(self._train_history.get("loss", [])),
+        }
+
+        # Train set metrics
+        train_preds = self.model.predict(X_train, verbose=0).flatten()
+        metrics["train_r2"] = float(r2_score(y_train, train_preds))
+        metrics["train_mae"] = float(mean_absolute_error(y_train, train_preds))
+        metrics["train_accuracy"] = float(
+            accuracy_score(y_train > 0.5, train_preds > 0.5)
+        )
+
+        # Test set metrics
+        if X_test is not None and len(X_test) > 0:
+            test_preds = self.model.predict(X_test, verbose=0).flatten()
+            metrics["test_r2"] = float(r2_score(y_test, test_preds))
+            metrics["test_mae"] = float(mean_absolute_error(y_test, test_preds))
+            metrics["test_accuracy"] = float(
+                accuracy_score(y_test > 0.5, test_preds > 0.5)
+            )
+        else:
+            metrics["test_r2"] = None
+            metrics["test_mae"] = None
+            metrics["test_accuracy"] = None
+
+        return metrics
+
+    def _evaluate_season_level(self, train_df: pd.DataFrame,
+                               full_table: pd.DataFrame) -> dict:
+        """Aggregate game-level predictions into season win totals and compute R2.
+
+        This is the proper apples-to-apples comparison with Pythagorean
+        Expectation (R2 ~ 0.89). For each team-season, we sum the predicted
+        win probabilities across all games and compare against actual wins.
+
+        Uses only training data seasons to avoid data leakage.
+
+        Returns:
+            Dict with season_r2, season_mae, and season_n (sample count).
+        """
+        # Use the last 5 training seasons for season-level eval
+        eval_seasons = sorted(train_df["season"].unique())[-5:]
+        if len(eval_seasons) == 0:
+            return {"season_r2": None, "season_mae": None, "season_n": 0}
+
+        eval_data = full_table[full_table["season"].isin(eval_seasons)].copy()
+        if eval_data.empty:
+            return {"season_r2": None, "season_mae": None, "season_n": 0}
+
+        # Predict all games
+        X_eval = eval_data[FEATURE_COLUMNS].values.astype(np.float32)
+        if self.scaler is not None:
+            X_eval = self.scaler.transform(X_eval)
+        eval_data = eval_data.copy()
+        eval_data["pred_home_wp"] = self.model.predict(X_eval, verbose=0).flatten()
+
+        # Aggregate to team-season level
+        records = []
+        for season in eval_seasons:
+            s_data = eval_data[eval_data["season"] == season]
+            all_teams = set(s_data["home_team"].unique()) | set(s_data["away_team"].unique())
+
+            for team in all_teams:
+                # Actual wins: count games where team won
+                home_wins = s_data[
+                    (s_data["home_team"] == team) & (s_data["home_win"] == 1.0)
+                ].shape[0]
+                away_wins = s_data[
+                    (s_data["away_team"] == team) & (s_data["home_win"] == 0.0)
+                ].shape[0]
+                # Count ties as 0.5
+                home_ties = s_data[
+                    (s_data["home_team"] == team) & (s_data["home_win"] == 0.5)
+                ].shape[0]
+                away_ties = s_data[
+                    (s_data["away_team"] == team) & (s_data["home_win"] == 0.5)
+                ].shape[0]
+                actual_wins = home_wins + away_wins + 0.5 * (home_ties + away_ties)
+
+                # Predicted wins: sum probabilities
+                home_pred = s_data[s_data["home_team"] == team]["pred_home_wp"].sum()
+                away_pred = (1.0 - s_data[s_data["away_team"] == team]["pred_home_wp"]).sum()
+                pred_wins = home_pred + away_pred
+
+                total_games = (
+                    s_data[s_data["home_team"] == team].shape[0]
+                    + s_data[s_data["away_team"] == team].shape[0]
+                )
+                if total_games >= 10:  # Require at least 10 games for valid comparison
+                    records.append({
+                        "season": season, "team": team,
+                        "actual_wins": actual_wins,
+                        "pred_wins": pred_wins,
+                        "games": total_games,
+                    })
+
+        if not records:
+            return {"season_r2": None, "season_mae": None, "season_n": 0}
+
+        results_df = pd.DataFrame(records)
+        actual = results_df["actual_wins"].values
+        predicted = results_df["pred_wins"].values
+
+        return {
+            "season_r2": float(r2_score(actual, predicted)),
+            "season_mae": float(mean_absolute_error(actual, predicted)),
+            "season_n": len(results_df),
+        }
+
+    # ------------------------------------------------------------------
+    # Inference
+    # ------------------------------------------------------------------
+
+    def predict_game(self, features: dict) -> float:
+        """Predict the home team win probability for a single game.
+
+        Args:
+            features: Dict with keys matching FEATURE_COLUMNS.
+
+        Returns:
+            Home win probability in [0, 1].
+        """
+        if not self._is_trained and self.model is None:
+            raise RuntimeError("Model is not trained or loaded.")
+
+        X = np.array([[features.get(c, 0.0) for c in FEATURE_COLUMNS]], dtype=np.float32)
+        if self.scaler is not None:
+            X = self.scaler.transform(X)
+        pred = self.model.predict(X, verbose=0).flatten()[0]
+        return float(np.clip(pred, 0.0, 1.0))
+
+    def predict_season_wins(
+        self, team: str, season: int, feature_table: pd.DataFrame
+    ) -> dict:
+        """Project total season wins for a team by summing game-level predictions.
+
+        Args:
+            team: Team abbreviation.
+            season: Season year.
+            feature_table: Full Master Feature Table (for the season).
+
+        Returns:
+            Dict with projected_wins, games, avg_win_prob.
+        """
+        # Get all games where this team is home or away
+        home_games = feature_table[
+            (feature_table["season"] == season) & (feature_table["home_team"] == team)
+        ]
+        away_games = feature_table[
+            (feature_table["season"] == season) & (feature_table["away_team"] == team)
+        ]
+
+        total_win_prob = 0.0
+        total_games = 0
+
+        # Home games: predict directly
+        if not home_games.empty:
+            X = home_games[FEATURE_COLUMNS].values.astype(np.float32)
+            if self.scaler is not None:
+                X = self.scaler.transform(X)
+            preds = self.model.predict(X, verbose=0).flatten()
+            total_win_prob += float(np.sum(preds))
+            total_games += len(preds)
+
+        # Away games: probability of away team winning = 1 - home_win_prob
+        if not away_games.empty:
+            X = away_games[FEATURE_COLUMNS].values.astype(np.float32)
+            if self.scaler is not None:
+                X = self.scaler.transform(X)
+            preds = self.model.predict(X, verbose=0).flatten()
+            total_win_prob += float(np.sum(1.0 - preds))
+            total_games += len(preds)
+
+        avg_prob = total_win_prob / max(total_games, 1)
+        return {
+            "team": team,
+            "projected_wins": round(total_win_prob, 2),
+            "games": total_games,
+            "avg_win_prob": round(avg_prob, 4),
+        }
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def save_model(self, path: Optional[str] = None):
+        """Save the trained model and scaler to disk.
+
+        Args:
+            path: Path for the .keras model file. Defaults to models/nn_v1.keras.
+        """
+        if self.model is None:
+            raise RuntimeError("No model to save.")
+
+        save_path = Path(path) if path else DEFAULT_MODEL_PATH
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        self.model.save(str(save_path))
+        logger.info("Model saved to %s", save_path)
+
+        # Save scaler
+        if self.scaler is not None:
+            import joblib
+            scaler_path = save_path.parent / "nn_v1_scaler.pkl"
+            joblib.dump(self.scaler, str(scaler_path))
+            logger.info("Scaler saved to %s", scaler_path)
+
+        print(f"[nn_prediction_service] Model saved to {save_path}")
+
+    def load_model(self, path: Optional[str] = None):
+        """Load a previously trained model and scaler from disk.
+
+        Args:
+            path: Path to the .keras model file. Defaults to models/nn_v1.keras.
+        """
+        if not TF_AVAILABLE:
+            raise RuntimeError("TensorFlow is required but not installed.")
+
+        load_path = Path(path) if path else DEFAULT_MODEL_PATH
+        if not load_path.exists():
+            raise FileNotFoundError(f"Model file not found: {load_path}")
+
+        # Load with custom focal loss registered
+        self.model = keras.models.load_model(
+            str(load_path),
+            custom_objects={"focal_loss": _build_focal_loss(gamma=2.0, alpha=0.25)},
+        )
+        self._is_trained = True
+        logger.info("Model loaded from %s", load_path)
+
+        # Load scaler
+        scaler_path = load_path.parent / "nn_v1_scaler.pkl"
+        if scaler_path.exists():
+            import joblib
+            self.scaler = joblib.load(str(scaler_path))
+            logger.info("Scaler loaded from %s", scaler_path)
+
+    # ------------------------------------------------------------------
+    # Accessors
+    # ------------------------------------------------------------------
+
+    def get_evaluation_metrics(self) -> Optional[dict]:
+        """Return the evaluation metrics from the last training run."""
+        return self._eval_metrics
+
+    def get_training_history(self) -> Optional[dict]:
+        """Return the full Keras training history from the last run."""
+        return self._train_history
+
+    @property
+    def is_trained(self) -> bool:
+        """Check if the model has been trained or loaded."""
+        return self._is_trained

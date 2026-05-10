@@ -27,3 +27,6 @@ docs/
 
 # Deployment Scripts
 deploy/
+
+#raw data
+rawdata/

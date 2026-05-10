@@ -116,12 +116,24 @@ _CACHE_TTL_SECONDS = 3600  # 1 hour - long-lived persistence
 _LAST_REMOTE_CHECK = 0
 _REMOTE_CHECK_INTERVAL = 60 # Check Firestore for invalidation every 60 seconds
 
-def clear_data_cache():
-    """Explicitly invalidates all in-memory data caches and signals remote observers."""
+def clear_data_cache(year=None):
+    """
+    Invalidates in-memory data caches.
+    If year is provided, only that year's cache is cleared.
+    If year is None, wipes all data (default behavior for full refreshes).
+    """
     global _DATA_CACHE, _CACHE_TIMESTAMPS
-    _DATA_CACHE.clear()
-    _CACHE_TIMESTAMPS.clear()
-    print("Log: Global data cache explicitly cleared.")
+    if year is not None:
+        key = str(year)
+        if key in _DATA_CACHE:
+            del _DATA_CACHE[key]
+        if key in _CACHE_TIMESTAMPS:
+            del _CACHE_TIMESTAMPS[key]
+        print(f"Log: Local data cache for {year} cleared.")
+    else:
+        _DATA_CACHE.clear()
+        _CACHE_TIMESTAMPS.clear()
+        print("Log: Global data cache explicitly cleared.")
 
 def _cache_key(year):
     return str(year) if year is not None else 'all'

@@ -13,8 +13,6 @@ from typing import Tuple, Dict, Any, List
 from services.db_service import get_collection_df
 from services.utils import get_team_logo_url
 
-# Constants
-NFL_DATA_GITHUB = "https://raw.githubusercontent.com/leesharpe/nfldata/master/data/"
 
 def get_team_logo(team_code: str) -> str:
     """Returns the official high-resolution logo URL for an NFL team."""
@@ -89,31 +87,7 @@ def load_data(year: int = None):
             print(f"[DEBUG_PAGE_LOAD] Returning load_data(year={year}) from memory cache instantly.")
         return _DATA_CACHE[key]
 
-    # 3. Smart deriving: If requesting a specific year, check if the MASTER (all seasons) cache is available.
-    # Deriving from existing master data is much faster than hitting Pickle or Firestore.
-    if year is not None and master_key in _DATA_CACHE:
-        if (current_time - _CACHE_TIMESTAMPS.get(master_key, 0) < _CACHE_TTL_SECONDS):
-            if is_debug:
-                print(f"[DEBUG_PAGE_LOAD] load_data(year={year}) deriving from cached master data.")
-            
-            # Unpack the master data
-            m_standings, m_teams, m_games, m_players, m_order, m_results, m_rules = _DATA_CACHE[master_key]
-            
-            # Slice only what needs slicing
-            try:
-                s_year = m_standings[m_standings['season'] == year].copy() if not m_standings.empty else m_standings
-                g_year = m_games[m_games['season'] == year].copy() if not m_games.empty else m_games
-                
-                res = (s_year, m_teams, g_year, m_players, m_order, m_results, m_rules)
-                
-                # Optionally update the specific year cache for next time
-                _DATA_CACHE[key] = res
-                _CACHE_TIMESTAMPS[key] = current_time
-                return res
-            except Exception as e:
-                if is_debug:
-                    print(f"[DEBUG_PAGE_LOAD] Failed deriving slice for {year}: {e}")
-                # Fall through to standard loading if slicing fails
+
 
     local_dir = pathlib.Path('.local_db')
 
@@ -376,7 +350,7 @@ def get_season_progress(season: int, week: int) -> Dict[str, Any]:
     """
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_op = time.time()
-    standings, teams, games, players, draft_order, draft_results, draft_order_rules = load_data()
+    standings, teams, games, players, draft_order, draft_results, draft_order_rules = load_data(year=season)
     games = process_games_data(games)
     
     today_teams = teams[teams['season'] == season].copy()

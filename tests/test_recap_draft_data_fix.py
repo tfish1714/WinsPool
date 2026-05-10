@@ -45,4 +45,4 @@ def test_extract_draft_data_filters_by_year(mock_preds, mock_load):
     # Verify exact match for drafted teams line to ensure no extra commas or items
     expected_line = "DRAFTED TEAMS: SEA (8.5), CHI (9.0), CIN (10.5)"
     assert expected_line in summary
-    assert "ROSTER PROJECTED WINS (Vegas Average): 28.0" in summary
+    assert "ROSTER PROJECTED WINS (Average): 28.0" in summary
