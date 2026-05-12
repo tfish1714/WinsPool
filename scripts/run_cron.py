@@ -40,7 +40,17 @@ SCRIPTS_DIR = pathlib.Path(__file__).parent
 
 STEPS = [
     {
-        'name': 'NFL Data Sync',
+        # Syncs rawdata/ CSVs from nflverse-data GitHub releases.
+        # Skips unchanged releases using timestamp cache — fast no-op when nothing changed.
+        # Schedule: Tuesdays 9 AM UTC (after Monday Night Football results).
+        'name': 'nflverse Raw Data Sync',
+        'script': SCRIPTS_DIR / 'sync_nflverse_data.py',
+        'required': False,  # Failure is non-fatal — rawdata/ may still be current
+    },
+    {
+        # Downloads game results and standings from leesharpe/nfldata → Firestore.
+        # Drives the live leaderboard and web app. Run this nightly during season.
+        'name': 'NFL Data Sync (Firestore)',
         'script': SCRIPTS_DIR / 'daily_nfl_sync.py',
         'required': True,   # If this fails, skip cache build (no new data)
     },
