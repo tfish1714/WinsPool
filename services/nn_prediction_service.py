@@ -3,16 +3,19 @@
 Provides a TensorFlow/Keras feedforward neural network for predicting NFL
 game outcomes (home win probability) and projecting season win totals.
 
-Architecture: Input(27) -> Dense(96,ReLU) -> Dropout(0.3) ->
-              Dense(48,ReLU) -> Dropout(0.3) -> Dense(24,ReLU) -> Dense(1,Sigmoid)
-Loss: Focal Loss (gamma=2.0, alpha=0.25)
+Architecture: Input(24) -> Dense(48,ReLU) -> Dropout(0.4) ->
+              Dense(24,ReLU) -> Dropout(0.4) -> Dense(1,Sigmoid)
+Loss: Binary cross-entropy
 
 This service is entirely additive; the existing PredictionService
 (Elo + Pythagorean) is not modified.
 """
 
+import json
 import logging
 import os
+import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -46,6 +49,7 @@ except ImportError:
 
 MODEL_DIR = Path(__file__).parent.parent / "models"
 DEFAULT_MODEL_PATH = MODEL_DIR / "nn_v1.keras"
+REGISTRY_PATH = MODEL_DIR / "model_registry.json"
 
 from services.nn_feature_engine import FEATURE_COLUMNS
 
@@ -54,39 +58,13 @@ LABEL_COLUMN = "home_win"
 # Training hyperparameters
 EPOCHS = 200
 BATCH_SIZE = 64
-LEARNING_RATE = 0.001
-DROPOUT_RATE = 0.3
-EARLY_STOP_PATIENCE = 15
+LEARNING_RATE = 0.0005
+DROPOUT_RATE = 0.4
+EARLY_STOP_PATIENCE = 20
 VALIDATION_SPLIT_WEEK = 14  # 2025 weeks 1-14 for validation
 TEST_SPLIT_WEEK = 15         # 2025 weeks 15+ for testing
 
 
-# ---------------------------------------------------------------------------
-# Focal Loss Definition
-# ---------------------------------------------------------------------------
-
-def _build_focal_loss(gamma=2.0, alpha=0.25):
-    """Build a focal loss function.
-
-    Focal loss down-weights easy well-classified examples, forcing the
-    model to focus on hard examples and produce more confident outputs.
-
-    FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
-
-    When gamma > 1, the loss aggressively penalizes under-confident
-    predictions where the model 'knows' the answer but outputs ~0.5.
-    """
-    if not TF_AVAILABLE:
-        return "binary_crossentropy"
-
-    def focal_loss(y_true, y_pred):
-        y_pred = tf.clip_by_value(y_pred, 1e-7, 1.0 - 1e-7)
-        p_t = y_true * y_pred + (1.0 - y_true) * (1.0 - y_pred)
-        alpha_t = y_true * alpha + (1.0 - y_true) * (1.0 - alpha)
-        loss = -alpha_t * tf.pow(1.0 - p_t, gamma) * tf.math.log(p_t)
-        return tf.reduce_mean(loss)
-
-    return focal_loss
 
 
 # ---------------------------------------------------------------------------
@@ -116,10 +94,11 @@ class NNPredictionService:
 
     @staticmethod
     def _build_model(input_dim: int) -> object:
-        """Construct the 96-48-24 feedforward neural network with focal loss.
+        """Construct a 48-24 feedforward neural network.
 
-        Focal loss penalizes under-confident predictions, forcing the model
-        to output more extreme probabilities when the evidence supports it.
+        Smaller than the original 96-48-24 to prevent rapid overfitting on
+        ~5000 training samples. Higher dropout (0.4) and lower learning rate
+        (0.0005) further regularize the fit.
 
         Args:
             input_dim: Number of input features.
@@ -132,20 +111,18 @@ class NNPredictionService:
 
         model = keras.Sequential([
             layers.Input(shape=(input_dim,)),
-            layers.Dense(96, activation="relu",
-                         kernel_regularizer=keras.regularizers.l2(1e-4)),
-            layers.Dropout(DROPOUT_RATE),
             layers.Dense(48, activation="relu",
                          kernel_regularizer=keras.regularizers.l2(1e-4)),
             layers.Dropout(DROPOUT_RATE),
             layers.Dense(24, activation="relu",
                          kernel_regularizer=keras.regularizers.l2(1e-4)),
+            layers.Dropout(DROPOUT_RATE),
             layers.Dense(1, activation="sigmoid"),
         ])
 
         model.compile(
             optimizer=keras.optimizers.Adam(learning_rate=LEARNING_RATE),
-            loss=_build_focal_loss(gamma=2.0, alpha=0.25),
+            loss="binary_crossentropy",
             metrics=["accuracy"],
         )
         return model
@@ -170,9 +147,11 @@ class NNPredictionService:
         Returns:
             (train_df, val_df, test_df)
         """
-        train = df[df["season"] < 2025].copy()
-        val = df[(df["season"] == 2025) & (df["week"] <= VALIDATION_SPLIT_WEEK)].copy()
-        test = df[(df["season"] == 2025) & (df["week"] > VALIDATION_SPLIT_WEEK)].copy()
+        # Use the most recent season in the table as the test/val season
+        test_season = int(df["season"].max())
+        train = df[df["season"] < test_season].copy()
+        val = df[(df["season"] == test_season) & (df["week"] <= VALIDATION_SPLIT_WEEK)].copy()
+        test = df[(df["season"] == test_season) & (df["week"] > VALIDATION_SPLIT_WEEK)].copy()
 
         logger.info("Split sizes: train=%d, val=%d, test=%d",
                      len(train), len(val), len(test))
@@ -226,7 +205,8 @@ class NNPredictionService:
         # Callbacks
         cb = [
             callbacks.EarlyStopping(
-                monitor="val_loss" if X_val is not None else "loss",
+                monitor="val_accuracy" if X_val is not None else "accuracy",
+                mode="max",
                 patience=EARLY_STOP_PATIENCE,
                 restore_best_weights=True,
                 verbose=1,
@@ -236,8 +216,8 @@ class NNPredictionService:
         # Train
         logger.info("Training NN: %d samples, %d features", len(X_train), len(FEATURE_COLUMNS))
         print(f"\n{'='*60}")
-        print(f"  NFL Neural Network Training (Focal Loss)")
-        print(f"  Architecture: {len(FEATURE_COLUMNS)}-96-48-24-1")
+        print(f"  NFL Neural Network Training (Binary Cross-Entropy)")
+        print(f"  Architecture: {len(FEATURE_COLUMNS)}-48-24-1")
         print(f"  Train samples: {len(X_train)}")
         print(f"  Val samples: {len(X_val) if X_val is not None else 0}")
         print(f"  Test samples: {len(X_test) if X_test is not None else 0}")
@@ -489,29 +469,120 @@ class NNPredictionService:
         """Load a previously trained model and scaler from disk.
 
         Args:
-            path: Path to the .keras model file. Defaults to models/nn_v1.keras.
+            path: Path to the .keras model file. Pass "latest" or "best" to
+                  resolve from the model registry. Defaults to models/nn_v1.keras.
         """
         if not TF_AVAILABLE:
             raise RuntimeError("TensorFlow is required but not installed.")
 
-        load_path = Path(path) if path else DEFAULT_MODEL_PATH
+        if path in ("latest", "best") or path is None:
+            registry = self._load_registry()
+            if path == "best":
+                version = registry.get("best_by", {}).get("season_r2") or registry.get("latest")
+            else:
+                version = registry.get("latest")
+
+            if version:
+                load_path = MODEL_DIR / f"nn_{version}.keras"
+                scaler_path = MODEL_DIR / f"nn_{version}_scaler.pkl"
+            else:
+                load_path = DEFAULT_MODEL_PATH
+                scaler_path = load_path.parent / f"{load_path.stem}_scaler.pkl"
+        elif path and re.match(r"^v\d+$", path):
+            # Version string like "v2", "v6" — resolve via MODEL_DIR
+            load_path = MODEL_DIR / f"nn_{path}.keras"
+            scaler_path = MODEL_DIR / f"nn_{path}_scaler.pkl"
+        else:
+            load_path = Path(path)
+            scaler_path = load_path.parent / f"{load_path.stem}_scaler.pkl"
+
         if not load_path.exists():
             raise FileNotFoundError(f"Model file not found: {load_path}")
 
-        # Load with custom focal loss registered
-        self.model = keras.models.load_model(
-            str(load_path),
-            custom_objects={"focal_loss": _build_focal_loss(gamma=2.0, alpha=0.25)},
-        )
+        self.model = keras.models.load_model(str(load_path))
         self._is_trained = True
         logger.info("Model loaded from %s", load_path)
 
         # Load scaler
-        scaler_path = load_path.parent / "nn_v1_scaler.pkl"
         if scaler_path.exists():
             import joblib
             self.scaler = joblib.load(str(scaler_path))
             logger.info("Scaler loaded from %s", scaler_path)
+
+    def save_versioned(
+        self,
+        version: Optional[str] = None,
+        training_params: Optional[dict] = None,
+    ) -> str:
+        """Save a versioned model and update the model registry.
+
+        Saves to models/nn_{version}.keras and models/nn_{version}_scaler.pkl,
+        then writes metadata + metrics to models/model_registry.json.
+
+        Args:
+            version: Version string (e.g. "v2"). Auto-increments from registry if None.
+            training_params: Extra metadata to store (min_season, max_season, etc.).
+
+        Returns:
+            The version string used.
+        """
+        if self.model is None:
+            raise RuntimeError("No model to save.")
+
+        registry = self._load_registry()
+
+        if version is None:
+            existing_nums = [
+                int(e["version"].lstrip("v"))
+                for e in registry.get("models", [])
+                if e["version"].lstrip("v").isdigit()
+            ]
+            version = f"v{max(existing_nums, default=0) + 1}"
+
+        model_path = MODEL_DIR / f"nn_{version}.keras"
+        scaler_path = MODEL_DIR / f"nn_{version}_scaler.pkl"
+        MODEL_DIR.mkdir(parents=True, exist_ok=True)
+
+        self.model.save(str(model_path))
+        if self.scaler is not None:
+            import joblib
+            joblib.dump(self.scaler, str(scaler_path))
+
+        entry = {
+            "version": version,
+            "path": f"models/nn_{version}.keras",
+            "scaler_path": f"models/nn_{version}_scaler.pkl",
+            "trained_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if training_params:
+            entry.update(training_params)
+        if self._eval_metrics:
+            entry["metrics"] = self._eval_metrics
+
+        models = [m for m in registry.get("models", []) if m["version"] != version]
+        models.append(entry)
+        registry["models"] = models
+        registry["latest"] = version
+
+        # Track best model by season R2
+        r2_entries = [
+            (m["version"], m.get("metrics", {}).get("season_r2", -999))
+            for m in models
+            if m.get("metrics", {}).get("season_r2") is not None
+        ]
+        if r2_entries:
+            registry.setdefault("best_by", {})["season_r2"] = max(r2_entries, key=lambda x: x[1])[0]
+
+        REGISTRY_PATH.write_text(json.dumps(registry, indent=2))
+        logger.info("Versioned model %s saved to %s", version, model_path)
+        print(f"[nn_prediction_service] Saved {version} -> {model_path}")
+        return version
+
+    def _load_registry(self) -> dict:
+        """Load the model registry JSON, or return an empty registry if none exists."""
+        if REGISTRY_PATH.exists():
+            return json.loads(REGISTRY_PATH.read_text())
+        return {"models": [], "latest": None, "best_by": {}}
 
     # ------------------------------------------------------------------
     # Accessors

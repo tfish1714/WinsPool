@@ -1,0 +1,123 @@
+{
+  "models": [
+    {
+      "version": "v1",
+      "path": "models/nn_v1.keras",
+      "scaler_path": "models/nn_v1_scaler.pkl",
+      "trained_at": "2026-05-10T00:00:00+00:00",
+      "min_season": 2006,
+      "max_season": 2025,
+      "notes": "Initial model \u00e2\u20ac\u201d registered manually. Retrain with train_nn_model.py to capture metrics."
+    },
+    {
+      "version": "v2",
+      "path": "models/nn_v2.keras",
+      "scaler_path": "models/nn_v2_scaler.pkl",
+      "trained_at": "2026-05-11T02:41:15.020901+00:00",
+      "min_season": 2006,
+      "max_season": 2025,
+      "train_samples": 4927,
+      "metrics": {
+        "epochs_trained": 16,
+        "train_r2": 0.202964186668396,
+        "train_mae": 0.394950270652771,
+        "train_accuracy": 0.6990054800081186,
+        "test_r2": 0.038178861141204834,
+        "test_mae": 0.47264331579208374,
+        "test_accuracy": 0.609375,
+        "season_r2": 0.6656780997729124,
+        "season_mae": 1.3834872767329216,
+        "season_n": 160
+      }
+    },
+    {
+      "version": "v3",
+      "path": "models/nn_v3.keras",
+      "scaler_path": "models/nn_v3_scaler.pkl",
+      "trained_at": "2026-05-11T02:51:58.071405+00:00",
+      "min_season": 2006,
+      "max_season": 2025,
+      "train_samples": 4927,
+      "metrics": {
+        "epochs_trained": 22,
+        "train_r2": 0.17232048511505127,
+        "train_mae": 0.4273354411125183,
+        "train_accuracy": 0.6904810229348488,
+        "test_r2": -0.01938474178314209,
+        "test_mae": 0.4990200102329254,
+        "test_accuracy": 0.515625,
+        "season_r2": 0.5632353647307576,
+        "season_mae": 1.6158499866724014,
+        "season_n": 160
+      }
+    },
+    {
+      "version": "v4",
+      "path": "models/nn_v4.keras",
+      "scaler_path": "models/nn_v4_scaler.pkl",
+      "trained_at": "2026-05-11T03:32:45.098723+00:00",
+      "min_season": 2006,
+      "max_season": 2025,
+      "train_samples": 4927,
+      "metrics": {
+        "epochs_trained": 23,
+        "train_r2": 0.14636534452438354,
+        "train_mae": 0.4278372824192047,
+        "train_accuracy": 0.6716054394154658,
+        "test_r2": 0.05499112606048584,
+        "test_mae": 0.46163493394851685,
+        "test_accuracy": 0.515625,
+        "season_r2": 0.6457630102567558,
+        "season_mae": 1.5036051779985429,
+        "season_n": 160
+      }
+    },
+    {
+      "version": "v5",
+      "path": "models/nn_v5.keras",
+      "scaler_path": "models/nn_v5_scaler.pkl",
+      "trained_at": "2026-05-11T03:35:04.748586+00:00",
+      "min_season": 2006,
+      "max_season": 2025,
+      "train_samples": 4927,
+      "metrics": {
+        "epochs_trained": 26,
+        "train_r2": 0.17093324661254883,
+        "train_mae": 0.420731782913208,
+        "train_accuracy": 0.6839861984980719,
+        "test_r2": 0.0909966230392456,
+        "test_mae": 0.4544283151626587,
+        "test_accuracy": 0.578125,
+        "season_r2": 0.6601104940926066,
+        "season_mae": 1.4696830794215203,
+        "season_n": 160
+      }
+    },
+    {
+      "version": "v6",
+      "path": "models/nn_v6.keras",
+      "scaler_path": "models/nn_v6_scaler.pkl",
+      "trained_at": "2026-05-11T14:18:27.892165+00:00",
+      "min_season": 2006,
+      "max_season": 2025,
+      "train_samples": 4927,
+      "metrics": {
+        "epochs_trained": 41,
+        "train_r2": 0.2081296443939209,
+        "train_mae": 0.4041432738304138,
+        "train_accuracy": 0.7038765983357013,
+        "test_r2": 0.13136035203933716,
+        "test_mae": 0.4464610815048218,
+        "test_accuracy": 0.609375,
+        "season_r2": 0.672106861191599,
+        "season_mae": 1.3894545704126358,
+        "season_n": 160
+      }
+    }
+  ],
+  "latest": "v6",
+  "best_by": {
+    "test_accuracy": "v6",
+    "season_r2": "v6"
+  }
+}

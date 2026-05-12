@@ -28,5 +28,15 @@ docs/
 # Deployment Scripts
 deploy/
 
-#raw data
+# Raw data (large, not committed)
 rawdata/
+
+# Claude Code local session data
+.claude/
+
+# Trained model binaries (large — use model_registry.json to track versions)
+models/*.keras
+models/*.pkl
+
+# ML reports (generated, not source)
+reports/

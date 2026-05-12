@@ -40,7 +40,11 @@ def main():
     )
     parser.add_argument(
         "--output", type=str, default=None,
-        help="Path to save model (default: models/nn_v1.keras)"
+        help="Path to save model (legacy, use --version instead)"
+    )
+    parser.add_argument(
+        "--version", type=str, default=None,
+        help="Version string to save as (e.g. 'v2'). Auto-increments if omitted."
     )
     args = parser.parse_args()
 
@@ -107,8 +111,19 @@ def main():
         print("  Season-level: (insufficient data for evaluation)")
     print(f"{'='*60}")
 
-    # Save model
-    svc.save_model(args.output)
+    # Save model — versioned (preferred) or legacy path
+    if args.output:
+        svc.save_model(args.output)
+    else:
+        saved_version = svc.save_versioned(
+            version=args.version,
+            training_params={
+                "min_season": args.min_season,
+                "max_season": args.max_season,
+                "train_samples": len(feature_table[feature_table["season"] < 2025]),
+            },
+        )
+        print(f"  Registry entry: {saved_version}")
     print("\nDone.")
 
 
