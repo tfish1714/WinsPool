@@ -941,3 +941,84 @@ async def update_prediction_config(request: Request):
     except Exception as e:
         import traceback; traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.get("/admin/elo_history")
+async def get_elo_history(playerId: str):
+    """Admin-only: Return Elo ratings over time for all teams.
+
+    Returns a structure ready for Chart.js:
+    {
+        "seasons": [2006, 2007, ...],
+        "teams": {
+            "KC": {
+                "2006": [{"week": 1, "elo": 1512.3}, ...],
+                ...
+            }
+        },
+        "divisions": {"KC": "AFC West", ...},
+        "conferences": {"KC": "AFC", ...}
+    }
+    """
+    if get_player_role(playerId) != "admin":
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+    try:
+        import pathlib
+        import pandas as pd
+
+        elo_path = pathlib.Path(__file__).parent.parent / "rawdata" / "elo_computed.csv"
+        if not elo_path.exists():
+            return JSONResponse(status_code=404, content={"error": "elo_computed.csv not found. Run scripts/compute_elo.py first."})
+
+        df = pd.read_csv(elo_path)
+
+        # Build per-team Elo series from home/away rows
+        records = []
+        for _, row in df.iterrows():
+            records.append({"season": int(row["season"]), "week": int(row["week"]),
+                            "team": row["home_team"], "elo": round(float(row["home_elo_post"]), 1)})
+            records.append({"season": int(row["season"]), "week": int(row["week"]),
+                            "team": row["away_team"], "elo": round(float(row["away_elo_post"]), 1)})
+
+        elo_df = pd.DataFrame(records)
+        # Keep last Elo per team per (season, week) — handles bye weeks etc.
+        elo_df = elo_df.sort_values(["season", "week"]).drop_duplicates(
+            subset=["season", "week", "team"], keep="last"
+        )
+
+        seasons = sorted(elo_df["season"].unique().tolist())
+        teams_data: dict = {}
+
+        for (season, week, team), group in elo_df.groupby(["season", "week", "team"]):
+            if team not in teams_data:
+                teams_data[team] = {}
+            season_key = str(season)
+            if season_key not in teams_data[team]:
+                teams_data[team][season_key] = []
+            teams_data[team][season_key].append({"week": int(week), "elo": group["elo"].iloc[0]})
+
+        # Load division/conference/color from teams CSV
+        teams_csv = pathlib.Path(__file__).parent.parent / "rawdata" / "teams_colors_logos.csv"
+        DIVISIONS: dict = {}
+        conferences: dict = {}
+        colors: dict = {}
+        if teams_csv.exists():
+            tdf = pd.read_csv(teams_csv)
+            for _, tr in tdf.iterrows():
+                abbr = str(tr["team_abbr"])
+                DIVISIONS[abbr] = str(tr["team_division"])
+                conferences[abbr] = str(tr["team_conf"])
+                colors[abbr] = str(tr["team_color"])
+
+        return JSONResponse(content={
+            "seasons": seasons,
+            "teams": teams_data,
+            "divisions": DIVISIONS,
+            "conferences": conferences,
+            "colors": colors,
+        })
+
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})

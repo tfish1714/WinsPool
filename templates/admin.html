@@ -28,6 +28,9 @@
         <button class="tab-btn" data-tab="system-section"
             style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">System
             Operations</button>
+        <button class="tab-btn" data-tab="elo-section"
+            style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">Elo
+            Ratings</button>
     </div>
 
     <!-- Season Management Card -->
@@ -188,8 +191,71 @@
         </div>
     </div>
 
+    <!-- Elo Ratings Explorer -->
+    <div id="elo-section" class="tab-content card-glass hidden" style="height: auto;">
+        <h2>Elo Ratings Explorer</h2>
+        <p>Compare team strength over time. Select teams, divisions, or conferences and season range.</p>
+
+        <!-- Filters -->
+        <div style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem;">
+
+            <!-- Season range -->
+            <div style="display: flex; gap: 1rem; align-items: flex-end;">
+                <div style="flex: 1;">
+                    <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">From Season</label>
+                    <select id="elo-season-from" class="admin-input"></select>
+                </div>
+                <div style="flex: 1;">
+                    <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">To Season</label>
+                    <select id="elo-season-to" class="admin-input"></select>
+                </div>
+                <div style="flex: 1;">
+                    <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">Resolution</label>
+                    <select id="elo-resolution" class="admin-input">
+                        <option value="week">Week by Week</option>
+                        <option value="season" selected>Season End</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Quick-select buttons -->
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <span style="font-size: 0.8rem; color: var(--text-secondary); align-self: center;">Quick select:</span>
+                <button class="elo-conf-btn btn-secondary" data-conf="AFC" style="padding: 0.25rem 0.75rem; font-size: 0.8rem;">AFC</button>
+                <button class="elo-conf-btn btn-secondary" data-conf="NFC" style="padding: 0.25rem 0.75rem; font-size: 0.8rem;">NFC</button>
+                <button class="elo-div-btn btn-secondary" data-div="AFC East" style="padding: 0.25rem 0.75rem; font-size: 0.8rem;">AFC East</button>
+                <button class="elo-div-btn btn-secondary" data-div="AFC North" style="padding: 0.25rem 0.75rem; font-size: 0.8rem;">AFC North</button>
+                <button class="elo-div-btn btn-secondary" data-div="AFC South" style="padding: 0.25rem 0.75rem; font-size: 0.8rem;">AFC South</button>
+                <button class="elo-div-btn btn-secondary" data-div="AFC West" style="padding: 0.25rem 0.75rem; font-size: 0.8rem;">AFC West</button>
+                <button class="elo-div-btn btn-secondary" data-div="NFC East" style="padding: 0.25rem 0.75rem; font-size: 0.8rem;">NFC East</button>
+                <button class="elo-div-btn btn-secondary" data-div="NFC North" style="padding: 0.25rem 0.75rem; font-size: 0.8rem;">NFC North</button>
+                <button class="elo-div-btn btn-secondary" data-div="NFC South" style="padding: 0.25rem 0.75rem; font-size: 0.8rem;">NFC South</button>
+                <button class="elo-div-btn btn-secondary" data-div="NFC West" style="padding: 0.25rem 0.75rem; font-size: 0.8rem;">NFC West</button>
+                <button id="elo-clear-btn" class="btn-secondary" style="padding: 0.25rem 0.75rem; font-size: 0.8rem; margin-left: auto;">Clear All</button>
+            </div>
+
+            <!-- Team grid -->
+            <div id="elo-team-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 0.4rem; border: 1px solid var(--glass-border); padding: 0.75rem; border-radius: 8px; background: rgba(0,0,0,0.2);">
+                <!-- Populated by JS -->
+            </div>
+
+        </div>
+
+        <!-- Chart -->
+        <div style="position: relative; margin-top: 1.5rem; height: 420px;">
+            <canvas id="elo-chart" style="display: none;"></canvas>
+            <div id="elo-empty" style="display: flex; align-items: center; justify-content: center; height: 100%; border: 1px dashed rgba(255,255,255,0.12); border-radius: 8px; color: rgba(255,255,255,0.3); font-size: 0.9rem;">
+                Select teams above to compare Elo ratings
+            </div>
+        </div>
+
+        <!-- Legend -->
+        <div id="elo-legend" style="margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.4rem;"></div>
+    </div>
+
     <p id="admin-message" style="margin-top: 1rem; text-align: center; font-weight: 600;"></p>
 </div>
 
 <script type="module" src="/static/js/admin_main.js"></script>
+<script type="module" src="/static/js/admin_elo.js"></script>
 {% endblock %}
