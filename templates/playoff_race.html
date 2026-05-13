@@ -7,20 +7,22 @@
 
 <main class="dashboard-main">
     <div class="card-glass page-card">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
-            <h2><i data-lucide="flag"></i> Playoff Race — {{ year }}</h2>
-            <div class="year-selector">
-                <label for="year-pick">Season:</label>
-                <select id="year-pick" onchange="window.location='/playoff-race/' + this.value">
+        <header class="wp-top">
+            <div>
+                <div class="eyebrow">NFL Wins Pool</div>
+                <h1 class="wp-h1">Playoff Race<span class="wp-year">/{{ year }}</span></h1>
+                <p style="color:var(--ink-2); margin:0.25rem 0 0; font-size:.9rem;">
+                    Shows whether each player can mathematically catch the players ahead of them based on remaining games.
+                </p>
+            </div>
+            <div class="wp-top-right">
+                <select id="year-pick" class="season-select" onchange="window.location='/playoff-race/' + this.value" aria-label="Season">
                     {% for y in available_years %}
-                    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}</option>
+                    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }} Season</option>
                     {% endfor %}
                 </select>
             </div>
-        </div>
-        <p style="color: var(--text-secondary); margin-top: 0.5rem;">
-            Shows whether each player can mathematically catch the players ahead of them based on remaining games.
-        </p>
+        </header>
 
         <div class="race-container" style="margin-top: 2rem;">
             {% for rec in race %}

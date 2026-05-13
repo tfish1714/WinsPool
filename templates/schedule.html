@@ -7,17 +7,19 @@
     <div class="card-glass page-card">
 
         <!-- Header + Year Selector -->
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
-            <h2><i data-lucide="calendar"></i> Game Schedule — {{ year }}</h2>
-            <div class="year-selector">
-                <label for="year-pick">Season:</label>
-                <select id="year-pick" onchange="window.location='/schedule/' + this.value">
+        <header class="wp-top">
+            <div>
+                <div class="eyebrow">NFL Wins Pool</div>
+                <h1 class="wp-h1">Game Schedule<span class="wp-year">/{{ year }}</span></h1>
+            </div>
+            <div class="wp-top-right">
+                <select id="year-pick" class="season-select" onchange="window.location='/schedule/' + this.value" aria-label="Season">
                     {% for y in available_years %}
-                    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}</option>
+                    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }} Season</option>
                     {% endfor %}
                 </select>
             </div>
-        </div>
+        </header>
 
         {% if schedule %}
         <!-- Week Carousel -->

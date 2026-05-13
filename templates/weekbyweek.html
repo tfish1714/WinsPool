@@ -6,17 +6,19 @@
 
 <main class="dashboard-main">
     <div class="card-glass page-card weekbyweek-wrap">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
-            <h2><i data-lucide="bar-chart-3"></i> Weekly Progress — {{ year }}</h2>
-            <div class="year-selector">
-                <label for="year-pick">Season:</label>
-                <select id="year-pick" onchange="window.location='/wins-pool/' + this.value + '/weekbyweek'">
+        <header class="wp-top">
+            <div>
+                <div class="eyebrow">NFL Wins Pool</div>
+                <h1 class="wp-h1">Weekly Progress<span class="wp-year">/{{ year }}</span></h1>
+            </div>
+            <div class="wp-top-right">
+                <select id="year-pick" class="season-select" onchange="window.location='/wins-pool/' + this.value + '/weekbyweek'" aria-label="Season">
                     {% for y in available_years %}
-                    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}</option>
+                    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }} Season</option>
                     {% endfor %}
                 </select>
             </div>
-        </div>
+        </header>
         <div class="table-container">
             {{ table|safe }}
         </div>

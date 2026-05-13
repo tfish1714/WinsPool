@@ -2,8 +2,13 @@
 {% block title %}Overall History{% endblock %}
 {% block content %}
 <main class="dashboard-main" style="display:block;">
-    <div class="card-glass" style="height:auto; overflow:visible;">
-        <h2><i data-lucide="crown"></i> All-Time History</h2>
+    <div class="card-glass page-card" style="height:auto; overflow:visible;">
+        <header class="wp-top" style="margin-bottom:1.5rem;">
+            <div>
+                <div class="eyebrow">NFL Wins Pool</div>
+                <h1 class="wp-h1">All-Time History</h1>
+            </div>
+        </header>
         <p style="color:var(--text-secondary); margin-bottom:1.5rem; font-size:.9rem;">
             All-time metrics for every player across all seasons.
         </p>
@@ -44,7 +49,7 @@
                                 style="color:var(--primary-color);font-weight:600;">{{
                                 stat.best.year }}</span> ({{ stat.best.wins }}W, #{{ stat.best.rank }})</td>
                         <td style="font-size:0.85rem;"><span class="stacked-label">Worst</span><span
-                                style="color:#ff6b6b;font-weight:600;">{{ stat.worst.year
+                                style="color:var(--neg);font-weight:600;">{{ stat.worst.year
                                 }}</span> ({{ stat.worst.wins }}W, #{{ stat.worst.rank }})</td>
                     </tr>
                     {% endfor %}
@@ -81,7 +86,7 @@
                     {{ undrafted_worst.team }}
                     <span style="font-weight: 400; color: var(--text-secondary);">({{ undrafted_worst.year }})</span>
                 </div>
-                <div style="color: #ff6b6b; font-weight: 800; font-size: 1.2rem;">{{ undrafted_worst.wins }} Wins</div>
+                <div style="color: var(--neg); font-weight: 800; font-size: 1.2rem;">{{ undrafted_worst.wins }} Wins</div>
             </div>
         </div>
 
@@ -118,7 +123,7 @@
 
             <!-- Bottom 10 Seasons -->
             <div>
-                <h3 style="color:#ff6b6b; margin-bottom: 1rem;"><i data-lucide="snowflake"></i> Top 10 Worst Seasons
+                <h3 style="color:var(--neg); margin-bottom: 1rem;"><i data-lucide="snowflake"></i> Top 10 Worst Seasons
                 </h3>
                 <table style="font-size: 0.88rem; width:100%;">
                     <thead>
@@ -138,7 +143,7 @@
                                 style="text-align:left; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px;">
                                 {{ s.player }}</td>
                             <td>{{ s.season }}</td>
-                            <td style="color:#ff6b6b; font-weight:700;">{{ s.wins }}</td>
+                            <td style="color:var(--neg); font-weight:700;">{{ s.wins }}</td>
                             <td>#{{ s.rank }}</td>
                         </tr>
                         {% endfor %}

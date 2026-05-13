@@ -407,6 +407,24 @@ def add_draft_rule(season: int, draft_order: int, pick_one: int, pick_two: int, 
     clear_data_cache()
     signal_data_update()
 
+def set_member_paid(season: int, player_id: int, paid: bool) -> bool:
+    """Set the paid flag on a player's draft_order entry for a given season."""
+    order_df = get_collection_df("draft_order")
+    if order_df.empty:
+        return False
+    mask = (order_df["season"].astype(int) == season) & (order_df["playerId"].astype(int) == player_id)
+    if not mask.any():
+        return False
+    draft_order_num = int(order_df.loc[mask, "draftOrder"].iloc[0])
+    doc_id = f"{season}_{draft_order_num}"
+    db = get_db()
+    if db:
+        db.collection("draft_order").document(doc_id).update({"paid": paid})
+    order_df.loc[mask, "paid"] = paid
+    _save_df_to_local("draft_order", order_df)
+    return True
+
+
 def update_player_profile(player_id: str, updates: dict):
     """Updates non-credential player fields (nickname, email, MFA) with cache invalidation."""
     db = get_db()

@@ -6,7 +6,8 @@
 <main class="dashboard-main" style="display:block;">
     <div style="max-width: 1400px; margin: 0 auto;">
         <div style="text-align: center; margin-bottom: 2rem;">
-            <h2><i data-lucide="book-open"></i> All-Time Draft History</h2>
+            <div class="eyebrow" style="text-align:center;">NFL Wins Pool</div>
+            <h1 class="wp-h1" style="justify-content:center; margin-bottom:0.5rem;">Draft History</h1>
             <p style="color:var(--text-secondary); font-size:.95rem; margin-bottom: 1rem;">
                 A comprehensive view of draft tendencies and total wins. Hover over any team/player chip to see their
                 Best and Worst seasons.
@@ -147,7 +148,7 @@
                                         </div>
                                         {% endif %}
                                     </div>
-                                    <span style="margin-left:auto; font-weight:800; color:#4aa8ff;">{{ overall_wins
+                                    <span style="margin-left:auto; font-weight:800; color:var(--link);">{{ overall_wins
                                         }}W</span>
                                 </div>
                             </td>
@@ -157,7 +158,7 @@
                             <td style="font-weight:700; color:var(--accent-green); font-size:0.95rem;"><span
                                     class="stacked-label">#1 Picks</span>{{
                                 team_first_picks[team] if team_first_picks and team in team_first_picks else 0 }}x</td>
-                            <td style="font-weight:800; color:#4aa8ff; font-size:1.1rem;"><span
+                            <td style="font-weight:800; color:var(--link); font-size:1.1rem;"><span
                                     class="stacked-label">Total Wins</span>{{ overall_wins }}</td>
                             <td>
                                 <div style="display:flex; flex-wrap:wrap; gap:8px;">

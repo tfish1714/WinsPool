@@ -418,7 +418,8 @@ class App {
     showAuthError(text) {
         const err = document.getElementById('auth-error');
         if (err) {
-            err.textContent = text;
+            err.innerHTML = `<div class="err-banner__dot"></div><div style="font-size:13px;color:var(--ink);">${text}</div>`;
+            err.style.display = 'grid';
             err.classList.remove('hidden');
         }
     }

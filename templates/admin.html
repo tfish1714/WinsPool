@@ -12,29 +12,26 @@
 {% endblock %}
 
 {% block content %}
-<div class="container admin-container" style="max-width: 1000px; display: flex; flex-direction: column; gap: 1rem;">
+<div class="container admin-container" style="max-width: 1200px; display: flex; flex-direction: column; gap: 0;">
+    <!-- Page Header -->
+    <header class="wp-top">
+        <div>
+            <div class="eyebrow">Commissioner</div>
+            <h1 class="wp-h1">Admin<span class="wp-year">/console</span></h1>
+        </div>
+    </header>
+
     <!-- Admin Sub-menu Tabs -->
-    <div class="admin-tabs"
-        style="display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--glass-border); padding-bottom: 0.5rem; overflow-x: auto;">
-        <button class="tab-btn active" data-tab="draft-section"
-            style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">Draft
-            Operations</button>
-        <button class="tab-btn" data-tab="player-section"
-            style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">Player
-            Management</button>
-        <button class="tab-btn" data-tab="recap-section"
-            style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">AI
-            Recaps</button>
-        <button class="tab-btn" data-tab="system-section"
-            style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">System
-            Operations</button>
-        <button class="tab-btn" data-tab="elo-section"
-            style="background: none; border: 1px solid var(--glass-border); color: var(--text-secondary); padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; white-space: nowrap;">Elo
-            Ratings</button>
+    <div class="admin-tab-bar admin-tabs">
+        <button class="admin-tab-btn tab-btn active" data-tab="player-section">Players</button>
+        <button class="admin-tab-btn tab-btn" data-tab="draft-section">Draft</button>
+        <button class="admin-tab-btn tab-btn" data-tab="members-section">Members</button>
+        <button class="admin-tab-btn tab-btn" data-tab="recap-section">AI Recaps</button>
+        <button class="admin-tab-btn tab-btn" data-tab="elo-section">Elo Ratings</button>
     </div>
 
     <!-- Season Management Card -->
-    <div id="draft-section" class="tab-content card-glass" style="height: auto;">
+    <div id="draft-section" class="tab-content card-glass hidden" style="height: auto;">
         <h2 style="border-bottom: 1px solid var(--glass-border); padding-bottom: 0.5rem;">Season & Draft Management</h2>
         <p>Generate a new season with specific players or wipe existing seasonal data.</p>
 
@@ -87,11 +84,47 @@
                     style="width: 100%; background: #222; border-color: #444;">Reset Draft Picks (Current Season
                     Only)</button>
             </div>
+
+            <div style="border-top: 1px solid var(--line); padding-top: 1rem;">
+                <h4 style="margin: 0 0 0.75rem; color: var(--ink-2); font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em;">Pre-season</h4>
+                <button id="scrape-predictions-btn" class="btn-primary"
+                    style="width: 100%; background: #333; border-color: #555;">Run Preseason Predictor Agent</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Members Tab -->
+    <div id="members-section" class="tab-content card-glass hidden" style="height: auto;">
+        <div class="members-toolbar">
+            <div style="display:flex; align-items:baseline; gap:14px;">
+                <span style="font-size:18px; font-weight:700; letter-spacing:-0.01em;">Members</span>
+                <span id="members-meta" class="mono-pill" style="border:none; color:var(--ink-3); font-size:11px; padding:0;"></span>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px;">
+                <label class="field-label" style="margin:0;">Season</label>
+                <select id="members-season-select" class="season-select" style="font-size:13px; padding:8px 32px 8px 12px;">
+                    <option value="">Loading…</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Table head -->
+        <div class="members-table-head">
+            <div>Member</div>
+            <div>Email</div>
+            <div>Role</div>
+            <div>Draft Order</div>
+            <div>Paid</div>
+        </div>
+
+        <!-- Rows populated by JS -->
+        <div id="members-rows">
+            <div style="padding:40px 0; text-align:center; color:var(--ink-3); font-size:13px;">Select a season above to load members.</div>
         </div>
     </div>
 
     <!-- Player Management Card -->
-    <div id="player-section" class="tab-content card-glass hidden" style="height: auto;">
+    <div id="player-section" class="tab-content card-glass" style="height: auto;">
         <h2>Player Management</h2>
         <p>Create new players, edit profiles, and manage credentials.</p>
 
@@ -180,17 +213,6 @@
     </div>
 
     <!-- System Operations Card -->
-    <div id="system-section" class="tab-content card-glass hidden" style="height: auto;">
-        <h2>System Operations</h2>
-        <p>Developer and operations utilities for data management.</p>
-        <div style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem;">
-            <button id="scrape-predictions-btn" class="btn-primary"
-                style="width: 100%; background: #333; border-color: #555;">Run Preseason Predictor Agent</button>
-            <button id="test-connection-btn" class="btn-primary"
-                style="width: 100%; background: #222; border-color: #444;">Verify Data Connections</button>
-        </div>
-    </div>
-
     <!-- Elo Ratings Explorer -->
     <div id="elo-section" class="tab-content card-glass hidden" style="height: auto;">
         <h2>Elo Ratings Explorer</h2>

@@ -44,8 +44,139 @@ class AdminApp {
                 } else {
                     console.error(`[Admin] Target section '${target}' not found in DOM!`);
                 }
+                if (target === 'members-section') {
+                    this.initMembersTab();
+                }
             };
         });
+    }
+
+    /* ------------------------------------------------------------------
+       Members Tab
+       ------------------------------------------------------------------ */
+
+    initMembersTab() {
+        if (this._membersTabReady) return;
+        this._membersTabReady = true;
+
+        const sel = document.getElementById('members-season-select');
+        if (!sel) return;
+
+        // Populate season dropdown from already-fetched seasons, or re-fetch
+        const populate = (seasons) => {
+            sel.innerHTML = seasons.map(s => `<option value="${s}">${s} Season</option>`).join('');
+            // Load the most recent season by default
+            if (seasons.length) this.loadMembers(seasons[0]);
+        };
+
+        ApiService.fetchSeasons(this.playerId)
+            .then(({ seasons }) => populate(seasons))
+            .catch(() => {
+                sel.innerHTML = '<option value="">Error loading seasons</option>';
+            });
+
+        sel.addEventListener('change', () => {
+            if (sel.value) this.loadMembers(parseInt(sel.value, 10));
+        });
+    }
+
+    async loadMembers(season) {
+        const container = document.getElementById('members-rows');
+        const meta = document.getElementById('members-meta');
+        if (!container) return;
+
+        container.innerHTML = '<div style="padding:40px 0; text-align:center; color:var(--ink-3); font-size:13px;">Loading…</div>';
+
+        try {
+            const { members } = await ApiService.fetchMembers(this.playerId, season);
+            this.renderMemberRows(members, season, container, meta);
+        } catch (e) {
+            container.innerHTML = `<div style="padding:40px 0; text-align:center; color:var(--neg); font-size:13px;">${this._esc(e.message)}</div>`;
+        }
+    }
+
+    renderMemberRows(members, season, container, meta) {
+        if (!members || members.length === 0) {
+            container.innerHTML = '<div style="padding:40px 0; text-align:center; color:var(--ink-3); font-size:13px;">No members found for this season.</div>';
+            if (meta) meta.textContent = '';
+            return;
+        }
+
+        const unpaid = members.filter(m => !m.paid).length;
+        if (meta) {
+            meta.textContent = `${members.length} members · ${unpaid} unpaid`;
+        }
+
+        container.innerHTML = '';
+        members.forEach(m => {
+            const row = document.createElement('div');
+            row.className = 'members-row';
+            row.dataset.playerId = m.playerId;
+
+            const isAdmin = (m.role || '').toLowerCase() === 'admin';
+            const rolePill = isAdmin
+                ? `<span class="mono-pill" style="border-color:var(--leader); color:var(--leader); font-size:10px; padding:3px 8px;">${this._esc(m.role)}</span>`
+                : `<span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--ink-3);">${this._esc(m.role || '—')}</span>`;
+
+            const paidState = m.paid ? 'paid' : 'unpaid';
+            row.innerHTML = `
+                <div class="members-row-name">${this._esc(m.fullName)}</div>
+                <div class="members-row-email">${this._esc(m.email || '—')}</div>
+                <div>${rolePill}</div>
+                <div class="members-row-order">#${m.draftOrder ?? '—'}</div>
+                <div>
+                    <button class="paid-toggle" data-paid="${m.paid ? '1' : '0'}" aria-label="Toggle paid">
+                        <span class="paid-toggle__track" style="background:${m.paid ? 'var(--pos)' : 'var(--line-strong)'};">
+                            <span class="paid-toggle__thumb" style="left:${m.paid ? '19px' : '3px'}; background:${m.paid ? '#fff' : 'var(--ink-3)'};"></span>
+                        </span>
+                        <span class="paid-toggle__label" style="color:${m.paid ? 'var(--pos)' : 'var(--ink-3)'};">${paidState}</span>
+                    </button>
+                </div>
+            `;
+
+            const toggleBtn = row.querySelector('.paid-toggle');
+            toggleBtn.addEventListener('click', () => this.togglePaid(toggleBtn, m, season, meta, container));
+
+            container.appendChild(row);
+        });
+    }
+
+    async togglePaid(btn, member, season, meta, container) {
+        const currentPaid = btn.dataset.paid === '1';
+        const newPaid = !currentPaid;
+
+        // Optimistic UI update
+        btn.dataset.paid = newPaid ? '1' : '0';
+        const track = btn.querySelector('.paid-toggle__track');
+        const thumb = btn.querySelector('.paid-toggle__thumb');
+        const label = btn.querySelector('.paid-toggle__label');
+        track.style.background = newPaid ? 'var(--pos)' : 'var(--line-strong)';
+        thumb.style.left = newPaid ? '19px' : '3px';
+        thumb.style.background = newPaid ? '#fff' : 'var(--ink-3)';
+        label.textContent = newPaid ? 'paid' : 'unpaid';
+        label.style.color = newPaid ? 'var(--pos)' : 'var(--ink-3)';
+
+        // Update meta count
+        const rows = container.querySelectorAll('.members-row');
+        const unpaidCount = Array.from(rows).filter(r => {
+            const tb = r.querySelector('.paid-toggle');
+            return tb && tb.dataset.paid === '0';
+        }).length;
+        if (meta) meta.textContent = `${rows.length} members · ${unpaidCount} unpaid`;
+
+        try {
+            const { ok } = await ApiService.setMemberPaid(this.playerId, member.playerId, season, newPaid);
+            if (!ok) throw new Error('Server rejected update');
+        } catch (e) {
+            // Revert on failure
+            btn.dataset.paid = currentPaid ? '1' : '0';
+            track.style.background = currentPaid ? 'var(--pos)' : 'var(--line-strong)';
+            thumb.style.left = currentPaid ? '19px' : '3px';
+            thumb.style.background = currentPaid ? '#fff' : 'var(--ink-3)';
+            label.textContent = currentPaid ? 'paid' : 'unpaid';
+            label.style.color = currentPaid ? 'var(--pos)' : 'var(--ink-3)';
+            alert(`Failed to update: ${e.message}`);
+        }
     }
 
     async fetchInitialData() {

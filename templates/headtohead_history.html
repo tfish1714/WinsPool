@@ -4,10 +4,15 @@
 
 <main class="dashboard-main">
     <div class="card-glass page-card">
-        <h2><i data-lucide="library"></i> Head-to-Head History — All Seasons</h2>
-        <p style="color:var(--text-secondary); margin-bottom:1.5rem; font-size:.9rem;">
-            Win-loss records between each pair of players.
-        </p>
+        <header class="wp-top" style="margin-bottom:1.5rem;">
+            <div>
+                <div class="eyebrow">NFL Wins Pool</div>
+                <h1 class="wp-h1">H2H History</h1>
+                <p style="color:var(--ink-2); margin:0.25rem 0 0; font-size:.9rem;">
+                    Win-loss records between each pair of players.
+                </p>
+            </div>
+        </header>
 
         {% if all_time_table %}
         <div class="season-block" style="border: 2px solid var(--primary-color); padding: 1rem; border-radius: 8px;">

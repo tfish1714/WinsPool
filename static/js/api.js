@@ -119,5 +119,14 @@ export const ApiService = {
             method: 'POST',
             body: JSON.stringify({ playerId, year, week, summary })
         });
+    },
+    async fetchMembers(playerId, season) {
+        return fetchWithTimeout(`${API_BASE}/admin/members/${season}?playerId=${playerId}`);
+    },
+    async setMemberPaid(playerId, targetPlayerId, season, paid) {
+        return fetchWithTimeout(`${API_BASE}/admin/members/paid`, {
+            method: 'POST',
+            body: JSON.stringify({ playerId, targetPlayerId, season, paid })
+        });
     }
 };

@@ -9,18 +9,19 @@
     <div class="card-glass page-card">
 
         <!-- Header + Year Selector -->
-        <div
-            style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem; margin-bottom:1.5rem;">
-            <h2><i data-lucide="bar-chart-3"></i> Draft Results — {{ year }}</h2>
-            <div class="year-selector">
-                <label for="year-pick">Season:</label>
-                <select id="year-pick" onchange="window.location='/draft/' + this.value">
+        <header class="wp-top">
+            <div>
+                <div class="eyebrow">NFL Wins Pool</div>
+                <h1 class="wp-h1">Draft Results<span class="wp-year">/{{ year }}</span></h1>
+            </div>
+            <div class="wp-top-right">
+                <select id="year-pick" class="season-select" onchange="window.location='/draft/' + this.value" aria-label="Season">
                     {% for y in available_years | sort(reverse=True) %}
-                    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}</option>
+                    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }} Season</option>
                     {% endfor %}
                 </select>
             </div>
-        </div>
+        </header>
 
         <!-- Best Pick Badges -->
         {% if best_overall or best_by_round %}
@@ -97,7 +98,7 @@
                     row['TotalWinsBySeason'] is not string and row['TotalWinsBySeason'] is not none) else 0 %}
                     {% set delta = (actual - proj) | round(1) %}
                     <tr {% if best_overall and row['team']==best_overall.team
-                        %}style="border-left: 3px solid #f5c542; background: rgba(245, 197, 66, 0.05);" {% endif %}>
+                        %}style="border-left: 3px solid var(--leader); background: var(--leader-soft);" {% endif %}>
                         <td class="stacked-header-cell" style="text-align: left;">
                             <strong>#{{ row['draftPick'] | int }}</strong> {{ row['fullName'] }}
                             — <img src="{{ get_team_logo(row['team']) }}" class="tiny-logo" alt="">

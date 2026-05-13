@@ -14,7 +14,8 @@ from services.db_service import (
     get_collection_df, add_draft_order, add_draft_rule, delete_draft_results_for_season,
     get_player_by_email, verify_password, get_password_hash, _is_legacy_sha256,
     update_player_credentials, increment_failed_setup_attempts,
-    update_player_profile, add_player, delete_season_data, get_player_role
+    update_player_profile, add_player, delete_season_data, get_player_role,
+    set_member_paid,
 )
 from services.draft_service import load_draft_state, wipe_draft_cache, sanitize_state
 import services.analysis_service as analysis
@@ -469,6 +470,55 @@ async def fetch_admin_players(playerId: str):
         return JSONResponse(content=sanitize_state(players))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.get("/admin/members/{season}")
+async def get_season_members(season: int, playerId: str):
+    """Return all players enrolled in a season with their draft order and paid status."""
+    if get_player_role(playerId) != "admin":
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    try:
+        _, _, _, players_df, _, _, _ = load_data()
+        order_df = get_collection_df("draft_order")
+        if order_df.empty or "season" not in order_df.columns:
+            return JSONResponse(content=[])
+        season_order = order_df[order_df["season"].astype(int) == season]
+        members = []
+        for _, row in season_order.iterrows():
+            pid = int(row["playerId"])
+            player = players_df[players_df["playerId"].astype(int) == pid]
+            if player.empty:
+                continue
+            p = player.iloc[0]
+            members.append({
+                "playerId": pid,
+                "fullName": str(p.get("fullName", "")),
+                "email": str(p.get("email", "")),
+                "role": str(p.get("role", "member")),
+                "draftOrder": int(row.get("draftOrder", 0)),
+                "paid": bool(row.get("paid", False)),
+            })
+        members.sort(key=lambda x: x["draftOrder"])
+        return JSONResponse(content={"members": members})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.post("/admin/members/paid")
+async def update_member_paid(request: Request):
+    """Toggle paid status for a player in a given season."""
+    data = await request.json()
+    requester_id = str(data.get("playerId", ""))
+    if get_player_role(requester_id) != "admin":
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    try:
+        target_id = int(data["targetPlayerId"])
+        season = int(data["season"])
+        paid = bool(data["paid"])
+        ok = set_member_paid(season, target_id, paid)
+        return JSONResponse(content={"ok": ok})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 
 @router.get("/admin/seasons")
 async def fetch_admin_seasons(playerId: str):

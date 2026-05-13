@@ -4,21 +4,23 @@
 
 {% block content %}
 <div class="container">
-    <!-- Dashboard Header -->
-    <h2 style="text-align:center;">Live Draft Room <span id="season-display"></span></h2>
-    <div id="admin-year-selector" class="hidden" style="text-align:center; margin-bottom: 15px;">
-        <span style="font-size: 0.9rem; color: var(--text-secondary);">Admin Season Management:</span>
-        <select id="season-dropdown"
-            style="padding: 0.2rem 0.6rem; border-radius: 6px; background: rgba(0,0,0,0.4); color: #fff; border: 1px solid var(--glass-border); font-family: inherit; font-size: 0.9rem; cursor: pointer;">
-            <!-- Populated dynamically -->
-        </select>
-    </div>
-    <div style="text-align:center; margin-bottom: 20px;">
-        <div id="status-banner" class="status-banner">
-            <span class="pulse-dot"></span>
-            <p id="current-pick-status">Waiting for draft info...</p>
+    <!-- Page Header -->
+    <header class="wp-top">
+        <div>
+            <div class="eyebrow">Live Draft · <span id="season-display"></span></div>
+            <h1 class="wp-h1">Draft Room</h1>
         </div>
-    </div>
+        <div class="wp-top-right">
+            <div id="admin-year-selector" class="hidden">
+                <select id="season-dropdown" class="season-select">
+                    <!-- Populated dynamically -->
+                </select>
+            </div>
+            <span id="status-banner" class="mono-pill">
+                <span id="current-pick-status">Connecting…</span>
+            </span>
+        </div>
+    </header>
 
     <!-- Tab 1: Draft Board -->
     <main class="dashboard" id="dashboard-main" style="display: none;">

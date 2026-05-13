@@ -50,9 +50,17 @@
 
     // ---------- Chart ----------
 
+    // Index 0 = leader gold; indices 1-8 = distinct vivid colors
     const COLORS = [
-        '#4aa8ff', '#f5c542', '#ff6b6b', '#6cd97e',
-        '#a36be8', '#ff9f43', '#00cec9', '#fd79a8', '#e84393'
+        '#c9a24a',  // gold  — rank 1 only
+        '#5b9cf6',  // blue
+        '#4ade80',  // green
+        '#f87171',  // red
+        '#c084fc',  // purple
+        '#fb923c',  // orange
+        '#22d3ee',  // cyan
+        '#f472b6',  // pink
+        '#a3e635',  // lime
     ];
 
     function initChart(year, standingsOrderIds) {
@@ -90,6 +98,11 @@
                         interaction: { mode: 'index', intersect: false },
                         plugins: {
                             tooltip: {
+                                backgroundColor: 'rgba(0,0,0,0.85)',
+                                titleColor: 'rgba(255,255,255,0.9)',
+                                bodyColor: 'rgba(255,255,255,0.75)',
+                                borderColor: 'rgba(255,255,255,0.1)',
+                                borderWidth: 1,
                                 itemSort: function (a, b) {
                                     // Primary: highest wins first
                                     const winsDiff = b.raw - a.raw;
@@ -104,8 +117,8 @@
                             title: {
                                 display: true,
                                 text: `Player Total Wins by Week — ${year}`,
-                                color: '#ffffff',
-                                font: { size: 16 }
+                                color: 'rgba(255,255,255,0.7)',
+                                font: { size: 13, weight: '500' }
                             }
                         },
                         scales: {
