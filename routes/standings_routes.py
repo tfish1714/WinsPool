@@ -19,6 +19,17 @@ def _current_year(games, draft_results=None) -> int:
     return get_active_season(games, draft_results)
 
 
+def _first_name(name: str) -> str:
+    if not name or name == 'Undrafted':
+        return name or 'Undrafted'
+    if name == 'Overall Record':
+        return 'Overall'
+    parts = str(name).strip().split()
+    if len(parts) >= 2:
+        return f"{parts[0]} {parts[-1][0]}."
+    return parts[0] if parts else name
+
+
 @router.get("/profile")
 async def user_profile(request: Request):
     return templates.TemplateResponse("profile.html", {"request": request})
@@ -66,7 +77,8 @@ async def wins_pool_by_year(request: Request, year: int):
             "year": year,
             "available_years": available_years,
             "recap": recap["summary"] if recap else None,
-            "h2h_html": h2h_df.to_html(classes="table table-striped", border=0) if not h2h_df.empty else "",
+            "h2h_html": (h2h_df.rename(columns=_first_name, index=_first_name)
+                         .to_html(classes="wp-data-table", border=0)) if not h2h_df.empty else "",
         })
     except Exception as e:
         import traceback
@@ -92,7 +104,7 @@ async def wins_pool_weekbyweek(request: Request, year: int):
 
     return templates.TemplateResponse("weekbyweek.html", {
         "request": request,
-        "table": record_by_week.to_html(classes="table table-striped", index=True, border=0),
+        "table": record_by_week.rename(columns=_first_name).to_html(classes="wp-data-table", index=True, border=0),
         "current_year": _current_year(games),
         "year": year,
         "available_years": get_available_years(all_draft_results, all_games),

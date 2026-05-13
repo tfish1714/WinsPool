@@ -19,7 +19,7 @@
             <div class="season-header" style="border-bottom:none; margin-bottom: 1rem;">
                 <i data-lucide="trophy"></i> All-Time Head-to-Head Record
             </div>
-            <div style="overflow-x:auto;">{{ all_time_table | safe }}</div>
+            <div class="table-container">{{ all_time_table | safe }}</div>
         </div>
         {% endif %}
 
@@ -35,7 +35,7 @@
                     View standalone →
                 </a>
             </div>
-            <div style="overflow-x:auto;">{{ entry.table | safe }}</div>
+            <div class="table-container">{{ entry.table | safe }}</div>
         </div>
         {% endfor %}
         {% else %}

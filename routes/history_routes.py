@@ -15,6 +15,17 @@ def _current_year(games, draft_results=None) -> int:
     return get_active_season(games, draft_results)
 
 
+def _first_name(name: str) -> str:
+    if not name or name == 'Undrafted':
+        return name or 'Undrafted'
+    if name == 'Overall Record':
+        return 'Overall'
+    parts = str(name).strip().split()
+    if len(parts) >= 2:
+        return f"{parts[0]} {parts[-1][0]}."
+    return parts[0] if parts else name
+
+
 # ─── Overall History ──────────────────────────────────────────────────────────
 
 @router.get("/history")
@@ -139,7 +150,7 @@ async def headtohead_history(request: Request):
                 all_schedules.append(sched)
             m = analysis.player_winlossmatrix(sched)
             if not m.empty:
-                all_h2h.append({"year": yr, "table": m.to_html(classes="h2h-table", border=0)})
+                all_h2h.append({"year": yr, "table": m.rename(columns=_first_name, index=_first_name).to_html(classes="wp-data-table", border=0)})
         except Exception:
             pass
 
@@ -149,7 +160,7 @@ async def headtohead_history(request: Request):
             combined = pd.concat(all_schedules, ignore_index=True)
             all_time_m = analysis.player_winlossmatrix(combined)
             if not all_time_m.empty:
-                all_time_html = all_time_m.to_html(classes="h2h-table", border=0)
+                all_time_html = all_time_m.rename(columns=_first_name, index=_first_name).to_html(classes="wp-data-table", border=0)
         except Exception:
             pass
 
@@ -173,7 +184,8 @@ async def headtohead_by_year(request: Request, year: int):
 
     try:
         sched = analysis.get_enriched_schedule(games, draft_results, players, year)
-        h2h_html = analysis.player_winlossmatrix(sched).to_html(classes="h2h-table", border=0)
+        h2h_df = analysis.player_winlossmatrix(sched)
+        h2h_html = h2h_df.rename(columns=_first_name, index=_first_name).to_html(classes="wp-data-table", border=0)
     except Exception:
         h2h_html = ""
 

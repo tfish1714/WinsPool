@@ -2385,31 +2385,6 @@ tr:hover {
 }
 
 /* Head-to-head matrix table */
-.h2h-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.82rem;
-}
-
-.h2h-table th,
-.h2h-table td {
-    border: 1px solid var(--glass-border);
-    padding: 0.45rem 0.6rem;
-    text-align: center;
-    color: var(--text-primary);
-}
-
-.h2h-table th {
-    background: rgba(255, 255, 255, 0.05);
-    font-weight: 600;
-    font-size: 0.75rem;
-}
-
-.h2h-table tr:first-child th {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-}
 
 /* H2H season blocks */
 .season-block {
@@ -2448,11 +2423,18 @@ tr:hover {
     text-decoration: underline;
 }
 
+/* Generic page container — same padding/width as dashboard-main */
+.container {
+    padding: 1.5rem var(--content-padding);
+    max-width: var(--container-max);
+    margin: 0 auto;
+}
+
 /* Admin page */
 .admin-container {
-    max-width: 600px;
-    margin: 5rem auto;
-    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
 }
 
 .admin-form {
@@ -2478,28 +2460,84 @@ tr:hover {
 .admin-input.input-error { border-color: var(--neg); }
 
 /* Week-by-week table: headers wrap to prevent horizontal scroll */
-.weekbyweek-wrap .table-container table th {
-    white-space: normal;
-    word-break: break-word;
-    min-width: 70px;
-    max-width: 120px;
-    text-align: center;
-    font-size: 0.78rem;
-    line-height: 1.3;
+/* =============================================================
+   Unified data table — weekbyweek + head-to-head
+   ============================================================= */
+table.wp-data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    table-layout: fixed;
 }
 
-.weekbyweek-wrap .table-container table th:first-child,
-.weekbyweek-wrap .table-container table td:first-child {
-    text-align: left;
+table.wp-data-table thead tr {
+    border-bottom: 1px solid var(--line-strong);
+}
+
+table.wp-data-table thead th {
+    padding: 10px 8px;
+    text-align: center;
+    font: 600 11px 'Outfit', sans-serif;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
     white-space: nowrap;
-    min-width: 50px;
-    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background: var(--bg-elev-2);
+    cursor: pointer;
+    user-select: none;
+    transition: color 100ms;
+}
+table.wp-data-table thead th:hover { color: var(--ink-2); }
+table.wp-data-table thead th.sort-asc,
+table.wp-data-table thead th.sort-desc { color: var(--ink); }
+table.wp-data-table thead th.sort-asc::after  { content: ' ↑'; }
+table.wp-data-table thead th.sort-desc::after { content: ' ↓'; }
+
+table.wp-data-table thead th:first-child {
+    text-align: left;
+    width: 72px;
 }
 
-.weekbyweek-wrap .table-container table td {
+table.wp-data-table tbody tr {
+    border-bottom: 1px solid var(--line);
+    transition: background 80ms;
+}
+
+table.wp-data-table tbody tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.025);
+}
+
+table.wp-data-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+table.wp-data-table tbody td {
+    padding: 10px 8px;
     text-align: center;
-    font-size: 0.82rem;
-    padding: 0.5rem 0.4rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* First column — week label / row header */
+table.wp-data-table tbody td:first-child {
+    text-align: left;
+    font-family: 'Outfit', sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--ink);
+    width: 72px;
+}
+
+/* Last column — totals, emphasise slightly */
+table.wp-data-table tbody td:last-child {
+    font-weight: 700;
+    color: var(--ink);
 }
 
 /* =============================================================
@@ -3202,79 +3240,15 @@ tr:hover {
    ============================================================= */
 
 @media (max-width: 768px) {
-    .weekbyweek-wrap .table-container table {
-        min-width: 0;
+    /* weekbyweek + h2h: tighten further on small screens */
+    table.wp-data-table thead th,
+    table.wp-data-table tbody td {
+        padding: 8px 5px;
+        font-size: 10px;
     }
-
-    .weekbyweek-wrap .table-container table,
-    .weekbyweek-wrap .table-container table thead,
-    .weekbyweek-wrap .table-container table tbody,
-    .weekbyweek-wrap .table-container table th,
-    .weekbyweek-wrap .table-container table td,
-    .weekbyweek-wrap .table-container table tr {
-        display: block;
-    }
-
-    .weekbyweek-wrap .table-container table thead {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        margin: -1px;
-        padding: 0;
-        overflow: hidden;
-        clip: rect(0 0 0 0);
-        border: 0;
-    }
-
-    .weekbyweek-wrap .table-container table tbody tr {
-        background: var(--glass-bg);
-        border: 1px solid var(--glass-border);
-        border-radius: 12px;
-        padding: 1rem 1.25rem;
-        margin-bottom: 1rem;
-        backdrop-filter: blur(12px);
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
-    }
-
-    .weekbyweek-wrap .table-container table td {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0.4rem 0;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-        text-align: right;
-        white-space: normal;
-        min-width: 0;
-        max-width: none;
-    }
-
-    .weekbyweek-wrap .table-container table td:last-child {
-        border-bottom: none;
-    }
-
-    .weekbyweek-wrap .table-container table td::before {
-        content: attr(data-label);
-        color: var(--text-secondary);
-        font-weight: 600;
-        font-size: 0.8rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        text-align: left;
-        flex-shrink: 0;
-        margin-right: 1rem;
-    }
-
-    /* First cell in the row is the player name header */
-    .weekbyweek-wrap .table-container table td:first-child {
-        font-weight: 800;
-        font-size: 1rem;
-        text-align: left;
-        border-bottom: 1px solid var(--glass-border);
-        padding-bottom: 0.6rem;
-        margin-bottom: 0.25rem;
-    }
-
-    .weekbyweek-wrap .table-container table td:first-child::before {
-        display: none;
+    table.wp-data-table tbody td:first-child,
+    table.wp-data-table thead th:first-child {
+        width: 56px;
+        font-size: 11px;
     }
 }

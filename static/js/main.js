@@ -427,4 +427,43 @@ class App {
 
 // Global App Start
 window.App = new App();
+
+// ── Sortable tables ────────────────────────────────────────────
+function _parseSortVal(text) {
+    // "2-1 (4-3)" → sort by total wins (first number in parens)
+    const parens = text.match(/\((\d+)-/);
+    if (parens) return parseInt(parens[1], 10);
+    // "2-1" or plain number → first integer
+    const num = text.match(/^(\d+)/);
+    if (num) return parseInt(num[1], 10);
+    return text.toLowerCase();
+}
+
+document.querySelectorAll('table.wp-data-table').forEach(table => {
+    const headers = table.querySelectorAll('thead th');
+    headers.forEach((th, colIdx) => {
+        th.addEventListener('click', () => {
+            const asc = th.dataset.sortDir !== 'asc';
+            headers.forEach(h => {
+                h.dataset.sortDir = '';
+                h.classList.remove('sort-asc', 'sort-desc');
+            });
+            th.dataset.sortDir = asc ? 'asc' : 'desc';
+            th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+
+            const tbody = table.querySelector('tbody');
+            Array.from(tbody.querySelectorAll('tr'))
+                .sort((a, b) => {
+                    const cells = (r) => r.querySelectorAll('th, td');
+                    const aVal = _parseSortVal((cells(a)[colIdx]?.textContent ?? '').trim());
+                    const bVal = _parseSortVal((cells(b)[colIdx]?.textContent ?? '').trim());
+                    const cmp = typeof aVal === 'number' && typeof bVal === 'number'
+                        ? aVal - bVal
+                        : String(aVal).localeCompare(String(bVal));
+                    return asc ? cmp : -cmp;
+                })
+                .forEach(row => tbody.appendChild(row));
+        });
+    });
+});
 window.App.init();
