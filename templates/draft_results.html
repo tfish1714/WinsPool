@@ -41,6 +41,20 @@
                     best_overall.pick_value }}</div>
             </div>
             {% endif %}
+            {% if worst_overall %}
+            <div class="best-pick-card" style="border-top-color: var(--accent-red);">
+                <div class="best-pick-label"><i data-lucide="trending-down"></i> Worst Overall</div>
+                <div class="best-pick-name">{{ worst_overall.player }}</div>
+                <div class="best-pick-team">
+                    <img src="{{ get_team_logo(worst_overall.team) }}" class="tiny-logo" alt="">
+                    {{ worst_overall.team }}
+                </div>
+                <div class="best-pick-detail">Pick #{{ worst_overall.pick }} · {{ worst_overall.wins }} wins · Rank #{{
+                    worst_overall.win_rank }}</div>
+                <div class="best-pick-detail" style="color: var(--accent-red); font-weight: 700;">Pick Value: {{
+                    worst_overall.pick_value }}</div>
+            </div>
+            {% endif %}
             {% for rnum in [1, 2, 3] %}
             {% if best_by_round[rnum] is defined %}
             {% set r = best_by_round[rnum] %}
@@ -98,7 +112,10 @@
                     row['TotalWinsBySeason'] is not string and row['TotalWinsBySeason'] is not none) else 0 %}
                     {% set delta = (actual - proj) | round(1) %}
                     <tr {% if best_overall and row['team']==best_overall.team
-                        %}style="border-left: 3px solid var(--leader); background: var(--leader-soft);" {% endif %}>
+                        %}style="border-left: 3px solid var(--leader); background: var(--leader-soft);"
+                        {% elif worst_overall and row['team']==worst_overall.team
+                        %}style="border-left: 3px solid var(--accent-red); background: rgba(255,80,80,0.06);"
+                        {% endif %}>
                         <td class="stacked-header-cell" style="text-align: left;">
                             <strong>#{{ row['draftPick'] | int }}</strong> {{ row['fullName'] }}
                             — <img src="{{ get_team_logo(row['team']) }}" class="tiny-logo" alt="">

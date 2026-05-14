@@ -6,9 +6,12 @@ that the web server reads via USE_LOCAL_DATA=True.
 
 Usage:
     python scripts/refresh_local_pkls.py
+    python scripts/refresh_local_pkls.py --skip-analytics   # skip analytics_cache step
 """
 import os
 import sys
+import json
+import argparse
 import pathlib
 import logging
 
@@ -21,21 +24,23 @@ log = logging.getLogger(__name__)
 os.environ["USE_LOCAL_DATA"] = "False"
 
 import pandas as pd
-from services.db_service import get_collection_df
+from services.db_service import get_collection_df, get_db
 
 LOCAL_DB = pathlib.Path(".local_db")
 LOCAL_DB.mkdir(parents=True, exist_ok=True)
+ANALYTICS_DIR = LOCAL_DB / "analytics"
+ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Collections and their optional season filter column
 COLLECTIONS = [
-    ("players",            None),
-    ("draft_results",      None),
-    ("draft_order",        None),
-    ("draft_order_rules",  None),
-    ("nfl_teams",          None),
-    ("nfl_standings",      "season"),
-    ("nfl_games",          "season"),
-    ("weekly_recaps",      "year"),
+    ("players",               None),
+    ("draft_results",         None),
+    ("draft_order",           None),
+    ("draft_order_rules",     None),
+    ("nfl_teams",             None),
+    ("nfl_standings",         "season"),
+    ("nfl_games",             "season"),
+    ("weekly_recaps",         "year"),
     ("preseason_predictions", "season"),
 ]
 
@@ -64,13 +69,64 @@ def dump_collection(collection: str, season_col: str | None):
         log.error(f"    ✗ Failed '{collection}': {e}")
 
 
+def dump_analytics_cache():
+    """Pull all analytics_cache docs from Firestore → .local_db/analytics/*.json."""
+    log.info("  Fetching 'analytics_cache' from Firestore...")
+    try:
+        db = get_db()
+        docs = list(db.collection("analytics_cache").stream())
+        if not docs:
+            log.warning("    'analytics_cache' returned no documents — skipping")
+            return
+
+        written = 0
+        for doc in docs:
+            d = doc.to_dict()
+            analytic = d.get("analytic")
+            year = d.get("year")
+            week = d.get("week")
+            raw_data = d.get("data")
+            if not analytic or year is None or week is None or raw_data is None:
+                continue
+            try:
+                data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
+            except json.JSONDecodeError:
+                log.warning(f"    skipping {doc.id} — data is not valid JSON")
+                continue
+
+            out_path = ANALYTICS_DIR / f"{analytic}_{year}_{week}.json"
+            with open(out_path, "w") as f:
+                json.dump({
+                    "analytic": analytic,
+                    "year": year,
+                    "week": week,
+                    "is_final": d.get("is_final", False),
+                    "data": data,
+                }, f)
+            written += 1
+
+        log.info(f"    ✓ {written} docs → {ANALYTICS_DIR.name}/")
+    except Exception as e:
+        log.error(f"    ✗ Failed 'analytics_cache': {e}")
+
+
 def main():
+    parser = argparse.ArgumentParser(description="Rebuild local .pkl cache from Firestore")
+    parser.add_argument("--skip-analytics", action="store_true",
+                        help="Skip the analytics_cache download step")
+    args = parser.parse_args()
+
     log.info("=" * 60)
     log.info("Refreshing local .pkl cache from Firestore")
     log.info("=" * 60)
 
+    log.info("\n-- Raw collections --")
     for collection, season_col in COLLECTIONS:
         dump_collection(collection, season_col)
+
+    if not args.skip_analytics:
+        log.info("\n-- Analytics cache (NN projections, standings, etc.) --")
+        dump_analytics_cache()
 
     log.info("\nLocal cache refresh complete.")
     log.info(f"Files written to: {LOCAL_DB.resolve()}")

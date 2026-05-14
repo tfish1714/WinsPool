@@ -36,9 +36,9 @@ async def overall_history(request: Request):
     player_stats: dict = {}
     season_records: list = []
 
-    # Undrafted best & worst
+    # Undrafted best & drafted worst
     undrafted_best = {"team": "None", "year": "-", "wins": -1}
-    undrafted_worst = {"team": "None", "year": "-", "wins": 999}
+    drafted_worst = {"team": "None", "year": "-", "wins": 999, "player": "-", "pick": "-"}
 
     if not standings_master.empty and "season" in standings_master.columns:
         for yr in standings_master["season"].unique():
@@ -53,13 +53,21 @@ async def overall_history(request: Request):
                     w = int(u.get("wins", 0))
                     if w > undrafted_best["wins"]:
                         undrafted_best = {"team": u["team"], "year": int(yr), "wins": w}
-                    if 0 <= w < undrafted_worst["wins"]:
-                        undrafted_worst = {"team": u["team"], "year": int(yr), "wins": w}
+                for _, d in yr_standings[yr_standings["team"].isin(drafted)].iterrows():
+                    w = int(d.get("wins", 0))
+                    if w < drafted_worst["wins"]:
+                        pick_row = yr_draft[yr_draft["team"] == d["team"]]
+                        if not pick_row.empty:
+                            pid = pick_row.iloc[0]["playerId"]
+                            pick = int(pick_row.iloc[0]["draftPick"])
+                            p_row = players[players["playerId"] == pid] if not players.empty else pd.DataFrame()
+                            player_name = p_row.iloc[0]["fullName"] if not p_row.empty else f"Player {pid}"
+                            drafted_worst = {"team": d["team"], "year": int(yr), "wins": w, "player": player_name, "pick": pick}
 
     if undrafted_best["wins"] == -1:
         undrafted_best["wins"] = 0
-    if undrafted_worst["wins"] == 999:
-        undrafted_worst["wins"] = 0
+    if drafted_worst["wins"] == 999:
+        drafted_worst["wins"] = 0
 
     # available_years derived once
     available_years = get_available_years(all_draft_results, all_games)
@@ -115,7 +123,7 @@ async def overall_history(request: Request):
         "bottom_seasons": bottom_seasons,
         "current_year": current_year,
         "undrafted_best": undrafted_best,
-        "undrafted_worst": undrafted_worst,
+        "drafted_worst": drafted_worst,
     })
 
 

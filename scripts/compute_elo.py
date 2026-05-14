@@ -1,6 +1,6 @@
 """scripts/compute_elo.py -- Compute NFL Elo ratings from scratch.
 
-Implements the Reddit r/nfl methodology:
+Implements the Reddit r/nfl methodology (https://www.reddit.com/r/nfl/comments/1q0kg87/nfl_elo_model_that_uses_margin_and_game_flow/):
   - K=12, HFA=+15 rating points added to home team before computing expected win prob
   - MoV multiplier: log(margin + 1) / 2.5, clamped [0.5, 2.0]
   - Quarter-by-quarter updates (K_q=3 each): reduces noise from garbage time

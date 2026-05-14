@@ -252,12 +252,28 @@ async def route_draft_results_by_year(request: Request, year: int):
     drafted_teams_set = set(dr_year["team"].dropna().tolist()) if not dr_year.empty else set()
 
     # Build full league standings for ranking
+    # Tiebreakers mirror NFL procedures (using available data):
+    # 1. wins  2. net points  3. strength of victory  4. strength of schedule  5. points scored  6. team (stable fallback)
+    _tb_cols = {"net": 0.0, "sov": 0.0, "sos": 0.0, "scored": 0}
     league_rows = []
     for team in season_teams:
         team_st = st_year[st_year["team"] == team]
-        wins = int(team_st["wins"].iloc[0]) if not team_st.empty and "wins" in team_st.columns else 0
-        league_rows.append({"team": team, "wins": wins})
-    league_df = pd.DataFrame(league_rows).sort_values("wins", ascending=False).reset_index(drop=True)
+        row = {"team": team, "wins": 0}
+        if not team_st.empty:
+            row["wins"] = int(team_st["wins"].iloc[0]) if "wins" in team_st.columns else 0
+            for col, default in _tb_cols.items():
+                row[col] = float(team_st[col].iloc[0]) if col in team_st.columns else default
+        else:
+            row.update(_tb_cols)
+        league_rows.append(row)
+    league_df = (
+        pd.DataFrame(league_rows)
+        .sort_values(
+            ["wins", "net", "sov", "sos", "scored", "team"],
+            ascending=[False, False, False, False, False, True],
+        )
+        .reset_index(drop=True)
+    )
     league_df["win_rank"] = range(1, len(league_df) + 1)
     rank_map = dict(zip(league_df["team"], league_df["win_rank"]))
 
@@ -271,6 +287,7 @@ async def route_draft_results_by_year(request: Request, year: int):
         merged["pick_value"] = None
 
     best_overall = None
+    worst_overall = None
     best_by_round = {}
     if not merged.empty:
         # Best Overall: highest pick_value (best value relative to draft slot)
@@ -281,6 +298,14 @@ async def route_draft_results_by_year(request: Request, year: int):
             "pick": int(bv.get("draftPick", 0)), "wins": int(bv.get("TotalWinsBySeason", 0)),
             "pick_value": int(bv.get("pick_value", 0)),
             "win_rank": int(bv.get("win_rank", 0)),
+        }
+        # Worst Overall: lowest pick_value (worst value relative to draft slot)
+        wv = best_value_sorted.iloc[-1]
+        worst_overall = {
+            "player": wv.get("fullName", ""), "team": wv.get("team", ""),
+            "pick": int(wv.get("draftPick", 0)), "wins": int(wv.get("TotalWinsBySeason", 0)),
+            "pick_value": int(wv.get("pick_value", 0)),
+            "win_rank": int(wv.get("win_rank", 0)),
         }
         # Best by round: still uses raw wins (most wins in that round)
         sorted_awards = merged.sort_values(["TotalWinsBySeason", "draftPick"], ascending=[False, False])
@@ -358,6 +383,7 @@ async def route_draft_results_by_year(request: Request, year: int):
         "current_year": _current_year(games),
         "available_years": get_draft_years(all_draft_results),
         "best_overall": best_overall,
+        "worst_overall": worst_overall,
         "best_by_round": best_by_round,
         "quickest": quickest,
         "slowest": slowest,

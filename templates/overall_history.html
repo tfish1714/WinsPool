@@ -78,15 +78,20 @@
             <div>
                 <h4
                     style="color: var(--text-secondary); margin-bottom: 0.5rem; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1px;">
-                    <i data-lucide="snowflake"></i> All-Time Worst Undrafted Team
+                    <i data-lucide="snowflake"></i> All-Time Worst Drafted Team
                 </h4>
                 <div style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.25rem;">
-                    <img src="{{ get_team_logo(undrafted_worst.team) }}" class="tiny-logo"
+                    <img src="{{ get_team_logo(drafted_worst.team) }}" class="tiny-logo"
                         style="height: 32px; vertical-align: middle; margin-right: 8px;" alt="">
-                    {{ undrafted_worst.team }}
-                    <span style="font-weight: 400; color: var(--text-secondary);">({{ undrafted_worst.year }})</span>
+                    {{ drafted_worst.team }}
+                    <span style="font-weight: 400; color: var(--text-secondary);">({{ drafted_worst.year }})</span>
                 </div>
-                <div style="color: var(--neg); font-weight: 800; font-size: 1.2rem;">{{ undrafted_worst.wins }} Wins</div>
+                <div style="color: var(--neg); font-weight: 800; font-size: 1.2rem;">{{ drafted_worst.wins }} Wins</div>
+                {% if drafted_worst.player and drafted_worst.player != '-' %}
+                <div style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.3rem;">
+                    Picked by <strong style="color: var(--text-primary);">{{ drafted_worst.player }}</strong> &mdash; Pick #{{ drafted_worst.pick }}
+                </div>
+                {% endif %}
             </div>
         </div>
 

@@ -40,3 +40,6 @@ models/*.pkl
 
 # ML reports (generated, not source)
 reports/
+
+# Design Files
+design/
