@@ -8,6 +8,7 @@ import logging
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional
+from services.constants import UNDRAFTED_SENTINEL
 
 from services.nn_feature_engine import (
     build_master_feature_table,
@@ -19,33 +20,36 @@ from services.nn_prediction_service import (
     NNPredictionService,
     FEATURE_COLUMNS as NN_FEATURE_COLUMNS,
 )
+from services.xgb_prediction_service import XGBPredictionService
+from services.lr_prediction_service import LRPredictionService
 
 logger = logging.getLogger(__name__)
 
-NN_WEIGHT = 0.40
-POWER_WEIGHT = 0.60
-HOME_ADVANTAGE_PTS = 2.5
+NN_WEIGHT  = 0.45
+XGB_WEIGHT = 0.20
+LR_WEIGHT  = 0.35
 
 
 class NNProjectionEngine:
-    """Wrapper that leverages the trained NN and Monte Carlo engine for caching."""
+    """Wrapper that leverages the trained NN+XGB+LR ensemble and Monte Carlo engine for caching."""
 
     def __init__(self):
         self.svc = NNPredictionService()
         self.svc.load_model()
-        self._power_ratings = {}
+        self.xgb_svc = XGBPredictionService()
+        self.xgb_svc.load_model()
+        self.lr_svc = LRPredictionService()
+        self.lr_svc.load_model()
         self._team_profiles = pd.DataFrame()
 
     def initialize(self, season: int):
-        """Pre-compute the feature profiles and power ratings required for predictions.
-        
+        """Pre-compute the feature profiles required for predictions.
+
         Args:
             season: The target NFL season (e.g. 2026).
         """
-        # Feature baseline from previous year (season - 1)
         feature_table = build_master_feature_table(min_season=2020, max_season=season - 1)
         self._team_profiles = self._build_team_profiles(feature_table, season - 1)
-        self._power_ratings = self._compute_team_power_ratings(season - 1)
 
     def _build_team_profiles(self, feature_table: pd.DataFrame, proxy_season: int) -> pd.DataFrame:
         """Build per-team average feature profiles."""
@@ -63,45 +67,11 @@ class NNProjectionEngine:
         combined = pd.concat([home_avg, away_avg], ignore_index=True)
         return combined.groupby("team")[NN_FEATURE_COLUMNS].mean().reset_index()
 
-    def _compute_team_power_ratings(self, proxy_season: int) -> dict:
-        """Compute per-team power ratings from actual game results."""
-        path = RAWDATA_DIR / "schedules" / "games.csv"
-        df = _read_csv_safe(str(path))
-        df["home_team"] = df["home_team"].apply(_normalize_team)
-        df["away_team"] = df["away_team"].apply(_normalize_team)
-        df["home_score"] = pd.to_numeric(df["home_score"], errors="coerce")
-        df["away_score"] = pd.to_numeric(df["away_score"], errors="coerce")
-
-        reg = df[(df["season"] == proxy_season) & (df["game_type"] == "REG")].dropna(
-            subset=["home_score", "away_score"]
-        )
-        if reg.empty:
-            # Fallback
-            reg = df[(df["season"] == proxy_season - 1) & (df["game_type"] == "REG")].dropna(
-                subset=["home_score", "away_score"]
-            )
-
-        if reg.empty:
-            return {}
-
-        reg["margin"] = reg["home_score"] - reg["away_score"]
-        home_power = reg.groupby("home_team")["margin"].mean()
-        away_power = reg.groupby("away_team")["margin"].apply(lambda x: -x.mean())
-
-        all_teams_set = set(home_power.index) | set(away_power.index)
-        power = {}
-        for team in all_teams_set:
-            hp = home_power.get(team, 0.0)
-            ap = away_power.get(team, 0.0)
-            power[team] = (hp + ap) / 2.0
-
-        return power
-
     def game_win_probability(self, home_team: str, away_team: str) -> dict:
-        """Compute the blended neural network and power-rating probability.
-        
+        """Compute the blended NN+XGB+LR ensemble probability.
+
         Returns:
-            Dict containing 'home_win_prob' and other metadata.
+            Dict containing 'home_win_prob' and model-level probabilities.
         """
         profile_dict = {}
         for _, row in self._team_profiles.iterrows():
@@ -135,27 +105,23 @@ class NNProjectionEngine:
             else:
                 features[col] = hp.get(col, 0.0)
 
-        nn_prob = self.svc.predict_game(features)
+        nn_prob  = self.svc.predict_game(features)
+        xgb_prob = self.xgb_svc.predict_game(features)
+        lr_prob  = self.lr_svc.predict_game(features)
 
-        h_power = self._power_ratings.get(home_team, 0.0)
-        a_power = self._power_ratings.get(away_team, 0.0)
-        
-        spread = (h_power - a_power) + HOME_ADVANTAGE_PTS
-        pwr_prob = 1.0 / (1.0 + np.exp(-spread / 6.5))
-        pwr_prob = float(np.clip(pwr_prob, 0.02, 0.98))
-
-        blended = NN_WEIGHT * nn_prob + POWER_WEIGHT * pwr_prob
-        blended = float(np.clip(blended, 0.02, 0.98))
+        blended = float(np.clip(
+            NN_WEIGHT * nn_prob + XGB_WEIGHT * xgb_prob + LR_WEIGHT * lr_prob,
+            0.02, 0.98,
+        ))
 
         return {
             "home_team": home_team,
             "away_team": away_team,
             "home_win_prob": round(blended, 4),
             "away_win_prob": round(1.0 - blended, 4),
-            "nn_home_prob": round(float(nn_prob), 4),
-            "pwr_home_prob": round(float(pwr_prob), 4),
-            "home_power": round(float(h_power), 1),
-            "away_power": round(float(a_power), 1)
+            "nn_home_prob":  round(float(nn_prob),  4),
+            "xgb_home_prob": round(float(xgb_prob), 4),
+            "lr_home_prob":  round(float(lr_prob),  4),
         }
 
     def _run_monte_carlo(self, game_probs: list, all_teams: list, n_sims: int) -> dict:
@@ -192,17 +158,9 @@ class NNProjectionEngine:
         reg = schedule_df[schedule_df["game_type"] == "REG"] if "game_type" in schedule_df.columns else schedule_df
         
         if reg.empty:
-            # Fallback: estimate wins directly from power ratings since schedule doesn't exist
-            results = {}
-            for team, pwr in self._power_ratings.items():
-                expected_wins = 8.5 + (pwr * 0.35)
-                results[team] = round(float(np.clip(expected_wins, 2.0, 15.0)), 1)
-            # Ensure standard 32 teams are present
+            # Fallback: return equal projections when no schedule is available
             all_teams = ["ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE","DAL","DEN","DET","GB","HOU","IND","JAX","KC","LV","LAC","LA","MIA","MIN","NE","NO","NYG","NYJ","PHI","PIT","SF","SEA","TB","TEN","WAS"]
-            for t in all_teams:
-                if t not in results:
-                    results[t] = 8.5
-            return results
+            return {t: 8.5 for t in all_teams}
 
         game_probs = []
         for _, game in reg.iterrows():
@@ -235,7 +193,7 @@ class NNProjectionEngine:
             # If game is already played, probability is 1.0 or 0.0 based on result.
             # (Assuming missing 'result' column means unplayed for Monte Carlo)
             res = game.get("result", np.nan)
-            if pd.notna(res) and res != -1000:
+            if pd.notna(res) and res != UNDRAFTED_SENTINEL:
                 prob = 1.0 if res > 0 else 0.0
             else:
                 prob_dict = self.game_win_probability(ht, at)
@@ -295,7 +253,7 @@ def enrich_schedule_with_nn_predictions(
         home = row.get("home_team", "")
         away = row.get("away_team", "")
 
-        is_unplayed = (pd.isna(result) or result == -1000)
+        is_unplayed = (pd.isna(result) or result == UNDRAFTED_SENTINEL)
         if not is_unplayed or not home or not away:
             pred_winners.append(None)
             pred_confs.append(None)

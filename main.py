@@ -9,6 +9,8 @@ import time
 import logging
 import pathlib
 import uvicorn
+from dotenv import load_dotenv
+load_dotenv()
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
@@ -18,6 +20,9 @@ from routes.standings_routes import router as standings_router, templates as sta
 from routes.history_routes import router as history_router, templates as history_templates
 from routes.draft_routes import router as draft_router, templates as draft_templates
 from routes.api_routes import router as api_router
+from routes.auth_routes import router as auth_router
+from routes.admin_routes import router as admin_router
+from routes.prediction_routes import router as prediction_router
 
 app = FastAPI(title="WinsPool")
 
@@ -48,6 +53,9 @@ app.include_router(standings_router)
 app.include_router(history_router)
 app.include_router(draft_router)
 app.include_router(api_router)
+app.include_router(auth_router)
+app.include_router(admin_router)
+app.include_router(prediction_router)
 
 # ── Root redirect ─────────────────────────────────────────────────────────────
 @app.get("/")

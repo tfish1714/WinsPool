@@ -215,13 +215,12 @@ class NNPredictionService:
 
         # Train
         logger.info("Training NN: %d samples, %d features", len(X_train), len(FEATURE_COLUMNS))
-        print(f"\n{'='*60}")
-        print(f"  NFL Neural Network Training (Binary Cross-Entropy)")
-        print(f"  Architecture: {len(FEATURE_COLUMNS)}-48-24-1")
-        print(f"  Train samples: {len(X_train)}")
-        print(f"  Val samples: {len(X_val) if X_val is not None else 0}")
-        print(f"  Test samples: {len(X_test) if X_test is not None else 0}")
-        print(f"{'='*60}\n")
+        logger.info(
+            "NFL NN Training | arch=%d-48-24-1 | train=%d val=%d test=%d",
+            len(FEATURE_COLUMNS), len(X_train),
+            len(X_val) if X_val is not None else 0,
+            len(X_test) if X_test is not None else 0,
+        )
 
         validation_data = (X_val, y_val) if X_val is not None else None
 
@@ -463,7 +462,7 @@ class NNPredictionService:
             joblib.dump(self.scaler, str(scaler_path))
             logger.info("Scaler saved to %s", scaler_path)
 
-        print(f"[nn_prediction_service] Model saved to {save_path}")
+        logger.info("Model saved to %s", save_path)
 
     def load_model(self, path: Optional[str] = None):
         """Load a previously trained model and scaler from disk.
@@ -575,7 +574,7 @@ class NNPredictionService:
 
         REGISTRY_PATH.write_text(json.dumps(registry, indent=2))
         logger.info("Versioned model %s saved to %s", version, model_path)
-        print(f"[nn_prediction_service] Saved {version} -> {model_path}")
+        logger.info("Saved %s -> %s", version, model_path)
         return version
 
     def _load_registry(self) -> dict:

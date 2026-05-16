@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import httpx
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -8,6 +9,8 @@ import time
 
 from services.db_service import get_db
 from services.utils import normalize_team_abbr
+
+logger = logging.getLogger(__name__)
 
 # Simple mapping for ESPN's internal FPI table JSON
 ESPN_FPI_URL = "https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/fpi"
@@ -38,7 +41,7 @@ async def fetch_espn_fpi(client: httpx.AsyncClient) -> Dict[str, float]:
                 
         return predictions
     except Exception as e:
-        print(f"[ESPN FPI] Scrape failed: {e}")
+        logger.error("ESPN FPI scrape failed: %s", e)
         return {}
 
 async def fetch_pff_projections(client: httpx.AsyncClient) -> Dict[str, float]:
@@ -49,7 +52,7 @@ async def fetch_pff_projections(client: httpx.AsyncClient) -> Dict[str, float]:
     """
     # For demonstration of the concurrent pipeline, we return empty/mock data 
     # as HTML scraping requires an active, stable target URL.
-    print("[PFF] Scraper stub executed.")
+    logger.debug("PFF scraper stub executed.")
     return {}
 
 async def fetch_vegas_odds(client: httpx.AsyncClient) -> Dict[str, float]:
@@ -57,7 +60,7 @@ async def fetch_vegas_odds(client: httpx.AsyncClient) -> Dict[str, float]:
     Mock implementation for hitting a sports betting odds API 
     (e.g., DraftKings, FanDuel, or an odds aggregator) for Over/Under Win Totals.
     """
-    print("[Vegas] Scraper stub executed.")
+    logger.debug("Vegas scraper stub executed.")
     return {}
 
 async def aggregate_predictions_pipeline(season: int):
@@ -67,7 +70,7 @@ async def aggregate_predictions_pipeline(season: int):
     3. Calculates the Consensus Mean and Standard Deviation.
     4. Writes the results directly into the Firestore `preseason_predictions` array.
     """
-    print(f"Starting Prediction Aggregation Pipeline for {season} Season...")
+    logger.info("Starting Prediction Aggregation Pipeline for %s season...", season)
     start_time = time.time()
     
     async with httpx.AsyncClient(headers={'User-Agent': 'WinsPool/1.0'}) as client:
@@ -98,22 +101,22 @@ async def aggregate_predictions_pipeline(season: int):
     add_to_team_data(vegas_res)
     
     if not team_data:
-        print("❌ Pipeline Failed: No data retrieved from any source.")
+        logger.error("Pipeline failed: no data retrieved from any source.")
         return
         
     final_payload = []
     
-    print("\n--- Consensus Results ---")
+    logger.info("Consensus results:")
     for team, projections in team_data.items():
         count = len(projections)
         mean_wins = round(statistics.mean(projections), 1)
-        
+
         # StDev requires at least 2 data points
         std_dev = 0.0
         if count > 1:
             std_dev = round(statistics.stdev(projections), 2)
-            
-        print(f"{team}: {mean_wins}W (±{std_dev}) based on {count} sources.")
+
+        logger.info("%s: %.1fW (±%.2f) based on %d sources.", team, mean_wins, std_dev, count)
         
         final_payload.append({
             "team": team,
@@ -127,11 +130,11 @@ async def aggregate_predictions_pipeline(season: int):
     if db:
         doc_ref = db.collection("preseason_predictions").document(str(season))
         doc_ref.set({"predictions": final_payload})
-        print(f"\n✅ Successfully committed {len(final_payload)} team predictions to Firestore for {season}.")
+        logger.info("Committed %d team predictions to Firestore for %s.", len(final_payload), season)
     else:
-        print("\n⚠️ Database not connected. (Local mode?) Data not written to Firestore.")
+        logger.warning("Database not connected (local mode?). Data not written to Firestore.")
         
-    print(f"Pipeline completed in {time.time() - start_time:.2f} seconds.")
+    logger.info("Pipeline completed in %.2f seconds.", time.time() - start_time)
 
 if __name__ == "__main__":
     # Specify the upcoming season year. 

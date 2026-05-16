@@ -11,10 +11,6 @@ router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
 
-def _current_year(games, draft_results=None) -> int:
-    return get_active_season(games, draft_results)
-
-
 def _first_name(name: str) -> str:
     if not name or name == 'Undrafted':
         return name or 'Undrafted'
@@ -31,7 +27,7 @@ def _first_name(name: str) -> str:
 @router.get("/history")
 async def overall_history(request: Request):
     standings_master, _, all_games, players, _, all_draft_results, _ = load_data()
-    current_year = _current_year(all_games)
+    current_year = get_active_season(all_games)
 
     player_stats: dict = {}
     season_records: list = []
@@ -139,7 +135,7 @@ async def headtohead_redirect():
 async def headtohead_history(request: Request):
     # Load Master Data once
     standings_master, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
-    current_year = _current_year(all_games)
+    current_year = get_active_season(all_games)
 
     all_h2h = []
     all_schedules = []
@@ -201,6 +197,6 @@ async def headtohead_by_year(request: Request, year: int):
         "request": request,
         "h2h_html": h2h_html,
         "year": year,
-        "current_year": _current_year(games),
+        "current_year": get_active_season(games),
         "available_years": get_available_years(all_draft_results, all_games),
     })

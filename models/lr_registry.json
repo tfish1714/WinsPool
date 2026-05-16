@@ -1,0 +1,93 @@
+{
+  "v1": {
+    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v1.pkl",
+    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v1_scaler.pkl",
+    "feature_columns": [
+      "tm_elo_pre",
+      "opp_elo_pre",
+      "spread_line",
+      "off_pass_epa",
+      "def_pass_epa",
+      "off_rush_epa",
+      "def_rush_epa",
+      "turnover_margin_rolling",
+      "tm_point_diff",
+      "opp_point_diff",
+      "early_down_pass_epa",
+      "net_success_rate",
+      "vegas_elo_spread_delta",
+      "market_implied_team_total",
+      "passing_difficulty_index",
+      "travel_rest_disadvantage",
+      "trench_dominance_metric",
+      "roster_talent_delta",
+      "qb_pressure_rate",
+      "opp_qb_pressure_rate",
+      "def_pressure_gen",
+      "opp_def_pressure_gen",
+      "qb_injury_flag",
+      "off_roster_value_delta",
+      "def_roster_value_delta",
+      "st_value_delta",
+      "qb_resilience_delta",
+      "home_flag",
+      "div_game_flag",
+      "surface_type",
+      "is_dome_flag",
+      "playoff_flag",
+      "week"
+    ],
+    "n_features": 33,
+    "metrics": {
+      "train_accuracy": 0.6644281644281644,
+      "train_logloss": 0.6050576758623217,
+      "train_brier": 0.20913224161739488,
+      "train_r2": 0.1525436692310339,
+      "test_accuracy": 0.6041666666666666,
+      "test_logloss": 0.6312604207815534,
+      "test_brier": 0.22511678725032022,
+      "test_r2": 0.09953285099871911,
+      "test_auc": 0.6753472222222222,
+      "season_r2": 0.674519366840485,
+      "season_mae": 1.4731671429643214,
+      "season_n": 160,
+      "best_C": 0.05,
+      "best_l1_ratio": 0.9
+    },
+    "params": {
+      "Cs": [
+        0.001,
+        0.01,
+        0.05,
+        0.1,
+        0.5,
+        1.0,
+        5.0
+      ],
+      "cv": 5,
+      "penalty": "elasticnet",
+      "solver": "saga",
+      "l1_ratios": [
+        0.1,
+        0.3,
+        0.5,
+        0.7,
+        0.9
+      ],
+      "max_iter": 2000,
+      "random_state": 42,
+      "n_jobs": -1,
+      "scoring": "neg_log_loss"
+    },
+    "training_params": {
+      "min_season": 2006,
+      "max_season": 2025,
+      "train_samples": 4927
+    },
+    "trained_at": "2026-05-16T02:36:07.589535+00:00"
+  },
+  "best_by": {
+    "test_accuracy": "v1",
+    "season_r2": "v1"
+  }
+}

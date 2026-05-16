@@ -15,10 +15,6 @@ router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
 
-def _current_year(games, draft_results=None) -> int:
-    return get_active_season(games, draft_results)
-
-
 def _first_name(name: str) -> str:
     if not name or name == 'Undrafted':
         return name or 'Undrafted'
@@ -55,7 +51,7 @@ async def wins_pool_by_year(request: Request, year: int):
         draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
 
         sorted_df = analysis.calculate_wins_pool_standings(standings, draft_results, players, year, games)
-        current_year = _current_year(games)
+        current_year = get_active_season(games)
         available_years = get_available_years(all_draft_results, all_games)
 
         schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
@@ -105,7 +101,7 @@ async def wins_pool_weekbyweek(request: Request, year: int):
     return templates.TemplateResponse("weekbyweek.html", {
         "request": request,
         "table": record_by_week.rename(columns=_first_name).to_html(classes="wp-data-table", index=True, border=0),
-        "current_year": _current_year(games),
+        "current_year": get_active_season(games),
         "year": year,
         "available_years": get_available_years(all_draft_results, all_games),
     })
@@ -136,7 +132,7 @@ async def playoff_race_by_year(request: Request, year: int):
         "request": request,
         "race": race_data,
         "year": year,
-        "current_year": _current_year(games),
+        "current_year": get_active_season(games),
         "available_years": get_available_years(all_draft_results, all_games),
     })
 @router.get("/schedule")
@@ -178,5 +174,5 @@ async def schedule_by_year(request: Request, year: int):
         "current_week": latest_week,
         "year": year,
         "available_years": get_available_years(all_draft_results, all_games),
-        "current_year": _current_year(all_games),
+        "current_year": get_active_season(all_games),
     })

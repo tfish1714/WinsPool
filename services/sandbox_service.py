@@ -1,11 +1,15 @@
 import os
+import pathlib
 import pandas as pd
 import datetime
 from services.nn_projection_engine import NNProjectionEngine
+from services.constants import UNDRAFTED_SENTINEL
+
+_MOCK_SCHEDULE_PATH = pathlib.Path(__file__).parent.parent / "rawdata" / "2026_mock_schedule.csv"
 
 def get_sandbox_2026_schedule():
     """Generates an enriched schedule structure for the 2026 Mock Schedule."""
-    mock_path = "debug/2026_mock_schedule.csv"
+    mock_path = str(_MOCK_SCHEDULE_PATH)
     if not os.path.exists(mock_path):
         raise FileNotFoundError("2026 Mock Schedule CSV not found.")
         
@@ -34,9 +38,9 @@ def get_sandbox_2026_schedule():
             "gameday": gameday,
             "home_team": ht,
             "away_team": at,
-            "home_score": -1000,
-            "away_score": -1000,
-            "result": -1000,
+            "home_score": UNDRAFTED_SENTINEL,
+            "away_score": UNDRAFTED_SENTINEL,
+            "result": UNDRAFTED_SENTINEL,
             "spread_line": 0,
             "total_line": None,
             "pred_winner": pred_winner,

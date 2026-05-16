@@ -1,7 +1,10 @@
+import logging
 import requests
 import pandas as pd
 from datetime import datetime
 from services.utils import normalize_team_abbr
+
+logger = logging.getLogger(__name__)
 
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 
@@ -14,7 +17,7 @@ def fetch_espn_scores():
         if resp.ok:
             return resp.json()
     except Exception as e:
-        print(f"Error fetching ESPN scores: {e}")
+        logger.error("Error fetching ESPN scores: %s", e)
     return None
 
 def get_live_updates():

@@ -6,13 +6,24 @@
 const API_BASE = '/api';
 const DEFAULT_TIMEOUT = 10000; // 10 seconds
 
+function _getAuthHeaders() {
+    const token = localStorage.getItem('nfl_wins_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
 async function fetchWithTimeout(url, options = {}) {
     const { timeout = DEFAULT_TIMEOUT } = options;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
 
+    const mergedHeaders = {
+        'Content-Type': 'application/json',
+        ..._getAuthHeaders(),
+        ...(options.headers || {}),
+    };
+
     try {
-        const response = await fetch(url, { ...options, signal: controller.signal });
+        const response = await fetch(url, { ...options, headers: mergedHeaders, signal: controller.signal });
         clearTimeout(timer);
         if (!response.ok) {
             const err = await response.json().catch(() => ({ error: 'Unknown API Error' }));

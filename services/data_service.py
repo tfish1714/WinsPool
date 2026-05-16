@@ -1,17 +1,15 @@
+import logging
 import os
 import pathlib
-
-# Default to local data cache for the web server (avoids Firestore reads on every page load).
-# Override by setting USE_LOCAL_DATA=False before running (e.g. from cache_builder.py).
-if 'USE_LOCAL_DATA' not in os.environ:
-    os.environ['USE_LOCAL_DATA'] = 'True'
-
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 import numpy as np
 import time
 from typing import Tuple, Dict, Any, List
 from services.db_service import get_collection_df
 from services.utils import get_team_logo_url
+from services.constants import UNDRAFTED_SENTINEL
 
 
 def get_team_logo(team_code: str) -> str:
@@ -38,7 +36,7 @@ def load_data(year: int = None):
     use_local = os.environ.get('USE_LOCAL_DATA', 'False').lower() == 'true'
     
     if is_debug:
-        print(f"[DEBUG_PAGE_LOAD] load_data(year={year}) called. USE_LOCAL_DATA={use_local}")
+        logger.debug("load_data(year=%s) called. USE_LOCAL_DATA=%s", year, use_local)
 
     # 1. Check for remote invalidation signals if it's been a while
     current_time = time.time()
@@ -51,7 +49,7 @@ def load_data(year: int = None):
     if not use_local and (current_time - cs._LAST_REMOTE_CHECK) > cs._REMOTE_CHECK_INTERVAL:
         cs._LAST_REMOTE_CHECK = current_time
         if is_debug:
-            print("[DEBUG_PAGE_LOAD] Triggering remote Firestore cache_control check...")
+            logger.debug("Triggering remote Firestore cache_control check...")
         try:
             # We use a raw Firestore fetch here to avoid circular dependencies
             from services.db_service import get_db
@@ -65,18 +63,14 @@ def load_data(year: int = None):
                     key = _cache_key(year)
                     local_ts = _CACHE_TIMESTAMPS.get(key, 0)
                     if remote_ts > local_ts:
-                        print(f"Log: Remote invalidation detected (Remote: {remote_ts}, Local: {local_ts}). Clearing cache.")
-                        if is_debug:
-                            print(f"[DEBUG_PAGE_LOAD] Remote cache newer. Invalidating local memory cache.")
+                        logger.info("Remote invalidation detected (remote=%s, local=%s). Clearing cache.", remote_ts, local_ts)
                         clear_data_cache()
                 elif is_debug:
-                    print("[DEBUG_PAGE_LOAD] Remote cache_control document not found.")
+                    logger.debug("Remote cache_control document not found.")
         except Exception as e:
-            print(f"Warning: Failed to check remote cache control: {e}")
-            if is_debug:
-                print(f"[DEBUG_PAGE_LOAD] Failed checking remote cache control: {e}")
+            logger.warning("Failed to check remote cache control: %s", e)
     elif is_debug and use_local:
-        print("[DEBUG_PAGE_LOAD] Skipped remote Firestore cache_control check because USE_LOCAL_DATA=True.")
+        logger.debug("Skipped remote Firestore cache_control check because USE_LOCAL_DATA=True.")
 
     key = _cache_key(year)
     master_key = _cache_key(None)
@@ -84,7 +78,7 @@ def load_data(year: int = None):
     # 2. Check if we already have the memory cache for this specific key
     if key in _DATA_CACHE and (current_time - _CACHE_TIMESTAMPS.get(key, 0) < _CACHE_TTL_SECONDS):
         if is_debug:
-            print(f"[DEBUG_PAGE_LOAD] Returning load_data(year={year}) from memory cache instantly.")
+            logger.debug("Returning load_data(year=%s) from memory cache.", year)
         return _DATA_CACHE[key]
 
 
@@ -131,7 +125,7 @@ def load_data(year: int = None):
         start_io = time.time()
         df = get_collection_df(collection_name, filters)
         if is_debug:
-            print(f"[DEBUG_PAGE_LOAD] Firestore read '{collection_name}' took {time.time() - start_io:.3f}s")
+            logger.debug("Firestore read '%s' took %.3fs", collection_name, time.time() - start_io)
 
         if use_local and not df.empty:
             df.to_pickle(pkl_path)
@@ -156,7 +150,7 @@ def load_data(year: int = None):
     ]
 
     if is_debug:
-        print(f"[DEBUG_PAGE_LOAD] Starting parallel fetch of {len(fetch_tasks)} collections...")
+        logger.debug("Starting parallel fetch of %d collections...", len(fetch_tasks))
 
     with ThreadPoolExecutor(max_workers=len(fetch_tasks)) as executor:
         # Map task tuples to fetch_or_load
@@ -169,7 +163,7 @@ def load_data(year: int = None):
             try:
                 results[collection_name] = future.result()
             except Exception as e:
-                print(f"[ERROR] Parallel fetch failed for {collection_name}: {e}")
+                logger.error("Parallel fetch failed for %s: %s", collection_name, e)
                 results[collection_name] = pd.DataFrame()
 
     # Unpack results in the correct order
@@ -219,7 +213,7 @@ def load_data(year: int = None):
     _CACHE_TIMESTAMPS[key] = current_time
     
     if is_debug:
-        print(f"[DEBUG_PAGE_LOAD] load_data(year={year}) total execution took {time.time() - start_total:.3f}s")
+        logger.debug("load_data(year=%s) total execution took %.3fs", year, time.time() - start_total)
         
     return res
 
@@ -232,7 +226,7 @@ def get_active_season(games: pd.DataFrame, draft_results: pd.DataFrame = None) -
     """
     if games.empty or 'season' not in games.columns:
         return 2024
-    has_results = games[games['result'].notna() & (games['result'] != -1000)]
+    has_results = games[games['result'].notna() & (games['result'] != UNDRAFTED_SENTINEL)]
     if has_results.empty:
         return 2024
     active = int(has_results['season'].max())
@@ -280,7 +274,7 @@ def get_latest_week_for_year(games: pd.DataFrame, year: int) -> int:
 
     # Group by week: count total games and completed games
     def completed(r):
-        return r.notna() & (r != -1000)
+        return r.notna() & (r != UNDRAFTED_SENTINEL)
 
     week_stats = (
         reg_games.groupby('week')
@@ -301,24 +295,6 @@ def get_latest_week_for_year(games: pd.DataFrame, year: int) -> int:
 
     # All weeks are fully complete — return highest completed week
     return int(week_stats['week'].max())
-
-def process_games_data(games: pd.DataFrame) -> pd.DataFrame:
-    """Processes raw games data to compute cumulative wins for each team per week."""
-    games = games.copy()
-    conditions = [
-        games['result'] > 0,
-        games['result'] < 0
-    ]
-    choices = [games['home_team'], games['away_team']]
-    games['winner'] = np.select(conditions, choices, default=np.nan)
-    
-    games['rec'] = 1
-    games.sort_values(['season', 'week'], inplace=True)
-    games['TotalWinsBySeason'] = games.groupby(['season', 'winner', 'game_type'])['rec'].cumsum()
-    games.drop('rec', axis=1, inplace=True)
-    
-    games.rename(columns={'winner': 'team'}, inplace=True)
-    return games
 
 def get_latest_season_and_week(games: pd.DataFrame) -> Tuple[int, int]:
     """Determines the latest regular season week available in the data."""
@@ -342,135 +318,6 @@ def get_latest_season_and_week(games: pd.DataFrame) -> Tuple[int, int]:
         latest_week = 1
         
     return int(latest_season), int(latest_week)
-
-def get_season_progress(season: int, week: int) -> Dict[str, Any]:
-    """
-    Computes player and team wins for a specific season up to a specific week.
-    Returns a dictionary suitable for JSON serialization.
-    """
-    is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
-    start_op = time.time()
-    standings, teams, games, players, draft_order, draft_results, draft_order_rules = load_data(year=season)
-    games = process_games_data(games)
-    
-    today_teams = teams[teams['season'] == season].copy()
-    today_standings = standings[standings['season'] == season].copy()
-    today_draft_results = draft_results[draft_results['season'] == season].copy()
-    
-    # Filter games up to the requested week for this season, enforcing Regular Season only
-    if 'game_type' in games.columns:
-        today_games = games[(games['season'] == season) & (games['week'] <= week) & (games['game_type'] == 'REG')].copy()
-    else:
-        today_games = games[(games['season'] == season) & (games['week'] <= week)].copy()
-    
-    # Join games with players and calculate player wins by season
-    games_player_added = pd.merge(today_games, today_draft_results, on=['team', 'season'], how='inner')
-    games_player_added['rec'] = 1
-    games_player_added.sort_values(['season', 'week'], inplace=True)
-    games_player_added['TotalPlayerWinsBySeason'] = games_player_added.groupby('playerId')['rec'].cumsum()
-    games_player_added = pd.merge(games_player_added, players, on='playerId', how='inner')
-    
-    # Wins by week for players
-    wins_by_week_player = games_player_added.groupby(['season', 'week', 'nickName'])['TotalPlayerWinsBySeason'].max().reset_index()
-    wins_by_week_player = wins_by_week_player.pivot_table(index=['season', 'week'], columns='nickName', values='TotalPlayerWinsBySeason').ffill().fillna(0).reset_index()
-    
-    # Build a nickName → playerId lookup map (stable numeric key)
-    nick_to_pid = (
-        games_player_added[['nickName', 'playerId']]
-        .drop_duplicates('nickName')
-        .set_index('nickName')['playerId']
-        .to_dict()
-    )
-
-    # Build JSON structure for Chart.js
-    player_data = {
-        "labels": wins_by_week_player["week"].tolist(),
-        "datasets": []
-    }
-    for player in [col for col in wins_by_week_player.columns if col not in ['season', 'week']]:
-        player_data["datasets"].append({
-            "label": player,
-            "playerId": int(nick_to_pid.get(player, -1)),
-            "data": wins_by_week_player[player].tolist()
-        })
-        
-    # Team wins by week
-    teams_with_wins = today_games.dropna(subset=['team'])
-    team_data = {
-        "labels": sorted(teams_with_wins["week"].unique().tolist()),
-        "datasets": []
-    }
-    for team in teams_with_wins['team'].unique():
-        t_data = teams_with_wins[teams_with_wins['team'] == team].sort_values('week')
-        # Fill missing weeks with previous max wins for smooth lines
-        merged = pd.DataFrame({"week": team_data["labels"]})
-        merged = pd.merge(merged, t_data[['week', 'TotalWinsBySeason']], on='week', how='left')
-        merged['TotalWinsBySeason'] = merged['TotalWinsBySeason'].ffill().fillna(0)
-        
-        team_data["datasets"].append({
-            "label": str(team),
-            "data": merged["TotalWinsBySeason"].tolist()
-        })
-        
-    # Current Standings & Best Picks
-    wins_pool_standings = pd.merge(today_standings, today_draft_results, on=['team', 'season'])
-    
-    if not wins_pool_standings.empty and 'scored' in wins_pool_standings.columns and 'allowed' in wins_pool_standings.columns:
-        wins_pool_standings['ptDiff'] = wins_pool_standings['scored'] - wins_pool_standings['allowed']
-    else:
-        wins_pool_standings['ptDiff'] = 0
-        
-    if not wins_pool_standings.empty and 'wins' in wins_pool_standings.columns:
-        wins_pool_standings['my_ranks'] = wins_pool_standings.groupby(['season', 'playerId'])['wins'].rank(ascending=False)
-    else:
-        wins_pool_standings['my_ranks'] = 1
-        wins_pool_standings['wins'] = 0
-        
-    wins_pool_standings = pd.merge(wins_pool_standings, players, on='playerId', how='inner')
-    
-    # Replace any potential NaNs in the standings frame
-    wins_pool_standings = wins_pool_standings.replace({np.nan: None})
-    
-    # Calculate best picks (tiebreaker: later draft pick wins)
-    if 'wins' in wins_pool_standings.columns and 'ptDiff' in wins_pool_standings.columns and 'draftPick' in wins_pool_standings.columns:
-        picks_ranked = wins_pool_standings.sort_values(by=['wins', 'draftPick', 'ptDiff'], ascending=[False, False, False])
-    elif 'wins' in wins_pool_standings.columns and 'ptDiff' in wins_pool_standings.columns:
-        picks_ranked = wins_pool_standings.sort_values(by=['wins', 'ptDiff'], ascending=[False, False])
-    else:
-        picks_ranked = wins_pool_standings.copy()
-        
-    best_overall_team = picks_ranked.iloc[0]['team'] if not picks_ranked.empty else None
-    
-    # Best pick per round
-    total_players = len(players)
-    if not picks_ranked.empty and 'draftPick' in picks_ranked.columns:
-        picks_ranked['round'] = np.ceil(picks_ranked['draftPick'].astype(float) / total_players)
-        ranks_valid = picks_ranked[picks_ranked['wins'].notnull()] if 'wins' in picks_ranked.columns else pd.DataFrame()
-        
-        if not ranks_valid.empty:
-            # For each round, find the rows with max wins.
-            # To apply tiebreaker we can just take the first from picks_ranked which is already sorted
-            best_by_round_teams = {}
-            for r, grp in picks_ranked.groupby('round'):
-                best_by_round_teams[r] = grp.iloc[0]['team'] if not grp.empty else None
-            best_by_round_teams = {str(int(k)): (v if pd.notnull(v) else None) for k, v in best_by_round_teams.items() if pd.notnull(k)}
-        else:
-            best_by_round_teams = {}
-    else:
-        best_by_round_teams = {}
-    
-    if is_debug:
-        print(f"[DEBUG_PAGE_LOAD] get_season_progress(week={week}) processing took {time.time() - start_op:.3f}s")
-
-    return {
-        "season": season,
-        "week": week,
-        "player_chart": player_data,
-        "team_chart": team_data,
-        "best_overall": best_overall_team,
-        "best_by_round": best_by_round_teams,
-        "standings": wins_pool_standings.to_dict(orient="records")
-    }
 
 def get_preseason_predictions(season: int) -> Dict[str, dict]:
     """Retrieves Win Totals (including avg, std_dev, and sources) from the database."""
@@ -508,8 +355,8 @@ def get_team_schedule(team: str, games_df: pd.DataFrame, season: int) -> List[st
     return schedule
 
 if __name__ == "__main__":
-    # Quick test
     import json
+    from services.analysis_service import get_season_progress
     st, tm, gm, pl, do, dr, drr = load_data()
     s, w = get_latest_season_and_week(gm)
     print(f"Latest: Season {s} Week {w}")

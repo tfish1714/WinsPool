@@ -1,8 +1,11 @@
 """routes/draft_routes.py — Draft history, draft results, draft board, and WebSocket routes."""
 import json
+import logging
 import random
 import pandas as pd
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
+
+logger = logging.getLogger(__name__)
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -15,10 +18,6 @@ import services.analysis_service as analysis
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
-
-
-def _current_year(games, draft_results=None) -> int:
-    return get_active_season(games, draft_results)
 
 
 def _format_pick_time(seconds: int) -> str:
@@ -69,7 +68,7 @@ async def serve_draft_board(request: Request):
 @router.get("/draft-results")
 async def draft_results_redirect():
     _, _, games, _, _, draft_results, _ = load_data()
-    return RedirectResponse(f"/draft/{_current_year(games)}")
+    return RedirectResponse(f"/draft/{get_active_season(games)}")
 
 
 @router.get("/admin")
@@ -213,7 +212,7 @@ async def route_draft_history(request: Request):
         "sorted_teams": sorted_teams,
         "player_first_picks": player_first_picks,
         "team_first_picks": team_first_picks,
-        "current_year": _current_year(games),
+        "current_year": get_active_season(games),
     })
 
 
@@ -380,7 +379,7 @@ async def route_draft_results_by_year(request: Request, year: int):
         "request": request,
         "data": merged.to_dict(orient="records"),
         "year": year,
-        "current_year": _current_year(games),
+        "current_year": get_active_season(games),
         "available_years": get_draft_years(all_draft_results),
         "best_overall": best_overall,
         "worst_overall": worst_overall,
@@ -401,6 +400,7 @@ ROOM_CODE = os.environ.get("ROOM_CODE", "test").strip().lower()
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     current_view_year = None # Default to latest
+    socket_player_id: int | None = None  # track which player authenticated on this socket
     try:
         await websocket.send_json({"type": "state", "payload": load_draft_state(connected_players)})
         while True:
@@ -434,6 +434,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     pid = int(pid)
                     if str(code).strip().lower() == ROOM_CODE:
                         connected_players.add(pid)
+                        socket_player_id = pid
                         await websocket.send_json({"type": "verified", "playerId": pid})
                         await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
                     else:
@@ -452,6 +453,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             await websocket.send_json({"type": "error", "message": "Session expired. Please log in again."})
                             continue
                         connected_players.add(pid)
+                        socket_player_id = pid
                         await websocket.send_json({"type": "verified", "playerId": pid})
                         await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
                     except ValueError:
@@ -560,8 +562,10 @@ async def websocket_endpoint(websocket: WebSocket):
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+        if socket_player_id is not None:
+            connected_players.discard(socket_player_id)
     except Exception as e:
         manager.disconnect(websocket)
-        import traceback
-        print(f"WS error: {e}")
-        traceback.print_exc()
+        if socket_player_id is not None:
+            connected_players.discard(socket_player_id)
+        logger.exception("WebSocket error: %s", e)

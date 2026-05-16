@@ -1,8 +1,13 @@
-import pandas as pd
-import numpy as np
+import logging
 import os
 import re
+import time
+import pandas as pd
+import numpy as np
 from typing import Dict, List, Any
+from services.constants import UNDRAFTED_SENTINEL
+
+logger = logging.getLogger(__name__)
 
 
 def compute_team_records(games: pd.DataFrame, season: int) -> Dict[str, Dict[str, int]]:
@@ -19,7 +24,7 @@ def compute_team_records(games: pd.DataFrame, season: int) -> Dict[str, Dict[str
     played = games[
         (games['season'] == season)
         & (games['result'].notna())
-        & (games['result'] != -1000)
+        & (games['result'] != UNDRAFTED_SENTINEL)
     ]
     if 'game_type' in played.columns:
         played = played[played['game_type'] == 'REG']
@@ -119,7 +124,7 @@ def player_winsbyWeek(schedule: pd.DataFrame, sorted_players: List[str] = None) 
     result_df = result_df.reindex(sorted(result_df.index, key=_week_sort_key))
 
     # Rename the undrafted sentinel index (−1000) to a human-readable label.
-    result_df = result_df.rename(columns=lambda c: 'Undrafted' if str(c) in ('-1000', '-1000.0') else c)
+    result_df = result_df.rename(columns=lambda c: 'Undrafted' if str(c) in (str(UNDRAFTED_SENTINEL), f'{UNDRAFTED_SENTINEL}.0') else c)
 
     # Sort columns if sorted_players is provided
     if sorted_players:
@@ -198,7 +203,7 @@ def calculate_playoff_race(schedule: pd.DataFrame, standings_df: pd.DataFrame) -
     for player in all_players:
         # Skip -1000 sentinel (undrafted teams) and any non-player entries
         try:
-            if float(player) == -1000:
+            if float(player) == UNDRAFTED_SENTINEL:
                 continue
         except (ValueError, TypeError):
             pass
@@ -250,7 +255,7 @@ def calculate_playoff_race(schedule: pd.DataFrame, standings_df: pd.DataFrame) -
         rec['rank'] = i + 1
 
     if is_debug:
-        print(f"[DEBUG_PAGE_LOAD] calculate_playoff_race processing took {time.time() - start_op:.3f}s")
+        logger.debug("calculate_playoff_race processing took %.3fs", time.time() - start_op)
     return records
 
 
@@ -259,10 +264,10 @@ def player_winlossmatrix(schedule: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     df = schedule[['fullName_away', 'fullName_home', 'result']].copy()
     # Replace the -1000 sentinel (from get_enriched_schedule fillna) with 'Undrafted'
-    df['fullName_away'] = df['fullName_away'].replace(-1000, 'Undrafted').replace('-1000', 'Undrafted')
-    df['fullName_home'] = df['fullName_home'].replace(-1000, 'Undrafted').replace('-1000', 'Undrafted')
+    df['fullName_away'] = df['fullName_away'].replace(UNDRAFTED_SENTINEL, 'Undrafted').replace(str(UNDRAFTED_SENTINEL), 'Undrafted')
+    df['fullName_home'] = df['fullName_home'].replace(UNDRAFTED_SENTINEL, 'Undrafted').replace(str(UNDRAFTED_SENTINEL), 'Undrafted')
     # Drop rows where result has the sentinel (game not yet played)
-    df = df[df['result'] != -1000]
+    df = df[df['result'] != UNDRAFTED_SENTINEL]
     df = df.dropna(subset=['result'])
     all_players = pd.concat([df['fullName_away'], df['fullName_home']]).dropna().unique()
     all_players = [p for p in all_players if p not in (None, '', 'nan')]
@@ -279,7 +284,7 @@ def player_winlossmatrix(schedule: pd.DataFrame) -> pd.DataFrame:
         result = row.get('result')
 
         # Ignore unplayed games
-        if pd.isna(result) or result == -1000:
+        if pd.isna(result) or result == UNDRAFTED_SENTINEL:
             continue
 
         # 1. Update true overall record (against anyone, including Undrafted)
@@ -418,10 +423,10 @@ def get_enriched_schedule(games, draft_results, players, season):
     final_merged['home_record'] = final_merged['home_team'].apply(lambda t: format_team_record(t, team_records))
     
     final_merged = final_merged.where(pd.notnull(final_merged), None)
-    final_merged = final_merged.fillna(-1000)
+    final_merged = final_merged.fillna(UNDRAFTED_SENTINEL)
     
     if is_debug:
-        print(f"[DEBUG_PAGE_LOAD] get_enriched_schedule processing took {time.time() - start_op:.3f}s")
+        logger.debug("get_enriched_schedule processing took %.3fs", time.time() - start_op)
     return final_merged
 
 def calculate_wins_pool_standings(standings, draft_results, players, season, games=None):
@@ -440,17 +445,17 @@ def calculate_wins_pool_standings(standings, draft_results, players, season, gam
         
     if 'team' not in wins_pool_standings.columns or 'season' not in wins_pool_standings.columns:
         if is_debug:
-            print(f"[ERROR] wins_pool_standings missing merge keys: {wins_pool_standings.columns.tolist()}")
+            logger.error("wins_pool_standings missing merge keys: %s", wins_pool_standings.columns.tolist())
         return pd.DataFrame()
 
     if 'playerId' not in wins_pool_standings.columns:
         if is_debug:
-            print(f"[ERROR] wins_pool_standings missing 'playerId'. Cols: {wins_pool_standings.columns.tolist()}")
+            logger.error("wins_pool_standings missing 'playerId'. Cols: %s", wins_pool_standings.columns.tolist())
         return pd.DataFrame()
 
     if 'playerId' not in players.columns:
         if is_debug:
-            print(f"[ERROR] 'players' DF missing 'playerId'. Cols: {players.columns.tolist()}")
+            logger.error("'players' DF missing 'playerId'. Cols: %s", players.columns.tolist())
         return pd.DataFrame()
 
     wins_pool_standings = pd.merge(wins_pool_standings, players, on='playerId', how='inner')
@@ -475,3 +480,134 @@ def calculate_wins_pool_standings(standings, draft_results, players, season, gam
     refreshTime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     sorted_df["refreshTime"] = refreshTime
     return sorted_df
+
+
+# ---------------------------------------------------------------------------
+# Season progress computation (moved from data_service.py)
+# ---------------------------------------------------------------------------
+
+def process_games_data(games: pd.DataFrame) -> pd.DataFrame:
+    """Compute cumulative wins for each team per week from raw games data."""
+    games = games.copy()
+    conditions = [games['result'] > 0, games['result'] < 0]
+    choices = [games['home_team'], games['away_team']]
+    games['winner'] = np.select(conditions, choices, default=np.nan)
+    games['rec'] = 1
+    games.sort_values(['season', 'week'], inplace=True)
+    games['TotalWinsBySeason'] = games.groupby(['season', 'winner', 'game_type'])['rec'].cumsum()
+    games.drop('rec', axis=1, inplace=True)
+    games.rename(columns={'winner': 'team'}, inplace=True)
+    return games
+
+
+def get_season_progress(season: int, week: int) -> Dict[str, Any]:
+    """Compute player and team wins for a season up to a given week.
+
+    Returns a dict suitable for JSON serialization and Chart.js consumption.
+    """
+    from services.data_service import load_data  # local import avoids circular dep
+    is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
+    start_op = time.time()
+
+    standings, teams, games, players, draft_order, draft_results, draft_order_rules = load_data(year=season)
+    games = process_games_data(games)
+
+    today_teams = teams[teams['season'] == season].copy()
+    today_standings = standings[standings['season'] == season].copy()
+    today_draft_results = draft_results[draft_results['season'] == season].copy()
+
+    if 'game_type' in games.columns:
+        today_games = games[(games['season'] == season) & (games['week'] <= week) & (games['game_type'] == 'REG')].copy()
+    else:
+        today_games = games[(games['season'] == season) & (games['week'] <= week)].copy()
+
+    games_player_added = pd.merge(today_games, today_draft_results, on=['team', 'season'], how='inner')
+    games_player_added['rec'] = 1
+    games_player_added.sort_values(['season', 'week'], inplace=True)
+    games_player_added['TotalPlayerWinsBySeason'] = games_player_added.groupby('playerId')['rec'].cumsum()
+    games_player_added = pd.merge(games_player_added, players, on='playerId', how='inner')
+
+    wins_by_week_player = games_player_added.groupby(['season', 'week', 'nickName'])['TotalPlayerWinsBySeason'].max().reset_index()
+    wins_by_week_player = wins_by_week_player.pivot_table(index=['season', 'week'], columns='nickName', values='TotalPlayerWinsBySeason').ffill().fillna(0).reset_index()
+
+    nick_to_pid = (
+        games_player_added[['nickName', 'playerId']]
+        .drop_duplicates('nickName')
+        .set_index('nickName')['playerId']
+        .to_dict()
+    )
+
+    player_data: Dict[str, Any] = {
+        "labels": wins_by_week_player["week"].tolist(),
+        "datasets": []
+    }
+    for player in [col for col in wins_by_week_player.columns if col not in ['season', 'week']]:
+        player_data["datasets"].append({
+            "label": player,
+            "playerId": int(nick_to_pid.get(player, -1)),
+            "data": wins_by_week_player[player].tolist()
+        })
+
+    teams_with_wins = today_games.dropna(subset=['team'])
+    team_data: Dict[str, Any] = {
+        "labels": sorted(teams_with_wins["week"].unique().tolist()),
+        "datasets": []
+    }
+    for team in teams_with_wins['team'].unique():
+        t_data = teams_with_wins[teams_with_wins['team'] == team].sort_values('week')
+        merged = pd.DataFrame({"week": team_data["labels"]})
+        merged = pd.merge(merged, t_data[['week', 'TotalWinsBySeason']], on='week', how='left')
+        merged['TotalWinsBySeason'] = merged['TotalWinsBySeason'].ffill().fillna(0)
+        team_data["datasets"].append({"label": str(team), "data": merged["TotalWinsBySeason"].tolist()})
+
+    wins_pool_standings = pd.merge(today_standings, today_draft_results, on=['team', 'season'])
+
+    if not wins_pool_standings.empty and 'scored' in wins_pool_standings.columns and 'allowed' in wins_pool_standings.columns:
+        wins_pool_standings['ptDiff'] = wins_pool_standings['scored'] - wins_pool_standings['allowed']
+    else:
+        wins_pool_standings['ptDiff'] = 0
+
+    if not wins_pool_standings.empty and 'wins' in wins_pool_standings.columns:
+        wins_pool_standings['my_ranks'] = wins_pool_standings.groupby(['season', 'playerId'])['wins'].rank(ascending=False)
+    else:
+        wins_pool_standings['my_ranks'] = 1
+        wins_pool_standings['wins'] = 0
+
+    wins_pool_standings = pd.merge(wins_pool_standings, players, on='playerId', how='inner')
+    wins_pool_standings = wins_pool_standings.replace({np.nan: None})
+
+    if 'wins' in wins_pool_standings.columns and 'ptDiff' in wins_pool_standings.columns and 'draftPick' in wins_pool_standings.columns:
+        picks_ranked = wins_pool_standings.sort_values(by=['wins', 'draftPick', 'ptDiff'], ascending=[False, False, False])
+    elif 'wins' in wins_pool_standings.columns and 'ptDiff' in wins_pool_standings.columns:
+        picks_ranked = wins_pool_standings.sort_values(by=['wins', 'ptDiff'], ascending=[False, False])
+    else:
+        picks_ranked = wins_pool_standings.copy()
+
+    best_overall_team = picks_ranked.iloc[0]['team'] if not picks_ranked.empty else None
+
+    total_players = len(players)
+    if not picks_ranked.empty and 'draftPick' in picks_ranked.columns:
+        picks_ranked['round'] = np.ceil(picks_ranked['draftPick'].astype(float) / total_players)
+        ranks_valid = picks_ranked[picks_ranked['wins'].notnull()] if 'wins' in picks_ranked.columns else pd.DataFrame()
+        if not ranks_valid.empty:
+            best_by_round_teams = {}
+            for r, grp in picks_ranked.groupby('round'):
+                best_by_round_teams[r] = grp.iloc[0]['team'] if not grp.empty else None
+            best_by_round_teams = {str(int(k)): (v if pd.notnull(v) else None) for k, v in best_by_round_teams.items() if pd.notnull(k)}
+        else:
+            best_by_round_teams = {}
+    else:
+        best_by_round_teams = {}
+
+    if is_debug:
+        logger.debug("get_season_progress(week=%s) processing took %.3fs", week, time.time() - start_op)
+
+    return {
+        "season": season,
+        "week": week,
+        "player_chart": player_data,
+        "team_chart": team_data,
+        "best_overall": best_overall_team,
+        "best_by_round": best_by_round_teams,
+        "standings": wins_pool_standings.to_dict(orient="records")
+    }

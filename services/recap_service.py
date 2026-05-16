@@ -1,4 +1,5 @@
 import pandas as pd
+from services.constants import UNDRAFTED_SENTINEL
 from services.data_service import load_data, get_preseason_predictions
 from services.analysis_service import get_enriched_schedule
 from services.ai_service import generate_weekly_summary, get_recap_prompt
@@ -21,12 +22,12 @@ def extract_weekly_data(year, week):
 
     # 1. Calculate Overall Season Wins (up to and including this week)
     season_to_date = schedule[schedule['week'] <= week]
-    played_to_date = season_to_date[(season_to_date['result'] != -1000) & (season_to_date['result'].notna())]
+    played_to_date = season_to_date[(season_to_date['result'] != UNDRAFTED_SENTINEL) & (season_to_date['result'].notna())]
     
     overall_wins = {}
     for _, row in played_to_date.iterrows():
         win_pid = row['playerId_home_draft'] if row['result'] > 0 else row['playerId']
-        if pd.notna(win_pid) and win_pid != -1000:
+        if pd.notna(win_pid) and win_pid != UNDRAFTED_SENTINEL:
             overall_wins[win_pid] = overall_wins.get(win_pid, 0) + 1
 
     # 2. Extract specific week stats
@@ -38,13 +39,13 @@ def extract_weekly_data(year, week):
     pid_to_name = dict(zip(players['playerId'], players['fullName']))
     
     for _, row in weekly_games.iterrows():
-        if row['result'] == -1000 or row['result'] is None:
+        if row['result'] == UNDRAFTED_SENTINEL or row['result'] is None:
             continue
             
         a_pid = row['playerId']
         h_pid = row['playerId_home_draft']
         
-        if a_pid == -1000 or h_pid == -1000 or pd.isna(a_pid) or pd.isna(h_pid):
+        if a_pid == UNDRAFTED_SENTINEL or h_pid == UNDRAFTED_SENTINEL or pd.isna(a_pid) or pd.isna(h_pid):
             continue
             
         if h_pid not in player_stats:

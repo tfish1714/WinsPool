@@ -1,3 +1,4 @@
+import logging
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -5,6 +6,18 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+def send_mfa_code_email(to_email: str, code: str) -> bool:
+    """Send a 6-digit MFA verification code to a single recipient."""
+    html_content = f"""
+    <p>Your WinsPool verification code is:</p>
+    <h2 style="letter-spacing:4px;">{code}</h2>
+    <p>This code expires in 10 minutes. Do not share it with anyone.</p>
+    """
+    return send_weekly_recap_email([to_email], "WinsPool Login Verification Code", html_content)
+
 
 def send_weekly_recap_email(to_emails: list, subject: str, html_content: str):
     """
@@ -17,7 +30,7 @@ def send_weekly_recap_email(to_emails: list, subject: str, html_content: str):
     from_email = os.getenv("FROM_EMAIL", smtp_user)
 
     if not all([smtp_server, smtp_user, smtp_password]):
-        print("Error: SMTP configuration missing in .env.")
+        logger.error("SMTP configuration missing in environment.")
         return False
 
     try:
@@ -43,5 +56,5 @@ def send_weekly_recap_email(to_emails: list, subject: str, html_content: str):
                 
         return True
     except Exception as e:
-        print(f"Error sending email: {str(e)}")
+        logger.error("Error sending email: %s", e)
         return False

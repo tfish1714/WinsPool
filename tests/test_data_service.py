@@ -1,10 +1,6 @@
 import pandas as pd
-from services.data_service import (
-    load_data, 
-    process_games_data, 
-    get_latest_season_and_week, 
-    get_season_progress
-)
+from services.data_service import load_data, get_latest_season_and_week
+from services.analysis_service import process_games_data, get_season_progress
 
 def test_load_data():
     """Verify that all 7 required dataframes load successfully."""

@@ -154,19 +154,18 @@ Two sources, both synced by `scripts/sync_nflverse_data.py`:
 | `weekly_rosters` | `rawdata/weekly_rosters/roster_weekly_{year}.csv` | Daily |
 | `pbp` | `rawdata/pbp/play_by_play_{year}.csv` | Nightly (~100MB/year, opt-in) |
 
-**[nflscraPy](https://github.com/blnkpagelabs/nflscraPy/releases)** — last updated Jan 2024, historical only:
-| Release tag | Local path | Notes |
-|---|---|---|
-| `SeasonRoster` | `rawdata/SeasonRoster-{year}.csv` | Has PFR Approximate Value (not in nflverse) |
+Not synced (redundant or unmaintained): `FiveThirtyEight.csv` (FTE, stops 2022), `Metadata-*.csv`, `Scoring-*.csv`, `ExpectedPoints-*.csv`, `Stats-*.csv` (box stats computed from nflverse weekly stats instead), `SeasonRoster-*.csv` (nflscraPy, superseded by snap_counts + rosters).
 
-Not synced (redundant or unmaintained): `FiveThirtyEight.csv` (FTE, stops 2022), `Metadata-*.csv`, `Scoring-*.csv`, `ExpectedPoints-*.csv`, `Stats-*.csv` (box stats computed from nflverse weekly stats instead).
+### Roster talent features
+`roster_talent_delta` and `trench_dominance_metric` are computed from **nflverse snap counts** (`snap_counts/snap_counts_{year}.csv`) joined with **nflverse rosters** (`rosters/roster_{year}.csv`) for age. Snap counts cover 2012–present. Seasons before 2012 get zero values for these features.
 
-### Files safe to delete (~465 MB)
-- `rawdata/dont use/` — deprecated old PBP format
+### Files safe to delete
+- `rawdata/dont use/` — deprecated old PBP format (~157 MB)
 - `rawdata/pbp_participation/` — 305 MB, never used
 - `rawdata/players_components/` — unused mapping tables
 - `rawdata/teams/` — duplicate of `rawdata/teams_colors_logos.csv`
 - `rawdata/Seasons-2024(1)` and `rawdata/Seasons-2024(2)` — duplicate files
+- `rawdata/SeasonRoster-*.csv` — superseded; feature engine now uses snap_counts
 
 ### Recommended Cloud Scheduler jobs
 ```

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 RAWDATA_DIR = Path(__file__).parent.parent / "rawdata"
 
-# Aging curve multipliers (applied to pfr_approximate_value)
+# Aging curve multipliers (applied to snap-based talent score)
 AGE_GROWTH_THRESHOLD = 24
 AGE_PRIME_UPPER = 27
 AGE_MID_UPPER = 30
@@ -55,6 +55,13 @@ FEATURE_COLUMNS = [
     "market_implied_team_total", "passing_difficulty_index",
     "travel_rest_disadvantage", "trench_dominance_metric",
     "roster_talent_delta",
+    # Pressure & Injury (5)  — pfr_advstats 2018+, injuries 2009+
+    "qb_pressure_rate", "opp_qb_pressure_rate",
+    "def_pressure_gen", "opp_def_pressure_gen",
+    "qb_injury_flag",
+    # Roster Value (4)  — EPA-based WAR proxy; 2000+; punter from PBP
+    "off_roster_value_delta", "def_roster_value_delta",
+    "st_value_delta", "qb_resilience_delta",
     # Contextual (6)
     "home_flag", "div_game_flag", "surface_type", "is_dome_flag", "playoff_flag",
     "week",
@@ -110,25 +117,72 @@ def compute_age_multiplier(age: float, pos: str) -> float:
         return max(0.3, 1.0 - (decay * (age - AGE_PRIME_UPPER)))
 
 
-def compute_roster_features(rosters: pd.DataFrame):
-    if rosters.empty:
-        return {}
-    rosters["age"] = pd.to_numeric(rosters.get("age"), errors="coerce")
-    rosters["pfr_av"] = pd.to_numeric(rosters.get("pfr_approximate_value"), errors="coerce").fillna(0)
-    rosters["gs"] = pd.to_numeric(rosters.get("games_started"), errors="coerce").clip(lower=1)
+def compute_roster_features(snap_counts: pd.DataFrame, rosters: pd.DataFrame) -> dict:
+    """Build per-(season, team) talent scores from nflverse snap counts.
 
-    cache = {}
-    for (s, t), grp in rosters.groupby(["season", "alias"]):
+    Quality proxy: total regular-season snaps (offense + defense) weighted by
+    an age multiplier derived from birth_date in the nflverse roster file.
+    Replaces the legacy pfr_approximate_value * games_started metric.
+    snap_counts covers 2012+; seasons before that return zero features.
+    """
+    if snap_counts.empty:
+        return {}
+
+    sc = snap_counts[snap_counts.get("game_type", "REG") == "REG"].copy()
+    sc["total_snaps"] = (
+        pd.to_numeric(sc["offense_snaps"], errors="coerce").fillna(0)
+        + pd.to_numeric(sc["defense_snaps"], errors="coerce").fillna(0)
+    )
+    sc["season"] = pd.to_numeric(sc["season"], errors="coerce")
+    sc["team"] = sc["team"].apply(_normalize_team)
+
+    # Aggregate to season-level per player
+    player_season = (
+        sc.groupby(["season", "team", "pfr_player_id", "position"], as_index=False)["total_snaps"]
+        .sum()
+    )
+
+    # Join birth_date from nflverse rosters for age multiplier
+    if not rosters.empty:
+        roster_ages = (
+            rosters[["pfr_id", "birth_date", "season"]]
+            .dropna(subset=["pfr_id"])
+            .drop_duplicates(["pfr_id", "season"])
+        )
+        player_season = player_season.merge(
+            roster_ages.rename(columns={"pfr_id": "pfr_player_id"}),
+            on=["pfr_player_id", "season"],
+            how="left",
+        )
+    else:
+        player_season["birth_date"] = None
+
+    # Compute age as of Sept 1 of the season year
+    def _age_on_sept1(row) -> float:
+        bd = row.get("birth_date")
+        if pd.isna(bd) or not bd:
+            return float("nan")
+        try:
+            born = pd.to_datetime(bd)
+            sept1 = pd.Timestamp(int(row["season"]), 9, 1)
+            return (sept1 - born).days / 365.25
+        except Exception:
+            return float("nan")
+
+    player_season["age"] = player_season.apply(_age_on_sept1, axis=1)
+
+    cache: dict = {}
+    for (s, t), grp in player_season.groupby(["season", "team"]):
         talent = ol_av = dl_av = 0.0
         for _, r in grp.iterrows():
             pos = str(r.get("position", "")).upper()
             mult = compute_age_multiplier(r["age"], pos)
-            av = r["pfr_av"] * mult * r["gs"]
-            talent += av
+            score = r["total_snaps"] * mult
+            talent += score
             if pos in OL_POSITIONS:
-                ol_av += av
+                ol_av += score
             if pos in DL_POSITIONS:
-                dl_av += av
+                dl_av += score
         cache[(s, t)] = {"talent": talent, "ol_av": ol_av, "dl_av": dl_av}
     return cache
 
@@ -366,6 +420,113 @@ def _load_elo(rd: Path) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Pressure & Injury Loaders
+# ---------------------------------------------------------------------------
+
+def _load_pressure_stats(rd: Path) -> pd.DataFrame:
+    """Rolling QB pressure rate allowed and defensive pressure generated per (season, week, team).
+
+    QB pressure rate: the weekly pressure rate of the team's primary QB (identified by most
+    pressures faced = most dropbacks). Values in 0-1 range; clipped at 1.
+    Def pressure gen: sum of all defenders' pressures per game.
+    Both roll as expanding prior-game means shifted by 1 (no leakage). Week-1 NaN filled
+    from prior season average. pfr_advstats covers 2018+; earlier seasons return zero.
+    """
+    pass_raw = _load_multi_season("pfr_advstats/advstats_week_pass_*.csv", rd)
+    def_raw = _load_multi_season("pfr_advstats/advstats_week_def_*.csv", rd)
+
+    def _roll_metric(df: pd.DataFrame, metric_col: str) -> pd.DataFrame:
+        df = df.sort_values(["season", "team", "week"])
+        prior = (
+            df.groupby(["season", "team"])[metric_col].mean()
+            .reset_index().rename(columns={metric_col: "_avg"})
+        )
+        prior["join_season"] = prior["season"] + 1
+        df[f"{metric_col}_roll"] = (
+            df.groupby(["season", "team"])[metric_col]
+            .transform(lambda s: s.expanding().mean().shift(1))
+        )
+        df = df.merge(
+            prior[["join_season", "team", "_avg"]],
+            left_on=["season", "team"], right_on=["join_season", "team"], how="left",
+        ).drop(columns=["join_season"], errors="ignore")
+        df[f"{metric_col}_roll"] = df[f"{metric_col}_roll"].fillna(df["_avg"]).fillna(0.0)
+        return df[["season", "week", "team", f"{metric_col}_roll"]]
+
+    out = None
+
+    if not pass_raw.empty:
+        p = pass_raw[pass_raw.get("game_type", "REG") == "REG"].copy()
+        p["season"] = pd.to_numeric(p["season"], errors="coerce")
+        p["week"] = pd.to_numeric(p["week"], errors="coerce")
+        p["team"] = p["team"].apply(_normalize_team)
+        p["times_pressured"] = pd.to_numeric(p["times_pressured"], errors="coerce").fillna(0)
+        p["qb_pressure_rate"] = (
+            pd.to_numeric(p["times_pressured_pct"], errors="coerce").clip(0, 1).fillna(0)
+        )
+        p = p.dropna(subset=["season", "week", "team"])
+        # Starting QB = player with most pressures faced that game
+        starter = (
+            p.sort_values("times_pressured", ascending=False)
+            .groupby(["season", "week", "team"], as_index=False)
+            .first()[["season", "week", "team", "qb_pressure_rate"]]
+        )
+        rolled = _roll_metric(starter, "qb_pressure_rate")
+        out = rolled
+
+    if not def_raw.empty:
+        d = def_raw[def_raw.get("game_type", "REG") == "REG"].copy()
+        d["season"] = pd.to_numeric(d["season"], errors="coerce")
+        d["week"] = pd.to_numeric(d["week"], errors="coerce")
+        d["team"] = d["team"].apply(_normalize_team)
+        d["def_pressure_gen"] = pd.to_numeric(d["def_pressures"], errors="coerce").fillna(0)
+        d = d.dropna(subset=["season", "week", "team"])
+        team_press = (
+            d.groupby(["season", "week", "team"], as_index=False)["def_pressure_gen"].sum()
+        )
+        rolled = _roll_metric(team_press, "def_pressure_gen")
+        out = rolled if out is None else out.merge(rolled, on=["season", "week", "team"], how="outer")
+
+    return out if out is not None else pd.DataFrame()
+
+
+def _load_injury_flags(rd: Path) -> pd.DataFrame:
+    """Binary QB injury flag per (season, week, team).
+
+    Returns 1.0 if any QB is listed as Out or Doubtful on the official injury report,
+    0.0 otherwise. Data covers 2009+; earlier seasons get 0 (active assumed).
+    """
+    df = _load_multi_season("injuries/injuries_*.csv", rd)
+    if df.empty:
+        return pd.DataFrame()
+
+    df["season"] = pd.to_numeric(df["season"], errors="coerce")
+    df["week"] = pd.to_numeric(df["week"], errors="coerce")
+    df["team"] = df["team"].apply(_normalize_team)
+    df = df.dropna(subset=["season", "week", "team"])
+
+    # Don't filter on season_type — many rows have NaN there. The join to the
+    # schedule (which is already REG-only) handles postseason exclusion naturally.
+    if "season_type" in df.columns:
+        df = df[df["season_type"].isin(["REG"]) | df["season_type"].isna()].copy()
+
+    qb_out = df[
+        (df["position"] == "QB") &
+        (df["report_status"].isin(["Out", "Doubtful"]))
+    ]
+    if qb_out.empty:
+        return pd.DataFrame()
+
+    flags = (
+        qb_out.groupby(["season", "week", "team"]).size()
+        .reset_index(name="_n")
+        .assign(qb_injury_flag=1.0)
+        [["season", "week", "team", "qb_injury_flag"]]
+    )
+    return flags
+
+
+# ---------------------------------------------------------------------------
 # Build Master Feature Table (V2)
 # ---------------------------------------------------------------------------
 
@@ -385,10 +546,11 @@ def build_master_feature_table(
     epa = _load_rolling_epa(rd)
     elo = _load_elo(rd)
     box = _load_box_stats_from_weekly(rd)
-    rosters = _load_multi_season("SeasonRoster-*.csv", rd)
-    if not rosters.empty:
-        rosters["alias"] = rosters["alias"].apply(_normalize_team)
-    roster_cache = compute_roster_features(rosters)
+    pressure = _load_pressure_stats(rd)
+    injuries = _load_injury_flags(rd)
+    snap_counts = _load_multi_season("snap_counts/snap_counts_*.csv", rd)
+    nflverse_rosters = _load_multi_season("rosters/roster_*.csv", rd)
+    roster_cache = compute_roster_features(snap_counts, nflverse_rosters)
 
     # --- Rolling EPA (per-game join on season + week + team) ---
     if not epa.empty:
@@ -468,6 +630,41 @@ def build_master_feature_table(
 
     total = sched.get("total_line", pd.Series(44.0, index=sched.index)).fillna(44.0)
     sched["market_implied_team_total"] = (total / 2) + (spread / 2)
+
+    # --- Pressure Stats (per-game join on season + week + team) ---
+    if pressure is not None and not pressure.empty:
+        pressure_cols = [c for c in pressure.columns if c not in ("season", "week", "team")]
+        sched = sched.merge(
+            pressure.rename(columns={
+                "team": "home_team",
+                **{c: c for c in pressure_cols if "qb_pressure" in c},
+                **{"def_pressure_gen_roll": "def_pressure_gen"},
+            }),
+            on=["season", "week", "home_team"], how="left",
+        )
+        sched = sched.merge(
+            pressure.rename(columns={
+                "team": "away_team",
+                "qb_pressure_rate_roll": "opp_qb_pressure_rate",
+                "def_pressure_gen_roll": "opp_def_pressure_gen",
+            }),
+            on=["season", "week", "away_team"], how="left",
+        )
+        if "qb_pressure_rate_roll" in sched.columns:
+            sched.rename(columns={"qb_pressure_rate_roll": "qb_pressure_rate"}, inplace=True)
+    else:
+        for col in ["qb_pressure_rate", "opp_qb_pressure_rate", "def_pressure_gen", "opp_def_pressure_gen"]:
+            sched[col] = 0.0
+
+    # --- QB Injury Flag (join on season + week + home_team) ---
+    if injuries is not None and not injuries.empty:
+        sched = sched.merge(
+            injuries.rename(columns={"team": "home_team"}),
+            on=["season", "week", "home_team"], how="left",
+        )
+        sched["qb_injury_flag"] = sched["qb_injury_flag"].fillna(0.0)
+    else:
+        sched["qb_injury_flag"] = 0.0
 
     # --- Rolling Point Differential (no leakage) ---
     if "home_score" in sched.columns and "away_score" in sched.columns:
@@ -560,6 +757,32 @@ def build_master_feature_table(
         sched["roster_talent_delta"] = 0.0
         sched["trench_dominance_metric"] = 0.0
 
+    # --- Roster Value (season-level WAR proxy; EPA + kicker FG+ + punter gross avg) ---
+    try:
+        from services.roster_value_service import compute_roster_value as _compute_rv
+        rv_cache: dict = {}
+        for _season in sorted(sched["season"].unique()):
+            try:
+                rv_cache.update(_compute_rv(int(_season), rd))
+            except Exception as _e:
+                logger.debug("roster_value skipped for %d: %s", _season, _e)
+
+        def _rv_delta(row, feat):
+            key = (int(row["season"]), int(row["week"]))
+            h = rv_cache.get((*key, row["home_team"]), {}).get(feat, 0.0)
+            a = rv_cache.get((*key, row["away_team"]), {}).get(feat, 0.0)
+            return h - a
+
+        sched["off_roster_value_delta"] = sched.apply(lambda r: _rv_delta(r, "off_roster_value"), axis=1)
+        sched["def_roster_value_delta"] = sched.apply(lambda r: _rv_delta(r, "def_roster_value"), axis=1)
+        sched["st_value_delta"]         = sched.apply(lambda r: _rv_delta(r, "st_value"), axis=1)
+        sched["qb_resilience_delta"]    = sched.apply(lambda r: _rv_delta(r, "qb_resilience"), axis=1)
+    except Exception as _e:
+        logger.warning("roster_value_service unavailable: %s", _e)
+        for _col in ["off_roster_value_delta", "def_roster_value_delta",
+                     "st_value_delta", "qb_resilience_delta"]:
+            sched[_col] = 0.0
+
     # --- Ensure all required columns exist and are numeric ---
     for col in FEATURE_COLUMNS:
         if col not in sched.columns:
@@ -568,7 +791,7 @@ def build_master_feature_table(
 
     sched = sched.dropna(subset=["home_win"]).reset_index(drop=True)
 
-    logger.info("Master Feature Table V2 assembled: %d rows, 27 features.", len(sched))
+    logger.info("Master Feature Table V2 assembled: %d rows, %d features.", len(sched), len(FEATURE_COLUMNS))
 
     # Build column list without duplicates (week lives in both metadata and FEATURE_COLUMNS)
     meta = ["season", "week", "home_team", "away_team"]

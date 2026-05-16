@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 import pathlib
@@ -6,6 +7,8 @@ import hashlib
 import time
 import bcrypt
 from services.cache_service import clear_data_cache
+
+logger = logging.getLogger(__name__)
 
 # Bcrypt work factor: 12 rounds = ~250ms per hash on modern hardware.
 # Balances security against brute-force with acceptable login latency.
@@ -75,11 +78,12 @@ def _init_firebase():
         tmp.write(decoded)
         tmp.close()
         cred = credentials.Certificate(tmp.name)
+        os.unlink(tmp.name)
     else:
         project_root = pathlib.Path(__file__).parent.parent
         creds_path = project_root / "firebase_credentials.json"
         if not creds_path.exists():
-            print("Warning: No FIREBASE_CREDENTIALS env var and no firebase_credentials.json found.")
+            logger.warning("No FIREBASE_CREDENTIALS env var and no firebase_credentials.json found.")
             return None
         cred = credentials.Certificate(str(creds_path))
 
@@ -114,48 +118,7 @@ def signal_data_update():
                 "last_update": time.time()
             })
     except Exception as e:
-        print(f"Warning: Failed to signal remote cache update: {e}")
-
-def _mutate_local(collection_name: str, doc_id: str, data: dict, action: str = "set"):
-    """Internal helper to reflect mutations onto local .pkl files when in local mode."""
-    if os.environ.get("USE_LOCAL_DATA", "False").lower() != "true":
-        return
-    
-    pkl_path = pathlib.Path(".local_db") / f"{collection_name}.pkl"
-    pkl_path.parent.mkdir(exist_ok=True)
-    
-    if pkl_path.exists():
-        try:
-            df = pd.read_pickle(pkl_path)
-        except Exception:
-            df = pd.DataFrame()
-    else:
-        df = pd.DataFrame()
-
-    if action == "set":
-        # Check if row exists by matching ID field or similar
-        # For simplicity in this project, we'll use doc_id matching if a column exists
-        if not df.empty and "id" in df.columns:
-             df = df[df["id"] != doc_id]
-        
-        # Convert dict to row
-        row = pd.DataFrame([data])
-        df = pd.concat([df, row], ignore_index=True)
-    elif action == "update":
-        # Merge update fields into existing rows matching the doc_id
-        if not df.empty and "id" in df.columns:
-            mask = df["id"] == doc_id
-            for key, value in data.items():
-                df.loc[mask, key] = value
-        else:
-            # If no id column, treat as set (append)
-            row = pd.DataFrame([data])
-            df = pd.concat([df, row], ignore_index=True)
-    elif action == "delete":
-        if not df.empty and "id" in df.columns:
-            df = df[df["id"] != doc_id]
-
-    df.to_pickle(pkl_path)
+        logger.warning("Failed to signal remote cache update: %s", e)
 
 
 def get_collection_df(collection_name: str, filters: list = None) -> pd.DataFrame:
@@ -176,7 +139,7 @@ def get_collection_df(collection_name: str, filters: list = None) -> pd.DataFram
                             df = df[df[col] == val]
                 return df
             except Exception as e:
-                print(f"Warning: Failed to read {pkl_path}: {e}. Falling back to Firestore...")
+                logger.warning("Failed to read %s: %s. Falling back to Firestore...", pkl_path, e)
 
     db = get_db()
     if db is None:
@@ -472,7 +435,7 @@ def save_weekly_recap(year: int, week: int, summary: str):
                 df = pd.DataFrame([data])
             _save_df_to_local("weekly_recaps", df)
         except Exception as e:
-            print(f"Warning: Failed to persist recap locally: {e}")
+            logger.warning("Failed to persist recap locally: %s", e)
 
 def get_weekly_recap(year: int, week: int):
     """Retrieves a specific weekly recap from Firestore."""
@@ -511,7 +474,7 @@ def save_metadata(doc_id: str, data: dict):
                 df = pd.DataFrame([{"id": doc_id, **data}])
             _save_df_to_local("metadata", df)
         except Exception as e:
-            print(f"Warning: Failed to persist metadata locally: {e}")
+            logger.warning("Failed to persist metadata locally: %s", e)
 
 def get_metadata(doc_id: str):
     """Retrieves arbitrary metadata from Firestore or local cache."""

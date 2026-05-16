@@ -7,14 +7,19 @@ export const AuthService = {
     getCredentials() {
         const pid = localStorage.getItem('nfl_wins_my_player_id');
         if (!pid || pid === 'null' || pid === 'undefined') {
-            return { playerId: null, playerName: null, nickName: null, role: 'user' };
+            return { playerId: null, playerName: null, nickName: null, role: 'user', token: null };
         }
         return {
             playerId: pid,
             playerName: localStorage.getItem('nfl_wins_playerName'),
             nickName: localStorage.getItem('nfl_wins_nickName'),
-            role: localStorage.getItem('nfl_wins_role') || 'user'
+            role: localStorage.getItem('nfl_wins_role') || 'user',
+            token: localStorage.getItem('nfl_wins_token') || null,
         };
+    },
+
+    getToken() {
+        return localStorage.getItem('nfl_wins_token') || null;
     },
 
     setCredentials(data) {
@@ -23,6 +28,9 @@ export const AuthService = {
         localStorage.setItem('nfl_wins_nickName', data.nickName || '');
         localStorage.setItem('nfl_wins_user_email', data.email);
         localStorage.setItem('nfl_wins_role', data.role || 'user');
+        if (data.token) {
+            localStorage.setItem('nfl_wins_token', data.token);
+        }
     },
 
     clearCredentials() {

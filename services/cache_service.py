@@ -5,11 +5,14 @@ The web app NEVER reads raw Firestore collections.
 All analytics are pre-computed by scripts/cache_builder.py and stored
 in the Firestore `analytics_cache` collection (or .local_db/*.pkl in dev mode).
 """
+import logging
 import os
 import json
 import pathlib
 import pandas as pd
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 _USE_LOCAL = os.environ.get('USE_LOCAL_DATA', 'False').lower() == 'true'
 _LOCAL_CACHE_DIR = pathlib.Path('.local_db/analytics')
@@ -80,7 +83,7 @@ def write_cache(analytic: str, year: int, week: int, data: Any, is_final: bool =
                 'data': serialized
             })
         except Exception as e:
-            print(f"[cache_service] Failed to write cache: {e}")
+            logger.error("Failed to write cache: %s", e)
 
 
 def is_cache_final(analytic: str, year: int, week: int) -> bool:
@@ -129,11 +132,66 @@ def clear_data_cache(year=None):
             del _DATA_CACHE[key]
         if key in _CACHE_TIMESTAMPS:
             del _CACHE_TIMESTAMPS[key]
-        print(f"Log: Local data cache for {year} cleared.")
+        logger.info("Local data cache for %s cleared.", year)
     else:
         _DATA_CACHE.clear()
         _CACHE_TIMESTAMPS.clear()
-        print("Log: Global data cache explicitly cleared.")
+        logger.info("Global data cache explicitly cleared.")
 
 def _cache_key(year):
     return str(year) if year is not None else 'all'
+
+
+# ---------------------------------------------------------------------------
+# Game-level ML predictions (separate from analytics_cache)
+# ---------------------------------------------------------------------------
+# One document per season; game_key = "W{wk:02d}_{home}_{away}"
+# Each value: {pred_prob, pred_winner, pred_su_conf, pred_ats_pick}
+
+_GAME_PRED_DIR = pathlib.Path('.local_db')
+
+
+def get_game_predictions(season: int) -> dict:
+    """Return {game_key: pred_dict} for season, or {} if not found."""
+    if _USE_LOCAL:
+        p = _GAME_PRED_DIR / f"game_predictions_{season}.json"
+        if p.exists():
+            try:
+                with open(p) as f:
+                    return json.load(f).get('predictions', {})
+            except Exception:
+                return {}
+        return {}
+    else:
+        try:
+            from services.db_service import get_db
+            db = get_db()
+            doc = db.collection('game_predictions').document(str(season)).get()
+            if doc.exists:
+                return doc.to_dict().get('predictions', {})
+        except Exception:
+            pass
+        return {}
+
+
+def write_game_predictions(season: int, predictions: dict) -> None:
+    """Persist {game_key: pred_dict} for season (local JSON or Firestore)."""
+    from datetime import datetime, timezone
+    if _USE_LOCAL:
+        _GAME_PRED_DIR.mkdir(parents=True, exist_ok=True)
+        p = _GAME_PRED_DIR / f"game_predictions_{season}.json"
+        with open(p, 'w') as f:
+            json.dump({'season': season,
+                       'generated_at': datetime.now(timezone.utc).isoformat(),
+                       'predictions': predictions}, f, default=str)
+    else:
+        try:
+            from services.db_service import get_db
+            db = get_db()
+            db.collection('game_predictions').document(str(season)).set({
+                'season': season,
+                'generated_at': datetime.now(timezone.utc).isoformat(),
+                'predictions': predictions,
+            })
+        except Exception as e:
+            logger.error("Failed to write game_predictions/%s: %s", season, e)

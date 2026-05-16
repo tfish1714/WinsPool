@@ -1,5 +1,6 @@
 """services/prediction_service.py -- Advanced NFL Prediction Engine.
 
+
 Blends two peer-reviewed methodologies to produce game-level win probabilities,
 season-level portfolio projections, and draft-room confidence scores:
 
@@ -22,6 +23,7 @@ import math
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
+from services.constants import UNDRAFTED_SENTINEL
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -937,7 +939,7 @@ def enrich_schedule_with_predictions(
         away = row.get("away_team", "")
 
         # Only predict unplayed games
-        is_unplayed = (pd.isna(result) or result == -1000)
+        is_unplayed = (pd.isna(result) or result == UNDRAFTED_SENTINEL)
         if not is_unplayed or not home or not away:
             pred_winners.append(None)
             pred_confs.append(None)

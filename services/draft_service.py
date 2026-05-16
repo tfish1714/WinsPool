@@ -1,3 +1,4 @@
+import logging
 import os
 import traceback
 import pandas as pd
@@ -5,6 +6,8 @@ from typing import Dict, Any, List
 from services.db_service import get_collection_df, add_draft_result, update_player_cell, delete_draft_pick
 from services.data_service import get_preseason_predictions, get_team_schedule, load_data
 import time
+
+logger = logging.getLogger(__name__)
 
 _CACHED_DRAFT_STATE = None
 
@@ -59,7 +62,7 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
         else:
             season = int(season_val)
     
-    print(f"  [draft_state] Processing season: {season}")
+    logger.info("draft_state: processing season %s", season)
 
     # If after determining season, it's still None (e.g., no data at all), return empty state
     if season is None:
@@ -73,11 +76,11 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
     
     # 2. Load Data (GRANULAR: Only fetches current season as we use cached analytics)
     if is_debug: 
-        print(f"  [draft_state] Fetching granular season data for {season}...")
+        logger.debug("draft_state: fetching granular season data for %s...", season)
     standings, _, games_master, players_df, d_order, results, rules = load_data(year=season)
 
     if is_debug:
-        print(f"  [draft_state] Data fetch took {time.time() - t_start_fetch:.3f}s")
+        logger.debug("draft_state: data fetch took %.3fs", time.time() - t_start_fetch)
     
     # Slice datasets for the target season (if not already filtered)
     d_order_season = d_order[d_order['season'] == season] if 'season' in d_order.columns else d_order
@@ -129,11 +132,11 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
         snapshot = get_cached('prediction_snapshot', int(season), 0)
         if snapshot and 'team_projections' in snapshot:
             elo_predictions = snapshot['team_projections']
-            print(f"  [draft_state] Loaded {len(elo_predictions)} cached Elo projections for {season} Week 0 ({time.time() - t2:.3f}s)")
+            logger.debug("draft_state: loaded %d cached Elo projections for %s Week 0 (%.3fs)", len(elo_predictions), season, time.time() - t2)
         else:
-            print(f"  [draft_state] WARNING: No cached 'prediction_snapshot' found for {season} Week 0. elo_predictions is EMPTY.")
+            logger.warning("draft_state: no cached 'prediction_snapshot' found for %s Week 0. elo_predictions is EMPTY.", season)
     except Exception as e:
-        print(f"  [draft_state] ERROR fetching analytics cache: {e}")
+        logger.error("draft_state: error fetching analytics cache: %s", e)
         if is_debug:
             import traceback; traceback.print_exc()
 
@@ -187,7 +190,7 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
     _CACHED_DRAFT_STATE = copy.deepcopy(state)
     
     if is_debug:
-        print(f"Log: load_draft_state total took {time.time() - start_time:.3f}s")
+        logger.debug("load_draft_state total took %.3fs", time.time() - start_time)
     return state
 
 def save_pick(season: int, draft_pick: int, player_id: int, team: str, executed_by: str = None):
