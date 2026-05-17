@@ -177,6 +177,31 @@ def get_prediction_accuracy():
         return JSONResponse(status_code=500, content={'error': str(e)})
 
 
+@router.get("/predictions/explain")
+def get_prediction_explain(season: int, week: int, home: str, away: str):
+    """Return the stored explanation (feature values) for a single game prediction."""
+    try:
+        from services.cache_service import get_game_predictions
+        from services.nn_feature_engine import _normalize_team
+        ht = _normalize_team(home)
+        at = _normalize_team(away)
+        key = f"W{week:02d}_{ht}_{at}"
+        preds = get_game_predictions(season)
+        pred = preds.get(key)
+        if not pred:
+            return JSONResponse(status_code=404, content={"error": "No prediction found for this game."})
+        return JSONResponse(content={
+            "key": key,
+            "home_team": ht,
+            "away_team": at,
+            "season": season,
+            "week": week,
+            **{k: v for k, v in pred.items() if k != "locked"},
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @router.get("/schedule")
 def get_schedule(year: int):
     """Data for the week-by-week schedule grid."""

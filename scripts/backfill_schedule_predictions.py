@@ -97,11 +97,32 @@ def _profile_predictions_for_year(year: int, schedule_df: pd.DataFrame,
                     ats = ht if implied < sv else at
                 except (ValueError, TypeError):
                     pass
+            sl = game.get("spread_line")
+            sl_val = float(sl) if pd.notna(sl) else None
+            vhp = round(1 / (1 + np.exp(sl_val / 7.5)), 4) if sl_val is not None else None
+            elo_diff = round(prob.get("nn_home_prob", 0.5) * 100 - 50, 1)  # proxy
             out[key] = {
                 "pred_prob":     round(float(hp), 4),
                 "pred_winner":   winner,
                 "pred_su_conf":  conf,
                 "pred_ats_pick": ats,
+                "explanation": {
+                    "vegas_line":      round(sl_val, 1) if sl_val is not None else None,
+                    "vegas_home_prob": vhp,
+                    "elo_diff":        None,
+                    "roster_delta":    None,
+                    "off_pass_epa":    None,
+                    "def_pass_epa":    None,
+                    "off_rush_epa":    None,
+                    "def_rush_epa":    None,
+                    "turnover_margin": None,
+                    "qb_injury":       None,
+                    "rest_disadvantage": None,
+                    "trench_dominance":  None,
+                    "off_roster_value":  None,
+                    "def_roster_value":  None,
+                    "source": "profile",
+                },
             }
         except Exception:
             continue

@@ -112,11 +112,44 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
             except (ValueError, TypeError):
                 pass
 
+        def _f(attr, default=0.0):
+            v = getattr(row, attr, default)
+            try:
+                return float(v) if v is not None and not (isinstance(v, float) and np.isnan(v)) else default
+            except (TypeError, ValueError):
+                return default
+
+        sl = _f("spread_line", None)
+        vegas_home_prob = None
+        if sl is not None:
+            try:
+                vegas_home_prob = round(1 / (1 + np.exp(sl / 7.5)), 4)
+            except Exception:
+                pass
+
+        explanation = {
+            "vegas_line":       round(sl, 1) if sl is not None else None,
+            "vegas_home_prob":  vegas_home_prob,
+            "elo_diff":         round(_f("tm_elo_pre") - _f("opp_elo_pre"), 1),
+            "roster_delta":     round(_f("roster_talent_delta"), 3),
+            "off_pass_epa":     round(_f("off_pass_epa"), 3),
+            "def_pass_epa":     round(_f("def_pass_epa"), 3),
+            "off_rush_epa":     round(_f("off_rush_epa"), 3),
+            "def_rush_epa":     round(_f("def_rush_epa"), 3),
+            "turnover_margin":  round(_f("turnover_margin_rolling"), 2),
+            "qb_injury":        int(_f("qb_injury_flag")),
+            "rest_disadvantage":round(_f("travel_rest_disadvantage"), 2),
+            "trench_dominance": round(_f("trench_dominance_metric"), 3),
+            "off_roster_value": round(_f("off_roster_value_delta"), 3),
+            "def_roster_value": round(_f("def_roster_value_delta"), 3),
+        }
+
         lookup[(int(row.season), int(row.week), ht, at)] = {
             "pred_prob":     round(hp, 4),
             "pred_winner":   winner,
             "pred_su_conf":  conf,
             "pred_ats_pick": ats,
+            "explanation":   explanation,
         }
     return lookup
 

@@ -104,14 +104,23 @@
 
                         {% if row['pred_winner'] %}
                         <div class="game-prediction"
-                            style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1); color: var(--accent-gold); font-weight: 600;">
-                            <span title="AI Prediction Logic"><i data-lucide="sparkles"></i> Predictor:</span>
-                            <div style="font-size: 0.75rem; color: #fff;">
-                                Win: {{ row['pred_winner'] }} ({{ row['pred_su_conf'] }}%)
+                            style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1); color: var(--accent-gold); font-weight: 600; display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div>
+                                <span><i data-lucide="sparkles"></i> Predictor:</span>
+                                <div style="font-size: 0.75rem; color: #fff;">
+                                    Win: {{ row['pred_winner'] }} ({{ row['pred_su_conf'] }}%)
+                                </div>
+                                <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: normal;">
+                                    ATS: {{ row['pred_ats_pick'] }}
+                                </div>
                             </div>
-                            <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: normal;">
-                                ATS: {{ row['pred_ats_pick'] }}
-                            </div>
+                            <button class="pred-explain-btn"
+                                data-season="{{ row['season'] }}"
+                                data-week="{{ row['week'] }}"
+                                data-home="{{ row['home_team'] }}"
+                                data-away="{{ row['away_team'] }}"
+                                title="Why this prediction?"
+                                style="display:none; background:none; border:1px solid rgba(251,191,36,0.3); border-radius:50%; width:22px; height:22px; cursor:pointer; color:var(--accent-gold); font-size:12px; padding:0; line-height:22px; text-align:center; flex-shrink:0; margin-top:2px;">?</button>
                         </div>
                         {% endif %}
                     </div>
@@ -131,6 +140,15 @@
 </main>
 {% endblock %}
 
+<!-- Prediction Explanation Modal -->
+<div id="pred-explain-modal" style="display:none; position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,0.7); backdrop-filter:blur(4px); align-items:center; justify-content:center;">
+    <div style="background:var(--glass-bg,#1a1a2e); border:1px solid var(--glass-border); border-radius:16px; padding:1.5rem; max-width:420px; width:90%; max-height:80vh; overflow-y:auto; position:relative;">
+        <button id="pred-explain-close" style="position:absolute; top:1rem; right:1rem; background:none; border:none; color:var(--text-secondary); font-size:1.3rem; cursor:pointer; line-height:1;">✕</button>
+        <div id="pred-explain-content">Loading…</div>
+    </div>
+</div>
+
 {% block scripts %}
 <script src="/static/js/standings.js"></script>
+<script type="module" src="/static/js/schedule_explain.js"></script>
 {% endblock %}
