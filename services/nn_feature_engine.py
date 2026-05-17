@@ -98,7 +98,87 @@ def _load_multi_season(pattern: str, rawdata_dir: Path) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Roster & Trenches (Season Level)
+# Roster Performance Grade (Performance-based, replaces snap-count talent)
+# ---------------------------------------------------------------------------
+
+def compute_roster_performance(stats_team: pd.DataFrame) -> dict:
+    """Performance-based team grade from stats_team_week data.
+
+    Cumulative season-to-date (weeks 1..W-1) offense + defense composite,
+    z-scored against the league average at each (season, week).
+
+    Offense: passing_epa + rushing_epa + TDs*2 - INTs*3
+    Defense: def_sacks*1.5 + def_interceptions*2.5 + def_tackles_for_loss*0.5
+    Grade  : off_z * 0.6 + def_z * 0.4  (approx N(0,1) at any given week)
+
+    Returns {(season, week, team): grade}
+    """
+    if stats_team.empty:
+        return {}
+
+    reg = stats_team.copy()
+    if "season_type" in reg.columns:
+        reg = reg[reg["season_type"] == "REG"].copy()
+
+    num_cols = [
+        "passing_epa", "rushing_epa", "passing_tds", "rushing_tds",
+        "passing_interceptions", "def_sacks", "def_interceptions",
+        "def_tackles_for_loss",
+    ]
+    for col in num_cols:
+        reg[col] = pd.to_numeric(reg.get(col, 0), errors="coerce").fillna(0.0)
+
+    reg["season"] = pd.to_numeric(reg["season"], errors="coerce")
+    reg["week"]   = pd.to_numeric(reg["week"],   errors="coerce")
+    reg["team"]   = reg["team"].apply(_normalize_team)
+    reg = reg.dropna(subset=["season", "week", "team"]).copy()
+
+    # Deduplicate (one row per season+week+team)
+    reg = reg.drop_duplicates(subset=["season", "week", "team"])
+
+    # Per-game composite scores
+    reg["off_raw"] = (
+        reg["passing_epa"] + reg["rushing_epa"]
+        + (reg["passing_tds"] + reg["rushing_tds"]) * 2.0
+        - reg["passing_interceptions"] * 3.0
+    )
+    reg["def_raw"] = (
+        reg["def_sacks"] * 1.5
+        + reg["def_interceptions"] * 2.5
+        + reg["def_tackles_for_loss"] * 0.5
+    )
+
+    reg = reg.sort_values(["season", "team", "week"])
+
+    # Cumulative average of all prior weeks (shift then expanding mean — no leakage)
+    reg["cum_off"] = (
+        reg.groupby(["season", "team"])["off_raw"]
+        .transform(lambda x: x.shift(1).expanding().mean())
+    )
+    reg["cum_def"] = (
+        reg.groupby(["season", "team"])["def_raw"]
+        .transform(lambda x: x.shift(1).expanding().mean())
+    )
+
+    # Week 1 has no prior data — drop those rows (grade stays 0.0 for those games)
+    reg = reg.dropna(subset=["cum_off", "cum_def"]).copy()
+
+    # Z-score within (season, week) across teams → ≈ N(0,1)
+    for col in ["cum_off", "cum_def"]:
+        reg[f"{col}_z"] = reg.groupby(["season", "week"])[col].transform(
+            lambda x: (x - x.mean()) / (x.std(ddof=1) + 1e-6)
+        )
+
+    reg["grade"] = reg["cum_off_z"] * 0.6 + reg["cum_def_z"] * 0.4
+
+    return {
+        (int(r.season), int(r.week), r.team): float(r.grade)
+        for r in reg[["season", "week", "team", "grade"]].itertuples(index=False)
+    }
+
+
+# ---------------------------------------------------------------------------
+# Trench Snap-Count Features (O-line / D-line — kept for trench_dominance_metric)
 # ---------------------------------------------------------------------------
 
 def compute_age_multiplier(age: float, pos: str) -> float:
@@ -185,6 +265,81 @@ def compute_roster_features(snap_counts: pd.DataFrame, rosters: pd.DataFrame) ->
                 dl_av += score
         cache[(s, t)] = {"talent": talent, "ol_av": ol_av, "dl_av": dl_av}
     return cache
+
+
+# ---------------------------------------------------------------------------
+# Snap-Count QB Starter Flag
+# ---------------------------------------------------------------------------
+
+def compute_starter_qb_flags(snap_counts: pd.DataFrame) -> dict:
+    """Detect when a team's expected season QB starter is no longer playing.
+
+    Expected starter = QB with most offense_snaps across weeks 1-3 of that season.
+    Flag fires (1.0) from week 4+ when that QB takes <20% of team QB snaps.
+    Returns {(season, week, team): 1.0 if starter out else 0.0}.
+    Covers 2012+ (snap_counts availability); earlier seasons not included.
+    """
+    if snap_counts.empty:
+        return {}
+
+    sc = snap_counts.copy()
+    if "game_type" in sc.columns:
+        sc = sc[sc["game_type"] == "REG"].copy()
+
+    sc["season"] = pd.to_numeric(sc["season"], errors="coerce")
+    sc["week"]   = pd.to_numeric(sc["week"],   errors="coerce")
+    sc["team"]   = sc["team"].apply(_normalize_team)
+    sc["offense_snaps"] = pd.to_numeric(sc.get("offense_snaps", 0), errors="coerce").fillna(0)
+    sc = sc.dropna(subset=["season", "week", "team"])
+
+    qbs = sc[sc["position"] == "QB"].copy()
+    if qbs.empty:
+        return {}
+
+    id_col = next(
+        (c for c in ["pfr_player_id", "gsis_id", "player_name"] if c in qbs.columns),
+        None,
+    )
+    if id_col is None:
+        return {}
+
+    # Season expected starter: QB with most combined snaps in weeks 1–3
+    early = qbs[qbs["week"].between(1, 3)]
+    starter_map = (
+        early.groupby(["season", "team", id_col], as_index=False)["offense_snaps"]
+        .sum()
+        .sort_values("offense_snaps", ascending=False)
+        .groupby(["season", "team"], as_index=False)
+        .first()[["season", "team", id_col]]
+        .rename(columns={id_col: "starter_id"})
+    )
+
+    # From week 4 onward, compare starter snaps to total team QB snaps
+    week4 = qbs[qbs["week"] >= 4].copy()
+    week4 = week4.merge(starter_map, on=["season", "team"], how="left")
+
+    total_snaps = (
+        week4.groupby(["season", "week", "team"], as_index=False)["offense_snaps"]
+        .sum()
+        .rename(columns={"offense_snaps": "total_qb_snaps"})
+    )
+    starter_snaps = (
+        week4[week4[id_col] == week4["starter_id"]]
+        .groupby(["season", "week", "team"], as_index=False)["offense_snaps"]
+        .sum()
+        .rename(columns={"offense_snaps": "starter_snaps"})
+    )
+
+    result = total_snaps.merge(starter_snaps, on=["season", "week", "team"], how="left")
+    result["starter_snaps"]   = result["starter_snaps"].fillna(0.0)
+    result["total_qb_snaps"]  = result["total_qb_snaps"].clip(lower=1)
+    result["starter_pct"]     = result["starter_snaps"] / result["total_qb_snaps"]
+    result["flag"]            = (result["starter_pct"] < 0.20).astype(float)
+
+    return {
+        (int(r.season), int(r.week), r.team): float(r.flag)
+        for r in result[["season", "week", "team", "flag"]].itertuples(index=False)
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -547,10 +702,12 @@ def build_master_feature_table(
     elo = _load_elo(rd)
     box = _load_box_stats_from_weekly(rd)
     pressure = _load_pressure_stats(rd)
-    injuries = _load_injury_flags(rd)
     snap_counts = _load_multi_season("snap_counts/snap_counts_*.csv", rd)
+    starter_qb_flags = compute_starter_qb_flags(snap_counts)
     nflverse_rosters = _load_multi_season("rosters/roster_*.csv", rd)
     roster_cache = compute_roster_features(snap_counts, nflverse_rosters)
+    stats_team_weekly = _load_multi_season("stats_team/stats_team_week_*.csv", rd)
+    roster_perf_cache = compute_roster_performance(stats_team_weekly)
 
     # --- Rolling EPA (per-game join on season + week + team) ---
     if not epa.empty:
@@ -656,13 +813,25 @@ def build_master_feature_table(
         for col in ["qb_pressure_rate", "opp_qb_pressure_rate", "def_pressure_gen", "opp_def_pressure_gen"]:
             sched[col] = 0.0
 
-    # --- QB Injury Flag (join on season + week + home_team) ---
-    if injuries is not None and not injuries.empty:
+    # --- QB Starter Flag (snap-count; signed delta: +1 = away starter out, -1 = home starter out) ---
+    if starter_qb_flags:
+        _qb_df = pd.DataFrame(
+            [{"season": s, "week": w, "team": t, "flag": f}
+             for (s, w, t), f in starter_qb_flags.items()]
+        )
         sched = sched.merge(
-            injuries.rename(columns={"team": "home_team"}),
+            _qb_df.rename(columns={"team": "home_team", "flag": "_home_qb_out"}),
             on=["season", "week", "home_team"], how="left",
         )
-        sched["qb_injury_flag"] = sched["qb_injury_flag"].fillna(0.0)
+        sched = sched.merge(
+            _qb_df.rename(columns={"team": "away_team", "flag": "_away_qb_out"}),
+            on=["season", "week", "away_team"], how="left",
+        )
+        sched["_home_qb_out"] = sched["_home_qb_out"].fillna(0.0)
+        sched["_away_qb_out"] = sched["_away_qb_out"].fillna(0.0)
+        # Positive = home team advantage (away starter is out)
+        sched["qb_injury_flag"] = sched["_away_qb_out"] - sched["_home_qb_out"]
+        sched = sched.drop(columns=["_home_qb_out", "_away_qb_out"])
     else:
         sched["qb_injury_flag"] = 0.0
 
@@ -742,20 +911,34 @@ def build_master_feature_table(
     rest = sched.get("rest_advantage", pd.Series(0, index=sched.index)).fillna(0)
     sched["travel_rest_disadvantage"] = rest + sched["travel_miles"] / 1500.0
 
-    # --- Roster / Trenches ---
-    def _apply_roster(row, feature):
-        h = roster_cache.get((row["season"], row["home_team"]), {}).get(feature, 0)
-        a = roster_cache.get((row["season"], row["away_team"]), {}).get(feature, 0)
-        if feature == "talent":
-            return (h - a) / max(h + a, 1.0)
-        return h - a
-
-    if roster_cache:
-        sched["roster_talent_delta"] = sched.apply(lambda r: _apply_roster(r, "talent"), axis=1)
-        sched["trench_dominance_metric"] = sched.apply(lambda r: _apply_roster(r, "ol_av"), axis=1)
+    # --- Roster Performance Grade (performance-based; replaces snap-count talent) ---
+    if roster_perf_cache:
+        _perf_df = pd.DataFrame(
+            [{"season": s, "week": w, "team": t, "grade": g}
+             for (s, w, t), g in roster_perf_cache.items()],
+        )
+        sched = sched.merge(
+            _perf_df.rename(columns={"team": "home_team", "grade": "_home_grade"}),
+            on=["season", "week", "home_team"], how="left",
+        )
+        sched = sched.merge(
+            _perf_df.rename(columns={"team": "away_team", "grade": "_away_grade"}),
+            on=["season", "week", "away_team"], how="left",
+        )
+        sched["roster_talent_delta"] = (
+            sched["_home_grade"].fillna(0.0) - sched["_away_grade"].fillna(0.0)
+        )
+        sched = sched.drop(columns=["_home_grade", "_away_grade"])
     else:
         sched["roster_talent_delta"] = 0.0
-        sched["trench_dominance_metric"] = 0.0
+
+    # --- Trench Dominance (snap-count O-line score; kept separate from roster grade) ---
+    def _trench(row):
+        h = roster_cache.get((row["season"], row["home_team"]), {}).get("ol_av", 0)
+        a = roster_cache.get((row["season"], row["away_team"]), {}).get("ol_av", 0)
+        return h - a
+
+    sched["trench_dominance_metric"] = sched.apply(_trench, axis=1) if roster_cache else 0.0
 
     # --- Roster Value (season-level WAR proxy; EPA + kicker FG+ + punter gross avg) ---
     try:

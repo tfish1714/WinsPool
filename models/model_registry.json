@@ -134,9 +134,51 @@
         "season_mae": 1.5808704435825347,
         "season_n": 160
       }
+    },
+    {
+      "version": "v8",
+      "path": "models/nn_v8.keras",
+      "scaler_path": "models/nn_v8_scaler.pkl",
+      "trained_at": "2026-05-17T03:52:15.136128+00:00",
+      "min_season": 2006,
+      "max_season": 2025,
+      "train_samples": 4927,
+      "metrics": {
+        "epochs_trained": 67,
+        "train_r2": 0.17381346225738525,
+        "train_mae": 0.421756386756897,
+        "train_accuracy": 0.6791150801704892,
+        "test_r2": 0.13855892419815063,
+        "test_mae": 0.41471415758132935,
+        "test_accuracy": 0.625,
+        "season_r2": 0.643685232847214,
+        "season_mae": 1.5271487474441527,
+        "season_n": 160
+      }
+    },
+    {
+      "version": "v9",
+      "path": "models/nn_v9.keras",
+      "scaler_path": "models/nn_v9_scaler.pkl",
+      "trained_at": "2026-05-17T04:56:21.832157+00:00",
+      "min_season": 2006,
+      "max_season": 2025,
+      "train_samples": 4927,
+      "metrics": {
+        "epochs_trained": 25,
+        "train_r2": 0.1275041103363037,
+        "train_mae": 0.4388742744922638,
+        "train_accuracy": 0.6592246803328597,
+        "test_r2": 0.11298567056655884,
+        "test_mae": 0.4334504008293152,
+        "test_accuracy": 0.578125,
+        "season_r2": 0.543205398498737,
+        "season_mae": 1.7345470875501632,
+        "season_n": 160
+      }
     }
   ],
-  "latest": "v7",
+  "latest": "v9",
   "best_by": {
     "test_accuracy": "v6",
     "season_r2": "v6"

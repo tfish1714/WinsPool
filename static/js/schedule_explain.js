@@ -85,13 +85,13 @@ function renderExplanation(data) {
         eloHtml = favTeam ? `${_up} ${favTeam} +${pts.toFixed(0)} Elo` : '≈ Even';
     }
 
-    // Roster talent (normalized ratio, real range ≈ ±0.03)
+    // Roster quality grade (z-score diff: home_grade − away_grade, range ≈ ±3)
     let rosterHtml = '—';
     if (ex?.roster_delta != null) {
         const d = ex.roster_delta;
-        rosterHtml = Math.abs(d) < 0.008
+        rosterHtml = Math.abs(d) < 0.2
             ? `≈ Even`
-            : `${_up} ${d > 0 ? home_team : away_team} edge (${(Math.abs(d) * 100).toFixed(1)}%)`;
+            : `${_up} ${d > 0 ? home_team : away_team} edge (${d > 0 ? '+' : ''}${d.toFixed(2)})`;
     }
 
     // Pass EPA
@@ -117,10 +117,18 @@ function renderExplanation(data) {
             : `${_up} ${t > 0 ? home_team : away_team} +${Math.abs(t).toFixed(2)}/gm`;
     }
 
-    // QB injury
-    let qbHtml = ex?.qb_injury === 1
-        ? `<span style="color:var(--accent-red);">⚠ ${home_team} QB injury flagged</span>`
-        : (ex?.qb_injury === 0 ? 'None reported' : '—');
+    // QB starter status (signed delta: +1 = away starter out → home advantage; -1 = home starter out)
+    let qbHtml = '—';
+    if (ex?.qb_injury !== null && ex?.qb_injury !== undefined) {
+        const qi = ex.qb_injury;
+        if (qi > 0) {
+            qbHtml = `<span style="color:var(--accent-green);">${_up} ${away_team} backup QB</span>`;
+        } else if (qi < 0) {
+            qbHtml = `<span style="color:var(--accent-red);">⚠ ${home_team} backup QB</span>`;
+        } else {
+            qbHtml = 'Starters playing';
+        }
+    }
 
     // Rest/travel
     let restHtml = '—';
