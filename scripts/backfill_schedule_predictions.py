@@ -308,7 +308,17 @@ def main():
         actions = []
 
         if write_local:
-            write_game_predictions(year, predictions_map)
+            # Write directly to local JSON (bypasses USE_LOCAL_DATA routing in cache_service)
+            _local_dir = pathlib.Path(".local_db")
+            _local_dir.mkdir(parents=True, exist_ok=True)
+            _local_path = _local_dir / f"game_predictions_{year}.json"
+            import json as _json
+            with open(_local_path, "w") as _f:
+                _json.dump({
+                    "season": year,
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                    "predictions": predictions_map,
+                }, _f, default=str)
             actions.append("local")
 
         if write_firestore:

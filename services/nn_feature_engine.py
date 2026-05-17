@@ -827,13 +827,15 @@ def build_master_feature_table(
             _qb_df.rename(columns={"team": "away_team", "flag": "_away_qb_out"}),
             on=["season", "week", "away_team"], how="left",
         )
-        sched["_home_qb_out"] = sched["_home_qb_out"].fillna(0.0)
-        sched["_away_qb_out"] = sched["_away_qb_out"].fillna(0.0)
+        sched["home_qb_out"] = sched["_home_qb_out"].fillna(0.0)
+        sched["away_qb_out"] = sched["_away_qb_out"].fillna(0.0)
         # Positive = home team advantage (away starter is out)
-        sched["qb_injury_flag"] = sched["_away_qb_out"] - sched["_home_qb_out"]
+        sched["qb_injury_flag"] = sched["away_qb_out"] - sched["home_qb_out"]
         sched = sched.drop(columns=["_home_qb_out", "_away_qb_out"])
     else:
         sched["qb_injury_flag"] = 0.0
+        sched["home_qb_out"] = 0.0
+        sched["away_qb_out"] = 0.0
 
     # --- Rolling Point Differential (no leakage) ---
     if "home_score" in sched.columns and "away_score" in sched.columns:
@@ -982,5 +984,7 @@ def build_master_feature_table(
 
     # Build column list without duplicates (week lives in both metadata and FEATURE_COLUMNS)
     meta = ["season", "week", "home_team", "away_team"]
-    out_cols = meta + [c for c in FEATURE_COLUMNS if c not in meta] + ["home_win"]
+    # home_qb_out / away_qb_out are extra explanation columns (not model inputs)
+    extra = [c for c in ["home_qb_out", "away_qb_out"] if c in sched.columns]
+    out_cols = meta + [c for c in FEATURE_COLUMNS if c not in meta] + extra + ["home_win"]
     return sched[out_cols]

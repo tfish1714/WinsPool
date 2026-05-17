@@ -117,15 +117,18 @@ function renderExplanation(data) {
             : `${_up} ${t > 0 ? home_team : away_team} +${Math.abs(t).toFixed(2)}/gm`;
     }
 
-    // QB starter status (signed delta: +1 = away starter out → home advantage; -1 = home starter out)
+    // QB starter status (snap-count based: flags when Week 1-3 starter takes <20% of snaps)
     let qbHtml = '—';
-    if (ex?.qb_injury !== null && ex?.qb_injury !== undefined) {
-        const qi = ex.qb_injury;
-        if (qi > 0) {
-            qbHtml = `<span style="color:var(--accent-green);">${_up} ${away_team} backup QB</span>`;
-        } else if (qi < 0) {
+    {
+        const hOut = ex?.home_qb_out ?? (ex?.qb_injury < 0 ? 1 : 0);
+        const aOut = ex?.away_qb_out ?? (ex?.qb_injury > 0 ? 1 : 0);
+        if (hOut && aOut) {
+            qbHtml = `<span style="color:var(--accent-gold);">⚠ Both teams using backup QBs</span>`;
+        } else if (hOut) {
             qbHtml = `<span style="color:var(--accent-red);">⚠ ${home_team} backup QB</span>`;
-        } else {
+        } else if (aOut) {
+            qbHtml = `<span style="color:var(--accent-green);">${_up} ${away_team} backup QB</span>`;
+        } else if (ex?.qb_injury !== null && ex?.qb_injury !== undefined) {
             qbHtml = 'Starters playing';
         }
     }

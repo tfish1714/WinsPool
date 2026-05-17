@@ -138,6 +138,8 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
             "def_rush_epa":     round(_f("def_rush_epa"), 3),
             "turnover_margin":  round(_f("turnover_margin_rolling"), 2),
             "qb_injury":        round(_f("qb_injury_flag"), 1),
+            "home_qb_out":      round(_f("home_qb_out", 0.0), 1),
+            "away_qb_out":      round(_f("away_qb_out", 0.0), 1),
             "rest_disadvantage":round(_f("travel_rest_disadvantage"), 2),
             "trench_dominance": round(_f("trench_dominance_metric"), 3),
             "off_roster_value": round(_f("off_roster_value_delta"), 3),
