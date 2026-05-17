@@ -84,13 +84,13 @@ function renderExplanation(data) {
             : '≈ Even';
     }
 
-    // Roster talent
+    // Roster talent (normalized ratio, real range ≈ ±0.03)
     let rosterHtml = '—';
     if (ex?.roster_delta != null) {
         const d = ex.roster_delta;
-        rosterHtml = Math.abs(d) < 0.05
+        rosterHtml = Math.abs(d) < 0.008
             ? `≈ Even`
-            : `${_arrow(d)} ${d > 0 ? home_team : away_team} edge`;
+            : `${_arrow(d)} ${d > 0 ? home_team : away_team} edge (${(Math.abs(d) * 100).toFixed(1)}%)`;
     }
 
     // Pass EPA
@@ -107,11 +107,11 @@ function renderExplanation(data) {
         rushHtml = `${_arrow(net)} ${net >= 0 ? home_team : away_team} +${Math.abs(net).toFixed(3)} EPA/play`;
     }
 
-    // Turnovers
+    // Turnovers (rolling margin, real range ≈ ±1.5)
     let toHtml = '—';
     if (ex?.turnover_margin != null) {
         const t = ex.turnover_margin;
-        toHtml = Math.abs(t) < 0.05
+        toHtml = Math.abs(t) < 0.1
             ? '≈ Even'
             : `${_arrow(t)} ${t > 0 ? home_team : away_team} +${Math.abs(t).toFixed(2)}/gm`;
     }
@@ -130,11 +130,11 @@ function renderExplanation(data) {
             : `${_arrow(-r)} ${r > 0 ? home_team + ' disadvantaged' : away_team + ' disadvantaged'}`;
     }
 
-    // Trench dominance
+    // Trench dominance (snap-weighted O-line score, real range ≈ ±750)
     let trenchHtml = '—';
     if (ex?.trench_dominance != null) {
         const t = ex.trench_dominance;
-        trenchHtml = Math.abs(t) < 0.05
+        trenchHtml = Math.abs(t) < 50
             ? '≈ Even'
             : `${_arrow(t)} ${t > 0 ? home_team : away_team} O-line edge`;
     }
