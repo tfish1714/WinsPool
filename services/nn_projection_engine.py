@@ -269,19 +269,17 @@ def enrich_schedule_with_nn_predictions(
         # Clamp confidence to 50-99%
         conf_pct = round(min(99.0, max(50.0, confidence * 100)), 1)
 
-        # ATS pick
+        # ATS pick: compare ML-implied spread to Vegas spread.
         spread = row.get("spread_line")
+        ats = winner
         if pd.notna(spread):
             try:
-                spread_val = float(spread)
-                if abs(spread_val) <= 3:
-                    ats = away if spread_val < 0 else home
-                else:
-                    ats = winner
+                sv = float(spread)
+                hp_clip = min(0.98, max(0.02, home_prob))
+                implied = -7.5 * np.log(hp_clip / (1.0 - hp_clip))
+                ats = home if implied < sv else away
             except (ValueError, TypeError):
-                ats = winner
-        else:
-            ats = winner
+                pass
 
         pred_winners.append(winner)
         pred_confs.append(conf_pct)

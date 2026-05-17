@@ -112,8 +112,7 @@ async def overall_history(request: Request):
     top_seasons = sorted(season_records, key=lambda x: (x["wins"], -x["rank"]), reverse=True)[:10]
     bottom_seasons = sorted(season_records, key=lambda x: (x["wins"], -x["rank"]))[:10]
 
-    return templates.TemplateResponse("overall_history.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "overall_history.html", {
         "stats": sorted_stats,
         "top_seasons": top_seasons,
         "bottom_seasons": bottom_seasons,
@@ -168,8 +167,7 @@ async def headtohead_history(request: Request):
         except Exception:
             pass
 
-    return templates.TemplateResponse("headtohead_history.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "headtohead_history.html", {
         "all_time_table": all_time_html,
         "history": all_h2h,
         "current_year": current_year,
@@ -193,8 +191,7 @@ async def headtohead_by_year(request: Request, year: int):
     except Exception:
         h2h_html = ""
 
-    return templates.TemplateResponse("headtohead.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "headtohead.html", {
         "h2h_html": h2h_html,
         "year": year,
         "current_year": get_active_season(games),

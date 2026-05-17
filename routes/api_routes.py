@@ -85,6 +85,98 @@ def get_standings(year: int):
 from services.cache_service import merge_game_predictions as _merge_game_predictions
 
 
+@router.get("/predictions/accuracy")
+def get_prediction_accuracy():
+    """ML prediction accuracy vs actual game results, by season and week."""
+    try:
+        from services.cache_service import get_game_predictions
+        from services.nn_feature_engine import _normalize_team
+        import pathlib, json, numpy as np
+
+        _, _, all_games, _, _, _, _ = load_data()
+
+        # Build a result lookup: normalized_key -> actual_winner (or None for ties/unplayed)
+        result_lookup = {}
+        if not all_games.empty:
+            played = all_games[all_games['result'].notna() & (all_games['result'] != -1000)]
+            for _, row in played.iterrows():
+                wk = row.get('week')
+                ht = _normalize_team(str(row.get('home_team', '') or ''))
+                at = _normalize_team(str(row.get('away_team', '') or ''))
+                res = row.get('result', 0)
+                if not wk or not ht or not at:
+                    continue
+                key = f"W{int(wk):02d}_{ht}_{at}"
+                if res > 0:
+                    result_lookup[key] = ht
+                elif res < 0:
+                    result_lookup[key] = at
+                # ties: key not stored → skipped in accuracy
+
+        # Scan all game_predictions_*.json files for locked predictions
+        local_db = pathlib.Path('.local_db')
+        seasons_data = {}
+        overall_correct = overall_total = 0
+
+        pred_files = sorted(local_db.glob('game_predictions_*.json')) if local_db.exists() else []
+        for pfile in pred_files:
+            try:
+                season = int(pfile.stem.split('_')[-1])
+            except ValueError:
+                continue
+            preds = get_game_predictions(season)
+            if not preds:
+                continue
+
+            by_week = {}
+            s_correct = s_total = 0
+            for key, pred in preds.items():
+                if not pred.get('locked'):
+                    continue
+                actual = result_lookup.get(key)
+                if actual is None:
+                    continue
+                pw = pred.get('pred_winner')
+                if pw is None:
+                    continue
+                correct = int(_normalize_team(str(pw)) == actual)
+                wk = int(key[1:3])
+                if wk not in by_week:
+                    by_week[wk] = {'week': wk, 'total': 0, 'correct': 0}
+                by_week[wk]['total'] += 1
+                by_week[wk]['correct'] += correct
+                s_correct += correct
+                s_total += 1
+
+            if s_total == 0:
+                continue
+
+            week_rows = sorted(by_week.values(), key=lambda r: r['week'])
+            for r in week_rows:
+                r['accuracy'] = round(r['correct'] / r['total'] * 100, 1)
+
+            seasons_data[season] = {
+                'season': season,
+                'total': s_total,
+                'correct': s_correct,
+                'accuracy': round(s_correct / s_total * 100, 1),
+                'by_week': week_rows,
+            }
+            overall_correct += s_correct
+            overall_total += s_total
+
+        seasons_list = sorted(seasons_data.values(), key=lambda r: r['season'], reverse=True)
+        overall = {
+            'total': overall_total,
+            'correct': overall_correct,
+            'accuracy': round(overall_correct / overall_total * 100, 1) if overall_total else 0,
+        }
+        return JSONResponse(content={'seasons': seasons_list, 'overall': overall})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return JSONResponse(status_code=500, content={'error': str(e)})
+
+
 @router.get("/schedule")
 def get_schedule(year: int):
     """Data for the week-by-week schedule grid."""

@@ -92,7 +92,9 @@ def _profile_predictions_for_year(year: int, schedule_df: pd.DataFrame,
             if pd.notna(spread):
                 try:
                     sv = float(spread)
-                    ats = at if sv < -3 else (ht if sv > 3 else (at if sv < 0 else ht))
+                    hp_clip = min(0.98, max(0.02, hp))
+                    implied = -7.5 * np.log(hp_clip / (1.0 - hp_clip))
+                    ats = ht if implied < sv else at
                 except (ValueError, TypeError):
                     pass
             out[key] = {

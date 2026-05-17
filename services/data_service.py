@@ -281,7 +281,7 @@ def get_latest_week_for_year(games: pd.DataFrame, year: int) -> int:
         .apply(lambda g: pd.Series({
             'total': len(g),
             'done': completed(g['result']).sum()
-        }))
+        }), include_groups=False)
         .reset_index()
     )
     week_stats = week_stats[week_stats['done'] > 0]  # Only weeks with at least one completed game

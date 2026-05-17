@@ -62,7 +62,7 @@ connected_players: set = set()
 
 @router.get("/draft")
 async def serve_draft_board(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
 
 
 @router.get("/draft-results")
@@ -73,7 +73,7 @@ async def draft_results_redirect():
 
 @router.get("/admin")
 async def serve_admin(request: Request):
-    return templates.TemplateResponse("admin.html", {"request": request})
+    return templates.TemplateResponse(request, "admin.html")
 
 
 # ─── Draft History ────────────────────────────────────────────────────────────
@@ -205,8 +205,7 @@ async def route_draft_history(request: Request):
     # Sort final_data so grouped_players/teams iteration is stable — by player wins desc, then team wins desc
     final_data.sort(key=lambda x: (-player_total_wins.get(x["fullName"], 0), -x["total_wins"]))
 
-    return templates.TemplateResponse("draft_history.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "draft_history.html", {
         "data": final_data,
         "sorted_players": sorted_players,
         "sorted_teams": sorted_teams,
@@ -375,8 +374,7 @@ async def route_draft_results_by_year(request: Request, year: int):
         })
     undrafted_teams.sort(key=lambda x: x.get("win_rank") or 99)
 
-    return templates.TemplateResponse("draft_results.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "draft_results.html", {
         "data": merged.to_dict(orient="records"),
         "year": year,
         "current_year": get_active_season(games),

@@ -4,6 +4,8 @@ import re
 import time
 import pandas as pd
 import numpy as np
+
+pd.set_option('future.no_silent_downcasting', True)
 from typing import Dict, List, Any
 from services.constants import UNDRAFTED_SENTINEL
 
@@ -336,7 +338,8 @@ def player_winlossmatrix(schedule: pd.DataFrame) -> pd.DataFrame:
 
 def reshape_wins_pool_standings(df: pd.DataFrame) -> pd.DataFrame:
     grouped = df.groupby(['playerId', 'fullName', 'season']).apply(
-        lambda x: x[['team', 'wins', 'ptDiff', 'global_record']].values.flatten()
+        lambda x: x[['team', 'wins', 'ptDiff', 'global_record']].values.flatten(),
+        include_groups=False,
     )
     if grouped.empty: return pd.DataFrame()
     num_teams = len(grouped.iloc[0]) // 4
@@ -426,7 +429,6 @@ def get_enriched_schedule(games, draft_results, players, season):
     final_merged['away_record'] = final_merged['away_team'].apply(lambda t: format_team_record(t, team_records))
     final_merged['home_record'] = final_merged['home_team'].apply(lambda t: format_team_record(t, team_records))
     
-    final_merged = final_merged.where(pd.notnull(final_merged), None)
     final_merged = final_merged.fillna(UNDRAFTED_SENTINEL)
     
     if is_debug:

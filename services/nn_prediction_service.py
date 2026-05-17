@@ -99,11 +99,16 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
         winner = ht if hp >= 0.5 else at
         conf   = round(min(99.0, max(50.0, (hp if hp >= 0.5 else 1.0 - hp) * 100)), 1)
 
+        # ATS pick: compare ML-implied spread to Vegas spread.
+        # implied_spread = -7.5 * log(hp / (1-hp)); negative = home favored.
+        # If ML thinks home is undervalued vs the line, take home; else take away.
         ats = winner
         if spread is not None and not (isinstance(spread, float) and np.isnan(spread)):
             try:
                 sv = float(spread)
-                ats = at if sv < -3 else (ht if sv > 3 else (at if sv < 0 else ht))
+                hp_clip = np.clip(hp, 0.02, 0.98)
+                implied = -7.5 * np.log(hp_clip / (1.0 - hp_clip))
+                ats = ht if implied < sv else at
             except (ValueError, TypeError):
                 pass
 

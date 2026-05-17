@@ -28,7 +28,7 @@ def _first_name(name: str) -> str:
 
 @router.get("/profile")
 async def user_profile(request: Request):
-    return templates.TemplateResponse("profile.html", {"request": request})
+    return templates.TemplateResponse(request, "profile.html")
 
 
 @router.get("/wins-pool")
@@ -65,8 +65,7 @@ async def wins_pool_by_year(request: Request, year: int):
 
         recap = db.get_weekly_recap(year, latest_week)
 
-        return templates.TemplateResponse("wins_pool.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "wins_pool.html", {
             "data": sorted_df.to_dict(orient="records"),
             "refreshTime": sorted_df["refreshTime"].iloc[0] if not sorted_df.empty and "refreshTime" in sorted_df.columns else "",
             "current_year": current_year,
@@ -98,8 +97,7 @@ async def wins_pool_weekbyweek(request: Request, year: int):
     schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
     record_by_week = analysis.player_winsbyWeek(schedule_enriched, sorted_players=sorted_player_names)
 
-    return templates.TemplateResponse("weekbyweek.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "weekbyweek.html", {
         "table": record_by_week.rename(columns=_first_name).to_html(classes="wp-data-table", index=True, border=0),
         "current_year": get_active_season(games),
         "year": year,
@@ -128,8 +126,7 @@ async def playoff_race_by_year(request: Request, year: int):
     except Exception:
         race_data = []
 
-    return templates.TemplateResponse("playoff_race.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "playoff_race.html", {
         "race": race_data,
         "year": year,
         "current_year": get_active_season(games),
@@ -169,8 +166,7 @@ async def schedule_by_year(request: Request, year: int):
         if not schedule_enriched.empty and "week" in schedule_enriched.columns else []
     )
 
-    return templates.TemplateResponse("schedule.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "schedule.html", {
         "schedule": schedule_enriched.to_dict(orient="records") if not schedule_enriched.empty else [],
         "unique_weeks": unique_weeks,
         "current_week": latest_week,

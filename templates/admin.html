@@ -28,6 +28,7 @@
         <button class="admin-tab-btn tab-btn" data-tab="members-section">Members</button>
         <button class="admin-tab-btn tab-btn" data-tab="recap-section">AI Recaps</button>
         <button class="admin-tab-btn tab-btn" data-tab="elo-section">Elo Ratings</button>
+        <button class="admin-tab-btn tab-btn" data-tab="accuracy-section">ML Accuracy</button>
     </div>
 
     <!-- Season Management Card -->
@@ -275,9 +276,39 @@
         <div id="elo-legend" style="margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.4rem;"></div>
     </div>
 
+    <!-- ML Prediction Accuracy Tab -->
+    <div id="accuracy-section" class="tab-content card-glass hidden" style="height: auto;">
+        <h2>ML Prediction Accuracy</h2>
+        <p>Straight-up win/loss accuracy of the NN+XGB+LR ensemble vs actual game results.</p>
+
+        <!-- Overall accuracy banner -->
+        <div id="acc-overall" style="display:none; margin: 1rem 0; padding: 1rem 1.5rem; border-radius: 8px; background: rgba(251,191,36,0.08); border: 1px solid var(--accent-gold); display: flex; gap: 2rem; align-items: center; flex-wrap: wrap;">
+            <div>
+                <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.06em;">Overall Accuracy</div>
+                <div id="acc-overall-pct" style="font-size: 2.5rem; font-weight: 800; color: var(--accent-gold); line-height: 1.1;"></div>
+            </div>
+            <div>
+                <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.06em;">Games Evaluated</div>
+                <div id="acc-overall-games" style="font-size: 1.6rem; font-weight: 700;"></div>
+            </div>
+        </div>
+
+        <!-- Season breakdown table -->
+        <div id="acc-season-table" style="margin-top: 1rem; overflow-x: auto;">
+            <div style="padding: 2rem; text-align: center; color: var(--text-secondary);">Loading accuracy data…</div>
+        </div>
+
+        <!-- Week drill-down (shown when a season row is clicked) -->
+        <div id="acc-week-panel" style="display: none; margin-top: 1.5rem; border-top: 1px solid var(--glass-border); padding-top: 1rem;">
+            <h4 id="acc-week-title" style="color: var(--accent-gold); margin: 0 0 0.75rem;"></h4>
+            <div id="acc-week-table" style="overflow-x: auto;"></div>
+        </div>
+    </div>
+
     <p id="admin-message" style="margin-top: 1rem; text-align: center; font-weight: 600;"></p>
 </div>
 
 <script type="module" src="/static/js/admin_main.js"></script>
 <script type="module" src="/static/js/admin_elo.js"></script>
+<script type="module" src="/static/js/admin_accuracy.js"></script>
 {% endblock %}
