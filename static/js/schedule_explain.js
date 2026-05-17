@@ -74,14 +74,15 @@ function renderExplanation(data) {
     }
 
     // Elo
+    const _up   = `<span style="color:var(--accent-green); font-weight:700;">▲</span>`;
+    const _down = `<span style="color:var(--accent-red);   font-weight:700;">▼</span>`;
+
     let eloHtml = '—';
     if (ex?.elo_diff != null) {
         const d = ex.elo_diff;
         const favTeam = d > 0 ? home_team : (d < 0 ? away_team : null);
         const pts = Math.abs(d);
-        eloHtml = favTeam
-            ? `${_arrow(d)} ${favTeam} +${pts.toFixed(0)} Elo`
-            : '≈ Even';
+        eloHtml = favTeam ? `${_up} ${favTeam} +${pts.toFixed(0)} Elo` : '≈ Even';
     }
 
     // Roster talent (normalized ratio, real range ≈ ±0.03)
@@ -90,21 +91,21 @@ function renderExplanation(data) {
         const d = ex.roster_delta;
         rosterHtml = Math.abs(d) < 0.008
             ? `≈ Even`
-            : `${_arrow(d)} ${d > 0 ? home_team : away_team} edge (${(Math.abs(d) * 100).toFixed(1)}%)`;
+            : `${_up} ${d > 0 ? home_team : away_team} edge (${(Math.abs(d) * 100).toFixed(1)}%)`;
     }
 
     // Pass EPA
     let passHtml = '—';
     if (ex?.off_pass_epa != null && ex?.def_pass_epa != null) {
         const net = ex.off_pass_epa - ex.def_pass_epa;
-        passHtml = `${_arrow(net)} ${net >= 0 ? home_team : away_team} +${Math.abs(net).toFixed(3)} EPA/play`;
+        passHtml = `${_up} ${net >= 0 ? home_team : away_team} +${Math.abs(net).toFixed(3)} EPA/play`;
     }
 
     // Rush EPA
     let rushHtml = '—';
     if (ex?.off_rush_epa != null && ex?.def_rush_epa != null) {
         const net = ex.off_rush_epa - ex.def_rush_epa;
-        rushHtml = `${_arrow(net)} ${net >= 0 ? home_team : away_team} +${Math.abs(net).toFixed(3)} EPA/play`;
+        rushHtml = `${_up} ${net >= 0 ? home_team : away_team} +${Math.abs(net).toFixed(3)} EPA/play`;
     }
 
     // Turnovers (rolling margin, real range ≈ ±1.5)
@@ -113,7 +114,7 @@ function renderExplanation(data) {
         const t = ex.turnover_margin;
         toHtml = Math.abs(t) < 0.1
             ? '≈ Even'
-            : `${_arrow(t)} ${t > 0 ? home_team : away_team} +${Math.abs(t).toFixed(2)}/gm`;
+            : `${_up} ${t > 0 ? home_team : away_team} +${Math.abs(t).toFixed(2)}/gm`;
     }
 
     // QB injury
@@ -127,7 +128,7 @@ function renderExplanation(data) {
         const r = ex.rest_disadvantage;
         restHtml = Math.abs(r) < 0.1
             ? '≈ Even'
-            : `${_arrow(-r)} ${r > 0 ? home_team + ' disadvantaged' : away_team + ' disadvantaged'}`;
+            : `${_down} ${r > 0 ? home_team : away_team} disadvantaged`;
     }
 
     // Trench dominance (snap-weighted O-line score, real range ≈ ±750)
@@ -136,7 +137,7 @@ function renderExplanation(data) {
         const t = ex.trench_dominance;
         trenchHtml = Math.abs(t) < 50
             ? '≈ Even'
-            : `${_arrow(t)} ${t > 0 ? home_team : away_team} O-line edge`;
+            : `${_up} ${t > 0 ? home_team : away_team} O-line edge`;
     }
 
     const atsNote = pred_ats_pick !== pred_winner
