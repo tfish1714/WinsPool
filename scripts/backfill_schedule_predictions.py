@@ -63,14 +63,19 @@ def _profile_predictions_for_year(year: int, schedule_df: pd.DataFrame,
     """Generate team-profile predictions for unplayed games in a season.
 
     Uses the NNProjectionEngine (prior-season team averages) for games not
-    already covered by the feature table.  schedule_df must contain at least
-    week, home_team, away_team columns for the target year.
+    already covered by the feature table.  The explanation is populated with
+    prior-season profile values so the modal can show meaningful factors.
     """
     if schedule_df.empty:
         return {}
 
     engine = NNProjectionEngine()
     engine.initialize(year)
+
+    # Build per-team profile lookup
+    profile_dict = {}
+    for _, row in engine._team_profiles.iterrows():
+        profile_dict[str(row["team"])] = row.to_dict()
 
     out = {}
     for _, game in schedule_df.iterrows():
@@ -83,44 +88,76 @@ def _profile_predictions_for_year(year: int, schedule_df: pd.DataFrame,
         if key in played_keys:
             continue
         try:
-            prob = engine.game_win_probability(ht, at)
-            hp   = prob["home_win_prob"]
+            prob_result = engine.game_win_probability(ht, at)
+            hp   = prob_result["home_win_prob"]
             winner = ht if hp >= 0.5 else at
             conf   = round(min(99.0, max(50.0, (hp if hp >= 0.5 else 1.0 - hp) * 100)), 1)
+
             spread = game.get("spread_line")
             ats = winner
-            if pd.notna(spread):
+            sl_val = float(spread) if pd.notna(spread) else None
+            if sl_val is not None:
                 try:
-                    sv = float(spread)
                     hp_clip = min(0.98, max(0.02, hp))
                     implied = -7.5 * np.log(hp_clip / (1.0 - hp_clip))
-                    ats = ht if implied < sv else at
+                    ats = ht if implied < sl_val else at
                 except (ValueError, TypeError):
                     pass
-            sl = game.get("spread_line")
-            sl_val = float(sl) if pd.notna(sl) else None
             vhp = round(1 / (1 + np.exp(sl_val / 7.5)), 4) if sl_val is not None else None
-            elo_diff = round(prob.get("nn_home_prob", 0.5) * 100 - 50, 1)  # proxy
+
+            # Extract prior-season profile values for the explanation
+            h = profile_dict.get(ht, {})
+            a = profile_dict.get(at, {})
+
+            def _pf(team_dict, col, default=0.0):
+                v = team_dict.get(col, default)
+                try:
+                    return float(v) if v is not None and not (isinstance(v, float) and np.isnan(v)) else default
+                except (TypeError, ValueError):
+                    return default
+
+            elo_diff      = round(_pf(h, "tm_elo_pre", 1500) - _pf(a, "tm_elo_pre", 1500), 1)
+            # roster_talent_delta from profiles: home grade minus away grade
+            roster_delta  = round(_pf(h, "roster_talent_delta") - _pf(a, "roster_talent_delta"), 3)
+            # off EPA from home profile; def EPA = away team's offensive EPA (what home D faces)
+            off_pass_epa  = round(_pf(h, "off_pass_epa"), 3)
+            def_pass_epa  = round(_pf(a, "off_pass_epa"), 3)
+            off_rush_epa  = round(_pf(h, "off_rush_epa"), 3)
+            def_rush_epa  = round(_pf(a, "off_rush_epa"), 3)
+            turnover_mgn  = round(_pf(h, "turnover_margin_rolling"), 2)
+            trench        = round(_pf(h, "trench_dominance_metric") - _pf(a, "trench_dominance_metric"), 1)
+            off_rv        = round(_pf(h, "off_roster_value_delta"), 3)
+            def_rv        = round(_pf(h, "def_roster_value_delta"), 3)
+
+            # Rest/travel from schedule if available
+            rest_adv = None
+            h_rest = game.get("home_rest")
+            a_rest = game.get("away_rest")
+            if pd.notna(h_rest) and pd.notna(a_rest):
+                rest_adv = round(float(h_rest) - float(a_rest), 1)
+
             out[key] = {
                 "pred_prob":     round(float(hp), 4),
                 "pred_winner":   winner,
                 "pred_su_conf":  conf,
                 "pred_ats_pick": ats,
                 "explanation": {
-                    "vegas_line":      round(sl_val, 1) if sl_val is not None else None,
-                    "vegas_home_prob": vhp,
-                    "elo_diff":        None,
-                    "roster_delta":    None,
-                    "off_pass_epa":    None,
-                    "def_pass_epa":    None,
-                    "off_rush_epa":    None,
-                    "def_rush_epa":    None,
-                    "turnover_margin": None,
-                    "qb_injury":       None,
-                    "rest_disadvantage": None,
-                    "trench_dominance":  None,
-                    "off_roster_value":  None,
-                    "def_roster_value":  None,
+                    "vegas_line":        round(sl_val, 1) if sl_val is not None else None,
+                    "vegas_home_prob":   vhp,
+                    "elo_diff":          elo_diff,
+                    "roster_delta":      roster_delta,
+                    "off_pass_epa":      off_pass_epa,
+                    "def_pass_epa":      def_pass_epa,
+                    "off_rush_epa":      off_rush_epa,
+                    "def_rush_epa":      def_rush_epa,
+                    "turnover_margin":   turnover_mgn,
+                    "qb_injury":         0.0,
+                    "home_qb_out":       0.0,
+                    "away_qb_out":       0.0,
+                    "rest_disadvantage": rest_adv,
+                    "trench_dominance":  trench,
+                    "off_roster_value":  off_rv,
+                    "def_roster_value":  def_rv,
                     "source": "profile",
                 },
             }

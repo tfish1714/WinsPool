@@ -117,17 +117,17 @@ function renderExplanation(data) {
             : `${_up} ${t > 0 ? home_team : away_team} +${Math.abs(t).toFixed(2)}/gm`;
     }
 
-    // QB starter status (snap-count based: flags when Week 1-3 starter takes <20% of snaps)
+    // QB starter status — always shown as a negative for the team missing their starter
     let qbHtml = '—';
     {
         const hOut = ex?.home_qb_out ?? (ex?.qb_injury < 0 ? 1 : 0);
         const aOut = ex?.away_qb_out ?? (ex?.qb_injury > 0 ? 1 : 0);
         if (hOut && aOut) {
-            qbHtml = `<span style="color:var(--accent-gold);">⚠ Both teams using backup QBs</span>`;
+            qbHtml = `<span style="color:var(--accent-gold);">⚠ Both teams — backup QBs</span>`;
         } else if (hOut) {
-            qbHtml = `<span style="color:var(--accent-red);">⚠ ${home_team} backup QB</span>`;
+            qbHtml = `<span style="color:var(--accent-red);">⚠ ${home_team} — backup QB</span>`;
         } else if (aOut) {
-            qbHtml = `<span style="color:var(--accent-green);">${_up} ${away_team} backup QB</span>`;
+            qbHtml = `<span style="color:var(--accent-red);">⚠ ${away_team} — backup QB</span>`;
         } else if (ex?.qb_injury !== null && ex?.qb_injury !== undefined) {
             qbHtml = 'Starters playing';
         }
@@ -157,23 +157,21 @@ function renderExplanation(data) {
 
     const sourceNote = isProfileOnly
         ? `<div style="margin-top:0.75rem; padding:6px 10px; border-radius:6px; background:rgba(255,255,255,0.04); font-size:0.72rem; color:var(--text-secondary);">
-            ℹ Feature data unavailable for this game — prediction based on prior-season team profiles. Detailed factors not available.
+            ℹ Pre-season projection — factors reflect prior-season averages. Values update as ${data.season} game data becomes available.
            </div>`
         : '';
 
-    const rows = isProfileOnly
-        ? `${_row('Vegas Line', vegasHtml)}`
-        : [
-            _row('Vegas Line',       vegasHtml),
-            _row('Team Strength',    eloHtml,     'Elo rating differential'),
-            _row('Roster Quality',   rosterHtml,  'Talent composite delta'),
-            _row('Passing Game',     passHtml,    'Off EPA – Def EPA allowed'),
-            _row('Rushing Game',     rushHtml,    'Off EPA – Def EPA allowed'),
-            _row('Turnovers',        toHtml,      'Rolling turnover margin'),
-            _row('QB Health',        qbHtml),
-            _row('Trench Play',      trenchHtml,  'O-line / D-line dominance'),
-            _row('Travel / Rest',    restHtml),
-        ].join('');
+    const rows = [
+        _row('Vegas Line',       vegasHtml),
+        _row('Team Strength',    eloHtml,     isProfileOnly ? 'Prior season Elo' : 'Elo rating differential'),
+        _row('Roster Quality',   rosterHtml,  isProfileOnly ? 'Prior season talent delta' : 'Talent composite delta'),
+        _row('Passing Game',     passHtml,    'Off EPA – Def EPA allowed'),
+        _row('Rushing Game',     rushHtml,    'Off EPA – Def EPA allowed'),
+        _row('Turnovers',        toHtml,      'Rolling turnover margin'),
+        _row('QB Health',        qbHtml),
+        _row('Trench Play',      trenchHtml,  'O-line / D-line dominance'),
+        _row('Travel / Rest',    restHtml),
+    ].join('');
 
     return `
         <h3 style="margin:0 0 0.25rem; font-size:1rem; color:var(--accent-gold);">
