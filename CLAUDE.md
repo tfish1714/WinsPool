@@ -33,15 +33,22 @@ python scripts/sync_nflverse_data.py --include-pbp        # Also fetch large pla
 python scripts/daily_nfl_sync.py                          # Push game results → Firestore (web app)
 python scripts/run_cron.py                                # Run full pipeline (sync + firestore + cache)
 
-# Cache
-python scripts/cache_builder.py        # Pre-build pickle cache
+# Local dev cache (USE_LOCAL_DATA=True)
+python scripts/refresh_local_pkls.py                      # Rebuild ALL local pkl/json from Firestore (run after any Firestore change)
+python scripts/cache_builder.py                           # Pre-build analytics pkl cache
 
-# ML
+# ML predictions
+python scripts/backfill_schedule_predictions.py                        # Backfill predictions local only
+python scripts/backfill_schedule_predictions.py --firestore            # Backfill + push to Firestore
+python scripts/backfill_schedule_predictions.py --seasons 2020 2026   # Specific season range
+python scripts/backfill_schedule_predictions.py --force                # Overwrite locked predictions (after retraining)
+python scripts/predict_season.py --season 2026                        # Generate season win projections → Firestore
+
+# ML model training
 python scripts/train_nn_model.py       # Train ML model (auto-increments version in registry)
 python scripts/train_nn_model.py --version v3   # Train and save as specific version
 python scripts/weekly_model_eval.py --season 2025 --week 14    # Evaluate one week
 python scripts/weekly_model_eval.py --season 2025 --week 1 17  # Evaluate full season range
-python scripts/predict_2026.py         # Generate season predictions
 ```
 
 ### Tests
@@ -114,7 +121,37 @@ rawdata/                 # NFL raw data (NOT committed)
 2. **Pickle files** (`.local_db/*.pkl`) — used when `USE_LOCAL_DATA=True`
 3. **Firestore** — primary source of truth in production
 
-Firestore collections: `standings`, `games`, `players`, `draft_order`, `draft_results`, `draft_rules`, `weekly_recaps`.
+**Firestore is always the source of truth.** All writes go to Firestore first. Local pkl files are a read-only mirror built from Firestore via `scripts/refresh_local_pkls.py`.
+
+Firestore collections and their local equivalents:
+
+| Firestore collection | Local pkl / JSON | Notes |
+|---|---|---|
+| `nfl_games` | `.local_db/nfl_games.pkl` + `nfl_games_{year}.pkl` | Year slices written automatically |
+| `nfl_standings` | `.local_db/nfl_standings.pkl` + `nfl_standings_{year}.pkl` | |
+| `players` | `.local_db/players.pkl` | |
+| `draft_results` | `.local_db/draft_results.pkl` | |
+| `draft_order` | `.local_db/draft_order.pkl` | |
+| `draft_order_rules` | `.local_db/draft_order_rules.pkl` | |
+| `nfl_teams` | `.local_db/nfl_teams.pkl` | |
+| `preseason_predictions` | `.local_db/preseason_predictions.pkl` + `_{year}.pkl` | |
+| `game_predictions` | `.local_db/game_predictions_{year}.json` | JSON, not pkl; one doc per season |
+| `analytics_cache` | `.local_db/analytics/{analytic}_{year}_{week}.json` | JSON |
+
+**Rules for any new Firestore collection or data store:**
+1. Write to Firestore first (or with `--firestore` flag in scripts).
+2. Add the collection to `refresh_local_pkls.py` so local dev stays in sync.
+3. The local file format must match exactly what `cache_service.py` / `data_service.py` reads — no format divergence between local and Firestore paths.
+4. **Services and routes must never read from `rawdata/` CSVs.** They read exclusively from Firestore/pkl via `load_data()`. Scripts are allowed to read from `rawdata/` — sync scripts push game/standings data to Firestore; ML feature engineering scripts (`nn_feature_engine.py`, `predict_season.py`, `generate_weekly_predictions.py`, etc.) read rawdata directly for model training and batch prediction since that data is too large/ML-specific for Firestore.
+
+**Local dev workflow after any data change:**
+```bash
+# If you changed data in Firestore (or ran a backfill with --firestore):
+python scripts/refresh_local_pkls.py
+
+# If you need to push rawdata/ changes to Firestore first:
+python scripts/daily_nfl_sync.py && python scripts/refresh_local_pkls.py
+```
 
 ### Auth
 

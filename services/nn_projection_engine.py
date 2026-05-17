@@ -8,7 +8,7 @@ import logging
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional
-from services.constants import UNDRAFTED_SENTINEL
+from services.constants import UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 
 from services.nn_feature_engine import (
     build_master_feature_table,
@@ -24,10 +24,6 @@ from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
 
 logger = logging.getLogger(__name__)
-
-NN_WEIGHT  = 0.45
-XGB_WEIGHT = 0.20
-LR_WEIGHT  = 0.35
 
 
 class NNProjectionEngine:

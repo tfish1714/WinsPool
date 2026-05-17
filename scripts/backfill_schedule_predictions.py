@@ -1,25 +1,35 @@
-"""scripts/backfill_schedule_predictions.py -- Backfill ML ensemble predictions
-into the game_predictions store (local JSON and/or Firestore).
+"""scripts/backfill_schedule_predictions.py -- Backfill / refresh ML predictions.
 
-For every game in every cached season, computes the blended NN+XGB+LR probability
-using the actual game-level feature vector (Vegas lines, Elo, EPA, etc.) and writes
-pred_winner, pred_su_conf, pred_prob, and pred_ats_pick to:
-  - Local:     .local_db/game_predictions_{year}.json
-  - Firestore: game_predictions/{year} document (one doc per season, ~27 KB each)
+Writes per-game ML predictions to the game_predictions store (local JSON and/or
+Firestore), which /api/schedule reads to display predictions for every season.
 
-The /api/schedule route reads from game_predictions and merges predictions at
-request time, so this backfill makes ML predictions visible for all historical seasons.
+Prediction sources
+------------------
+- Completed games  : NN+XGB+LR ensemble via build_ensemble_lookup() on actual
+                     game-day feature vectors (Vegas lines, Elo, EPA from prior
+                     weeks — all pre-game data).
+- Future games     : NNProjectionEngine team-profile fallback using the prior
+                     season's averages.
+
+Locking
+-------
+Every completed game (any season) is stored with locked=True.  Future re-runs
+(including after model retraining) skip locked entries by default so the
+accuracy running-total stays valid across the whole history.
+
+  --force : overwrite locked predictions too. Use after retraining to reset
+            the accuracy baseline with the new model.
 
 Usage:
     python scripts/backfill_schedule_predictions.py                    # local only
     python scripts/backfill_schedule_predictions.py --firestore        # local + Firestore
     python scripts/backfill_schedule_predictions.py --firestore-only   # Firestore only
-    python scripts/backfill_schedule_predictions.py --seasons 2022 2025
+    python scripts/backfill_schedule_predictions.py --seasons 2022 2026
+    python scripts/backfill_schedule_predictions.py --force
     python scripts/backfill_schedule_predictions.py --dry-run
 """
 
 import argparse
-import json
 import logging
 import os
 import pathlib
@@ -35,88 +45,108 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 import numpy as np
 import pandas as pd
 
-from services.nn_feature_engine import build_master_feature_table, FEATURE_COLUMNS, _normalize_team
-from services.nn_prediction_service import NNPredictionService
+from services.nn_feature_engine import build_master_feature_table, _normalize_team
+from services.nn_prediction_service import NNPredictionService, build_ensemble_lookup
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
-
-NN_WEIGHT  = 0.45
-XGB_WEIGHT = 0.20
-LR_WEIGHT  = 0.35
-
-LOCAL_PRED_DIR = pathlib.Path(".local_db")
+from services.nn_projection_engine import NNProjectionEngine
+from services.cache_service import get_game_predictions, write_game_predictions
+from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 
 
 # ---------------------------------------------------------------------------
-# ML prediction lookup
+# Profile predictions (future / unplayed games)
 # ---------------------------------------------------------------------------
 
-def _build_prediction_lookup(feature_table: pd.DataFrame, nn_svc, xgb_svc, lr_svc) -> dict:
-    """Run ensemble on every row. Returns {(season, week, home_team, away_team): pred_dict}."""
-    X = feature_table[FEATURE_COLUMNS].values.astype(np.float32)
+def _profile_predictions_for_year(year: int, schedule_df: pd.DataFrame,
+                                   played_keys: set) -> dict:
+    """Generate team-profile predictions for unplayed games in a season.
 
-    nn_probs  = nn_svc.model.predict(nn_svc.scaler.transform(X), verbose=0).flatten()
-    xgb_probs = xgb_svc.model.predict_proba(xgb_svc.scaler.transform(X))[:, 1]
-    lr_probs  = lr_svc.model.predict_proba(lr_svc.scaler.transform(X))[:, 1]
+    Uses the NNProjectionEngine (prior-season team averages) for games not
+    already covered by the feature table.  schedule_df must contain at least
+    week, home_team, away_team columns for the target year.
+    """
+    if schedule_df.empty:
+        return {}
 
-    blended = np.clip(
-        NN_WEIGHT * nn_probs + XGB_WEIGHT * xgb_probs + LR_WEIGHT * lr_probs,
-        0.02, 0.98,
-    )
+    engine = NNProjectionEngine()
+    engine.initialize(year)
 
-    lookup = {}
-    for i, row in enumerate(feature_table.itertuples(index=False)):
-        home_prob = float(blended[i])
-        ht = _normalize_team(row.home_team)
-        at = _normalize_team(row.away_team)
-        spread = getattr(row, "spread_line", None)
-
-        winner     = ht if home_prob >= 0.5 else at
-        confidence = home_prob if home_prob >= 0.5 else 1.0 - home_prob
-        conf_pct   = round(min(99.0, max(50.0, confidence * 100)), 1)
-
-        ats = winner
-        if spread is not None and not (isinstance(spread, float) and np.isnan(spread)):
-            try:
-                sv = float(spread)
-                ats = at if sv < -3 else (ht if sv > 3 else (at if sv < 0 else ht))
-            except (ValueError, TypeError):
-                pass
-
-        lookup[(int(row.season), int(row.week), ht, at)] = {
-            "pred_prob":     round(home_prob, 4),
-            "pred_winner":   winner,
-            "pred_su_conf":  conf_pct,
-            "pred_ats_pick": ats,
-        }
-
-    return lookup
-
-
-def _lookup_to_predictions_map(year: int, lookup: dict) -> dict:
-    """Convert {(season,week,ht,at): pred} → {"W{wk:02d}_{ht}_{at}": pred} for one year."""
     out = {}
-    for (s, wk, ht, at), pred in lookup.items():
-        if s == year:
-            out[f"W{wk:02d}_{ht}_{at}"] = pred
+    for _, game in schedule_df.iterrows():
+        ht = _normalize_team(str(game.get("home_team", "") or ""))
+        at = _normalize_team(str(game.get("away_team", "") or ""))
+        wk = game.get("week")
+        if not ht or not at or wk is None:
+            continue
+        key = f"W{int(wk):02d}_{ht}_{at}"
+        if key in played_keys:
+            continue
+        try:
+            prob = engine.game_win_probability(ht, at)
+            hp   = prob["home_win_prob"]
+            winner = ht if hp >= 0.5 else at
+            conf   = round(min(99.0, max(50.0, (hp if hp >= 0.5 else 1.0 - hp) * 100)), 1)
+            spread = game.get("spread_line")
+            ats = winner
+            if pd.notna(spread):
+                try:
+                    sv = float(spread)
+                    ats = at if sv < -3 else (ht if sv > 3 else (at if sv < 0 else ht))
+                except (ValueError, TypeError):
+                    pass
+            out[key] = {
+                "pred_prob":     round(float(hp), 4),
+                "pred_winner":   winner,
+                "pred_su_conf":  conf,
+                "pred_ats_pick": ats,
+            }
+        except Exception:
+            continue
     return out
 
 
 # ---------------------------------------------------------------------------
-# Local write
+# Build full predictions map for one year
 # ---------------------------------------------------------------------------
 
-def _write_local(year: int, predictions_map: dict, dry_run: bool) -> None:
-    if dry_run:
-        return
-    LOCAL_PRED_DIR.mkdir(parents=True, exist_ok=True)
-    p = LOCAL_PRED_DIR / f"game_predictions_{year}.json"
-    with open(p, "w") as f:
-        json.dump({
-            "season":       year,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "predictions":  predictions_map,
-        }, f, default=str)
+def _build_predictions_map(year: int, ft_lookup: dict,
+                            schedule_df: pd.DataFrame,
+                            force: bool) -> dict:
+    """Assemble the final predictions map for one season.
+
+    1. Feature-table predictions for completed games → locked=True.
+    2. Team-profile predictions for future games → locked=False.
+    3. Without --force: read existing store, preserve any already-locked entries
+       (protects accuracy tracking if a game just became "completed" but the
+       feature table hasn't caught up yet — or if a prior run locked predictions
+       we want to keep).
+    """
+    # Feature-table hits for this year
+    played_keys = {}
+    for (s, wk, ht, at), pred in ft_lookup.items():
+        if s == year:
+            played_keys[f"W{wk:02d}_{ht}_{at}"] = pred
+
+    # Build final map: played = locked, future = unlocked
+    result = {k: {**v, "locked": True}  for k, v in played_keys.items()}
+
+    # Profile predictions for unplayed games
+    profile = _profile_predictions_for_year(year, schedule_df, set(played_keys))
+    for k, v in profile.items():
+        result[k] = {**v, "locked": False}
+
+    if force:
+        return result
+
+    # Preserve any already-locked entries from a prior run (including ones
+    # locked by a previous run that aren't yet in the feature table this run).
+    existing = get_game_predictions(year)
+    for k, v in existing.items():
+        if v.get("locked") and k not in played_keys:
+            result[k] = v  # keep the frozen pre-game prediction
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +155,7 @@ def _write_local(year: int, predictions_map: dict, dry_run: bool) -> None:
 
 def _init_firestore():
     import firebase_admin
-    from firebase_admin import credentials, firestore
+    from firebase_admin import credentials
     if not firebase_admin._apps:
         creds_b64 = os.environ.get("FIREBASE_CREDENTIALS")
         if creds_b64:
@@ -149,31 +179,24 @@ def _init_firestore():
     return fs.client()
 
 
-def _upload_to_firestore(db, year: int, predictions_map: dict, dry_run: bool) -> None:
-    """Write one season's predictions to Firestore game_predictions/{year}."""
-    payload = {
-        "season":       year,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "predictions":  predictions_map,
-    }
-    if not dry_run:
-        db.collection("game_predictions").document(str(year)).set(payload)
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Backfill ML predictions into game_predictions store")
+    parser = argparse.ArgumentParser(
+        description="Backfill / refresh ML predictions into game_predictions store")
     parser.add_argument("--seasons", type=int, nargs=2, metavar=("MIN", "MAX"),
-                        help="Season range, e.g. --seasons 2020 2025")
+                        help="Season range, e.g. --seasons 2020 2026")
     parser.add_argument("--firestore", action="store_true",
-                        help="Write to Firestore game_predictions in addition to local files")
+                        help="Write to Firestore in addition to local files")
     parser.add_argument("--firestore-only", action="store_true",
                         help="Write to Firestore only (skip local file updates)")
+    parser.add_argument("--force", action="store_true",
+                        help="Overwrite locked predictions (all seasons). "
+                             "Use after retraining to reset the accuracy baseline.")
     parser.add_argument("--dry-run", action="store_true",
-                        help="Compute predictions but do not write anywhere")
+                        help="Compute but do not write anywhere")
     args = parser.parse_args()
 
     write_local     = not args.firestore_only and not args.dry_run
@@ -186,25 +209,25 @@ def main():
     if args.dry_run:       dest.append("dry-run")
     if write_local:        dest.append("local (.local_db/game_predictions_*.json)")
     if write_firestore:    dest.append("Firestore (game_predictions/{season})")
-    print(f"  Output: {' + '.join(dest) or 'dry-run'}")
+    print(f"  Output : {' + '.join(dest) or 'dry-run'}")
+    print(f"  Force  : {args.force}")
     print("=" * 64)
 
-    # Init Firestore early so we fail fast on bad credentials
     db = None
     if write_firestore or (args.firestore and args.dry_run):
         print("\nConnecting to Firestore...")
         db = _init_firestore()
         print("  Connected.")
 
-    # Determine season range from feature table availability
+    # Year range
+    current_year = datetime.now(timezone.utc).year
     if args.seasons:
         lo, hi = args.seasons
         years = list(range(lo, hi + 1))
     else:
-        # Default: all seasons with available feature data (2006-current)
-        years = list(range(2006, 2026))
+        years = list(range(2006, current_year + 1))
 
-    print(f"\nSeasons to process: {years}")
+    print(f"\nSeasons: {years}")
 
     # Load models
     print("\n[1/3] Loading models...")
@@ -214,51 +237,75 @@ def main():
     lr_svc  = LRPredictionService();  lr_svc.load_model()
     print(f"  Done in {time.time()-t0:.1f}s")
 
-    # Build feature table
-    min_season = max(2006, min(years))
-    max_season = max(years)
-    print(f"\n[2/3] Building feature table ({min_season}-{max_season})...")
+    # Build feature table for all years (covers completed games only)
+    min_s = max(2006, min(years))
+    max_s = max(years)
+    print(f"\n[2/3] Building feature table ({min_s}–{max_s})...")
     t0 = time.time()
-    ft = build_master_feature_table(min_season=min_season, max_season=max_season)
+    ft = build_master_feature_table(min_season=min_s, max_season=max_s)
     ft["home_team"] = ft["home_team"].apply(_normalize_team)
     ft["away_team"] = ft["away_team"].apply(_normalize_team)
-    print(f"  {len(ft)} games in {time.time()-t0:.1f}s")
+    print(f"  {len(ft)} completed games in {time.time()-t0:.1f}s")
 
-    # Generate lookup
-    print("\n[3/3] Running ensemble and writing predictions...")
-    t0 = time.time()
-    lookup = _build_prediction_lookup(ft, nn_svc, xgb_svc, lr_svc)
-    print(f"  {len(lookup)} predictions computed in {time.time()-t0:.1f}s\n")
+    ft_lookup = build_ensemble_lookup(ft, nn_svc, xgb_svc, lr_svc)
+    print(f"  {len(ft_lookup)} feature-table predictions computed")
 
+    # Load the schedule from Firestore/pkl for the profile fallback
+    # (used only for years that have unplayed games not in the feature table)
+    print("\n  Loading schedule data for profile fallback...")
+    try:
+        from services.data_service import load_data
+        _, _, all_games, _, _, _, _ = load_data()
+        has_schedule = True
+    except Exception as e:
+        print(f"  [warn] Could not load schedule data: {e}")
+        all_games = pd.DataFrame()
+        has_schedule = False
+
+    print(f"\n[3/3] Writing predictions...")
     total_written = 0
     seasons_done  = 0
 
     for year in years:
-        predictions_map = _lookup_to_predictions_map(year, lookup)
+        # Schedule rows for this year (used by profile fallback for unplayed games)
+        if has_schedule and not all_games.empty and "season" in all_games.columns:
+            yr_schedule = all_games[all_games["season"] == year].copy()
+        else:
+            yr_schedule = pd.DataFrame()
+
+        predictions_map = _build_predictions_map(year, ft_lookup, yr_schedule, args.force)
+
         if not predictions_map:
-            print(f"  {year}  no predictions (no feature data) — skipped")
+            print(f"  {year}  no predictions available — skipped")
             continue
 
-        n = len(predictions_map)
+        n      = len(predictions_map)
+        locked = sum(1 for v in predictions_map.values() if v.get("locked"))
+        unlocked = n - locked
         actions = []
 
         if write_local:
-            _write_local(year, predictions_map, dry_run=False)
+            write_game_predictions(year, predictions_map)
             actions.append("local")
 
         if write_firestore:
-            _upload_to_firestore(db, year, predictions_map, dry_run=False)
+            payload = {
+                "season":       year,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "predictions":  predictions_map,
+            }
+            db.collection("game_predictions").document(str(year)).set(payload)
             actions.append("Firestore")
 
         status = f"[{', '.join(actions)}]" if actions else "[dry-run]"
-        print(f"  {year}  {n:>4} games  {status}")
+        lock_info = f"  {locked} locked / {unlocked} open" if unlocked > 0 else f"  {locked} locked"
+        print(f"  {year}  {n:>4} games  {status}{lock_info}")
         total_written += n
         seasons_done  += 1
 
     if write_firestore and db:
-        # Invalidate server-side in-memory cache
         db.collection("metadata").document("cache_control").set({"last_update": time.time()})
-        print("\n  Cache invalidation signal sent to Firestore.")
+        print("\n  Cache invalidation signal sent.")
 
     print(f"\n{'='*64}")
     print(f"  Total: {total_written} predictions across {seasons_done} seasons")

@@ -174,6 +174,35 @@ def get_game_predictions(season: int) -> dict:
         return {}
 
 
+def merge_game_predictions(df: pd.DataFrame, season: int) -> pd.DataFrame:
+    """Return df with ML predictions from game_predictions cache merged in.
+
+    Matches rows by W{wk:02d}_{home}_{away} key. Safe to call even when no
+    predictions exist — returns df unchanged.
+    """
+    from services.nn_feature_engine import _normalize_team
+    preds = get_game_predictions(season)
+    if not preds:
+        return df
+    df = df.copy()
+    for col in ('pred_winner', 'pred_su_conf', 'pred_ats_pick', 'pred_prob'):
+        if col not in df.columns:
+            df[col] = None
+
+    def _key(row):
+        wk = row.get('week')
+        ht = _normalize_team(str(row.get('home_team', '') or ''))
+        at = _normalize_team(str(row.get('away_team', '') or ''))
+        if wk is None or not ht or not at:
+            return None
+        return f"W{int(wk):02d}_{ht}_{at}"
+
+    keys = df.apply(_key, axis=1)
+    for col in ('pred_winner', 'pred_su_conf', 'pred_ats_pick', 'pred_prob'):
+        df[col] = keys.map(lambda k, c=col: preds.get(k, {}).get(c) if k else None)
+    return df
+
+
 def write_game_predictions(season: int, predictions: dict) -> None:
     """Persist {game_key: pred_dict} for season (local JSON or Firestore)."""
     from datetime import datetime, timezone

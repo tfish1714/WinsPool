@@ -773,10 +773,14 @@ def build_master_feature_table(
             a = rv_cache.get((*key, row["away_team"]), {}).get(feat, 0.0)
             return h - a
 
-        sched["off_roster_value_delta"] = sched.apply(lambda r: _rv_delta(r, "off_roster_value"), axis=1)
-        sched["def_roster_value_delta"] = sched.apply(lambda r: _rv_delta(r, "def_roster_value"), axis=1)
-        sched["st_value_delta"]         = sched.apply(lambda r: _rv_delta(r, "st_value"), axis=1)
-        sched["qb_resilience_delta"]    = sched.apply(lambda r: _rv_delta(r, "qb_resilience"), axis=1)
+        for _feat, _col in [("off_roster_value", "off_roster_value_delta"),
+                            ("def_roster_value", "def_roster_value_delta"),
+                            ("st_value",         "st_value_delta"),
+                            ("qb_resilience",    "qb_resilience_delta")]:
+            sched[_col] = pd.to_numeric(
+                sched.apply(lambda r, f=_feat: _rv_delta(r, f), axis=1),
+                errors="coerce",
+            ).fillna(0.0)
     except Exception as _e:
         logger.warning("roster_value_service unavailable: %s", _e)
         for _col in ["off_roster_value_delta", "def_roster_value_delta",

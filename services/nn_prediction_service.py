@@ -51,7 +51,8 @@ MODEL_DIR = Path(__file__).parent.parent / "models"
 DEFAULT_MODEL_PATH = MODEL_DIR / "nn_v1.keras"
 REGISTRY_PATH = MODEL_DIR / "model_registry.json"
 
-from services.nn_feature_engine import FEATURE_COLUMNS
+from services.nn_feature_engine import FEATURE_COLUMNS, _normalize_team
+from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 
 LABEL_COLUMN = "home_win"
 
@@ -70,6 +71,50 @@ TEST_SPLIT_WEEK = 15         # 2025 weeks 15+ for testing
 # ---------------------------------------------------------------------------
 # NNPredictionService
 # ---------------------------------------------------------------------------
+
+def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
+    """Run the NN+XGB+LR ensemble on every row in feature_table.
+
+    Returns {(season, week, home_team, away_team): pred_dict} where pred_dict
+    contains pred_prob, pred_winner, pred_su_conf, pred_ats_pick.
+    Completed games only — the feature table has no rows for unplayed games.
+    """
+    import numpy as np
+    if feature_table.empty:
+        return {}
+
+    X = feature_table[FEATURE_COLUMNS].values.astype(np.float32)
+    nn_p  = nn_svc.model.predict(nn_svc.scaler.transform(X), verbose=0).flatten()
+    xgb_p = xgb_svc.model.predict_proba(xgb_svc.scaler.transform(X))[:, 1]
+    lr_p  = lr_svc.model.predict_proba(lr_svc.scaler.transform(X))[:, 1]
+    blended = np.clip(NN_WEIGHT * nn_p + XGB_WEIGHT * xgb_p + LR_WEIGHT * lr_p, 0.02, 0.98)
+
+    lookup = {}
+    for i, row in enumerate(feature_table.itertuples(index=False)):
+        hp     = float(blended[i])
+        ht     = _normalize_team(row.home_team)
+        at     = _normalize_team(row.away_team)
+        spread = getattr(row, "spread_line", None)
+
+        winner = ht if hp >= 0.5 else at
+        conf   = round(min(99.0, max(50.0, (hp if hp >= 0.5 else 1.0 - hp) * 100)), 1)
+
+        ats = winner
+        if spread is not None and not (isinstance(spread, float) and np.isnan(spread)):
+            try:
+                sv = float(spread)
+                ats = at if sv < -3 else (ht if sv > 3 else (at if sv < 0 else ht))
+            except (ValueError, TypeError):
+                pass
+
+        lookup[(int(row.season), int(row.week), ht, at)] = {
+            "pred_prob":     round(hp, 4),
+            "pred_winner":   winner,
+            "pred_su_conf":  conf,
+            "pred_ats_pick": ats,
+        }
+    return lookup
+
 
 class NNPredictionService:
     """Feedforward Neural Network for NFL game prediction.

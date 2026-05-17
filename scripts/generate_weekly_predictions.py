@@ -46,9 +46,7 @@ from services.nn_prediction_service import (
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
 
-NN_WEIGHT  = 0.45
-XGB_WEIGHT = 0.20
-LR_WEIGHT  = 0.35
+from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 
 
 def _default_season() -> int:

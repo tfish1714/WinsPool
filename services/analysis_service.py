@@ -386,8 +386,12 @@ def get_enriched_schedule(games, draft_results, players, season):
     import time
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_op = time.time()
-    if games.empty or draft_results.empty or 'season' not in draft_results.columns:
+    if games.empty:
         return pd.DataFrame()
+    # If no draft results yet (pre-draft season), use an empty placeholder so
+    # the schedule still renders without player name columns filled in
+    if draft_results.empty or 'season' not in draft_results.columns:
+        draft_results = pd.DataFrame(columns=['season', 'team', 'playerId'])
     today_games = games[(games['season'] == season) & (games.get('game_type', pd.Series(['REG']*len(games))).eq('REG'))].copy() if 'game_type' in games.columns else games[games['season'] == season].copy()
     today_draft_results = draft_results[draft_results['season'] == season].copy()
     

@@ -147,25 +147,27 @@ async def schedule_by_year(request: Request, year: int):
     all_st, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
 
     available_years = get_available_years(all_draft_results, all_games)
-    
-    if 2026 not in available_years:
-        available_years.append(2026)
-        
-    if year == 2026:
-        from services.sandbox_service import get_sandbox_2026_schedule
-        schedule_enriched = get_sandbox_2026_schedule()
-        latest_week = 1
-        unique_weeks = sorted(schedule_enriched["week"].dropna().astype(int).unique().tolist())
-    else:
-        games = all_games[all_games['season'] == year] if not all_games.empty else all_games
-        draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
+    # Always include the requested year in the picker so future seasons are navigable
+    if year not in available_years:
+        available_years = sorted(available_years + [year])
 
+    games = all_games[all_games['season'] == year] if not all_games.empty else all_games
+    draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
+
+    if games.empty:
+        from services.sandbox_service import get_future_schedule
+        schedule_enriched = get_future_schedule(year)
+    else:
         schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
-        latest_week = get_latest_week_for_year(games, year)
-        unique_weeks = (
-            sorted(schedule_enriched["week"].dropna().astype(int).unique().tolist())
-            if not schedule_enriched.empty and "week" in schedule_enriched.columns else []
-        )
+
+    from services.cache_service import merge_game_predictions
+    schedule_enriched = merge_game_predictions(schedule_enriched, year)
+
+    latest_week = get_latest_week_for_year(games, year) if not games.empty else 1
+    unique_weeks = (
+        sorted(schedule_enriched["week"].dropna().astype(int).unique().tolist())
+        if not schedule_enriched.empty and "week" in schedule_enriched.columns else []
+    )
 
     return templates.TemplateResponse("schedule.html", {
         "request": request,
@@ -173,6 +175,6 @@ async def schedule_by_year(request: Request, year: int):
         "unique_weeks": unique_weeks,
         "current_week": latest_week,
         "year": year,
-        "available_years": get_available_years(all_draft_results, all_games),
+        "available_years": available_years,
         "current_year": get_active_season(all_games),
     })

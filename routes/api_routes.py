@@ -82,30 +82,7 @@ def get_standings(year: int):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-def _merge_game_predictions(df, year: int):
-    """Return df with ML predictions from game_predictions cache merged in."""
-    from services.cache_service import get_game_predictions
-    from services.nn_feature_engine import _normalize_team
-    preds = get_game_predictions(year)
-    if not preds:
-        return df
-    df = df.copy()
-    for col in ('pred_winner', 'pred_su_conf', 'pred_ats_pick', 'pred_prob'):
-        if col not in df.columns:
-            df[col] = None
-
-    def _key(row):
-        wk = row.get('week')
-        ht = _normalize_team(str(row.get('home_team', '') or ''))
-        at = _normalize_team(str(row.get('away_team', '') or ''))
-        if wk is None or not ht or not at:
-            return None
-        return f"W{int(wk):02d}_{ht}_{at}"
-
-    keys = df.apply(_key, axis=1)
-    for col in ('pred_winner', 'pred_su_conf', 'pred_ats_pick', 'pred_prob'):
-        df[col] = keys.map(lambda k, c=col: preds.get(k, {}).get(c) if k else None)
-    return df
+from services.cache_service import merge_game_predictions as _merge_game_predictions
 
 
 @router.get("/schedule")
@@ -114,16 +91,13 @@ def get_schedule(year: int):
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_route = time.time()
     try:
-        if year == 2026:
-            from services.sandbox_service import get_sandbox_2026_schedule
-            import pandas as pd
-            schedule_enriched = get_sandbox_2026_schedule()
-            if not schedule_enriched.empty and pd.api.types.is_datetime64_any_dtype(schedule_enriched['gameday']):
-                schedule_enriched['gameday'] = schedule_enriched['gameday'].dt.strftime('%Y-%m-%d')
+        _, _, games, players, _, draft_results, _ = load_data(year=year)
+        if games.empty:
+            from services.sandbox_service import get_future_schedule
+            schedule_enriched = get_future_schedule(year)
         else:
-            _, _, games, players, _, draft_results, _ = load_data(year=year)
             schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
-            schedule_enriched = _merge_game_predictions(schedule_enriched, year)
+        schedule_enriched = _merge_game_predictions(schedule_enriched, year)
 
         if is_debug:
             logger.debug("/api/schedule route total took %.3fs", time.time() - start_route)

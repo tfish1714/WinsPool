@@ -42,18 +42,14 @@ from services.cache_service import write_cache, is_cache_final, write_game_predi
 import services.analysis_service as analysis
 from services.prediction_service import PredictionService
 from services.nn_projection_engine import NNProjectionEngine
-from services.nn_prediction_service import NNPredictionService
+from services.nn_prediction_service import NNPredictionService, build_ensemble_lookup
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
 from services.nn_feature_engine import (
     build_master_feature_table, FEATURE_COLUMNS, _normalize_team,
 )
-from services.constants import UNDRAFTED_SENTINEL
+from services.constants import UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 import services.live_score_service as live_scores
-
-NN_WEIGHT  = 0.45
-XGB_WEIGHT = 0.20
-LR_WEIGHT  = 0.35
 
 ANALYTICS = [
     'wins_pool_standings',
@@ -64,50 +60,8 @@ ANALYTICS = [
 
 
 def _build_pred_lookup(ft: pd.DataFrame, nn_svc, xgb_svc, lr_svc) -> dict:
-    """Run ensemble on all feature-table rows.
-
-    Returns {(season, week, home_team, away_team): pred_dict} where pred_dict
-    contains pred_prob, pred_winner, pred_su_conf, pred_ats_pick.
-    """
-    if ft.empty:
-        return {}
-
-    X = ft[FEATURE_COLUMNS].values.astype(np.float32)
-    nn_p  = nn_svc.model.predict(nn_svc.scaler.transform(X), verbose=0).flatten()
-    xgb_p = xgb_svc.model.predict_proba(xgb_svc.scaler.transform(X))[:, 1]
-    lr_p  = lr_svc.model.predict_proba(lr_svc.scaler.transform(X))[:, 1]
-    blended = np.clip(NN_WEIGHT * nn_p + XGB_WEIGHT * xgb_p + LR_WEIGHT * lr_p, 0.02, 0.98)
-
-    lookup = {}
-    for i, row in enumerate(ft.itertuples(index=False)):
-        home_prob = float(blended[i])
-        ht = _normalize_team(row.home_team)
-        at = _normalize_team(row.away_team)
-        spread = getattr(row, 'spread_line', None)
-
-        if home_prob >= 0.5:
-            winner, conf = ht, home_prob
-        else:
-            winner, conf = at, 1.0 - home_prob
-
-        conf_pct = round(min(99.0, max(50.0, conf * 100)), 1)
-
-        ats = winner
-        if spread is not None and not (isinstance(spread, float) and np.isnan(spread)):
-            try:
-                sv = float(spread)
-                ats = at if sv < -3 else (ht if sv > 3 else (at if sv < 0 else ht))
-            except (ValueError, TypeError):
-                pass
-
-        key = (int(row.season), int(row.week), ht, at)
-        lookup[key] = {
-            'pred_prob':    round(home_prob, 4),
-            'pred_winner':  winner,
-            'pred_su_conf': conf_pct,
-            'pred_ats_pick': ats,
-        }
-    return lookup
+    """Thin wrapper around the shared build_ensemble_lookup."""
+    return build_ensemble_lookup(ft, nn_svc, xgb_svc, lr_svc)
 
 
 def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
@@ -235,6 +189,29 @@ def build_year(standings, games, players, draft_order, draft_results,
                 fallback_engine=fallback_engine,
             )
 
+            # Persist predictions to game_predictions store so /api/schedule can serve them.
+            # This captures both feature-table predictions and fallback predictions for
+            # future games, which pred_lookup alone would miss.
+            pred_cols = ['week', 'home_team', 'away_team', 'pred_winner',
+                         'pred_su_conf', 'pred_ats_pick', 'pred_prob']
+            pc = [c for c in pred_cols if c in schedule_df.columns]
+            if 'pred_winner' in pc:
+                pmap = {}
+                for _, r in schedule_df[pc].dropna(subset=['pred_winner']).iterrows():
+                    ht = _normalize_team(str(r.get('home_team', '') or ''))
+                    at = _normalize_team(str(r.get('away_team', '') or ''))
+                    wk = r.get('week')
+                    if ht and at and wk is not None:
+                        pmap[f"W{int(wk):02d}_{ht}_{at}"] = {
+                            'pred_prob':     r.get('pred_prob'),
+                            'pred_winner':   r.get('pred_winner'),
+                            'pred_su_conf':  r.get('pred_su_conf'),
+                            'pred_ats_pick': r.get('pred_ats_pick'),
+                        }
+                if pmap:
+                    write_game_predictions(year, pmap)
+                    print(f"  [ok]   game_predictions year={year} ({len(pmap)} games)")
+
             # Store only the columns the web app needs to avoid huge payloads
             cols = ['week', 'gameday', 'home_team', 'away_team', 'home_score', 'away_score',
                     'result', 'fullName_home', 'fullName_away', 'spread_line', 'total_line',
@@ -345,17 +322,6 @@ def main():
         ft = build_master_feature_table(min_season=min_ft, max_season=max_ft)
         pred_lookup = _build_pred_lookup(ft, nn_svc, xgb_svc, lr_svc)
         print(f"[cache_builder] {len(pred_lookup)} game predictions pre-computed.")
-
-        # Write per-season game_predictions files (read by /api/schedule)
-        for yr in years_to_build:
-            pmap = {f"W{wk:02d}_{ht}_{at}": pred
-                    for (s, wk, ht, at), pred in pred_lookup.items() if s == yr}
-            if pmap:
-                try:
-                    write_game_predictions(yr, pmap)
-                    print(f"[cache_builder] Written game_predictions for {yr} ({len(pmap)} games).")
-                except Exception as wp_err:
-                    print(f"[cache_builder] WARNING: Could not write game_predictions/{yr}: {wp_err}")
     except Exception as e:
         print(f"[cache_builder] WARNING: ML models unavailable ({e}). Predictions will be skipped.")
         pred_lookup = {}
