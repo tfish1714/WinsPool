@@ -5,7 +5,10 @@ import time
 import pandas as pd
 import numpy as np
 
-pd.set_option('future.no_silent_downcasting', True)
+try:
+    pd.set_option('future.no_silent_downcasting', True)
+except Exception:
+    pass  # Option added in pandas 2.2; silently skip on older versions
 from typing import Dict, List, Any
 from services.constants import UNDRAFTED_SENTINEL
 
