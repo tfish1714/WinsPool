@@ -92,10 +92,9 @@ class NNProjectionEngine:
             elif col.startswith("opp_"):
                 raw = col.replace("opp_", "tm_")
                 features[col] = ap.get(raw, ap.get(col, 0.0))
-            elif col == "vegas_elo_spread_delta":
+            elif col == "elo_confidence":
                 elo_diff = hp.get("tm_elo_pre", 1500) - ap.get("tm_elo_pre", 1500)
-                spread = hp.get("spread_line", 0)
-                features[col] = abs((elo_diff / 25.0) - spread)
+                features[col] = abs(elo_diff / 25.0)
             elif col == "market_implied_team_total":
                 features[col] = hp.get(col, 22.0)
             else:

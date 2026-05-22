@@ -3,7 +3,7 @@
 Provides a TensorFlow/Keras feedforward neural network for predicting NFL
 game outcomes (home win probability) and projecting season win totals.
 
-Architecture: Input(24) -> Dense(48,ReLU) -> Dropout(0.4) ->
+Architecture: Input(26) -> Dense(48,ReLU) -> Dropout(0.4) ->
               Dense(24,ReLU) -> Dropout(0.4) -> Dense(1,Sigmoid)
 Loss: Binary cross-entropy
 
@@ -94,21 +94,26 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
         hp     = float(blended[i])
         ht     = _normalize_team(row.home_team)
         at     = _normalize_team(row.away_team)
-        spread = getattr(row, "spread_line", None)
 
         winner = ht if hp >= 0.5 else at
         conf   = round(min(99.0, max(50.0, (hp if hp >= 0.5 else 1.0 - hp) * 100)), 1)
 
-        # ATS pick: compare ML-implied spread to Vegas spread.
-        # implied_spread = -7.5 * log(hp / (1-hp)); negative = home favored.
-        # If ML thinks home is undervalued vs the line, take home; else take away.
+        hp_clip = np.clip(hp, 0.02, 0.98)
+        model_spread = round(-7.5 * float(np.log(hp_clip / (1.0 - hp_clip))), 1)
+
+        # Vegas spread used for post-hoc comparison only (not a model feature).
+        # model_spread < vegas_spread → model likes home team more than Vegas.
+        sl_raw = getattr(row, "spread_line", None)
+        vegas_spread = None
+        edge_vs_vegas = None
         ats = winner
-        if spread is not None and not (isinstance(spread, float) and np.isnan(spread)):
+        if sl_raw is not None:
             try:
-                sv = float(spread)
-                hp_clip = np.clip(hp, 0.02, 0.98)
-                implied = -7.5 * np.log(hp_clip / (1.0 - hp_clip))
-                ats = ht if implied < sv else at
+                sv = float(sl_raw)
+                if not np.isnan(sv):
+                    vegas_spread = round(sv, 1)
+                    edge_vs_vegas = round(model_spread - sv, 1)
+                    ats = ht if model_spread < sv else at
             except (ValueError, TypeError):
                 pass
 
@@ -119,17 +124,18 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
             except (TypeError, ValueError):
                 return default
 
-        sl = _f("spread_line", None)
         vegas_home_prob = None
-        if sl is not None:
+        if vegas_spread is not None:
             try:
-                vegas_home_prob = round(1 / (1 + np.exp(sl / 7.5)), 4)
+                vegas_home_prob = round(1 / (1 + np.exp(vegas_spread / 7.5)), 4)
             except Exception:
                 pass
 
         explanation = {
-            "vegas_line":       round(sl, 1) if sl is not None else None,
+            "vegas_line":       vegas_spread,
             "vegas_home_prob":  vegas_home_prob,
+            "model_spread":     model_spread,
+            "edge_vs_vegas":    edge_vs_vegas,
             "elo_diff":         round(_f("tm_elo_pre") - _f("opp_elo_pre"), 1),
             "roster_delta":     round(_f("roster_talent_delta"), 3),
             "off_pass_epa":     round(_f("off_pass_epa"), 3),
@@ -151,6 +157,8 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
             "pred_winner":   winner,
             "pred_su_conf":  conf,
             "pred_ats_pick": ats,
+            "model_spread":  model_spread,
+            "edge_vs_vegas": edge_vs_vegas,
             "explanation":   explanation,
         }
     return lookup

@@ -44,14 +44,14 @@ TEAM_ABBR_MAP = {
 TURNOVER_REGRESSION = 0.50
 
 FEATURE_COLUMNS = [
-    # Raw (10)
-    "tm_elo_pre", "opp_elo_pre", "spread_line",
+    # Raw (9)
+    "tm_elo_pre", "opp_elo_pre",
     "off_pass_epa", "def_pass_epa", "off_rush_epa", "def_rush_epa",
     "turnover_margin_rolling",
     "tm_point_diff", "opp_point_diff",
     # Synthetic (8)
     "early_down_pass_epa", "net_success_rate",
-    "vegas_elo_spread_delta",
+    "elo_confidence",
     "market_implied_team_total", "passing_difficulty_index",
     "travel_rest_disadvantage", "trench_dominance_metric",
     "roster_talent_delta",
@@ -691,7 +691,7 @@ def build_master_feature_table(
     max_season: int = 2025,
 ) -> pd.DataFrame:
     rd = Path(rawdata_dir) if rawdata_dir else RAWDATA_DIR
-    logger.info("Building Master Feature Table V2 (27 Features)...")
+    logger.info("Building Master Feature Table V2 (26 Features)...")
 
     sched = _load_schedule(rd)
     if sched.empty:
@@ -782,11 +782,10 @@ def build_master_feature_table(
 
     # --- Market Synthetics ---
     elo_diff = sched["tm_elo_pre"] - sched["opp_elo_pre"]
-    spread = sched.get("spread_line", pd.Series(0, index=sched.index)).fillna(0)
-    sched["vegas_elo_spread_delta"] = np.abs((elo_diff / 25.0) - spread)
+    sched["elo_confidence"] = np.abs(elo_diff / 25.0)
 
     total = sched.get("total_line", pd.Series(44.0, index=sched.index)).fillna(44.0)
-    sched["market_implied_team_total"] = (total / 2) + (spread / 2)
+    sched["market_implied_team_total"] = total / 2
 
     # --- Pressure Stats (per-game join on season + week + team) ---
     if pressure is not None and not pressure.empty:

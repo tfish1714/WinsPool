@@ -94,13 +94,17 @@ def _profile_predictions_for_year(year: int, schedule_df: pd.DataFrame,
             conf   = round(min(99.0, max(50.0, (hp if hp >= 0.5 else 1.0 - hp) * 100)), 1)
 
             spread = game.get("spread_line")
-            ats = winner
             sl_val = float(spread) if pd.notna(spread) else None
+
+            hp_clip = min(0.98, max(0.02, hp))
+            model_spread = round(-7.5 * float(np.log(hp_clip / (1.0 - hp_clip))), 1)
+            vegas_spread = round(sl_val, 1) if sl_val is not None else None
+            edge_vs_vegas = round(model_spread - sl_val, 1) if sl_val is not None else None
+
+            ats = winner
             if sl_val is not None:
                 try:
-                    hp_clip = min(0.98, max(0.02, hp))
-                    implied = -7.5 * np.log(hp_clip / (1.0 - hp_clip))
-                    ats = ht if implied < sl_val else at
+                    ats = ht if model_spread < sl_val else at
                 except (ValueError, TypeError):
                     pass
             vhp = round(1 / (1 + np.exp(sl_val / 7.5)), 4) if sl_val is not None else None
@@ -141,9 +145,13 @@ def _profile_predictions_for_year(year: int, schedule_df: pd.DataFrame,
                 "pred_winner":   winner,
                 "pred_su_conf":  conf,
                 "pred_ats_pick": ats,
+                "model_spread":  model_spread,
+                "edge_vs_vegas": edge_vs_vegas,
                 "explanation": {
-                    "vegas_line":        round(sl_val, 1) if sl_val is not None else None,
+                    "vegas_line":        vegas_spread,
                     "vegas_home_prob":   vhp,
+                    "model_spread":      model_spread,
+                    "edge_vs_vegas":     edge_vs_vegas,
                     "elo_diff":          elo_diff,
                     "roster_delta":      roster_delta,
                     "off_pass_epa":      off_pass_epa,

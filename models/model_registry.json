@@ -176,9 +176,30 @@
         "season_mae": 1.7345470875501632,
         "season_n": 160
       }
+    },
+    {
+      "version": "v10",
+      "path": "models/nn_v10.keras",
+      "scaler_path": "models/nn_v10_scaler.pkl",
+      "trained_at": "2026-05-22T02:31:09.381353+00:00",
+      "min_season": 2006,
+      "max_season": 2025,
+      "train_samples": 4927,
+      "metrics": {
+        "epochs_trained": 39,
+        "train_r2": 0.1227412223815918,
+        "train_mae": 0.44446322321891785,
+        "train_accuracy": 0.6618632027603004,
+        "test_r2": 0.05218958854675293,
+        "test_mae": 0.45907062292099,
+        "test_accuracy": 0.5625,
+        "season_r2": 0.5235971238731283,
+        "season_mae": 1.77736636698246,
+        "season_n": 160
+      }
     }
   ],
-  "latest": "v9",
+  "latest": "v10",
   "best_by": {
     "test_accuracy": "v6",
     "season_r2": "v6"

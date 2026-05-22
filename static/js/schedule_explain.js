@@ -50,27 +50,47 @@ function _row(label, valueHtml, subHtml = '') {
 
 function renderExplanation(data) {
     const { home_team, away_team, pred_winner, pred_su_conf, pred_prob,
-            pred_ats_pick, explanation: ex } = data;
+            pred_ats_pick, model_spread, edge_vs_vegas, explanation: ex } = data;
 
     const isProfileOnly = ex?.source === 'profile';
     const homeFavored   = pred_winner === home_team;
     const predColor     = homeFavored ? 'var(--accent-green)' : 'var(--accent-gold)';
     const confBar       = _bar(pred_su_conf, predColor);
 
-    // Vegas implied probability (from stored vegas_home_prob)
+    // Vegas line row
+    // spread_line convention: negative = home favored, positive = away favored
     let vegasHtml = '—';
     if (ex?.vegas_line != null) {
-        const line     = ex.vegas_line;
-        const favTeam  = line > 0 ? home_team : (line < 0 ? away_team : null);
-        const lineAbs  = Math.abs(line);
-        const lineStr  = favTeam ? `${favTeam} -${lineAbs}` : 'Pick\'em';
-        const vhp      = ex.vegas_home_prob;
-        const vPct     = vhp != null ? Math.round((homeFavored ? vhp : 1 - vhp) * 100) : null;
-        const mlDiff   = vPct != null ? Math.round(pred_su_conf - vPct) : null;
-        const diffStr  = mlDiff != null
-            ? `<span style="color:${mlDiff >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}; font-size:0.72rem;"> (ML ${mlDiff >= 0 ? '+' : ''}${mlDiff}% vs Vegas)</span>`
-            : '';
-        vegasHtml = `${lineStr}${diffStr}`;
+        const line    = ex.vegas_line;
+        const favTeam = line < 0 ? home_team : (line > 0 ? away_team : null);
+        const lineAbs = Math.abs(line);
+        vegasHtml = favTeam ? `${favTeam} -${lineAbs}` : 'Pick\'em';
+    }
+
+    // Model spread card content
+    const ms = model_spread ?? ex?.model_spread;
+    const ev = edge_vs_vegas ?? ex?.edge_vs_vegas;
+    let modelSpreadHtml = '—';
+    let edgeBadgeHtml   = '';
+    if (ms != null) {
+        const msFav  = ms < 0 ? home_team : (ms > 0 ? away_team : null);
+        const msAbs  = Math.abs(ms);
+        modelSpreadHtml = msFav ? `${msFav} -${msAbs}` : 'Pick\'em';
+
+        if (ev != null) {
+            const edgeAbs = Math.abs(ev);
+            // ev > 0: model_spread > vegas_spread → Vegas over-rates home → away has edge
+            // ev < 0: model_spread < vegas_spread → Vegas under-rates home → home has edge
+            const edgeDir = ev > 0 ? away_team : (ev < 0 ? home_team : null);
+            if (edgeDir && edgeAbs >= 0.5) {
+                const isSignificant = edgeAbs >= 2;
+                edgeBadgeHtml = `<div style="margin-top:4px; font-size:0.72rem; color:${isSignificant ? 'var(--pos)' : 'var(--ink-2)'};">
+                    ${isSignificant ? '⚡' : '·'} ${edgeDir} +${edgeAbs}pts vs Vegas
+                </div>`;
+            } else {
+                edgeBadgeHtml = `<div style="margin-top:4px; font-size:0.72rem; color:var(--ink-2);">≈ Agrees with Vegas</div>`;
+            }
+        }
     }
 
     // Elo
@@ -162,7 +182,7 @@ function renderExplanation(data) {
         : '';
 
     const rows = [
-        _row('Vegas Line',       vegasHtml),
+        _row('Vegas Line',       vegasHtml,   modelSpreadHtml !== '—' ? `Model: ${modelSpreadHtml}` : ''),
         _row('Team Strength',    eloHtml,     isProfileOnly ? 'Prior season Elo' : 'Elo rating differential'),
         _row('Roster Quality',   rosterHtml,  isProfileOnly ? 'Prior season talent delta' : 'Talent composite delta'),
         _row('Passing Game',     passHtml,    'Off EPA – Def EPA allowed'),
@@ -194,6 +214,11 @@ function renderExplanation(data) {
                 <div style="font-size:1.3rem; font-weight:800; color:var(--accent-gold);">${pred_ats_pick}</div>
                 <div style="font-size:0.75rem; color:var(--text-secondary);">Against the spread</div>
             </div>
+            ${ms != null ? `<div style="flex:1; min-width:120px; padding:10px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
+                <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">Model Spread</div>
+                <div style="font-size:1.1rem; font-weight:700; font-family:'JetBrains Mono', monospace;">${modelSpreadHtml}</div>
+                ${edgeBadgeHtml}
+            </div>` : ''}
         </div>
         ${atsNote}
 
