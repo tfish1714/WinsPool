@@ -132,33 +132,33 @@
             {% for row in data %}
             <div class="standings-stacked-card">
                 <div class="standings-stacked-card__header">
-                    <span class="standings-stacked-card__rank">#{{ row['Rank'] }}</span>
+                    <span class="standings-stacked-card__rank">{{ row['Rank'] }}</span>
                     <span class="standings-stacked-card__name">{{ row['fullName'] }}</span>
                     <span class="standings-stacked-card__score">{{ row['TotalWins'] }}W</span>
                 </div>
                 <div class="standings-stacked-card__teams">
+                    {% set pd1 = row['ptDiff1'] or 0 %}
+                    {% set pd2 = row['ptDiff2'] or 0 %}
+                    {% set pd3 = row['ptDiff3'] or 0 %}
                     <div class="standings-stacked-card__team">
                         <img src="{{ get_team_logo(row['team1']) }}" alt="">
                         <div class="standings-stacked-card__team-info">
                             <div class="standings-stacked-card__team-name">{{ row['team1'] }}</div>
-                            <div class="standings-stacked-card__team-stats">{{ row['wins1'] }}W ({{ row['ptDiff1'] }})
-                            </div>
+                            <div class="standings-stacked-card__team-stats">{{ row['wins1'] }}W · <span class="{{ 'pos' if pd1 >= 0 else 'neg' }}">{{ '+' if pd1 >= 0 else '' }}{{ pd1 }}</span></div>
                         </div>
                     </div>
                     <div class="standings-stacked-card__team">
                         <img src="{{ get_team_logo(row['team2']) }}" alt="">
                         <div class="standings-stacked-card__team-info">
                             <div class="standings-stacked-card__team-name">{{ row['team2'] }}</div>
-                            <div class="standings-stacked-card__team-stats">{{ row['wins2'] }}W ({{ row['ptDiff2'] }})
-                            </div>
+                            <div class="standings-stacked-card__team-stats">{{ row['wins2'] }}W · <span class="{{ 'pos' if pd2 >= 0 else 'neg' }}">{{ '+' if pd2 >= 0 else '' }}{{ pd2 }}</span></div>
                         </div>
                     </div>
                     <div class="standings-stacked-card__team">
                         <img src="{{ get_team_logo(row['team3']) }}" alt="">
                         <div class="standings-stacked-card__team-info">
                             <div class="standings-stacked-card__team-name">{{ row['team3'] }}</div>
-                            <div class="standings-stacked-card__team-stats">{{ row['wins3'] }}W ({{ row['ptDiff3'] }})
-                            </div>
+                            <div class="standings-stacked-card__team-stats">{{ row['wins3'] }}W · <span class="{{ 'pos' if pd3 >= 0 else 'neg' }}">{{ '+' if pd3 >= 0 else '' }}{{ pd3 }}</span></div>
                         </div>
                     </div>
                 </div>

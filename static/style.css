@@ -476,6 +476,23 @@
     border: 1px solid var(--line);
 }
 
+@media (max-width: 768px) {
+    .wp-chart-wrap {
+        height: 260px;
+        max-height: 260px;
+        margin: 0.75rem 0 1.5rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .wp-chart-wrap {
+        height: 200px;
+        max-height: 200px;
+        margin: 0.5rem 0 1.25rem;
+        padding: 0.75rem;
+    }
+}
+
 * {
     box-sizing: border-box;
     margin: 0;
@@ -1663,15 +1680,20 @@ tr:hover {
         padding: 0.5rem;
     }
 
-    /* Admin tabs: stack vertically on mobile */
+    /* Admin tabs: horizontal scroll on mobile */
     .admin-tabs {
-        flex-direction: column !important;
-        gap: 0.35rem !important;
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 4px;
+        gap: 0.25rem !important;
     }
 
     .admin-tabs .tab-btn {
-        width: 100%;
-        text-align: left;
+        flex-shrink: 0;
+        white-space: nowrap;
+        scroll-snap-align: start;
     }
 }
 
@@ -1721,13 +1743,13 @@ tr:hover {
     align-items: center;
     gap: 0.75rem;
     padding: 1.25rem 1rem;
-    border-bottom: 1px solid var(--glass-border);
+    border-bottom: 1px solid var(--line-strong);
 }
 
 .nav-drawer__title {
     font-size: 1.15rem;
-    font-weight: 800;
-    color: var(--text-primary);
+    font-weight: 700;
+    color: var(--ink);
     flex: 1;
 }
 
@@ -1761,7 +1783,7 @@ tr:hover {
     align-items: center;
     gap: 0.75rem;
     padding: 0.85rem 1.25rem;
-    color: var(--text-secondary);
+    color: var(--ink-2);
     text-decoration: none;
     font-size: 0.95rem;
     font-weight: 500;
@@ -1772,7 +1794,7 @@ tr:hover {
 .nav-drawer__links a:hover,
 .nav-drawer__links a:active {
     background: rgba(255, 255, 255, 0.08);
-    color: var(--text-primary);
+    color: var(--ink);
 }
 
 .nav-drawer__links a i {
@@ -1783,21 +1805,21 @@ tr:hover {
 
 .nav-drawer__footer {
     padding: 1rem 1.25rem;
-    border-top: 1px solid var(--glass-border);
-    color: var(--text-secondary);
+    border-top: 1px solid var(--line-strong);
+    color: var(--ink-2);
     font-size: 0.85rem;
 }
 
 .nav-drawer__footer .drawer-user-name {
     font-weight: 600;
-    color: var(--text-primary);
+    color: var(--ink);
     margin-bottom: 0.5rem;
 }
 
 .nav-drawer__footer .drawer-logout-btn {
     background: rgba(255, 255, 255, 0.08);
-    border: 1px solid var(--glass-border);
-    color: var(--text-secondary);
+    border: 1px solid var(--line-strong);
+    color: var(--ink-2);
     padding: 0.5rem 1rem;
     border-radius: 6px;
     cursor: pointer;
@@ -1859,28 +1881,27 @@ tr:hover {
     }
 
     .card {
-        background: var(--glass-bg);
-        border: 1px solid var(--glass-border);
+        background: var(--bg-elev);
+        border: 1px solid var(--line-strong);
         border-radius: 12px;
         padding: 1.25rem 1.5rem;
-        backdrop-filter: blur(12px);
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
     }
 
     .card-header {
-        font-weight: 800;
+        font-weight: 700;
         font-size: 1.1rem;
         margin-bottom: 0.5rem;
-        color: var(--text-primary);
+        color: var(--ink);
     }
 
     .card-content {
         display: none;
         margin-top: 0.75rem;
-        border-top: 1px solid var(--glass-border);
+        border-top: 1px solid var(--line-strong);
         padding-top: 0.75rem;
         font-size: 0.9rem;
-        color: var(--text-secondary);
+        color: var(--ink-2);
         line-height: 1.8;
     }
 
@@ -2064,6 +2085,12 @@ tr:hover {
     }
     .wp-h1 { font-size: 32px; }
     .wp-year { font-size: 24px; }
+}
+
+@media (max-width: 768px) {
+    .wp-top { gap: 16px; }
+    .wp-h1 { font-size: 28px; }
+    .wp-year { font-size: 20px; }
 }
 
 /* Section divider title */
@@ -2563,6 +2590,8 @@ table.wp-data-table tbody td:last-child {
     /* IE/Edge */
     gap: 0.5rem;
     padding: 0.5rem;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
 }
 
 .week-carousel::-webkit-scrollbar {
@@ -2582,6 +2611,7 @@ table.wp-data-table tbody td:last-child {
     text-transform: uppercase;
     letter-spacing: 0.05em;
     border: 1px solid transparent;
+    scroll-snap-align: start;
 }
 
 .week-item:hover {
@@ -2946,17 +2976,16 @@ table.wp-data-table tbody td:last-child {
     }
 
     .stacked-table tbody tr {
-        background: var(--glass-bg);
-        border: 1px solid var(--glass-border);
+        background: var(--bg-elev);
+        border: 1px solid var(--line-strong);
         border-radius: 12px;
         padding: 1rem 1.25rem;
         margin-bottom: 1rem;
-        backdrop-filter: blur(12px);
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
     }
 
     .stacked-table tbody tr:hover {
-        background: var(--glass-bg);
+        background: var(--bg-elev);
     }
 
     .stacked-table td {
@@ -2977,17 +3006,17 @@ table.wp-data-table tbody td:last-child {
     .stacked-table td.stacked-header-cell {
         display: block;
         text-align: left;
-        font-weight: 800;
+        font-weight: 700;
         font-size: 1.1rem;
-        color: var(--text-primary);
+        color: var(--ink);
         padding-bottom: 0.75rem;
         margin-bottom: 0.25rem;
-        border-bottom: 1px solid var(--glass-border);
+        border-bottom: 1px solid var(--line-strong);
     }
 
     .stacked-label {
         display: inline;
-        color: var(--text-secondary);
+        color: var(--ink-2);
         font-weight: 600;
         font-size: 0.8rem;
         text-transform: uppercase;
@@ -3028,11 +3057,10 @@ table.wp-data-table tbody td:last-child {
     }
 
     .standings-stacked-card {
-        background: var(--glass-bg);
-        border: 1px solid var(--glass-border);
+        background: var(--bg-elev);
+        border: 1px solid var(--line-strong);
         border-radius: 14px;
         padding: 1.25rem;
-        backdrop-filter: blur(12px);
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
     }
 
@@ -3042,26 +3070,32 @@ table.wp-data-table tbody td:last-child {
         gap: 0.75rem;
         margin-bottom: 1rem;
         padding-bottom: 0.75rem;
-        border-bottom: 1px solid var(--glass-border);
+        border-bottom: 1px solid var(--line-strong);
     }
 
     .standings-stacked-card__rank {
-        font-size: 0.85rem;
-        color: var(--text-secondary);
-        font-weight: 700;
+        font-family: 'Newsreader', serif;
+        font-style: italic;
+        font-weight: 500;
+        font-size: 28px;
+        line-height: 1;
+        color: var(--ink-3);
     }
 
     .standings-stacked-card__name {
-        font-size: 1.15rem;
-        font-weight: 800;
-        color: var(--text-primary);
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--ink);
         flex: 1;
+        letter-spacing: -0.005em;
     }
 
     .standings-stacked-card__score {
-        font-size: 1.3rem;
-        font-weight: 800;
-        color: var(--accent-gold);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--leader);
+        letter-spacing: -0.02em;
     }
 
     .standings-stacked-card__teams {
@@ -3078,28 +3112,32 @@ table.wp-data-table tbody td:last-child {
         background: rgba(255, 255, 255, 0.03);
         padding: 0.6rem 0.75rem;
         border-radius: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--line);
     }
 
     .standings-stacked-card__team img {
         width: 28px;
         height: 28px;
         object-fit: contain;
-        filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.5));
+        filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4));
     }
 
     .standings-stacked-card__team-info {
         flex: 1;
+        min-width: 0;
+        line-height: 1.25;
     }
 
     .standings-stacked-card__team-name {
         font-weight: 700;
         font-size: 0.95rem;
+        color: var(--ink);
     }
 
     .standings-stacked-card__team-stats {
-        font-size: 0.8rem;
-        color: var(--text-secondary);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.78rem;
+        color: var(--ink-2);
     }
 
     .standings-stacked-card__tb {
@@ -3109,13 +3147,15 @@ table.wp-data-table tbody td:last-child {
         background: rgba(0, 0, 0, 0.2);
         padding: 0.6rem 0.75rem;
         border-radius: 6px;
-        font-size: 0.75rem;
-        color: var(--text-secondary);
-        border: 1px dashed rgba(255, 255, 255, 0.1);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.72rem;
+        color: var(--ink-2);
+        border: 1px dashed var(--line);
     }
 
     .standings-stacked-card__tb .tb-label {
-        font-size: 0.6rem;
+        font-size: 0.58rem;
+        color: var(--ink-3);
     }
 }
 
@@ -3152,8 +3192,8 @@ table.wp-data-table tbody td:last-child {
     bottom: 0;
     left: 0;
     right: 0;
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
+    background: var(--bg-elev);
+    border: 1px solid var(--line-strong);
     border-radius: 20px 20px 0 0;
     padding: 1rem 1.5rem 2rem;
     z-index: 9999;
@@ -3179,13 +3219,13 @@ table.wp-data-table tbody td:last-child {
 
 .bottom-sheet__title {
     font-size: 1.1rem;
-    font-weight: 800;
-    color: var(--text-primary);
+    font-weight: 700;
+    color: var(--ink);
     margin-bottom: 1rem;
 }
 
 .bottom-sheet__content {
-    color: var(--text-secondary);
+    color: var(--ink-2);
     line-height: 1.8;
     font-size: 0.95rem;
 }
@@ -3250,5 +3290,120 @@ table.wp-data-table tbody td:last-child {
     table.wp-data-table thead th:first-child {
         width: 56px;
         font-size: 11px;
+    }
+}
+
+/* =============================================================
+   480px — Very small phones (iPhone SE, narrow Androids)
+   ============================================================= */
+
+@media (max-width: 480px) {
+    :root {
+        --content-padding: 0.75rem;
+    }
+
+    /* Page header */
+    .wp-top {
+        padding-bottom: 20px;
+        margin-bottom: 24px;
+        gap: 16px;
+    }
+
+    .wp-h1 {
+        font-size: 22px;
+    }
+
+    .wp-year {
+        font-size: 16px;
+    }
+
+    .wp-top-right {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .season-select {
+        font-size: 13px;
+    }
+
+    /* Leader card */
+    .wp-leader {
+        padding: 16px;
+        gap: 12px;
+    }
+
+    .wp-leader-rank {
+        font-size: 48px;
+    }
+
+    .wp-leader-score .wp-leader-num {
+        font-size: 28px;
+    }
+
+    .wp-leader-name {
+        font-size: 18px;
+    }
+
+    .wp-leader-teams {
+        gap: 8px;
+    }
+
+    /* Standings stacked cards */
+    .standings-stacked-card {
+        padding: 1rem;
+    }
+
+    .standings-stacked-card__rank {
+        font-size: 22px;
+    }
+
+    .standings-stacked-card__name {
+        font-size: 1rem;
+    }
+
+    .standings-stacked-card__score {
+        font-size: 1.1rem;
+    }
+
+    /* Stacked data tables */
+    .stacked-table tbody tr {
+        padding: 0.75rem 1rem;
+    }
+
+    .stacked-label {
+        font-size: 0.75rem;
+    }
+
+    /* Sign-in */
+    .signin-wrap {
+        padding: 1rem;
+        width: 100%;
+    }
+
+    .signin-card {
+        padding: 1.5rem 1.25rem 1.25rem;
+    }
+
+    /* Game cards */
+    .game-card {
+        padding: 0.75rem;
+    }
+
+    .team-name-text {
+        font-size: 0.85rem;
+    }
+
+    .game-info-aside {
+        min-width: 56px;
+        padding-left: 0.75rem;
+    }
+
+    /* Recap */
+    .recap-card-glass {
+        padding: 1rem;
+    }
+
+    .recap-content {
+        font-size: 0.9rem;
     }
 }
