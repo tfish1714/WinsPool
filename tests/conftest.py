@@ -14,6 +14,23 @@ def mock_env_vars(monkeypatch):
     """
     monkeypatch.setenv("USE_LOCAL_DATA", "true")
     monkeypatch.setenv("GEMINI_API_KEY", "test_mock_key")
+    # Provide a deterministic JWT secret so session_service doesn't raise in tests.
+    # This is intentionally weak — test-only, never used outside the test suite.
+    monkeypatch.setenv("JWT_SECRET", "test-jwt-secret-for-winspool-tests-only")
+
+
+@pytest.fixture
+def auth_token(monkeypatch):
+    """A valid JWT Bearer token for a regular player (role='user')."""
+    from services.session_service import create_token
+    return f"Bearer {create_token(player_id=1, role='user')}"
+
+
+@pytest.fixture
+def admin_token(monkeypatch):
+    """A valid JWT Bearer token for an admin player (role='admin')."""
+    from services.session_service import create_token
+    return f"Bearer {create_token(player_id=1, role='admin')}"
 
 @pytest.fixture
 def mock_firestore():

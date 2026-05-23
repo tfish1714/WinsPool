@@ -44,3 +44,41 @@ def test_invalid_login_credentials():
     response = client.post("/api/login", json={"email": "nonexistent@test.com", "password": "wrong"})
     assert response.status_code == 401
     assert "Invalid email or password" in response.json().get("error", "")
+
+
+# ── #12: API endpoints must require authentication ─────────────────────────
+
+def test_api_progress_requires_auth():
+    """GET /api/progress/{season}/{week} returns 401 without a token."""
+    response = client.get("/api/progress/2024/10")
+    assert response.status_code == 401
+
+
+def test_api_progress_draft_summary_requires_auth():
+    """GET /api/progress/draft_summary returns 401 without a token."""
+    response = client.get("/api/progress/draft_summary")
+    assert response.status_code == 401
+
+
+def test_api_standings_requires_auth():
+    """GET /api/standings returns 401 without a token."""
+    response = client.get("/api/standings?year=2024")
+    assert response.status_code == 401
+
+
+def test_api_schedule_requires_auth():
+    """GET /api/schedule returns 401 without a token."""
+    response = client.get("/api/schedule?year=2024")
+    assert response.status_code == 401
+
+
+def test_api_predictions_accuracy_requires_auth():
+    """GET /api/predictions/accuracy returns 401 without a token."""
+    response = client.get("/api/predictions/accuracy")
+    assert response.status_code == 401
+
+
+def test_api_predictions_explain_requires_auth():
+    """GET /api/predictions/explain returns 401 without a token."""
+    response = client.get("/api/predictions/explain?season=2024&week=1&home=KC&away=BUF")
+    assert response.status_code == 401

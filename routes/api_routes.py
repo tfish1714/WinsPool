@@ -3,11 +3,12 @@ import logging
 import os
 import time
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from services.data_service import load_data, get_latest_season_and_week
 from services.draft_service import sanitize_state
+from services.session_service import require_auth
 import services.analysis_service as analysis
 from services.analysis_service import get_season_progress
 
@@ -17,7 +18,7 @@ router = APIRouter(prefix="/api")
 
 
 @router.get("/progress/{season}/{week}")
-def fetch_progress(season: str, week: str):
+def fetch_progress(season: str, week: str, _auth: dict = Depends(require_auth)):
     """Chart data: cumulative player wins by week for the given season."""
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_route = time.time()
@@ -48,7 +49,7 @@ def fetch_progress(season: str, week: str):
 
 
 @router.get("/progress/draft_summary")
-def fetch_draft_summary():
+def fetch_draft_summary(_auth: dict = Depends(require_auth)):
     """Best-picks summary for the current season (used by draft board tab)."""
     try:
         _, _, games, _, _, _, _ = load_data()
@@ -64,7 +65,7 @@ def fetch_draft_summary():
 
 
 @router.get("/standings")
-def get_standings(year: int):
+def get_standings(year: int, _auth: dict = Depends(require_auth)):
     """Data for the standings table."""
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_route = time.time()
@@ -86,7 +87,7 @@ from services.cache_service import merge_game_predictions as _merge_game_predict
 
 
 @router.get("/predictions/accuracy")
-def get_prediction_accuracy():
+def get_prediction_accuracy(_auth: dict = Depends(require_auth)):
     """ML prediction accuracy vs actual game results, by season and week."""
     try:
         from services.cache_service import get_game_predictions
@@ -178,7 +179,7 @@ def get_prediction_accuracy():
 
 
 @router.get("/predictions/explain")
-def get_prediction_explain(season: int, week: int, home: str, away: str):
+def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: dict = Depends(require_auth)):
     """Return the stored explanation (feature values) for a single game prediction."""
     try:
         from services.cache_service import get_game_predictions
@@ -203,7 +204,7 @@ def get_prediction_explain(season: int, week: int, home: str, away: str):
 
 
 @router.get("/schedule")
-def get_schedule(year: int):
+def get_schedule(year: int, _auth: dict = Depends(require_auth)):
     """Data for the week-by-week schedule grid."""
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_route = time.time()

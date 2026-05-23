@@ -20,6 +20,21 @@ router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
 
+def _get_authenticated_admin(socket_player_id: int | None, all_players: list[dict]) -> dict | None:
+    """Return the player dict if the authenticated socket user is an admin, else None.
+
+    Always uses socket_player_id (the server-validated identity from the verify/
+    reauthenticate handshake) — never the playerId field from a client message,
+    which is attacker-controlled.  Callers must pass socket_player_id directly.
+    """
+    if socket_player_id is None:
+        return None
+    player = next((p for p in all_players if p["playerId"] == socket_player_id), None)
+    if not player or player.get("role") != "admin":
+        return None
+    return player
+
+
 def _format_pick_time(seconds: int) -> str:
     """Convert raw seconds to a human-readable duration string."""
     if seconds >= 3600:
@@ -458,11 +473,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         pass
 
             elif action == "undo_pick":
-                pid = msg.get("playerId")
                 state = load_draft_state(connected_players, year=target_year)
-                
-                player = next((p for p in state["all_players"] if p["playerId"] == int(pid)), None)
-                if not player or player.get("role") != "admin":
+                player = _get_authenticated_admin(socket_player_id, state["all_players"])
+                if not player:
                     await websocket.send_json({"type": "error", "message": "Unauthorized: Admin access required."})
                     continue
                 
@@ -476,11 +489,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
 
             elif action == "reset_pick":
-                pid = msg.get("playerId")
                 state = load_draft_state(connected_players, year=target_year)
-                
-                player = next((p for p in state["all_players"] if p["playerId"] == int(pid)), None)
-                if not player or player.get("role") != "admin":
+                player = _get_authenticated_admin(socket_player_id, state["all_players"])
+                if not player:
                     await websocket.send_json({"type": "error", "message": "Unauthorized: Admin access required."})
                     continue
                 
@@ -498,12 +509,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
 
             elif action == "force_pick":
-                pid = msg.get("playerId")
                 team = msg.get("team")
                 state = load_draft_state(connected_players, year=target_year)
-                
-                player = next((p for p in state["all_players"] if p["playerId"] == int(pid)), None)
-                if not player or player.get("role") != "admin":
+                player = _get_authenticated_admin(socket_player_id, state["all_players"])
+                if not player:
                     await websocket.send_json({"type": "error", "message": "Unauthorized: Admin access required."})
                     continue
                 
@@ -525,7 +534,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif action == "pick":
                 team = msg.get("team")
-                pid = msg.get("playerId")
                 state = load_draft_state(connected_players, year=target_year)
                 if not state["draft_ready"]:
                     await websocket.send_json({"type": "error", "message": "Draft cannot start until everyone is signed in!"})
@@ -537,25 +545,27 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json({"type": "error", "message": "Team is not available!"})
                     continue
 
-                # Check permissions: Is it their turn OR are they an admin?
+                # Check permissions using socket_player_id (server-validated identity),
+                # never the client-supplied playerId from the message.
                 active_pick = state["active_pick"]
                 target_pid = next((x["playerId"] for x in state["draft_board"] if x["pick"] == active_pick), None)
                 try:
                     target_pid_int = int(target_pid) if target_pid is not None else None
-                    pid_int = int(pid) if pid is not None else None
                 except (ValueError, TypeError):
-                    await websocket.send_json({"type": "error", "message": "Invalid Player ID."})
+                    await websocket.send_json({"type": "error", "message": "Invalid draft board state."})
                     continue
 
-                player = next((p for p in state["all_players"] if p["playerId"] == pid_int), None)
-                is_admin = player and player.get("role") == "admin"
+                # Resolve admin status from the authenticated socket identity only
+                admin_player = _get_authenticated_admin(socket_player_id, state["all_players"])
+                is_admin = admin_player is not None
 
-                if pid_int != target_pid_int and not is_admin:
+                if socket_player_id != target_pid_int and not is_admin:
                     await websocket.send_json({"type": "error", "message": "It is not your turn to pick!"})
                     continue
 
                 if target_pid is not None:
-                    save_pick(state["season"], active_pick, target_pid, team, executed_by=player.get("playerName") if is_admin else None)
+                    executed_by = admin_player.get("playerName") if is_admin and socket_player_id != target_pid_int else None
+                    save_pick(state["season"], active_pick, target_pid, team, executed_by=executed_by)
                     await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
 
     except WebSocketDisconnect:
