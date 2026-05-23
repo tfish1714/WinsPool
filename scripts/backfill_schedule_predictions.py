@@ -97,17 +97,17 @@ def _profile_predictions_for_year(year: int, schedule_df: pd.DataFrame,
             sl_val = float(spread) if pd.notna(spread) else None
 
             hp_clip = min(0.98, max(0.02, hp))
-            model_spread = round(-7.5 * float(np.log(hp_clip / (1.0 - hp_clip))), 1)
+            model_spread = round(7.5 * float(np.log(hp_clip / (1.0 - hp_clip))), 1)
             vegas_spread = round(sl_val, 1) if sl_val is not None else None
             edge_vs_vegas = round(model_spread - sl_val, 1) if sl_val is not None else None
 
             ats = winner
             if sl_val is not None:
                 try:
-                    ats = ht if model_spread < sl_val else at
+                    ats = ht if model_spread > sl_val else at
                 except (ValueError, TypeError):
                     pass
-            vhp = round(1 / (1 + np.exp(sl_val / 7.5)), 4) if sl_val is not None else None
+            vhp = round(1 / (1 + np.exp(-sl_val / 7.5)), 4) if sl_val is not None else None
 
             # Extract prior-season profile values for the explanation
             h = profile_dict.get(ht, {})
@@ -318,17 +318,27 @@ def main():
     ft_lookup = build_ensemble_lookup(ft, nn_svc, xgb_svc, lr_svc)
     print(f"  {len(ft_lookup)} feature-table predictions computed")
 
-    # Load the schedule from Firestore/pkl for the profile fallback
-    # (used only for years that have unplayed games not in the feature table)
+    # Load the schedule for the profile fallback.
+    # Primary: rawdata games.csv (always has latest spread_line/total_line from nflverse).
+    # Fallback: Firestore/pkl via load_data() for any columns rawdata doesn't have.
     print("\n  Loading schedule data for profile fallback...")
     try:
-        from services.data_service import load_data
-        _, _, all_games, _, _, _, _ = load_data()
+        from services.nn_feature_engine import _load_schedule, RAWDATA_DIR
+        all_games = _load_schedule(RAWDATA_DIR)
+        if all_games.empty:
+            raise ValueError("rawdata schedule empty")
         has_schedule = True
+        print(f"  Loaded {len(all_games)} games from rawdata schedule")
     except Exception as e:
-        print(f"  [warn] Could not load schedule data: {e}")
-        all_games = pd.DataFrame()
-        has_schedule = False
+        print(f"  [warn] rawdata schedule unavailable ({e}), falling back to Firestore/pkl")
+        try:
+            from services.data_service import load_data
+            _, _, all_games, _, _, _, _ = load_data()
+            has_schedule = True
+        except Exception as e2:
+            print(f"  [warn] Could not load schedule data: {e2}")
+            all_games = pd.DataFrame()
+            has_schedule = False
 
     print(f"\n[3/3] Writing predictions...")
     total_written = 0

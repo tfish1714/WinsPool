@@ -58,30 +58,30 @@ function renderExplanation(data) {
     const confBar       = _bar(pred_su_conf, predColor);
 
     // Vegas line row
-    // spread_line convention: negative = home favored, positive = away favored
+    // nflverse convention: positive spread_line = home favored (e.g. DET -7 stored as +7)
     let vegasHtml = '—';
     if (ex?.vegas_line != null) {
         const line    = ex.vegas_line;
-        const favTeam = line < 0 ? home_team : (line > 0 ? away_team : null);
+        const favTeam = line > 0 ? home_team : (line < 0 ? away_team : null);
         const lineAbs = Math.abs(line);
         vegasHtml = favTeam ? `${favTeam} -${lineAbs}` : 'Pick\'em';
     }
 
-    // Model spread card content
+    // Model spread card content (same positive = home favored convention)
     const ms = model_spread ?? ex?.model_spread;
     const ev = edge_vs_vegas ?? ex?.edge_vs_vegas;
     let modelSpreadHtml = '—';
     let edgeBadgeHtml   = '';
     if (ms != null) {
-        const msFav  = ms < 0 ? home_team : (ms > 0 ? away_team : null);
+        const msFav  = ms > 0 ? home_team : (ms < 0 ? away_team : null);
         const msAbs  = Math.abs(ms);
         modelSpreadHtml = msFav ? `${msFav} -${msAbs}` : 'Pick\'em';
 
         if (ev != null) {
             const edgeAbs = Math.abs(ev);
-            // ev > 0: model_spread > vegas_spread → Vegas over-rates home → away has edge
-            // ev < 0: model_spread < vegas_spread → Vegas under-rates home → home has edge
-            const edgeDir = ev > 0 ? away_team : (ev < 0 ? home_team : null);
+            // ev > 0: model likes home MORE than Vegas → home has edge ATS
+            // ev < 0: model likes home LESS than Vegas → away has edge ATS
+            const edgeDir = ev > 0 ? home_team : (ev < 0 ? away_team : null);
             if (edgeDir && edgeAbs >= 0.5) {
                 const isSignificant = edgeAbs >= 2;
                 edgeBadgeHtml = `<div style="margin-top:4px; font-size:0.72rem; color:${isSignificant ? 'var(--pos)' : 'var(--ink-2)'};">

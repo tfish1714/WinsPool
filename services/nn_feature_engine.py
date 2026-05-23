@@ -36,6 +36,12 @@ SKILL_POSITIONS = {"RB", "WR", "CB", "S", "FS", "SS"}
 OL_POSITIONS = {"C", "G", "T", "OL", "OG", "OT"}
 DL_POSITIONS = {"DE", "DT", "NT", "DL"}
 
+# DL performance weights (applied to per-player / per-team stats)
+DL_SACK_WEIGHT    = 6.0
+DL_PRESSURE_WEIGHT = 1.5
+DL_HIT_WEIGHT     = 1.0
+DL_TFL_WEIGHT     = 1.0
+
 # Canonical team abbreviation normalization
 TEAM_ABBR_MAP = {
     "LAR": "LA", "WSH": "WAS", "JAC": "JAX", "OAK": "LV", "SD": "LAC", "STL": "LA"
@@ -197,13 +203,16 @@ def compute_age_multiplier(age: float, pos: str) -> float:
         return max(0.3, 1.0 - (decay * (age - AGE_PRIME_UPPER)))
 
 
-def compute_roster_features(snap_counts: pd.DataFrame, rosters: pd.DataFrame) -> dict:
-    """Build per-(season, team) talent scores from nflverse snap counts.
+def compute_roster_features(
+    snap_counts: pd.DataFrame,
+    rosters: pd.DataFrame,
+    team_stats: pd.DataFrame | None = None,
+) -> dict:
+    """Build per-(season, team) talent scores from nflverse snap counts + team defensive stats.
 
-    Quality proxy: total regular-season snaps (offense + defense) weighted by
-    an age multiplier derived from birth_date in the nflverse roster file.
-    Replaces the legacy pfr_approximate_value * games_started metric.
-    snap_counts covers 2012+; seasons before that return zero features.
+    OL quality: snap count × age multiplier (volume proxy for line depth and continuity).
+    DL quality: sacks×6 + qb_hits×1.5 + tfl×1 from team-level weekly stats, summed per season.
+    snap_counts covers 2012+; team_stats covers 2020+.
     """
     if snap_counts.empty:
         return {}
@@ -216,13 +225,11 @@ def compute_roster_features(snap_counts: pd.DataFrame, rosters: pd.DataFrame) ->
     sc["season"] = pd.to_numeric(sc["season"], errors="coerce")
     sc["team"] = sc["team"].apply(_normalize_team)
 
-    # Aggregate to season-level per player
     player_season = (
         sc.groupby(["season", "team", "pfr_player_id", "position"], as_index=False)["total_snaps"]
         .sum()
     )
 
-    # Join birth_date from nflverse rosters for age multiplier
     if not rosters.empty:
         roster_ages = (
             rosters[["pfr_id", "birth_date", "season"]]
@@ -237,7 +244,6 @@ def compute_roster_features(snap_counts: pd.DataFrame, rosters: pd.DataFrame) ->
     else:
         player_season["birth_date"] = None
 
-    # Compute age as of Sept 1 of the season year
     def _age_on_sept1(row) -> float:
         bd = row.get("birth_date")
         if pd.isna(bd) or not bd:
@@ -251,6 +257,7 @@ def compute_roster_features(snap_counts: pd.DataFrame, rosters: pd.DataFrame) ->
 
     player_season["age"] = player_season.apply(_age_on_sept1, axis=1)
 
+    # OL scores from snap counts
     cache: dict = {}
     for (s, t), grp in player_season.groupby(["season", "team"]):
         talent = ol_av = dl_av = 0.0
@@ -263,8 +270,137 @@ def compute_roster_features(snap_counts: pd.DataFrame, rosters: pd.DataFrame) ->
                 ol_av += score
             if pos in DL_POSITIONS:
                 dl_av += score
-        cache[(s, t)] = {"talent": talent, "ol_av": ol_av, "dl_av": dl_av}
+        cache[(s, t)] = {"talent": talent, "ol_av": ol_av, "dl_av": dl_av, "dl_perf": 0.0}
+
+    # DL performance from team-level stats (sacks + qb_hits + tfl)
+    if team_stats is not None and not team_stats.empty:
+        ts = team_stats.copy()
+        if "season_type" in ts.columns:
+            ts = ts[ts["season_type"] == "REG"]
+        elif "game_type" in ts.columns:
+            ts = ts[ts["game_type"] == "REG"]
+        ts["season"] = pd.to_numeric(ts["season"], errors="coerce")
+        ts["team"]   = ts["team"].apply(_normalize_team)
+        ts["_dl"] = (
+            pd.to_numeric(ts.get("def_sacks",              0), errors="coerce").fillna(0) * DL_SACK_WEIGHT
+            + pd.to_numeric(ts.get("def_qb_hits",          0), errors="coerce").fillna(0) * DL_HIT_WEIGHT
+            + pd.to_numeric(ts.get("def_tackles_for_loss", 0), errors="coerce").fillna(0) * DL_TFL_WEIGHT
+        )
+        for (s, t), grp in ts.groupby(["season", "team"]):
+            key = (int(s), t)
+            if key in cache:
+                cache[key]["dl_perf"] = float(grp["_dl"].sum())
+
     return cache
+
+
+def compute_preseason_roster_features(target_season: int, rawdata_dir) -> dict:
+    """Build per-team OL snap quality + DL performance from current roster + prior-season data.
+
+    OL: snap count × age multiplier for each OL player on the target-season roster,
+        using the prior season's snap data. Rookies/new signings get median × 0.5.
+    DL: individual sacks×6 + pressures×1.5 + qb_hits×1 from prior-season advstats_def,
+        age-adjusted and summed per team. Rookies get team-average prior-year contribution.
+
+    Returns {team: {"ol_av": float, "dl_perf": float}}.
+    """
+    prior = target_season - 1
+    roster_path  = Path(rawdata_dir) / "rosters"      / f"roster_{target_season}.csv"
+    snap_path    = Path(rawdata_dir) / "snap_counts"  / f"snap_counts_{prior}.csv"
+    adv_def_path = Path(rawdata_dir) / "pfr_advstats" / f"advstats_week_def_{prior}.csv"
+
+    if not roster_path.exists() or not snap_path.exists():
+        return {}
+
+    roster = pd.read_csv(roster_path, low_memory=False)
+    snaps  = pd.read_csv(snap_path,  low_memory=False)
+
+    if "game_type" in snaps.columns:
+        snaps = snaps[snaps["game_type"] == "REG"].copy()
+    snaps["offense_snaps"] = pd.to_numeric(snaps["offense_snaps"], errors="coerce").fillna(0)
+    snaps["defense_snaps"] = pd.to_numeric(snaps["defense_snaps"], errors="coerce").fillna(0)
+
+    # Build per-player season totals, keyed by both pfr_player_id and name
+    player_snaps = snaps.groupby("pfr_player_id")[["offense_snaps", "defense_snaps"]].sum().reset_index()
+    pos_per_player = (
+        snaps.groupby("pfr_player_id")["position"]
+        .agg(lambda x: x.mode().iloc[0] if len(x) > 0 else "")
+        .reset_index()
+    )
+    player_snaps = player_snaps.merge(pos_per_player, on="pfr_player_id", how="left")
+    player_snaps["position"] = player_snaps["position"].fillna("").str.upper()
+
+    # Name → season snap totals (for players where pfr_id matching fails)
+    name_snaps = snaps.groupby("player")[["offense_snaps", "defense_snaps"]].sum().reset_index()
+    name_to_snaps: dict = {
+        row["player"]: (row["offense_snaps"], row["defense_snaps"])
+        for _, row in name_snaps.iterrows()
+    }
+
+    ol_vets = player_snaps[player_snaps["position"].isin(OL_POSITIONS)]["offense_snaps"]
+    ol_median = float(ol_vets.median()) if not ol_vets.empty else 300.0
+
+    # DL performance: player-level advstats, keyed by pfr_player_id and name
+    dl_by_pfr:  dict = {}  # {pfr_player_id: score}
+    dl_by_name: dict = {}  # {player_name: score}
+    dl_avg_per_player = 0.0
+    if adv_def_path.exists():
+        adv = pd.read_csv(adv_def_path, low_memory=False)
+        if "game_type" in adv.columns:
+            adv = adv[adv["game_type"] == "REG"].copy()
+        adv["_dl"] = (
+            pd.to_numeric(adv["def_sacks"],        errors="coerce").fillna(0) * DL_SACK_WEIGHT
+            + pd.to_numeric(adv.get("def_pressures", pd.Series(0, index=adv.index)), errors="coerce").fillna(0) * DL_PRESSURE_WEIGHT
+            + pd.to_numeric(adv["def_times_hitqb"], errors="coerce").fillna(0) * DL_HIT_WEIGHT
+        )
+        dl_by_pfr  = adv.groupby("pfr_player_id")["_dl"].sum().to_dict()
+        dl_by_name = adv.groupby("pfr_player_name")["_dl"].sum().to_dict()
+        all_scores = list(dl_by_pfr.values())
+        if all_scores:
+            dl_avg_per_player = float(np.mean(all_scores))
+
+    # Age as of September 1 of target season
+    sep1 = pd.Timestamp(f"{target_season}-09-01")
+    roster = roster.copy()
+    roster["birth_date"] = pd.to_datetime(roster["birth_date"], errors="coerce")
+    roster["age"] = ((sep1 - roster["birth_date"]).dt.days / 365.25)
+    roster["position"] = roster["position"].fillna("").str.upper()
+    roster["team"] = roster["team"].apply(_normalize_team)
+
+    # pfr_id → season snap lookup
+    pfr_to_snaps: dict = {
+        row["pfr_player_id"]: (row["offense_snaps"], row["defense_snaps"])
+        for _, row in player_snaps.iterrows()
+    }
+
+    result = {}
+    for team, grp in roster.groupby("team"):
+        ol_av   = 0.0
+        dl_perf = 0.0
+        for _, p in grp.iterrows():
+            pos  = str(p["position"]).upper().strip()
+            age  = float(p["age"]) if pd.notna(p["age"]) else 26.0
+            mult = compute_age_multiplier(age, pos)
+            name = str(p.get("full_name", ""))
+            pid  = str(p.get("pfr_id", "")) if pd.notna(p.get("pfr_id")) else ""
+
+            if pos in OL_POSITIONS:
+                # Try pfr_id first, fall back to name
+                snaps_tup = pfr_to_snaps.get(pid) or name_to_snaps.get(name)
+                off_snaps = snaps_tup[0] if snaps_tup else None
+                snp = off_snaps if off_snaps is not None else (ol_median * 0.5)
+                ol_av += snp * mult
+
+            elif pos in DL_POSITIONS:
+                # Try pfr_id first, fall back to name
+                raw_dl = dl_by_pfr.get(pid) or dl_by_name.get(name)
+                if raw_dl is None:
+                    raw_dl = dl_avg_per_player * 0.5
+                dl_perf += raw_dl * mult
+
+        result[team] = {"ol_av": ol_av, "dl_perf": dl_perf}
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -705,8 +841,8 @@ def build_master_feature_table(
     snap_counts = _load_multi_season("snap_counts/snap_counts_*.csv", rd)
     starter_qb_flags = compute_starter_qb_flags(snap_counts)
     nflverse_rosters = _load_multi_season("rosters/roster_*.csv", rd)
-    roster_cache = compute_roster_features(snap_counts, nflverse_rosters)
     stats_team_weekly = _load_multi_season("stats_team/stats_team_week_*.csv", rd)
+    roster_cache = compute_roster_features(snap_counts, nflverse_rosters, team_stats=stats_team_weekly)
     roster_perf_cache = compute_roster_performance(stats_team_weekly)
 
     # --- Rolling EPA (per-game join on season + week + team) ---
@@ -933,13 +1069,33 @@ def build_master_feature_table(
     else:
         sched["roster_talent_delta"] = 0.0
 
-    # --- Trench Dominance (snap-count O-line score; kept separate from roster grade) ---
-    def _trench(row):
-        h = roster_cache.get((row["season"], row["home_team"]), {}).get("ol_av", 0)
-        a = roster_cache.get((row["season"], row["away_team"]), {}).get("ol_av", 0)
-        return h - a
+    # --- Trench Dominance (OL snap quality + DL performance composite, z-scored per season) ---
+    # Pre-compute per-season normalization params so OL and DL contribute equally.
+    _trench_seasons: dict[int, dict] = {}
+    for (s, _t), v in roster_cache.items():
+        _trench_seasons.setdefault(s, {"ol": [], "dl": []})
+        _trench_seasons[s]["ol"].append(v.get("ol_av", 0.0))
+        _trench_seasons[s]["dl"].append(v.get("dl_perf", 0.0))
+    _trench_norm: dict[int, tuple] = {}
+    for s, arrs in _trench_seasons.items():
+        ol_mu, ol_sig = float(np.mean(arrs["ol"])), max(float(np.std(arrs["ol"])), 1.0)
+        dl_mu, dl_sig = float(np.mean(arrs["dl"])), max(float(np.std(arrs["dl"])), 1.0)
+        _trench_norm[s] = (ol_mu, ol_sig, dl_mu, dl_sig)
 
-    sched["trench_dominance_metric"] = sched.apply(_trench, axis=1) if roster_cache else 0.0
+    def _trench(row):
+        s = int(row["season"])
+        h = roster_cache.get((s, row["home_team"]), {})
+        a = roster_cache.get((s, row["away_team"]), {})
+        if s not in _trench_norm:
+            return h.get("ol_av", 0.0) - a.get("ol_av", 0.0)
+        ol_mu, ol_sig, dl_mu, dl_sig = _trench_norm[s]
+        h_z = (h.get("ol_av", ol_mu) - ol_mu) / ol_sig + (h.get("dl_perf", dl_mu) - dl_mu) / dl_sig
+        a_z = (a.get("ol_av", ol_mu) - ol_mu) / ol_sig + (a.get("dl_perf", dl_mu) - dl_mu) / dl_sig
+        return h_z - a_z
+
+    sched["trench_dominance_metric"] = (
+        sched.apply(_trench, axis=1) if (roster_cache and not sched.empty) else 0.0
+    )
 
     # --- Roster Value (season-level WAR proxy; EPA + kicker FG+ + punter gross avg) ---
     try:

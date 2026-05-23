@@ -1,4 +1,4 @@
-"""scripts/weekly_model_eval.py -- Track NN model accuracy week-by-week.
+"""scripts/weekly_model_eval.py -- Track ensemble model accuracy week-by-week.
 
 After each week of NFL games, run this script to evaluate how well the model
 predicted that week's outcomes. Results are appended to reports/nn_weekly_accuracy.csv
@@ -32,6 +32,9 @@ from services.nn_prediction_service import (
     FEATURE_COLUMNS,
     REGISTRY_PATH,
 )
+from services.xgb_prediction_service import XGBPredictionService
+from services.lr_prediction_service import LRPredictionService
+from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 
 REPORTS_DIR = pathlib.Path(__file__).parent.parent / "reports"
 ACCURACY_CSV = REPORTS_DIR / "nn_weekly_accuracy.csv"
@@ -63,14 +66,15 @@ def _resolve_model_version(svc: NNPredictionService) -> str:
 
 def _evaluate_weeks(
     svc: NNPredictionService,
+    xgb_svc: XGBPredictionService,
+    lr_svc: LRPredictionService,
     feature_table: pd.DataFrame,
     season: int,
     weeks: list[int],
 ) -> list[dict]:
-    """Evaluate model on each specified week. Returns one row per week."""
+    """Evaluate full NN+XGB+LR ensemble on each specified week. Returns one row per week."""
     from sklearn.metrics import r2_score, mean_absolute_error
 
-    # All completed games in this season up to max(weeks) for YTD season R2
     season_data = feature_table[
         (feature_table["season"] == season)
         & (feature_table["home_win"].notna())
@@ -80,13 +84,27 @@ def _evaluate_weeks(
         print(f"  No completed games found for season {season}.")
         return []
 
-    # Predict all games in the season at once for efficiency
-    X_all = season_data[FEATURE_COLUMNS].values.astype("float32")
-    if svc.scaler is not None:
-        X_all = svc.scaler.transform(X_all)
+    X_raw = season_data[FEATURE_COLUMNS].values.astype("float32")
+
+    # NN predictions (scaled)
+    X_nn = svc.scaler.transform(X_raw) if svc.scaler is not None else X_raw
+    nn_probs = svc.model.predict(X_nn, verbose=0).flatten()
+
+    # XGB predictions
+    xgb_probs = xgb_svc.model.predict_proba(X_raw)[:, 1]
+
+    # LR predictions
+    X_lr = lr_svc.scaler.transform(X_raw) if lr_svc.scaler is not None else X_raw
+    lr_probs = lr_svc.model.predict_proba(X_lr)[:, 1]
+
+    blended = np.clip(
+        NN_WEIGHT * nn_probs + XGB_WEIGHT * xgb_probs + LR_WEIGHT * lr_probs,
+        0.02, 0.98,
+    )
+
     season_data = season_data.copy()
-    season_data["pred_home_wp"] = svc.model.predict(X_all, verbose=0).flatten()
-    season_data["pred_away_wp"] = 1.0 - season_data["pred_home_wp"]
+    season_data["pred_home_wp"] = blended
+    season_data["pred_away_wp"] = 1.0 - blended
 
     model_version = _resolve_model_version(svc)
     now = datetime.now(timezone.utc).isoformat()
@@ -211,19 +229,24 @@ def main():
         weeks = args.week
 
     print("=" * 65)
-    print("  NFL Neural Network -- Weekly Accuracy Tracker")
+    print("  NFL Ensemble (NN+XGB+LR) -- Weekly Accuracy Tracker")
     print("=" * 65)
 
-    print(f"\n[1/3] Loading model ({args.model})...")
+    print(f"\n[1/3] Loading models ({args.model})...")
     svc = NNPredictionService()
     svc.load_model(args.model if args.model not in ("latest", "best") else args.model)
+    xgb_svc = XGBPredictionService()
+    xgb_svc.load_model()
+    lr_svc = LRPredictionService()
+    lr_svc.load_model()
+    print(f"  Weights: NN={NN_WEIGHT} XGB={XGB_WEIGHT} LR={LR_WEIGHT}")
 
     print(f"[2/3] Building feature table (seasons {args.min_season}–{args.season})...")
     ft = build_master_feature_table(min_season=args.min_season, max_season=args.season)
     print(f"  {len(ft)} games loaded.")
 
     print(f"\n[3/3] Evaluating season {args.season}, week(s) {weeks}...")
-    rows = _evaluate_weeks(svc, ft, args.season, weeks)
+    rows = _evaluate_weeks(svc, xgb_svc, lr_svc, ft, args.season, weeks)
 
     if not rows:
         print("  No rows to record.")

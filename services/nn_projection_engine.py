@@ -15,6 +15,7 @@ from services.nn_feature_engine import (
     RAWDATA_DIR,
     _read_csv_safe,
     _normalize_team,
+    compute_preseason_roster_features,
 )
 from services.nn_prediction_service import (
     NNPredictionService,
@@ -37,6 +38,8 @@ class NNProjectionEngine:
         self.lr_svc = LRPredictionService()
         self.lr_svc.load_model()
         self._team_profiles = pd.DataFrame()
+        self._preseason_roster: dict = {}   # {team: {"ol_av": float, "dl_perf": float}}
+        self._preseason_norm: tuple | None = None  # (ol_mu, ol_sig, dl_mu, dl_sig)
 
     def initialize(self, season: int):
         """Pre-compute the feature profiles required for predictions.
@@ -46,6 +49,26 @@ class NNProjectionEngine:
         """
         feature_table = build_master_feature_table(min_season=2020, max_season=season - 1)
         self._team_profiles = self._build_team_profiles(feature_table, season - 1)
+
+        snap_path = RAWDATA_DIR / "snap_counts" / f"snap_counts_{season}.csv"
+        snap_empty = not snap_path.exists() or pd.read_csv(snap_path, nrows=1).empty
+        if snap_empty:
+            try:
+                self._preseason_roster = compute_preseason_roster_features(season, RAWDATA_DIR)
+                if self._preseason_roster:
+                    logger.info(
+                        "Preseason roster profiles built for %d teams (season %d)",
+                        len(self._preseason_roster), season,
+                    )
+                    # Normalization params from league-wide preseason distribution
+                    ol_vals = [v.get("ol_av",   0.0) for v in self._preseason_roster.values()]
+                    dl_vals = [v.get("dl_perf", 0.0) for v in self._preseason_roster.values()]
+                    self._preseason_norm = (
+                        float(np.mean(ol_vals)), max(float(np.std(ol_vals)), 1.0),
+                        float(np.mean(dl_vals)), max(float(np.std(dl_vals)), 1.0),
+                    )
+            except Exception as exc:
+                logger.warning("Preseason roster build failed: %s", exc)
 
     def _build_team_profiles(self, feature_table: pd.DataFrame, proxy_season: int) -> pd.DataFrame:
         """Build per-team average feature profiles."""
@@ -80,9 +103,21 @@ class NNProjectionEngine:
         for col in NN_FEATURE_COLUMNS:
             if col == "home_flag":
                 features[col] = 1.0
+            elif col == "trench_dominance_metric":
+                if self._preseason_roster and self._preseason_norm:
+                    ol_mu, ol_sig, dl_mu, dl_sig = self._preseason_norm
+                    h_pr = self._preseason_roster.get(home_team, {})
+                    a_pr = self._preseason_roster.get(away_team, {})
+                    h_z = ((h_pr.get("ol_av",   ol_mu) - ol_mu) / ol_sig
+                           + (h_pr.get("dl_perf", dl_mu) - dl_mu) / dl_sig)
+                    a_z = ((a_pr.get("ol_av",   ol_mu) - ol_mu) / ol_sig
+                           + (a_pr.get("dl_perf", dl_mu) - dl_mu) / dl_sig)
+                    features[col] = h_z - a_z
+                else:
+                    features[col] = hp.get(col, 0.0) - ap.get(col, 0.0)
             elif col in (
                 "roster_talent_delta", "star_qb_value_delta",
-                "trench_dominance_metric", "net_success_rate",
+                "net_success_rate",
                 "high_leverage_regression_flag",
             ):
                 features[col] = hp.get(col, 0.0) - ap.get(col, 0.0)
@@ -268,15 +303,15 @@ def enrich_schedule_with_nn_predictions(
         # Clamp confidence to 50-99%
         conf_pct = round(min(99.0, max(50.0, confidence * 100)), 1)
 
-        # ATS pick: compare ML-implied spread to Vegas spread.
+        # ATS pick: positive model spread = home favored (matches nflverse convention).
         spread = row.get("spread_line")
         ats = winner
         if pd.notna(spread):
             try:
                 sv = float(spread)
                 hp_clip = min(0.98, max(0.02, home_prob))
-                implied = -7.5 * np.log(hp_clip / (1.0 - hp_clip))
-                ats = home if implied < sv else away
+                implied = 7.5 * np.log(hp_clip / (1.0 - hp_clip))
+                ats = home if implied > sv else away
             except (ValueError, TypeError):
                 pass
 

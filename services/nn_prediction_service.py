@@ -99,10 +99,13 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
         conf   = round(min(99.0, max(50.0, (hp if hp >= 0.5 else 1.0 - hp) * 100)), 1)
 
         hp_clip = np.clip(hp, 0.02, 0.98)
-        model_spread = round(-7.5 * float(np.log(hp_clip / (1.0 - hp_clip))), 1)
+        # nflverse convention: positive spread_line = home favored (e.g. DET -7 stored as +7).
+        # model_spread matches this: positive = home favored.
+        model_spread = round(7.5 * float(np.log(hp_clip / (1.0 - hp_clip))), 1)
 
         # Vegas spread used for post-hoc comparison only (not a model feature).
-        # model_spread < vegas_spread → model likes home team more than Vegas.
+        # edge_vs_vegas > 0: model likes home MORE than Vegas → home has edge ATS.
+        # edge_vs_vegas < 0: model likes home LESS than Vegas → away has edge ATS.
         sl_raw = getattr(row, "spread_line", None)
         vegas_spread = None
         edge_vs_vegas = None
@@ -113,7 +116,7 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
                 if not np.isnan(sv):
                     vegas_spread = round(sv, 1)
                     edge_vs_vegas = round(model_spread - sv, 1)
-                    ats = ht if model_spread < sv else at
+                    ats = ht if model_spread > sv else at
             except (ValueError, TypeError):
                 pass
 
@@ -127,7 +130,7 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
         vegas_home_prob = None
         if vegas_spread is not None:
             try:
-                vegas_home_prob = round(1 / (1 + np.exp(vegas_spread / 7.5)), 4)
+                vegas_home_prob = round(1 / (1 + np.exp(-vegas_spread / 7.5)), 4)
             except Exception:
                 pass
 
