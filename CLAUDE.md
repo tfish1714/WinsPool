@@ -30,7 +30,8 @@ docker run -p 8000:8080 -e USE_LOCAL_DATA=True -e ROOM_CODE=test winspool
 python scripts/sync_nflverse_data.py                      # Update rawdata/ from nflverse (current season)
 python scripts/sync_nflverse_data.py --seasons 2020 2025  # Full historical rebuild
 python scripts/sync_nflverse_data.py --include-pbp        # Also fetch large play-by-play files
-python scripts/daily_nfl_sync.py                          # Push game results → Firestore (web app)
+python scripts/compute_elo.py                             # Recompute rawdata/elo_computed.csv from scratch (run after rawdata sync)
+python scripts/daily_nfl_sync.py                          # Read rawdata/schedules/games.csv → compute standings → push nfl_games + nfl_standings to Firestore
 python scripts/run_cron.py                                # Run full pipeline (sync + firestore + cache)
 
 # Local dev cache (USE_LOCAL_DATA=True)
@@ -47,8 +48,8 @@ python scripts/predict_season.py --season 2026                        # Generate
 # ML model training
 python scripts/train_nn_model.py       # Train ML model (auto-increments version in registry)
 python scripts/train_nn_model.py --version v3   # Train and save as specific version
-python scripts/weekly_model_eval.py --season 2025 --week 14    # Evaluate one week
-python scripts/weekly_model_eval.py --season 2025 --week 1 17  # Evaluate full season range
+python scripts/weekly_model_eval.py --season 2025 --week 14    # Evaluate ensemble accuracy for one week
+python scripts/weekly_model_eval.py --season 2025 --week 1 18  # Evaluate full season range (NN+XGB+LR ensemble)
 ```
 
 ### Tests
@@ -64,7 +65,7 @@ pytest tests/ --cov=services --cov=routes
 - **Database**: Google Cloud Firestore (prod) / local pickle files (dev)
 - **Frontend**: Vanilla JS (ES6 modules) + Jinja2 templates + CSS (glassmorphism)
 - **Real-time**: WebSockets (live draft room)
-- **ML**: TensorFlow/Keras (`models/nn_v1.keras`), Pandas, NumPy
+- **ML**: TensorFlow/Keras (NN), XGBoost, scikit-learn (LR) — blended ensemble (45% NN + 20% XGB + 35% LR)
 - **AI**: Google Gemini (weekly recaps)
 
 ### Key Environment Variables
@@ -109,8 +110,9 @@ static/
     admin_main.js        # Admin dashboard
     auth_service.js      # Client-side auth
 scripts/                 # CLI tools for data sync, ML training, cache building
-models/                  # nn_v1.keras + nn_v1_scaler.pkl
+models/                  # nn_v{N}.keras + scaler, xgb_v{N}.json + scaler, lr_v{N}.pkl + scaler; *_registry.json per model type
 rawdata/                 # NFL raw data (NOT committed)
+docs/                    # Architecture and model documentation (prediction_model.md, etc.)
 .local_db/               # Local pickle cache (NOT committed)
 ```
 
@@ -165,17 +167,22 @@ Handled in `db_service.py`: bcrypt (12 rounds) with legacy SHA-256 migration sup
 
 ### ML Predictions
 
-- Model registry: `models/model_registry.json` — tracks all trained versions with metrics
-- Active model resolved via `NNPredictionService.load_model("latest")` or `load_model("best")`
-- When retraining, `train_nn_model.py` auto-increments version and writes to the registry
-- Feature pipeline: `nn_feature_engine.py` → `nn_prediction_service.py` → `prediction_service.py`
-- Weekly accuracy tracked in `reports/nn_weekly_accuracy.csv` via `scripts/weekly_model_eval.py`
-- Raw data for training lives in `rawdata/` (not committed)
-- `NNProjectionEngine` (`nn_projection_engine.py`) wraps the NN with a power-rating blend (40% NN, 60% power rating) for season projections
+Three models are blended (45% NN + 20% XGB + 35% LR) for every game prediction:
+- **NN** — `models/nn_v{N}.keras` + scaler; registry: `models/model_registry.json`
+- **XGB** — `models/xgb_v{N}.json` + scaler; registry: `models/xgb_registry.json`
+- **LR** — `models/lr_v{N}.pkl` + scaler; registry: `models/lr_registry.json`
+
+Each registry tracks all versions and designates `latest` and `best`. When retraining, the train scripts auto-increment the version.
+
+- Feature pipeline: `nn_feature_engine.py` (26 features) → `nn_prediction_service.py` / `xgb_prediction_service.py` / `lr_prediction_service.py` → blended in `prediction_service.py` and `backfill_schedule_predictions.py`
+- Weekly ensemble accuracy tracked in `reports/nn_weekly_accuracy.csv` via `scripts/weekly_model_eval.py`
+- Elo ratings computed by `scripts/compute_elo.py` → `rawdata/elo_computed.csv` (run after each rawdata sync)
+- `NNProjectionEngine` (`nn_projection_engine.py`) wraps the ensemble with a power-rating blend (40% ensemble, 60% power rating) for season projections; uses 2026 roster files for preseason trench estimates
+- See `docs/prediction_model.md` for a full description of all 26 features, model architectures, and both prediction paths
 
 ## Raw Data Sources
 
-Two sources, both synced by `scripts/sync_nflverse_data.py`:
+All rawdata comes from nflverse, synced by `scripts/sync_nflverse_data.py`. There is no longer any dependency on LeeSharpe/nfldata — `daily_nfl_sync.py` reads from local rawdata only.
 
 **[nflverse-data](https://github.com/nflverse/nflverse-data/releases)** — actively maintained, nightly updates during season:
 | Release tag | Local path | Update frequency |
@@ -191,10 +198,17 @@ Two sources, both synced by `scripts/sync_nflverse_data.py`:
 | `weekly_rosters` | `rawdata/weekly_rosters/roster_weekly_{year}.csv` | Daily |
 | `pbp` | `rawdata/pbp/play_by_play_{year}.csv` | Nightly (~100MB/year, opt-in) |
 
+Also required (not from nflverse, computed locally):
+| Script | Output | Notes |
+|---|---|---|
+| `scripts/compute_elo.py` | `rawdata/elo_computed.csv` | Run after each rawdata sync; requires `rawdata/schedules/games.csv` |
+| `scripts/scrape_quarter_scores.py` | `rawdata/quarter_scores.csv` | Optional; enables quarter-by-quarter Elo updates |
+
 Not synced (redundant or unmaintained): `FiveThirtyEight.csv` (FTE, stops 2022), `Metadata-*.csv`, `Scoring-*.csv`, `ExpectedPoints-*.csv`, `Stats-*.csv` (box stats computed from nflverse weekly stats instead), `SeasonRoster-*.csv` (nflscraPy, superseded by snap_counts + rosters).
 
 ### Roster talent features
-`roster_talent_delta` and `trench_dominance_metric` are computed from **nflverse snap counts** (`snap_counts/snap_counts_{year}.csv`) joined with **nflverse rosters** (`rosters/roster_{year}.csv`) for age. Snap counts cover 2012–present. Seasons before 2012 get zero values for these features.
+- `roster_talent_delta` — performance-based team grade from `stats_team_week_*.csv` (2020+): cumulative offense + defense composite z-scored within each week.
+- `trench_dominance_metric` — composite of OL snap quality (snap counts × age multiplier, 2012+) and DL performance (sacks×6 + qb_hits×1 + tfl×1 from `stats_team_week_*.csv`, 2020+), z-scored per season so both components contribute equally. In the **preseason path**, this is overridden using the actual target-season roster file (`roster_{year}.csv`) joined to the prior season's individual player advstats (`advstats_week_def_*.csv`).
 
 ### Files safe to delete
 - `rawdata/dont use/` — deprecated old PBP format (~157 MB)
@@ -206,8 +220,8 @@ Not synced (redundant or unmaintained): `FiveThirtyEight.csv` (FTE, stops 2022),
 
 ### Recommended Cloud Scheduler jobs
 ```
-# Weekly nflverse raw data sync — Tuesdays 9 AM UTC (after MNF)
-0 9 * * 2   →  python scripts/sync_nflverse_data.py
+# Weekly nflverse raw data sync + Elo recompute — Tuesdays 9 AM UTC (after MNF)
+0 9 * * 2   →  python scripts/sync_nflverse_data.py && python scripts/compute_elo.py
 
 # Nightly Firestore sync + cache rebuild — 2 AM ET daily
 0 7 * * *   →  python scripts/run_cron.py
