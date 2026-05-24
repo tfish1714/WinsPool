@@ -77,3 +77,155 @@ def test_draft_order_integrity():
     df = get_collection_df("draft_order")
     assert isinstance(df, pd.DataFrame)
     # Even if empty, it should return a standardized DF or at least not crash
+
+
+# ── Write operation tests ────────────────────────────────────────────────────
+
+class TestDeleteDraftResults:
+    """delete_draft_results_for_season removes the season's rows."""
+
+    def test_removes_season_rows(self):
+        from services.db_service import delete_draft_results_for_season
+
+        initial_df = pd.DataFrame({
+            "season": [2024, 2024, 2025],
+            "player_id": [1, 2, 1],
+            "team": ["KC", "SF", "BUF"],
+        })
+
+        with patch("services.db_service.get_collection_df", return_value=initial_df.copy()) as mock_get, \
+             patch("services.db_service._save_df_to_local") as mock_save, \
+             patch("services.db_service.clear_data_cache"), \
+             patch("services.db_service.signal_data_update"):
+            delete_draft_results_for_season(2024)
+
+        # _save_df_to_local(collection_name, df) — second positional arg is the DataFrame
+        saved_df = mock_save.call_args[0][1]
+        assert len(saved_df) == 1
+        assert (saved_df["season"] == 2024).sum() == 0
+        assert (saved_df["season"] == 2025).sum() == 1
+
+
+class TestDeleteSeasonData:
+    """delete_season_data wipes draft_order and draft_order_rules for a season.
+
+    delete_season_data iterates directly over the three collections; it does NOT
+    call delete_draft_results_for_season internally — so a single _save_df_to_local
+    mock captures all three saves.
+    """
+
+    def test_wipes_all_season_collections(self):
+        from services.db_service import delete_season_data
+
+        order_df = pd.DataFrame({
+            "season": [2024, 2025],
+            "player_id": [1, 2],
+        })
+        rules_df = pd.DataFrame({
+            "season": [2024, 2025],
+            "rule": ["a", "b"],
+        })
+        results_df = pd.DataFrame({
+            "season": [2024, 2025],
+            "player_id": [1, 2],
+            "team": ["KC", "BUF"],
+        })
+
+        def _get_df(collection, *args, **kwargs):
+            if collection == "draft_order":
+                return order_df.copy()
+            elif collection == "draft_order_rules":
+                return rules_df.copy()
+            elif collection == "draft_results":
+                return results_df.copy()
+            return pd.DataFrame()
+
+        saved = {}
+
+        def _save_df(collection, df, *args, **kwargs):
+            saved[collection] = df.copy()
+
+        with patch("services.db_service.get_collection_df", side_effect=_get_df), \
+             patch("services.db_service._save_df_to_local", side_effect=_save_df), \
+             patch("services.db_service.clear_data_cache"), \
+             patch("services.db_service.signal_data_update"):
+            delete_season_data(2024)
+
+        for collection in ("draft_order", "draft_order_rules", "draft_results"):
+            assert collection in saved, f"{collection} was never saved"
+            assert (saved[collection]["season"] == 2024).sum() == 0, \
+                f"{collection} still contains 2024 rows"
+
+
+class TestIncrementFailedSetupAttempts:
+    """increment_failed_setup_attempts calls update_player_profile with correct keys."""
+
+    def test_sets_attempt_count(self):
+        from services.db_service import increment_failed_setup_attempts
+
+        with patch("services.db_service.update_player_profile") as mock_update:
+            increment_failed_setup_attempts(player_id=42, new_count=3)
+
+        mock_update.assert_called_once()
+        # update_player_profile(player_id, update_data) — both positional
+        args, kwargs = mock_update.call_args
+        update_data = kwargs.get("update_data") or (args[1] if len(args) > 1 else args[0])
+        assert update_data.get("failed_setup_attempts") == 3
+
+    def test_sets_lockout_until_when_provided(self):
+        from services.db_service import increment_failed_setup_attempts
+        from datetime import datetime, timezone
+
+        lockout = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+        with patch("services.db_service.update_player_profile") as mock_update:
+            increment_failed_setup_attempts(player_id=42, new_count=5, lockout_until=lockout)
+
+        args, kwargs = mock_update.call_args
+        update_data = kwargs.get("update_data") or (args[1] if len(args) > 1 else args[0])
+        assert update_data.get("failed_setup_attempts") == 5
+        assert update_data.get("lockout_until") == lockout
+
+
+class TestSetMemberPaid:
+    """set_member_paid updates the paid flag and returns True/False."""
+
+    def test_returns_true_on_success(self):
+        from services.db_service import set_member_paid
+
+        # set_member_paid uses "playerId" and "draftOrder" (camelCase) column names
+        order_df = pd.DataFrame({
+            "season": [2025, 2025],
+            "playerId": [1, 2],
+            "draftOrder": [1, 2],
+            "paid": [False, False],
+        })
+
+        with patch("services.db_service.get_collection_df", return_value=order_df.copy()), \
+             patch("services.db_service._save_df_to_local") as mock_save, \
+             patch("services.db_service.clear_data_cache"), \
+             patch("services.db_service.signal_data_update"):
+            result = set_member_paid(season=2025, player_id=1, paid=True)
+
+        assert result is True
+        saved_df = mock_save.call_args[0][1]
+        row = saved_df[(saved_df["season"] == 2025) & (saved_df["playerId"] == 1)]
+        assert bool(row.iloc[0]["paid"]) is True
+
+    def test_returns_false_when_player_not_found(self):
+        from services.db_service import set_member_paid
+
+        order_df = pd.DataFrame({
+            "season": [2025],
+            "playerId": [99],
+            "draftOrder": [1],
+            "paid": [False],
+        })
+
+        with patch("services.db_service.get_collection_df", return_value=order_df.copy()), \
+             patch("services.db_service._save_df_to_local"), \
+             patch("services.db_service.clear_data_cache"), \
+             patch("services.db_service.signal_data_update"):
+            result = set_member_paid(season=2025, player_id=1, paid=True)
+
+        assert result is False
