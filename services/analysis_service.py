@@ -316,6 +316,7 @@ def player_winlossmatrix(schedule: pd.DataFrame) -> pd.DataFrame:
 
     record_matrix = pd.DataFrame('0-0', index=all_players, columns=all_players)
 
+    # Pass 1: fill cells where winner has wins (include tie component)
     for (winner, loser), w_count in win_counts.items():
         if winner in record_matrix.index and loser in record_matrix.columns:
             l_count = int(win_counts.get((loser, winner), 0))
@@ -325,11 +326,21 @@ def player_winlossmatrix(schedule: pd.DataFrame) -> pd.DataFrame:
             else:
                 record_matrix.loc[winner, loser] = f"{w_count}-{l_count}"
 
-    # Fill cells where player only lost (never won vs this opponent)
+    # Pass 2: fill cells where player only lost (never won vs this opponent)
     for (winner, loser), w_count in win_counts.items():
         if loser in record_matrix.index and winner in record_matrix.columns:
             if record_matrix.loc[loser, winner] == '0-0':
-                record_matrix.loc[loser, winner] = f"0-{w_count}"
+                t_count = int(tie_counts.get((loser, winner), 0))
+                if t_count > 0:
+                    record_matrix.loc[loser, winner] = f"0-{w_count}-{t_count}"
+                else:
+                    record_matrix.loc[loser, winner] = f"0-{w_count}"
+
+    # Pass 3: fill tie-only pairs (neither player won, both cells still '0-0')
+    for (p1, p2), t_count in tie_counts.items():
+        if p1 in record_matrix.index and p2 in record_matrix.columns:
+            if record_matrix.loc[p1, p2] == '0-0':
+                record_matrix.loc[p1, p2] = f"0-0-{t_count}"
 
     record_matrix['Overall Record'] = overall['Overall Record']
     return record_matrix

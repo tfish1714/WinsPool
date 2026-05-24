@@ -109,3 +109,24 @@ def test_winlossmatrix_bob_overall(matrix_schedule):
     """Bob's overall record: 1 win (vs Carol), 2 losses (vs Alice)."""
     result = player_winlossmatrix(matrix_schedule)
     assert result.loc["Bob", "Overall Record"] == "1-2"
+
+
+def test_winlossmatrix_pure_tie():
+    """When two players only tied, H2H cell should be '0-0-1' not '0-0'."""
+    df = pd.DataFrame([
+        {"fullName_away": "Alice", "fullName_home": "Bob", "result": 0.0},
+    ])
+    result = player_winlossmatrix(df)
+    assert result.loc["Alice", "Bob"] == "0-0-1"
+    assert result.loc["Bob", "Alice"] == "0-0-1"
+
+
+def test_winlossmatrix_win_plus_tie_loser():
+    """When Alice beat Bob once AND tied once, Bob's cell vs Alice should be '0-1-1'."""
+    df = pd.DataFrame([
+        {"fullName_away": "Alice", "fullName_home": "Bob", "result": -3.0},  # Alice wins
+        {"fullName_away": "Alice", "fullName_home": "Bob", "result": 0.0},   # Tie
+    ])
+    result = player_winlossmatrix(df)
+    assert result.loc["Bob", "Alice"] == "0-1-1"
+    assert result.loc["Alice", "Bob"] == "1-0-1"
