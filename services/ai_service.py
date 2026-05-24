@@ -31,8 +31,7 @@ def generate_generic_content(prompt: str, system_instruction: str = None) -> str
 
     import google.generativeai as genai
     genai.configure(api_key=api_key)
-    
-    config = {}
+
     if system_instruction:
         model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=system_instruction)
     else:

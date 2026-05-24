@@ -6,7 +6,6 @@ This file only wires the app together.
 """
 import os
 import time
-import logging
 import pathlib
 import uvicorn
 from dotenv import load_dotenv

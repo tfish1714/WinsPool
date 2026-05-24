@@ -75,14 +75,6 @@ def sync_live_scores_to_df(games_df: pd.DataFrame) -> pd.DataFrame:
     df = games_df.copy()
     cache_needs_rebuild = False
     
-    # We need to map ESPN abbreviations to repo abbreviations if they differ.
-    # Usually they match (KC, SF, etc.), but sometimes (LAR vs LA, etc.)
-    # For now assume mostly matching or add a small map.
-    repo_to_espn = {
-        "LA": "LAR",
-        "ARI": "ARI", # ... and so on
-    }
-    
     for idx, row in df.iterrows():
         # Only check games for the current/active week (or all for simplicity in V1)
         # Try to find match

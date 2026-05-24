@@ -30,7 +30,6 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
     Optimized to reuse cached game data and skip redundant historical Elo re-replays.
     """
     global _CACHED_DRAFT_STATE
-    import time
     start_time = time.time()
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     
