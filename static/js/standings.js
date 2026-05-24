@@ -64,9 +64,7 @@
     ];
 
     function initChart(year, latestWeek, standingsOrderIds) {
-        const _token = localStorage.getItem('nfl_wins_token');
-        const _headers = _token ? { 'Authorization': `Bearer ${_token}` } : {};
-        fetch(`/api/progress/${year}/${latestWeek}`, { headers: _headers })
+        fetch(`/api/progress/${year}/${latestWeek}`)
             .then(res => res.json())
             .then(data => {
                 const chartData = data.player_chart;

@@ -24,9 +24,12 @@ router = APIRouter(prefix="/api")
 def fetch_progress(
     season: Annotated[int, Path(ge=2000, le=2030)],
     week: Annotated[int, Path(ge=1, le=22)],
-    _auth: dict = Depends(require_auth),
 ):
-    """Chart data: cumulative player wins by week for the given season."""
+    """Chart data: cumulative player wins by week for the given season.
+
+    Public endpoint — the standings page is public and this data is already
+    visible in the standings table. No auth required.
+    """
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_route = time.time()
     try:
