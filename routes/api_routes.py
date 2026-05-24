@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Path
 from fastapi.responses import JSONResponse
 
 from services.data_service import load_data, get_latest_season_and_week
+from services.response_helpers import error_response, server_error, not_found, unauthorized
 from services.draft_service import sanitize_state
 from services.session_service import require_auth
 import services.analysis_service as analysis
@@ -37,8 +38,8 @@ def fetch_progress(
             logger.debug("/api/progress route total took %.3fs", time.time() - start_route)
         return JSONResponse(content=res)
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in /api/progress")
+        return server_error()
 
 
 @router.get("/progress/draft_summary")
@@ -54,7 +55,7 @@ def fetch_draft_summary(_auth: dict = Depends(require_auth)):
             "best_by_round": data.get("best_by_round"),
         })
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return server_error()
 
 
 @router.get("/standings")
@@ -73,7 +74,7 @@ def get_standings(year: int, _auth: dict = Depends(require_auth)):
             logger.debug("/api/standings route total took %.3fs", time.time() - start_route)
         return JSONResponse(content=sanitize_state(data))
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return server_error()
 
 
 from services.cache_service import merge_game_predictions as _merge_game_predictions
@@ -167,8 +168,8 @@ def get_prediction_accuracy(_auth: dict = Depends(require_auth)):
         }
         return JSONResponse(content={'seasons': seasons_list, 'overall': overall})
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={'error': str(e)})
+        logger.exception("Unhandled error in /api/predictions/accuracy")
+        return server_error()
 
 
 @router.get("/predictions/explain")
@@ -183,7 +184,7 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
         preds = get_game_predictions(season)
         pred = preds.get(key)
         if not pred:
-            return JSONResponse(status_code=404, content={"error": "No prediction found for this game."})
+            return not_found("No prediction found for this game.")
         return JSONResponse(content={
             "key": key,
             "home_team": ht,
@@ -193,7 +194,7 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
             **{k: v for k, v in pred.items() if k != "locked"},
         })
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return server_error()
 
 
 @router.get("/schedule")
@@ -214,5 +215,5 @@ def get_schedule(year: int, _auth: dict = Depends(require_auth)):
             logger.debug("/api/schedule route total took %.3fs", time.time() - start_route)
         return JSONResponse(content=sanitize_state(schedule_enriched.to_dict(orient="records")))
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in /api/schedule")
+        return server_error()

@@ -1,4 +1,5 @@
 """routes/auth_routes.py — Authentication and player profile endpoints."""
+import hashlib
 import logging
 import random
 import re
@@ -98,8 +99,8 @@ async def set_password(body: SetPasswordRequest):
             "role": role
         })
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in set_password")
+        return JSONResponse(status_code=500, content={"error": "An internal error occurred."})
 
 
 @router.post("/login")
@@ -149,8 +150,9 @@ async def login(body: LoginRequest):
 
         if player.get("mfa_enabled"):
             mfa_code = "".join([str(random.randint(0, 9)) for _ in range(6)])
+            mfa_token_hash = hashlib.sha256(mfa_code.encode()).hexdigest()
             update_player_profile(str(player["playerId"]), {
-                "mfa_token": mfa_code,
+                "mfa_token": mfa_token_hash,
                 "mfa_expiry": time.time() + 600
             })
             player_email = player.get("email")
@@ -173,8 +175,8 @@ async def login(body: LoginRequest):
             "token": token,
         })
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in login")
+        return JSONResponse(status_code=500, content={"error": "An internal error occurred."})
 
 
 @router.get("/profile")
@@ -242,8 +244,8 @@ async def update_profile(body: UpdateProfileRequest):
 
         return JSONResponse(content={"message": "Profile updated successfully!"})
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error updating profile")
+        return JSONResponse(status_code=500, content={"error": "An internal error occurred."})
 
 
 @router.post("/mfa/verify")
@@ -259,13 +261,14 @@ async def verify_mfa(body: MfaVerifyRequest):
         player = get_player_by_id(pid)
         if not player:
             return JSONResponse(status_code=404, content={"error": "Player not found."})
-        stored_code = player.get("mfa_token")
+        stored_hash = player.get("mfa_token")
         expiry = player.get("mfa_expiry", 0)
 
-        if not stored_code or time.time() > expiry:
+        if not stored_hash or time.time() > expiry:
             return JSONResponse(status_code=401, content={"error": "MFA code expired or invalid."})
 
-        if code != stored_code:
+        submitted_hash = hashlib.sha256(str(code).encode()).hexdigest()
+        if submitted_hash != stored_hash:
             return JSONResponse(status_code=401, content={"error": "Incorrect verification code."})
 
         update_player_profile(pid, {"mfa_token": None, "mfa_expiry": 0})
@@ -281,4 +284,5 @@ async def verify_mfa(body: MfaVerifyRequest):
             "token": token,
         })
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in MFA flow")
+        return JSONResponse(status_code=500, content={"error": "An internal error occurred."})

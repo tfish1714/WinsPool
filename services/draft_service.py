@@ -1,6 +1,5 @@
 import logging
 import os
-import traceback
 import pandas as pd
 from typing import Dict, Any, List
 from services.db_service import get_collection_df, add_draft_result, update_player_cell, delete_draft_pick
@@ -135,9 +134,7 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
         else:
             logger.warning("draft_state: no cached 'prediction_snapshot' found for %s Week 0. elo_predictions is EMPTY.", season)
     except Exception as e:
-        logger.error("draft_state: error fetching analytics cache: %s", e)
-        if is_debug:
-            import traceback; traceback.print_exc()
+        logger.exception("Unhandled error in WebSocket draft handler")
 
     # 6. Player Info Metadata
     all_players_info = []

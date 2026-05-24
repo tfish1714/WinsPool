@@ -17,6 +17,7 @@ from routes.models import (
     RecapYearRequest, GenerateRecapRequest, SaveBroadcastRecapRequest,
 )
 from services.data_service import load_data
+from services.response_helpers import server_error
 from services.db_service import (
     add_draft_order, add_draft_rule, add_player, delete_draft_results_for_season,
     delete_season_data, get_collection_df, get_password_hash, save_weekly_recap,
@@ -62,8 +63,8 @@ async def create_new_season(body: NewSeasonRequest, _: dict = Depends(require_ad
         wipe_draft_cache()
         return JSONResponse(content={"message": f"Draft order for {season} created successfully with {len(player_ids)} players."})
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.get("/admin/players")
@@ -73,7 +74,8 @@ async def fetch_admin_players(_: dict = Depends(require_admin)):
         _, _, _, players_df, _, _, _ = load_data()
         return JSONResponse(content=sanitize_state(players_df.to_dict(orient="records")))
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.get("/admin/members/{season}")
@@ -103,7 +105,8 @@ async def get_season_members(season: int, _: dict = Depends(require_admin)):
         members.sort(key=lambda x: x["draftOrder"])
         return JSONResponse(content={"members": members})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.post("/admin/members/paid")
@@ -113,7 +116,8 @@ async def update_member_paid(body: MemberPaidRequest, _: dict = Depends(require_
         ok = set_member_paid(body.season, body.targetPlayerId, body.paid)
         return JSONResponse(content={"ok": ok})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.get("/admin/seasons")
@@ -128,7 +132,8 @@ async def fetch_admin_seasons(_: dict = Depends(require_admin)):
             seasons.update(draft_results_df["season"].unique().tolist())
         return JSONResponse(content={"seasons": sorted([int(s) for s in seasons], reverse=True)})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.post("/admin/preview_draft_order")
@@ -148,7 +153,8 @@ async def preview_draft_order(body: PreviewDraftOrderRequest, _: dict = Depends(
             preview.append({"order": idx + 1, "playerName": p_name, "playerId": int(pid)})
         return JSONResponse(content={"preview": preview})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.post("/admin/create_player")
@@ -160,7 +166,8 @@ async def create_player(body: CreatePlayerRequest, _: dict = Depends(require_adm
         new_id = add_player(body.fullName, body.nickName, body.email, phone=body.phone)
         return JSONResponse(content={"message": f"Player created with ID {new_id}", "playerId": new_id})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.post("/admin/update_player")
@@ -181,7 +188,8 @@ async def admin_update_player(body: UpdatePlayerRequest, _: dict = Depends(requi
         update_player_profile(str(body.targetPlayerId), updates)
         return JSONResponse(content={"message": "Player updated successfully."})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.post("/admin/reset_password")
@@ -199,7 +207,8 @@ async def admin_reset_password(body: TargetPlayerRequest, _: dict = Depends(requ
         })
         return JSONResponse(content={"message": "Password reset. Player will be prompted to set a new password on next login."})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.post("/admin/set_temp_password")
@@ -220,7 +229,8 @@ async def admin_set_temp_password(body: SetTempPasswordRequest, _: dict = Depend
         update_player_profile(str(body.targetPlayerId), {"must_change_password": True})
         return JSONResponse(content={"message": "Temporary password set. Player will be required to change it on next login."})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.post("/admin/delete_season")
@@ -231,7 +241,8 @@ async def delete_season(body: SeasonRequest, _: dict = Depends(require_admin)):
         wipe_draft_cache()
         return JSONResponse(content={"message": f"Season {body.season} data wiped successfully."})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.post("/admin/reset_draft")
@@ -242,8 +253,8 @@ async def reset_draft(body: SeasonRequest, _: dict = Depends(require_admin)):
         wipe_draft_cache()
         return JSONResponse(content={"message": f"Draft Results for {body.season} securely wiped! Mock draft reset successful."})
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.post("/admin/scrape_predictions")
@@ -256,8 +267,8 @@ async def scrape_predictions(_: dict = Depends(require_admin)):
             return JSONResponse(status_code=500, content={"error": result.stderr or "Script failed silently."})
         return JSONResponse(content={"message": "Vegas Odds successfully scraped and injected into Firestore!"})
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.post("/admin/recap/preview_prompt")
@@ -269,7 +280,8 @@ async def preview_recap_prompt(body: RecapWeekRequest, _: dict = Depends(require
             return JSONResponse(status_code=404, content={"error": f"No game results found for {body.year} Week {body.week}."})
         return JSONResponse(content={"prompt": ai_service.get_recap_prompt(data_summary)})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.post("/admin/recap/preview_draft_prompt")
@@ -281,7 +293,8 @@ async def preview_draft_recap_prompt(body: RecapYearRequest, _: dict = Depends(r
             return JSONResponse(status_code=404, content={"error": f"No draft data found for {body.year}."})
         return JSONResponse(content={"prompt": ai_service.get_draft_recap_prompt(data_summary)})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.post("/admin/recap/generate")
@@ -293,7 +306,8 @@ async def generate_admin_recap(body: GenerateRecapRequest, _: dict = Depends(req
         summary = ai_service.generate_generic_content(body.prompt_data)
         return JSONResponse(content={"summary": summary})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
 
 
 @router.post("/admin/recap/save_and_broadcast")
@@ -326,5 +340,5 @@ async def save_and_broadcast_recap(body: SaveBroadcastRecapRequest, _: dict = De
 
         return JSONResponse(content={"message": f"Week {body.week} recap saved and broadcast to {len(emails)} players."})
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()

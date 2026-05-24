@@ -25,6 +25,22 @@ from routes.prediction_routes import router as prediction_router
 
 app = FastAPI(title="WinsPool")
 
+# ── CORS ──────────────────────────────────────────────────────────────────────
+from fastapi.middleware.cors import CORSMiddleware
+
+# Read allowed origins from env (comma-separated). Never use wildcard *.
+# Dev default: localhost only. Production: set CORS_ORIGINS in Cloud Run env vars.
+_cors_origins_raw = os.environ.get("CORS_ORIGINS", "http://localhost:8000")
+_cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
 # ── Middleware ────────────────────────────────────────────────────────────────
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
