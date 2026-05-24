@@ -239,7 +239,10 @@ async function handleExplainClick(btn) {
 
     try {
         const url = `/api/predictions/explain?season=${season}&week=${week}&home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}`;
-        const resp = await fetch(url);
+        const token = AuthService.getToken();
+        const resp = await fetch(url, {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
             content.innerHTML = `<p style="color:var(--accent-red);">${err.error || 'No prediction stored for this game yet.'}</p>`;

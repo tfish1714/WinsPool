@@ -7,6 +7,7 @@ model architecture constraints, and prediction output bounds.
 import pytest
 import numpy as np
 import pandas as pd
+from importlib.util import find_spec
 
 from services.nn_feature_engine import (
     compute_age_multiplier,
@@ -17,15 +18,9 @@ from services.nn_feature_engine import (
     RAWDATA_DIR,
 )
 
-# Attempt TF import for model-level tests
-try:
-    from services.nn_prediction_service import (
-        NNPredictionService,
-        FEATURE_COLUMNS as NN_FEATURE_COLUMNS,
-    )
-    TF_AVAILABLE = True
-except Exception:
-    TF_AVAILABLE = False
+# Check TF availability without importing it — avoids 30s+ TF startup during
+# pytest collection. The actual import is deferred into each test method below.
+TF_AVAILABLE = find_spec("tensorflow") is not None
 
 
 # -----------------------------------------------------------------------
@@ -196,10 +191,12 @@ class TestModelArchitecture:
     """Validates the NN model structure and output constraints."""
 
     def test_model_builds(self):
+        from services.nn_prediction_service import NNPredictionService, FEATURE_COLUMNS as NN_FEATURE_COLUMNS
         model = NNPredictionService._build_model(len(NN_FEATURE_COLUMNS))
         assert model is not None
 
     def test_output_shape(self):
+        from services.nn_prediction_service import NNPredictionService, FEATURE_COLUMNS as NN_FEATURE_COLUMNS
         n = len(NN_FEATURE_COLUMNS)
         model = NNPredictionService._build_model(n)
         X = np.random.randn(5, n).astype(np.float32)
@@ -207,6 +204,7 @@ class TestModelArchitecture:
         assert preds.shape == (5, 1)
 
     def test_output_bounded(self):
+        from services.nn_prediction_service import NNPredictionService, FEATURE_COLUMNS as NN_FEATURE_COLUMNS
         n = len(NN_FEATURE_COLUMNS)
         model = NNPredictionService._build_model(n)
         X = np.random.randn(100, n).astype(np.float32)
@@ -215,6 +213,7 @@ class TestModelArchitecture:
 
     def test_predict_game_returns_float(self):
         """predict_game should return a float in [0, 1]."""
+        from services.nn_prediction_service import NNPredictionService, FEATURE_COLUMNS as NN_FEATURE_COLUMNS
         svc = NNPredictionService()
         svc.model = NNPredictionService._build_model(len(NN_FEATURE_COLUMNS))
         svc._is_trained = True

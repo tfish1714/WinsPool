@@ -1,7 +1,15 @@
+import os
 import pytest
 from unittest.mock import patch, MagicMock
 import sys
 import pathlib
+
+# Set USE_LOCAL_DATA before any service modules are imported so that
+# db_service.py's module-level Firebase init check reads the right value.
+# Using setdefault so a real Firestore env (USE_LOCAL_DATA=False) is not
+# overridden when running against production data intentionally.
+os.environ.setdefault("USE_LOCAL_DATA", "true")
+os.environ.setdefault("JWT_SECRET", "test-jwt-secret-for-winspool-tests-only")
 
 # Ensure the workspace root is injected into the Python path dynamically
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
