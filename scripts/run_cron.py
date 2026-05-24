@@ -70,12 +70,18 @@ def run_step(step: dict) -> bool:
         return False
 
     log.info(f"[{name}] Starting...")
-    result = subprocess.run(
-        [sys.executable, str(script)],
-        capture_output=True,
-        text=True,
-        cwd=str(SCRIPTS_DIR.parent),  # Run from project root
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script)],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=str(SCRIPTS_DIR.parent),
+        )
+    except subprocess.TimeoutExpired:
+        log.error(f"[{name}] FAILED: script timed out after 300s")
+        return False
+
     if result.stdout:
         for line in result.stdout.strip().splitlines():
             log.info(f"  {line}")

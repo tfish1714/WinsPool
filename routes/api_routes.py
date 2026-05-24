@@ -3,7 +3,9 @@ import logging
 import os
 import time
 
-from fastapi import APIRouter, Depends
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Path
 from fastapi.responses import JSONResponse
 
 from services.data_service import load_data, get_latest_season_and_week
@@ -18,28 +20,19 @@ router = APIRouter(prefix="/api")
 
 
 @router.get("/progress/{season}/{week}")
-def fetch_progress(season: str, week: str, _auth: dict = Depends(require_auth)):
+def fetch_progress(
+    season: Annotated[int, Path(ge=2000, le=2030)],
+    week: Annotated[int, Path(ge=1, le=22)],
+    _auth: dict = Depends(require_auth),
+):
     """Chart data: cumulative player wins by week for the given season."""
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_route = time.time()
     try:
         _, _, games, _, _, _, _ = load_data()
-
         if games.empty or "season" not in games.columns:
             return JSONResponse(content={"labels": [], "datasets": []})
-
-        if season.lower() == "latest":
-            target_season, _ = get_latest_season_and_week(games)
-        else:
-            target_season = int(season)
-
-        if week.lower() == "latest":
-            s_games = games[games["season"] == target_season]
-            target_week = int(s_games["week"].max()) if not s_games.empty else 18
-        else:
-            target_week = int(week)
-
-        res = get_season_progress(target_season, target_week)
+        res = get_season_progress(season, week)
         if is_debug:
             logger.debug("/api/progress route total took %.3fs", time.time() - start_route)
         return JSONResponse(content=res)
