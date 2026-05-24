@@ -130,3 +130,36 @@ def test_winlossmatrix_win_plus_tie_loser():
     result = player_winlossmatrix(df)
     assert result.loc["Bob", "Alice"] == "0-1-1"
     assert result.loc["Alice", "Bob"] == "1-0-1"
+
+
+# ── get_enriched_schedule ─────────────────────────────────────────────────────
+
+def test_get_enriched_schedule_attaches_player_names():
+    """
+    get_enriched_schedule must attach player names for home and away teams
+    based on the draft results, and handle undrafted teams with the sentinel.
+    """
+    from services.analysis_service import get_enriched_schedule, UNDRAFTED_SENTINEL
+    import pandas as pd
+
+    games = pd.DataFrame([{
+        "season": 2024, "week": 1, "game_type": "REG",
+        "away_team": "KC", "home_team": "SF",
+        "home_score": 24, "away_score": 21,
+        "result": 3.0,
+        "gameday": "2024-09-08",
+    }])
+    draft_results = pd.DataFrame([
+        {"season": 2024, "team": "KC", "playerId": 1},
+        {"season": 2024, "team": "SF", "playerId": 2},
+    ])
+    players = pd.DataFrame([
+        {"playerId": 1, "fullName": "Alice"},
+        {"playerId": 2, "fullName": "Bob"},
+    ])
+
+    result = get_enriched_schedule(games, draft_results, players, 2024)
+
+    assert len(result) == 1
+    assert result.iloc[0]["fullName_away"] == "Alice"
+    assert result.iloc[0]["fullName_home"] == "Bob"
