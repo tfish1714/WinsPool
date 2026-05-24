@@ -13,7 +13,7 @@ paths are /api/admin/... not /admin/...
 """
 import pytest
 import pandas as pd
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 from starlette.testclient import TestClient
 
 from main import app
@@ -43,6 +43,9 @@ class TestNewSeason:
         assert mock_order.call_count == 3
         # No rules copied because rules_df is empty
         assert mock_rule.call_count == 0
+        # Verify the correct season is passed to add_draft_order
+        first_call_args = mock_order.call_args_list[0][0]
+        assert first_call_args[0] == 2099
 
     def test_requires_admin_role(self, auth_token):
         """Non-admin token is rejected with 401 or 403."""
@@ -53,7 +56,7 @@ class TestNewSeason:
         )
         assert resp.status_code in (401, 403)
 
-    def test_requires_auth_token(self):
+    def test_requires_token(self):
         """Missing token is rejected with 401 or 403."""
         resp = client.post(
             "/api/admin/new_season",
@@ -88,6 +91,30 @@ class TestNewSeason:
         assert resp.status_code == 400
         mock_order.assert_not_called()
 
+    def test_copies_existing_rules_when_present(self, admin_token):
+        """When prior season has rules, copies them to the new season."""
+        existing_rules = pd.DataFrame({
+            "season": [2098],
+            "draftOrder": [1],
+            "pickOne": [10],
+            "pickTwo": [11],
+            "pickThree": [12],
+        })
+        with patch("routes.admin_routes.add_draft_order"), \
+             patch("routes.admin_routes.add_draft_rule") as mock_rule, \
+             patch("routes.admin_routes.get_collection_df", side_effect=[
+                 pd.DataFrame(),       # draft_order check → empty (season doesn't exist)
+                 existing_rules,        # draft_order_rules → has prior rules
+             ]), \
+             patch("routes.admin_routes.wipe_draft_cache"):
+            resp = client.post(
+                "/api/admin/new_season",
+                json={"season": 2099, "playerIds": [1]},
+                headers={"Authorization": admin_token},
+            )
+        assert resp.status_code == 200
+        assert mock_rule.called  # rules were copied
+
 
 # ── /api/admin/delete_season ──────────────────────────────────────────────────
 
@@ -113,7 +140,7 @@ class TestDeleteSeason:
         )
         assert resp.status_code in (401, 403)
 
-    def test_requires_auth_token(self):
+    def test_requires_token(self):
         """Missing token is rejected with 401 or 403."""
         resp = client.post(
             "/api/admin/delete_season",
@@ -210,7 +237,7 @@ class TestCreatePlayer:
 
 class TestResetPassword:
     def test_happy_path_calls_update_player_profile(self, admin_token):
-        """200 + update_player_profile called with password_hash=None."""
+        """200 + update_player_profile called with all security fields cleared."""
         with patch("routes.admin_routes.update_player_profile") as mock_update:
             resp = client.post(
                 "/api/admin/reset_password",
@@ -218,11 +245,16 @@ class TestResetPassword:
                 headers={"Authorization": admin_token},
             )
         assert resp.status_code == 200
-        mock_update.assert_called_once()
-        # Confirm the password_hash is cleared
-        call_kwargs = mock_update.call_args
-        profile_updates = call_kwargs[0][1]  # second positional arg is the updates dict
-        assert profile_updates.get("password_hash") is None
+        args, kwargs = mock_update.call_args
+        # Verify the player_id and the exact update dict
+        assert args[0] == "1"
+        assert args[1] == {
+            "password_hash": None,
+            "failed_setup_attempts": 0,
+            "lockout_until": None,
+            "mfa_secret": None,
+            "mfa_enabled": False,
+        }
 
     def test_requires_token(self):
         """Missing token is rejected with 401 or 403."""
@@ -303,7 +335,7 @@ class TestMembersPaid:
                 headers={"Authorization": admin_token},
             )
         assert resp.status_code == 200
-        mock_paid.assert_called_once()
+        mock_paid.assert_called_once_with(2025, 1, True)
 
     def test_requires_admin_role(self, auth_token):
         """Non-admin token is rejected with 401 or 403."""
@@ -314,7 +346,7 @@ class TestMembersPaid:
         )
         assert resp.status_code in (401, 403)
 
-    def test_requires_auth_token(self):
+    def test_requires_token(self):
         """Missing token is rejected with 401 or 403."""
         resp = client.post(
             "/api/admin/members/paid",
