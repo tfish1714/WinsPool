@@ -79,6 +79,8 @@ async def wins_pool_by_year(request: Request, year: int):
             "recap": recap["summary"] if recap else None,
             "h2h_html": (h2h_df.rename(columns=_first_name, index=_first_name)
                          .to_html(classes="wp-data-table", border=0)) if not h2h_df.empty else "",
+            "current_week": latest_week,
+            "latest_week": latest_week,
         })
     except Exception as e:
         logger.exception("Unhandled error rendering standings page")
