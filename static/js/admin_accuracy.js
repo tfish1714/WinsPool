@@ -102,7 +102,9 @@ async function loadAccuracyData() {
     table.innerHTML = '<div style="padding:2rem; text-align:center; color:var(--text-secondary);">Loading accuracy data…</div>';
 
     try {
-        const resp = await fetch('/api/predictions/accuracy');
+        const _token = localStorage.getItem('nfl_wins_token');
+        const _headers = _token ? { 'Authorization': `Bearer ${_token}` } : {};
+        const resp = await fetch('/api/predictions/accuracy', { headers: _headers });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         _accuracyData = await resp.json();
 
