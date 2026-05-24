@@ -89,16 +89,16 @@ class TestDeleteDraftResults:
 
         initial_df = pd.DataFrame({
             "season": [2024, 2024, 2025],
-            "player_id": [1, 2, 1],
+            "playerId": [1, 2, 1],
             "team": ["KC", "SF", "BUF"],
         })
 
         with patch("services.db_service.get_collection_df", return_value=initial_df.copy()) as mock_get, \
              patch("services.db_service._save_df_to_local") as mock_save, \
-             patch("services.db_service.clear_data_cache"), \
-             patch("services.db_service.signal_data_update"):
+             patch("services.db_service.clear_data_cache"):
             delete_draft_results_for_season(2024)
 
+        assert mock_save.call_args[0][0] == "draft_results"
         # _save_df_to_local(collection_name, df) — second positional arg is the DataFrame
         saved_df = mock_save.call_args[0][1]
         assert len(saved_df) == 1
@@ -169,6 +169,7 @@ class TestIncrementFailedSetupAttempts:
         mock_update.assert_called_once()
         # update_player_profile(player_id, update_data) — both positional
         args, kwargs = mock_update.call_args
+        assert args[0] == 42  # player_id is forwarded correctly
         update_data = kwargs.get("update_data") or (args[1] if len(args) > 1 else args[0])
         assert update_data.get("failed_setup_attempts") == 3
 
@@ -182,6 +183,7 @@ class TestIncrementFailedSetupAttempts:
             increment_failed_setup_attempts(player_id=42, new_count=5, lockout_until=lockout)
 
         args, kwargs = mock_update.call_args
+        assert args[0] == 42  # player_id is forwarded correctly
         update_data = kwargs.get("update_data") or (args[1] if len(args) > 1 else args[0])
         assert update_data.get("failed_setup_attempts") == 5
         assert update_data.get("lockout_until") == lockout
@@ -202,9 +204,7 @@ class TestSetMemberPaid:
         })
 
         with patch("services.db_service.get_collection_df", return_value=order_df.copy()), \
-             patch("services.db_service._save_df_to_local") as mock_save, \
-             patch("services.db_service.clear_data_cache"), \
-             patch("services.db_service.signal_data_update"):
+             patch("services.db_service._save_df_to_local") as mock_save:
             result = set_member_paid(season=2025, player_id=1, paid=True)
 
         assert result is True
@@ -223,9 +223,8 @@ class TestSetMemberPaid:
         })
 
         with patch("services.db_service.get_collection_df", return_value=order_df.copy()), \
-             patch("services.db_service._save_df_to_local"), \
-             patch("services.db_service.clear_data_cache"), \
-             patch("services.db_service.signal_data_update"):
+             patch("services.db_service._save_df_to_local") as mock_save:
             result = set_member_paid(season=2025, player_id=1, paid=True)
 
         assert result is False
+        mock_save.assert_not_called()
