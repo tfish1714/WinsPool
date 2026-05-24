@@ -73,77 +73,76 @@ def format_team_record(team: str, records: Dict[str, Dict[str, int]]) -> str:
     return f"{r['W']}-{r['L']}"
 
 def get_remaining_games(player: str, schedule: pd.DataFrame) -> int:
-    remaining_games = schedule[
-        (schedule['result'].isna()) & 
+    filtered = schedule[
+        (schedule['result'].isna()) &
         ((schedule['fullName_away'] == player) | (schedule['fullName_home'] == player))
-    ].apply(lambda row: 2 if row['fullName_away'] == row['fullName_home'] else 1, axis=1).sum()
-    return remaining_games
+    ]
+    if filtered.empty:
+        return 0
+    return int(np.where(
+        filtered['fullName_away'] == filtered['fullName_home'], 2, 1
+    ).sum())
 
 def player_winsbyWeek(schedule: pd.DataFrame, sorted_players: List[str] = None) -> pd.DataFrame:
     df = schedule[['week', 'fullName_away', 'fullName_home', 'result']].dropna(subset=['result'])
+    if df.empty:
+        return pd.DataFrame()
+
     all_players = pd.concat([df['fullName_away'], df['fullName_home']]).unique()
-    all_weeks = df['week'].unique()
+    all_weeks = sorted(df['week'].astype(int).unique())
 
-    record_by_week = pd.DataFrame('0-0', index=all_players, columns=[f'Week {week}' for week in all_weeks])
+    # Away-team perspective: wins when result < 0
+    away = df[['week', 'fullName_away', 'result']].rename(columns={'fullName_away': 'player'})
+    away['W'] = (away['result'] < 0).astype(int)
+    away['L'] = (away['result'] > 0).astype(int)
 
-    win_loss_tracker = {
-        player: {week: {'W': 0, 'L': 0} for week in all_weeks} for player in all_players
-    }
+    # Home-team perspective: wins when result > 0
+    home = df[['week', 'fullName_home', 'result']].rename(columns={'fullName_home': 'player'})
+    home['W'] = (home['result'] > 0).astype(int)
+    home['L'] = (home['result'] < 0).astype(int)
 
-    for index, row in df.iterrows():
-        away_player = row['fullName_away']
-        home_player = row['fullName_home']
-        result = row['result']
-        week = row['week']
+    combined = pd.concat(
+        [away[['week', 'player', 'W', 'L']], home[['week', 'player', 'W', 'L']]],
+        ignore_index=True,
+    )
+    weekly = combined.groupby(['player', 'week'])[['W', 'L']].sum()
 
-        if result < 0:  # Away win
-            win_loss_tracker[away_player][week]['W'] += 1
-            win_loss_tracker[home_player][week]['L'] += 1
-        elif result > 0:  # Home win
-            win_loss_tracker[home_player][week]['W'] += 1
-            win_loss_tracker[away_player][week]['L'] += 1
+    # Reindex to all player×week pairs so cumsum is continuous even for empty weeks
+    full_idx = pd.MultiIndex.from_product([all_players, all_weeks], names=['player', 'week'])
+    weekly = weekly.reindex(full_idx, fill_value=0).reset_index()
+    weekly = weekly.sort_values(['player', 'week'])
 
-    total_wins_losses = []
-    for player, weeks in win_loss_tracker.items():
-        total_wins = total_losses = 0
-        for week, record in weeks.items():
-            wins = record['W']
-            losses = record['L']
-            total_wins += wins
-            total_losses += losses
-            record_by_week.at[player, f'Week {week}'] = f'{wins}-{losses} ({total_wins}-{total_losses})'
-        total_wins_losses.append(f'{total_wins}-{total_losses}')
+    weekly['cum_W'] = weekly.groupby('player')['W'].cumsum()
+    weekly['cum_L'] = weekly.groupby('player')['L'].cumsum()
+    weekly['cell'] = (
+        weekly['W'].astype(str) + '-' + weekly['L'].astype(str)
+        + ' (' + weekly['cum_W'].astype(str) + '-' + weekly['cum_L'].astype(str) + ')'
+    )
 
-    record_by_week['Total'] = total_wins_losses
-    result_df = record_by_week.T
+    pivot = weekly.pivot(index='player', columns='week', values='cell')
+    pivot.columns = [f'Week {w}' for w in pivot.columns]
 
-    # Sort so latest week is at the top (descending), with Total first
+    totals = weekly.groupby('player')[['W', 'L']].sum()
+    pivot['Total'] = totals['W'].astype(str) + '-' + totals['L'].astype(str)
+
+    result_df = pivot.T
+
     def _week_sort_key(label):
         if label == 'Total':
             return (0, 0)
         try:
-            num = int(label.replace('Week ', ''))
-            return (1, -num)
+            return (1, -int(str(label).replace('Week ', '')))
         except ValueError:
             return (2, 0)
+
     result_df = result_df.reindex(sorted(result_df.index, key=_week_sort_key))
+    result_df = result_df.rename(
+        columns=lambda c: 'Undrafted' if str(c) in (str(UNDRAFTED_SENTINEL), f'{UNDRAFTED_SENTINEL}.0') else c
+    )
 
-    # Rename the undrafted sentinel index (−1000) to a human-readable label.
-    result_df = result_df.rename(columns=lambda c: 'Undrafted' if str(c) in (str(UNDRAFTED_SENTINEL), f'{UNDRAFTED_SENTINEL}.0') else c)
-
-    # Sort columns if sorted_players is provided
     if sorted_players:
-        cols = []
-        # Add players in ranked order if they exist in the dataframe
-        for p in sorted_players:
-            if p in result_df.columns:
-                cols.append(p)
-        
-        # Add any remaining players not in the sorted list (e.g. 'Undrafted')
-        for p in result_df.columns:
-            if p not in cols:
-                cols.append(p)
-        
+        cols = [p for p in sorted_players if p in result_df.columns]
+        cols += [p for p in result_df.columns if p not in cols]
         result_df = result_df[cols]
 
     return result_df
@@ -267,76 +266,72 @@ def calculate_playoff_race(schedule: pd.DataFrame, standings_df: pd.DataFrame) -
 def player_winlossmatrix(schedule: pd.DataFrame) -> pd.DataFrame:
     if schedule.empty or not all(c in schedule.columns for c in ['fullName_away', 'fullName_home', 'result']):
         return pd.DataFrame()
+
     df = schedule[['fullName_away', 'fullName_home', 'result']].copy()
-    # Replace the -1000 sentinel (from get_enriched_schedule fillna) with 'Undrafted'
     df['fullName_away'] = df['fullName_away'].replace(UNDRAFTED_SENTINEL, 'Undrafted').replace(str(UNDRAFTED_SENTINEL), 'Undrafted')
     df['fullName_home'] = df['fullName_home'].replace(UNDRAFTED_SENTINEL, 'Undrafted').replace(str(UNDRAFTED_SENTINEL), 'Undrafted')
-    # Drop rows where result has the sentinel (game not yet played)
-    df = df[df['result'] != UNDRAFTED_SENTINEL]
-    df = df.dropna(subset=['result'])
+    df = df[df['result'] != UNDRAFTED_SENTINEL].dropna(subset=['result'])
+    if df.empty:
+        return pd.DataFrame()
+
     all_players = pd.concat([df['fullName_away'], df['fullName_home']]).dropna().unique()
     all_players = [p for p in all_players if p not in (None, '', 'nan')]
     if not all_players:
         return pd.DataFrame()
+
+    # -- Overall record (vectorized) -----------------------------------------
+    away_w = df[df['result'] < 0].groupby('fullName_away').size().rename('W')
+    away_l = df[df['result'] > 0].groupby('fullName_away').size().rename('L')
+    away_t = df[df['result'] == 0].groupby('fullName_away').size().rename('T')
+    home_w = df[df['result'] > 0].groupby('fullName_home').size().rename('W')
+    home_l = df[df['result'] < 0].groupby('fullName_home').size().rename('L')
+    home_t = df[df['result'] == 0].groupby('fullName_home').size().rename('T')
+
+    idx = pd.Index(all_players)
+    W = away_w.reindex(idx, fill_value=0) + home_w.reindex(idx, fill_value=0)
+    L = away_l.reindex(idx, fill_value=0) + home_l.reindex(idx, fill_value=0)
+    T = away_t.reindex(idx, fill_value=0) + home_t.reindex(idx, fill_value=0)
+
+    overall = pd.DataFrame({'W': W, 'L': L, 'T': T}, index=idx)
+    overall['Overall Record'] = np.where(
+        overall['T'] > 0,
+        overall['W'].astype(str) + '-' + overall['L'].astype(str) + '-' + overall['T'].astype(str),
+        overall['W'].astype(str) + '-' + overall['L'].astype(str),
+    )
+
+    # -- H2H matrix (vectorized) ---------------------------------------------
+    away_wins = df[df['result'] < 0][['fullName_away', 'fullName_home']].rename(
+        columns={'fullName_away': 'winner', 'fullName_home': 'loser'}
+    )
+    home_wins = df[df['result'] > 0][['fullName_home', 'fullName_away']].rename(
+        columns={'fullName_home': 'winner', 'fullName_away': 'loser'}
+    )
+    ties_a = df[df['result'] == 0][['fullName_away', 'fullName_home']].rename(
+        columns={'fullName_away': 'p1', 'fullName_home': 'p2'}
+    )
+    ties_b = ties_a.rename(columns={'p1': 'p2', 'p2': 'p1'})
+
+    win_counts = pd.concat([away_wins, home_wins]).groupby(['winner', 'loser']).size()
+    tie_counts = pd.concat([ties_a, ties_b]).groupby(['p1', 'p2']).size()
+
     record_matrix = pd.DataFrame('0-0', index=all_players, columns=all_players)
 
-    win_loss_tracker = {player: {opponent: {'W': 0, 'L': 0, 'T': 0} for opponent in all_players} for player in all_players}
-    overall_tracker = {player: {'W': 0, 'L': 0, 'T': 0} for player in all_players}
-
-    for index, row in df.iterrows():
-        away_player = row.get('fullName_away')
-        home_player = row.get('fullName_home')
-        result = row.get('result')
-
-        # Ignore unplayed games
-        if pd.isna(result) or result == UNDRAFTED_SENTINEL:
-            continue
-
-        # 1. Update true overall record (against anyone, including Undrafted)
-        if pd.notna(away_player) and away_player in overall_tracker:
-            if result < 0: overall_tracker[away_player]['W'] += 1
-            elif result > 0: overall_tracker[away_player]['L'] += 1
-            elif result == 0: overall_tracker[away_player]['T'] += 1
-            
-        if pd.notna(home_player) and home_player in overall_tracker:
-            if result > 0: overall_tracker[home_player]['W'] += 1
-            elif result < 0: overall_tracker[home_player]['L'] += 1
-            elif result == 0: overall_tracker[home_player]['T'] += 1
-
-        # 2. Update H2H matrix (only for head-to-head drafted matchups)
-        if pd.isna(away_player) or pd.isna(home_player): continue
-        away_player = str(away_player)
-        home_player = str(home_player)
-        if away_player not in win_loss_tracker or home_player not in win_loss_tracker: continue
-
-        if result < 0:
-            win_loss_tracker[away_player][home_player]['W'] += 1
-            win_loss_tracker[home_player][away_player]['L'] += 1
-        elif result > 0:
-            win_loss_tracker[home_player][away_player]['W'] += 1
-            win_loss_tracker[away_player][home_player]['L'] += 1
-        elif result == 0:
-            win_loss_tracker[home_player][away_player]['T'] += 1
-            win_loss_tracker[away_player][home_player]['T'] += 1
-
-    row_totals = []
-    
-    for player in all_players:
-        for opponent in all_players:
-            record = win_loss_tracker[player][opponent]
-            if record['T'] > 0:
-                record_matrix.at[player, opponent] = f"{record['W']}-{record['L']}-{record['T']}"
+    for (winner, loser), w_count in win_counts.items():
+        if winner in record_matrix.index and loser in record_matrix.columns:
+            l_count = int(win_counts.get((loser, winner), 0))
+            t_count = int(tie_counts.get((winner, loser), 0))
+            if t_count > 0:
+                record_matrix.loc[winner, loser] = f"{w_count}-{l_count}-{t_count}"
             else:
-                record_matrix.at[player, opponent] = f"{record['W']}-{record['L']}"
-                
-        # Use true overall record for the Total column
-        ovr = overall_tracker[player]
-        if ovr['T'] > 0:
-            row_totals.append(f"{ovr['W']}-{ovr['L']}-{ovr['T']}")
-        else:
-            row_totals.append(f"{ovr['W']}-{ovr['L']}")
+                record_matrix.loc[winner, loser] = f"{w_count}-{l_count}"
 
-    record_matrix['Overall Record'] = row_totals
+    # Fill cells where player only lost (never won vs this opponent)
+    for (winner, loser), w_count in win_counts.items():
+        if loser in record_matrix.index and winner in record_matrix.columns:
+            if record_matrix.loc[loser, winner] == '0-0':
+                record_matrix.loc[loser, winner] = f"0-{w_count}"
+
+    record_matrix['Overall Record'] = overall['Overall Record']
     return record_matrix
 
 def reshape_wins_pool_standings(df: pd.DataFrame) -> pd.DataFrame:
