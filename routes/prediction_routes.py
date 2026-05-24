@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from routes.models import PredictionConfigRequest
 from services.data_service import load_data
 from services.draft_service import sanitize_state
+from services.response_helpers import server_error
 from services.session_service import require_admin
 
 logger = logging.getLogger(__name__)
@@ -24,8 +25,8 @@ def get_game_prediction(home_team: str, away_team: str, season: int = 2025):
         svc = PredictionService.get_initialized(games, season)
         return JSONResponse(content=sanitize_state(svc.game_win_probability(home_team, away_team)))
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in prediction endpoint")
+        return server_error()
 
 
 @router.get("/predictions/portfolio")
@@ -49,8 +50,8 @@ def get_portfolio_projection(season: int, playerId: int):
         svc = PredictionService.get_initialized(games, season)
         return JSONResponse(content=sanitize_state(svc.project_portfolio_wins(player_teams, season, games)))
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in prediction endpoint")
+        return server_error()
 
 
 @router.get("/predictions/ratings")
@@ -62,8 +63,8 @@ def get_elo_ratings(season: int = 2025):
         svc = PredictionService.get_initialized(games, season)
         return JSONResponse(content=sanitize_state(svc.get_all_ratings()))
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in prediction endpoint")
+        return server_error()
 
 
 @router.get("/admin/predictions/confidence")
@@ -78,8 +79,8 @@ def get_draft_confidence(season: int, _: dict = Depends(require_admin)):
         scores = svc.generate_draft_confidence_scores(season, games, drafted_teams)
         return JSONResponse(content=sanitize_state(scores))
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in prediction endpoint")
+        return server_error()
 
 
 @router.get("/admin/predictions/config")
@@ -90,7 +91,8 @@ def get_prediction_config(_: dict = Depends(require_admin)):
         svc = PredictionService()
         return JSONResponse(content=sanitize_state(svc.load_config()))
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in prediction endpoint")
+        return server_error()
 
 
 @router.post("/admin/predictions/config")
@@ -114,8 +116,8 @@ async def update_prediction_config(body: PredictionConfigRequest, _: dict = Depe
             "simulations": simulations,
         })
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in prediction endpoint")
+        return server_error()
 
 
 @router.get("/admin/elo_history")
@@ -172,5 +174,5 @@ async def get_elo_history(_: dict = Depends(require_admin)):
             "colors": colors,
         })
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        logger.exception("Unhandled error in prediction endpoint")
+        return server_error()

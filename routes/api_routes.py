@@ -55,6 +55,7 @@ def fetch_draft_summary(_auth: dict = Depends(require_auth)):
             "best_by_round": data.get("best_by_round"),
         })
     except Exception as e:
+        logger.exception("Unhandled error in fetch_draft_summary")
         return server_error()
 
 
@@ -74,6 +75,7 @@ def get_standings(year: int, _auth: dict = Depends(require_auth)):
             logger.debug("/api/standings route total took %.3fs", time.time() - start_route)
         return JSONResponse(content=sanitize_state(data))
     except Exception as e:
+        logger.exception("Unhandled error in get_standings")
         return server_error()
 
 
@@ -194,6 +196,7 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
             **{k: v for k, v in pred.items() if k != "locked"},
         })
     except Exception as e:
+        logger.exception("Unhandled error in get_prediction_explain")
         return server_error()
 
 

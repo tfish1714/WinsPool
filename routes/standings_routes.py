@@ -1,4 +1,6 @@
 """routes/standings_routes.py — Standings, week-by-week, and playoff race routes."""
+import logging
+
 import pandas as pd
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
@@ -8,8 +10,11 @@ from services.data_service import (
     load_data, get_available_years, get_latest_season_and_week,
     get_latest_week_for_year, get_active_season,
 )
+from services.response_helpers import server_error
 import services.db_service as db
 import services.analysis_service as analysis
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -76,9 +81,8 @@ async def wins_pool_by_year(request: Request, year: int):
                          .to_html(classes="wp-data-table", border=0)) if not h2h_df.empty else "",
         })
     except Exception as e:
-        import traceback
-        from fastapi.responses import PlainTextResponse
-        return PlainTextResponse(traceback.format_exc())
+        logger.exception("Unhandled error rendering standings page")
+        return server_error()
 
 
 @router.get("/wins-pool/{year}/weekbyweek")
