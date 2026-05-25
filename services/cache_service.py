@@ -224,3 +224,93 @@ def write_game_predictions(season: int, predictions: dict) -> None:
             })
         except Exception as e:
             logger.error("Failed to write game_predictions/%s: %s", season, e)
+
+
+# ---------------------------------------------------------------------------
+# Prediction features audit store
+# ---------------------------------------------------------------------------
+# One document per season × ensemble_version.
+# Local: .local_db/prediction_features_{season}_{ensemble_version}.json
+# Firestore: prediction_features/{season}_{ensemble_version}
+# games value: {game_key: per-game audit dict from feature_audit_service}
+
+
+def get_prediction_features(
+    season: int,
+    ensemble_version: str | None = None,
+) -> dict | None:
+    """Return the prediction features doc for season/version, or None if absent.
+
+    If ensemble_version is None, returns the most recently written doc for the
+    season (by file mtime locally, by created_at in Firestore).
+    """
+    if _USE_LOCAL:
+        if ensemble_version:
+            p = _GAME_PRED_DIR / f"prediction_features_{season}_{ensemble_version}.json"
+            if not p.exists():
+                return None
+            with open(p) as f:
+                return json.load(f)
+        else:
+            candidates = sorted(
+                _GAME_PRED_DIR.glob(f"prediction_features_{season}_*.json"),
+                key=lambda p: p.stat().st_mtime,
+            )
+            if not candidates:
+                return None
+            with open(candidates[-1]) as f:
+                return json.load(f)
+    else:
+        try:
+            from services.db_service import get_db
+            db = get_db()
+            if ensemble_version:
+                doc_id = f"{season}_{ensemble_version}"
+                doc = db.collection("prediction_features").document(doc_id).get()
+                return doc.to_dict() if doc.exists else None
+            else:
+                docs = list(
+                    db.collection("prediction_features")
+                    .where("season", "==", season)
+                    .order_by("created_at", direction="DESCENDING")
+                    .limit(1)
+                    .stream()
+                )
+                return docs[0].to_dict() if docs else None
+        except Exception:
+            logger.exception("Failed to fetch prediction_features for season=%s", season)
+            return None
+
+
+def write_prediction_features(
+    season: int,
+    ensemble_version: str,
+    games: dict,
+) -> None:
+    """Persist the prediction features doc (local JSON or Firestore).
+
+    Args:
+        season: NFL season year.
+        ensemble_version: e.g. "nn_v10+xgb_v4+lr_v2".
+        games: {game_key: per-game audit dict} from compute_feature_audit().
+    """
+    from datetime import datetime, timezone
+    payload = {
+        "season":           season,
+        "ensemble_version": ensemble_version,
+        "created_at":       datetime.now(timezone.utc).isoformat(),
+        "games":            games,
+    }
+    if _USE_LOCAL:
+        _GAME_PRED_DIR.mkdir(parents=True, exist_ok=True)
+        p = _GAME_PRED_DIR / f"prediction_features_{season}_{ensemble_version}.json"
+        with open(p, "w") as f:
+            json.dump(payload, f, default=str)
+    else:
+        try:
+            from services.db_service import get_db
+            db = get_db()
+            doc_id = f"{season}_{ensemble_version}"
+            db.collection("prediction_features").document(doc_id).set(payload)
+        except Exception:
+            logger.exception("Failed to write prediction_features to Firestore season=%s", season)
