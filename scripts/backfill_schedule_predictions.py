@@ -50,8 +50,9 @@ from services.nn_prediction_service import NNPredictionService, build_ensemble_l
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
 from services.nn_projection_engine import NNProjectionEngine
-from services.cache_service import get_game_predictions, write_game_predictions
+from services.cache_service import get_game_predictions, write_game_predictions, write_prediction_features
 from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
+from services.feature_audit_service import compute_feature_audit
 
 
 # ---------------------------------------------------------------------------
@@ -265,10 +266,14 @@ def main():
                              "Use after retraining to reset the accuracy baseline.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Compute but do not write anywhere")
+    parser.add_argument("--features", action="store_true",
+                        help="Also compute and store per-game feature audit "
+                             "(SHAP/LR contributions). Adds ~5-10s per season.")
     args = parser.parse_args()
 
     write_local     = not args.firestore_only and not args.dry_run
     write_firestore = (args.firestore or args.firestore_only) and not args.dry_run
+    write_features  = args.features and not args.dry_run
 
     print("=" * 64)
     print("  Backfill Schedule Predictions (NN+XGB+LR Ensemble)")
@@ -279,6 +284,7 @@ def main():
     if write_firestore:    dest.append("Firestore (game_predictions/{season})")
     print(f"  Output : {' + '.join(dest) or 'dry-run'}")
     print(f"  Force  : {args.force}")
+    print(f"  Features: {write_features}")
     print("=" * 64)
 
     db = None
@@ -340,6 +346,12 @@ def main():
             all_games = pd.DataFrame()
             has_schedule = False
 
+    ensemble_version = (
+        f"nn_{nn_svc.loaded_version}+xgb_{xgb_svc.loaded_version}+lr_{lr_svc.loaded_version}"
+    )
+    if write_features:
+        print(f"\n  Ensemble version for audit: {ensemble_version}")
+
     print(f"\n[3/3] Writing predictions...")
     total_written = 0
     seasons_done  = 0
@@ -390,6 +402,15 @@ def main():
         print(f"  {year}  {n:>4} games  {status}{lock_info}")
         total_written += n
         seasons_done  += 1
+
+        if write_features:
+            year_ft = ft[ft["season"] == year].copy()
+            if not year_ft.empty:
+                print(f"    Computing feature audit ({len(year_ft)} games)...")
+                audit_records = compute_feature_audit(year_ft, nn_svc, xgb_svc, lr_svc)
+                games_dict = {r["game_key"]: r for r in audit_records}
+                write_prediction_features(year, ensemble_version, games_dict)
+                print(f"    ✓ {len(games_dict)} games written → prediction_features_{year}_{ensemble_version}")
 
     if write_firestore and db:
         db.collection("metadata").document("cache_control").set({"last_update": time.time()})
