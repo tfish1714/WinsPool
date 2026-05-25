@@ -1,5 +1,6 @@
 import pytest
 import pandas as pd
+import time
 from unittest.mock import patch, MagicMock
 from services.cache_service import get_cached, write_cache, clear_data_cache, _DATA_CACHE
 
@@ -81,10 +82,13 @@ class TestPredictionFeaturesCache:
         from services.cache_service import write_prediction_features, get_prediction_features
 
         write_prediction_features(2025, "nn_v9+xgb_v3+lr_v1", {"W01_BUF_MIA": {}})
+        time.sleep(0.01)  # ensure different mtime
         write_prediction_features(2025, "nn_v10+xgb_v4+lr_v2", {"W01_BUF_MIA": {"newer": True}})
 
         doc = get_prediction_features(2025)  # no version -> latest by mtime
         assert doc is not None
+        assert doc["ensemble_version"] == "nn_v10+xgb_v4+lr_v2"
+        assert doc["games"]["W01_BUF_MIA"].get("newer") is True
 
     def test_get_nonexistent_returns_none(self, tmp_path, monkeypatch):
         monkeypatch.setenv("USE_LOCAL_DATA", "true")

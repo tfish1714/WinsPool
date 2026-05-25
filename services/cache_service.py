@@ -244,6 +244,11 @@ def get_prediction_features(
     If ensemble_version is None, returns the most recently written doc for the
     season (by file mtime locally, by created_at in Firestore).
     """
+    if ensemble_version is not None and (
+        "/" in ensemble_version or "\\" in ensemble_version or ".." in ensemble_version
+    ):
+        raise ValueError(f"Invalid ensemble_version: {ensemble_version!r}")
+
     if _USE_LOCAL:
         if ensemble_version:
             p = _GAME_PRED_DIR / f"prediction_features_{season}_{ensemble_version}.json"
@@ -294,6 +299,9 @@ def write_prediction_features(
         ensemble_version: e.g. "nn_v10+xgb_v4+lr_v2".
         games: {game_key: per-game audit dict} from compute_feature_audit().
     """
+    if "/" in ensemble_version or "\\" in ensemble_version or ".." in ensemble_version:
+        raise ValueError(f"Invalid ensemble_version: {ensemble_version!r}")
+
     from datetime import datetime, timezone
     payload = {
         "season":           season,
