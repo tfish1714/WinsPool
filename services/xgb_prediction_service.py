@@ -76,6 +76,7 @@ class XGBPredictionService:
         self.scaler: Optional[object] = None
         self._eval_metrics: Optional[dict] = None
         self._is_trained = False
+        self.loaded_version: Optional[str] = None
 
     # ------------------------------------------------------------------ #
     # Data splitting (identical to NNPredictionService)
@@ -307,4 +308,5 @@ class XGBPredictionService:
         with open(entry["scaler_path"], "rb") as f:
             self.scaler = pickle.load(f)
         self._is_trained = True
+        self.loaded_version = version
         logger.info("Loaded XGB model %s from %s", version, entry["model_path"])

@@ -70,6 +70,7 @@ class LRPredictionService:
         self.scaler: Optional[object] = None
         self._eval_metrics: Optional[dict] = None
         self._is_trained = False
+        self.loaded_version: Optional[str] = None
 
     # ------------------------------------------------------------------ #
     # Split (mirrors NN / XGB)
@@ -279,4 +280,5 @@ class LRPredictionService:
         with open(entry["model_path"],  "rb") as f: self.model  = pickle.load(f)
         with open(entry["scaler_path"], "rb") as f: self.scaler = pickle.load(f)
         self._is_trained = True
+        self.loaded_version = version
         logger.info("Loaded LR model %s", version)

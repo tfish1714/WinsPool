@@ -183,6 +183,7 @@ class NNPredictionService:
         self._train_history: Optional[dict] = None
         self._eval_metrics: Optional[dict] = None
         self._is_trained = False
+        self.loaded_version: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Model Architecture
@@ -596,6 +597,11 @@ class NNPredictionService:
 
         self.model = keras.models.load_model(str(load_path))
         self._is_trained = True
+
+        # Extract version from load_path filename for tracking
+        stem = load_path.stem
+        match = re.search(r"nn_(v\d+)", stem)
+        self.loaded_version = match.group(1) if match else "unknown"
         logger.info("Model loaded from %s", load_path)
 
         # Load scaler
