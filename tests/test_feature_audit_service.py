@@ -183,3 +183,20 @@ class TestComputeFeatureAudit:
         nn, xgb_svc, lr = _make_mocks(0)
         records = compute_feature_audit(empty, nn, xgb_svc, lr)
         assert records == []
+
+    def test_tf_unavailable_falls_back_to_zeros(self):
+        """When TF_AVAILABLE is False, NN importance should be zero (falls back gracefully)."""
+        from services.feature_audit_service import compute_feature_audit
+        ft = _make_feature_table(2)
+        nn, xgb_svc, lr = _make_mocks(2)
+        dummy_shap = np.zeros((2, len(FEATURE_COLUMNS) + 1))
+        xgb_svc.model.get_booster.return_value.predict.return_value = dummy_shap
+
+        with patch("services.feature_audit_service.xgb.DMatrix"), \
+             patch("services.feature_audit_service.TF_AVAILABLE", False):
+            records = compute_feature_audit(ft, nn, xgb_svc, lr)
+
+        # Should not raise; records should be complete
+        assert len(records) == 2
+        for r in records:
+            assert "feature_importance" in r

@@ -59,6 +59,9 @@ def _nn_gradient_importance(model, X_scaled: np.ndarray) -> np.ndarray:
             tape.watch(X_tensor)
             pred = model(X_tensor, training=False)   # (n, 1)
         grads = tape.gradient(pred, X_tensor)        # (n, n_features)
+        if grads is None:
+            logger.warning("NN gradient is None (no graph path to input); using zeros for NN importance.")
+            return np.zeros_like(X_scaled)
         return (X_scaled * grads.numpy()).astype(np.float32)
     except Exception:
         logger.warning("NN gradient computation failed; using zeros for NN importance.")
@@ -141,6 +144,7 @@ def compute_feature_audit(
 
         raw_features    = {col: round(_safe_float(getattr(row, col, 0.0)), 4)
                            for col in FEATURE_COLUMNS}
+        # Note: scaled_features uses the NN scaler — may differ slightly from XGB/LR scalers
         scaled_features = {col: round(float(X_nn[i, j]), 4)
                            for j, col in enumerate(FEATURE_COLUMNS)}
 
