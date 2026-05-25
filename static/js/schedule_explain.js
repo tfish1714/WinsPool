@@ -230,6 +230,64 @@ function renderExplanation(data) {
     `;
 }
 
+// ── Feature audit section ─────────────────────────────────────────────────
+
+function renderFeatureAuditSection(featureData, homeTeam, awayTeam) {
+    if (!featureData) return '';
+
+    const { nn_prob, xgb_prob, lr_prob, blended_prob, feature_importance, ensemble_version } = featureData;
+
+    // Per-model probability row
+    const fmt = p => p != null ? `${Math.round(p * 100)}%` : '—';
+    const modelRow = `
+        <div style="background:rgba(255,255,255,0.04); border-radius:8px; padding:10px 14px; margin-bottom:12px;">
+            <div style="font-size:0.72rem; color:var(--text-secondary); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.05em;">Model breakdown</div>
+            <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+                <span style="font-size:0.82rem;">NN <strong>${fmt(nn_prob)}</strong></span>
+                <span style="color:var(--glass-border);">·</span>
+                <span style="font-size:0.82rem;">XGB <strong>${fmt(xgb_prob)}</strong></span>
+                <span style="color:var(--glass-border);">·</span>
+                <span style="font-size:0.82rem;">LR <strong>${fmt(lr_prob)}</strong></span>
+                <span style="color:var(--glass-border);">→</span>
+                <span style="font-size:0.85rem; color:var(--accent-green);">Blended <strong>${fmt(blended_prob)}</strong></span>
+            </div>
+        </div>`;
+
+    // Top-5 feature importance bar chart
+    const top5 = (feature_importance || []).slice(0, 5);
+    if (!top5.length) return modelRow;
+
+    const maxScore = Math.max(...top5.map(f => Math.abs(f.score)), 0.0001);
+
+    const bars = top5.map(f => {
+        const pct  = Math.round((Math.abs(f.score) / maxScore) * 100);
+        const dir  = f.direction === 'home' ? homeTeam : awayTeam;
+        const color = f.direction === 'home' ? 'var(--accent-green)' : 'var(--accent-gold)';
+        const label = f.feature.replace(/_/g, ' ');
+        return `
+            <div style="margin-bottom:7px;">
+                <div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:2px;">
+                    <span style="color:var(--text-secondary);">${label}</span>
+                    <span style="color:${color}; font-weight:600;">${dir}</span>
+                </div>
+                <div style="height:5px; background:rgba(255,255,255,0.07); border-radius:3px; overflow:hidden;">
+                    <div style="width:${pct}%; height:100%; background:${color}; border-radius:3px;"></div>
+                </div>
+            </div>`;
+    }).join('');
+
+    const versionNote = ensemble_version
+        ? `<div style="font-size:0.68rem; color:var(--text-secondary); margin-top:8px; text-align:right;">${ensemble_version}</div>`
+        : '';
+
+    return `${modelRow}
+        <div style="background:rgba(255,255,255,0.04); border-radius:8px; padding:10px 14px; margin-bottom:12px;">
+            <div style="font-size:0.72rem; color:var(--text-secondary); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.05em;">Top factors (blended importance)</div>
+            ${bars}
+            ${versionNote}
+        </div>`;
+}
+
 // ── Event wiring ──────────────────────────────────────────────────────────────
 
 async function handleExplainClick(btn) {
@@ -249,7 +307,19 @@ async function handleExplainClick(btn) {
             return;
         }
         const data = await resp.json();
-        content.innerHTML = renderExplanation(data);
+
+        // Feature audit fetch (graceful — 404 is normal for older games)
+        let featureData = null;
+        try {
+            const featResp = await fetch(
+                `/api/prediction_features/${season}/${week}/${encodeURIComponent(away)}/${encodeURIComponent(home)}`,
+                { headers: token ? { 'Authorization': `Bearer ${token}` } : {} }
+            );
+            if (featResp.ok) featureData = await featResp.json();
+        } catch (_) { /* no feature data — silently skip */ }
+
+        const auditHtml = renderFeatureAuditSection(featureData, home, away);
+        content.innerHTML = auditHtml + renderExplanation(data);
         // Re-init lucide icons inside modal
         if (window.lucide) window.lucide.createIcons();
     } catch (e) {
