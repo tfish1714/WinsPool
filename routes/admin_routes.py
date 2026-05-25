@@ -7,8 +7,11 @@ import re
 import subprocess
 import sys
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Path as FPath, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 
 from routes.models import (
     NewSeasonRequest, MemberPaidRequest, PreviewDraftOrderRequest,
@@ -16,6 +19,7 @@ from routes.models import (
     SetTempPasswordRequest, SeasonRequest, RecapWeekRequest,
     RecapYearRequest, GenerateRecapRequest, SaveBroadcastRecapRequest,
 )
+from services.cache_service import get_prediction_features
 from services.data_service import load_data
 from services.response_helpers import server_error
 from services.db_service import (
@@ -32,6 +36,8 @@ import services.recap_service as recap_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
+_templates = Jinja2Templates(directory="templates")
+_page_router = APIRouter()  # No prefix — for HTML page routes
 
 
 @router.post("/admin/new_season")
@@ -341,4 +347,35 @@ async def save_and_broadcast_recap(body: SaveBroadcastRecapRequest, _: dict = De
         return JSONResponse(content={"message": f"Week {body.week} recap saved and broadcast to {len(emails)} players."})
     except Exception as e:
         logger.exception("Unhandled error in admin endpoint")
+        return server_error()
+
+
+@_page_router.get("/admin/predictions", response_class=HTMLResponse)
+async def admin_predictions_page(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Admin prediction debug page — requires admin auth."""
+    return _templates.TemplateResponse(request, "admin_predictions.html")
+
+
+@router.get("/admin/prediction_features/{season}")
+def get_admin_prediction_features(
+    season: Annotated[int, FPath(ge=2000, le=2030)],
+    _: dict = Depends(require_admin),
+):
+    """Full feature audit for a season (admin only — used by debug page).
+
+    Returns the latest ensemble version doc for the season.
+    """
+    try:
+        doc = get_prediction_features(season)
+        if doc is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"No feature data for season {season}."},
+            )
+        return JSONResponse(content=doc)
+    except Exception:
+        logger.exception("Unhandled error in get_admin_prediction_features")
         return server_error()

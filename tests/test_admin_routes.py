@@ -353,3 +353,66 @@ class TestMembersPaid:
             json={"targetPlayerId": 1, "season": 2025, "paid": True},
         )
         assert resp.status_code in (401, 403)
+
+
+# ── /api/admin/prediction_features/{season} ───────────────────────────────────
+
+class TestAdminPredictionFeaturesEndpoint:
+    """Tests for GET /api/admin/prediction_features/{season}."""
+
+    def test_returns_data_for_season(self, admin_token, monkeypatch):
+        from fastapi.testclient import TestClient
+        from main import app
+
+        fake_doc = {
+            "season": 2025,
+            "ensemble_version": "nn_v10+xgb_v4+lr_v2",
+            "created_at": "2025-11-01T00:00:00Z",
+            "games": {"W08_SF_KC": {"blended_prob": 0.61}},
+        }
+        monkeypatch.setattr(
+            "routes.admin_routes.get_prediction_features",
+            lambda season, **kw: fake_doc,
+        )
+
+        client = TestClient(app)
+        resp = client.get(
+            "/api/admin/prediction_features/2025",
+            headers={"Authorization": admin_token},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["season"] == 2025
+        assert "games" in data
+
+    def test_returns_404_when_no_data(self, admin_token, monkeypatch):
+        from fastapi.testclient import TestClient
+        from main import app
+
+        monkeypatch.setattr(
+            "routes.admin_routes.get_prediction_features",
+            lambda season, **kw: None,
+        )
+
+        client = TestClient(app)
+        resp = client.get(
+            "/api/admin/prediction_features/2025",
+            headers={"Authorization": admin_token},
+        )
+        assert resp.status_code == 404
+
+    def test_requires_admin(self, auth_token, monkeypatch):
+        from fastapi.testclient import TestClient
+        from main import app
+
+        monkeypatch.setattr(
+            "routes.admin_routes.get_prediction_features",
+            lambda season, **kw: {"season": 2025, "games": {}},
+        )
+
+        client = TestClient(app)
+        resp = client.get(
+            "/api/admin/prediction_features/2025",
+            headers={"Authorization": auth_token},  # non-admin user
+        )
+        assert resp.status_code in (401, 403)
