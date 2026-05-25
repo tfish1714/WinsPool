@@ -361,9 +361,6 @@ class TestAdminPredictionFeaturesEndpoint:
     """Tests for GET /api/admin/prediction_features/{season}."""
 
     def test_returns_data_for_season(self, admin_token, monkeypatch):
-        from fastapi.testclient import TestClient
-        from main import app
-
         fake_doc = {
             "season": 2025,
             "ensemble_version": "nn_v10+xgb_v4+lr_v2",
@@ -375,7 +372,6 @@ class TestAdminPredictionFeaturesEndpoint:
             lambda season, **kw: fake_doc,
         )
 
-        client = TestClient(app)
         resp = client.get(
             "/api/admin/prediction_features/2025",
             headers={"Authorization": admin_token},
@@ -386,15 +382,11 @@ class TestAdminPredictionFeaturesEndpoint:
         assert "games" in data
 
     def test_returns_404_when_no_data(self, admin_token, monkeypatch):
-        from fastapi.testclient import TestClient
-        from main import app
-
         monkeypatch.setattr(
             "routes.admin_routes.get_prediction_features",
             lambda season, **kw: None,
         )
 
-        client = TestClient(app)
         resp = client.get(
             "/api/admin/prediction_features/2025",
             headers={"Authorization": admin_token},
@@ -402,15 +394,11 @@ class TestAdminPredictionFeaturesEndpoint:
         assert resp.status_code == 404
 
     def test_requires_admin(self, auth_token, monkeypatch):
-        from fastapi.testclient import TestClient
-        from main import app
-
         monkeypatch.setattr(
             "routes.admin_routes.get_prediction_features",
             lambda season, **kw: {"season": 2025, "games": {}},
         )
 
-        client = TestClient(app)
         resp = client.get(
             "/api/admin/prediction_features/2025",
             headers={"Authorization": auth_token},  # non-admin user

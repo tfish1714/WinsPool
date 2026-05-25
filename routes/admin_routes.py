@@ -360,7 +360,7 @@ async def admin_predictions_page(
 
 
 @router.get("/admin/prediction_features/{season}")
-def get_admin_prediction_features(
+async def get_admin_prediction_features(
     season: Annotated[int, FPath(ge=2000, le=2030)],
     _: dict = Depends(require_admin),
 ):
