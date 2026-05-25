@@ -138,6 +138,35 @@ def dump_game_predictions():
         log.error(f"    ✗ Failed 'game_predictions': {e}")
 
 
+def dump_prediction_features():
+    """Pull all prediction_features docs from Firestore → .local_db/prediction_features_*.json."""
+    log.info("  Fetching 'prediction_features' from Firestore...")
+    try:
+        db = get_db()
+        docs = list(db.collection("prediction_features").stream())
+        if not docs:
+            log.warning("    'prediction_features' returned no documents — skipping")
+            return
+
+        written = 0
+        for doc in docs:
+            d = doc.to_dict()
+            season = d.get("season")
+            ensemble_version = d.get("ensemble_version")
+            if season is None or not ensemble_version:
+                log.warning(f"    skipping {doc.id} — missing season or ensemble_version")
+                continue
+            out_path = LOCAL_DB / f"prediction_features_{int(season)}_{ensemble_version}.json"
+            with open(out_path, "w") as f:
+                json.dump(d, f, default=str)
+            written += 1
+            log.info(f"    ✓ {len(d.get('games', {}))} games → {out_path.name}")
+
+        log.info(f"    ✓ {written} docs written")
+    except Exception as e:
+        log.error(f"    ✗ Failed 'prediction_features': {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Rebuild local .pkl cache from Firestore")
     parser.add_argument("--skip-analytics", action="store_true",
@@ -154,6 +183,9 @@ def main():
 
     log.info("\n-- ML game predictions --")
     dump_game_predictions()
+
+    log.info("\n-- ML feature audit --")
+    dump_prediction_features()
 
     if not args.skip_analytics:
         log.info("\n-- Analytics cache (NN projections, standings, etc.) --")
