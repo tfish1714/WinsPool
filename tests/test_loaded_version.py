@@ -1,10 +1,8 @@
 """Test that all three prediction services expose loaded_version after load_model()."""
 import pytest
-from unittest.mock import patch, MagicMock, mock_open
-import pickle
+from unittest.mock import patch, MagicMock
 import json
 from pathlib import Path
-from io import BytesIO
 
 
 class TestNNLoadedVersion:
@@ -38,9 +36,9 @@ class TestNNLoadedVersion:
         with patch.object(services.nn_prediction_service.keras.models, "load_model", return_value=fake_model), \
              patch("joblib.load", return_value=fake_scaler):
             svc = NNPredictionService()
+            assert svc.loaded_version is None  # not yet loaded
             svc.load_model(path="v10")
 
-            assert hasattr(svc, "loaded_version"), "NNPredictionService should have loaded_version attribute"
             assert svc.loaded_version == "v10", f"Expected loaded_version='v10', got {svc.loaded_version}"
 
 
@@ -75,9 +73,9 @@ class TestXGBLoadedVersion:
         with patch.object(xgb.XGBClassifier, "load_model"), \
              patch("pickle.load", return_value=fake_scaler):
             svc = XGBPredictionService()
+            assert svc.loaded_version is None  # not yet loaded
             svc.load_model(version="v4")
 
-            assert hasattr(svc, "loaded_version"), "XGBPredictionService should have loaded_version attribute"
             assert svc.loaded_version == "v4", f"Expected loaded_version='v4', got {svc.loaded_version}"
 
 
@@ -110,7 +108,7 @@ class TestLRLoadedVersion:
 
         with patch("pickle.load", side_effect=[fake_model, fake_scaler]):
             svc = LRPredictionService()
+            assert svc.loaded_version is None  # not yet loaded
             svc.load_model(version="v2")
 
-            assert hasattr(svc, "loaded_version"), "LRPredictionService should have loaded_version attribute"
             assert svc.loaded_version == "v2", f"Expected loaded_version='v2', got {svc.loaded_version}"
