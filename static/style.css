@@ -3094,8 +3094,12 @@ table.wp-data-table tbody td:last-child {
         font-family: 'JetBrains Mono', monospace;
         font-size: 1.25rem;
         font-weight: 700;
-        color: var(--leader);
+        color: var(--ink);
         letter-spacing: -0.02em;
+    }
+
+    .standings-stacked-card__score.leader {
+        color: var(--leader);
     }
 
     .standings-stacked-card__teams {

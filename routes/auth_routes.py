@@ -1,8 +1,8 @@
 """routes/auth_routes.py — Authentication and player profile endpoints."""
 import hashlib
 import logging
-import random
 import re
+import secrets
 import time
 
 from fastapi import APIRouter
@@ -149,7 +149,7 @@ async def login(body: LoginRequest):
             })
 
         if player.get("mfa_enabled"):
-            mfa_code = "".join([str(random.randint(0, 9)) for _ in range(6)])
+            mfa_code = "".join([str(secrets.randbelow(10)) for _ in range(6)])
             mfa_token_hash = hashlib.sha256(mfa_code.encode()).hexdigest()
             update_player_profile(str(player["playerId"]), {
                 "mfa_token": mfa_token_hash,

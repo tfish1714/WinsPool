@@ -24,9 +24,12 @@ router = APIRouter(prefix="/api")
 def fetch_progress(
     season: Annotated[int, Path(ge=2000, le=2030)],
     week: Annotated[int, Path(ge=1, le=22)],
-    _auth: dict = Depends(require_auth),
 ):
-    """Chart data: cumulative player wins by week for the given season."""
+    """Chart data: cumulative player wins by week for the given season.
+
+    Public endpoint — the standings page is public and this data is already
+    visible in the standings table. No auth required.
+    """
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_route = time.time()
     try:
@@ -55,6 +58,7 @@ def fetch_draft_summary(_auth: dict = Depends(require_auth)):
             "best_by_round": data.get("best_by_round"),
         })
     except Exception as e:
+        logger.exception("Unhandled error in fetch_draft_summary")
         return server_error()
 
 
@@ -74,6 +78,7 @@ def get_standings(year: int, _auth: dict = Depends(require_auth)):
             logger.debug("/api/standings route total took %.3fs", time.time() - start_route)
         return JSONResponse(content=sanitize_state(data))
     except Exception as e:
+        logger.exception("Unhandled error in get_standings")
         return server_error()
 
 
@@ -194,6 +199,7 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
             **{k: v for k, v in pred.items() if k != "locked"},
         })
     except Exception as e:
+        logger.exception("Unhandled error in get_prediction_explain")
         return server_error()
 
 

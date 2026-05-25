@@ -61,7 +61,9 @@ class EloExplorer {
         if (!playerId) return;
 
         try {
-            const resp = await fetch(`/api/admin/elo_history?playerId=${encodeURIComponent(playerId)}`);
+            const _token = AuthService.getToken();
+            const _headers = _token ? { 'Authorization': `Bearer ${_token}` } : {};
+            const resp = await fetch(`/api/admin/elo_history?playerId=${encodeURIComponent(playerId)}`, { headers: _headers });
             this._data = await resp.json();
             this._buildSeasonDropdowns();
             this._buildTeamGrid();

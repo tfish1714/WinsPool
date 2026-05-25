@@ -63,8 +63,8 @@
         '#a3e635',  // lime
     ];
 
-    function initChart(year, standingsOrderIds) {
-        fetch(`/api/progress/${year}/latest`)
+    function initChart(year, latestWeek, standingsOrderIds) {
+        fetch(`/api/progress/${year}/${latestWeek}`)
             .then(res => res.json())
             .then(data => {
                 const chartData = data.player_chart;
@@ -150,7 +150,7 @@
         // Init chart using config injected by Jinja template
         const cfg = window.STANDINGS_CONFIG;
         if (cfg && document.getElementById('winsChart')) {
-            initChart(cfg.year, cfg.standingsOrderIds);
+            initChart(cfg.year, cfg.latestWeek, cfg.standingsOrderIds);
         }
     });
 

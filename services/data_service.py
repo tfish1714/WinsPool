@@ -217,6 +217,35 @@ def load_data(year: int = None):
         
     return res
 
+def load_data_season(year: int):
+    """
+    Returns data sliced to a single season year.
+    Uses the same 3-tier cache as load_data().
+
+    Returns the same 7-tuple as load_data() but with DataFrames filtered to
+    just the requested year. Use this in route handlers that only need one season
+    to avoid processing multi-year master datasets.
+
+    Returns: (standings, teams, games, players, draft_order, draft_results, rules)
+    """
+    standings, teams, games, players, draft_order, draft_results, rules = load_data()
+
+    def _filter(df, col='season'):
+        if df.empty or col not in df.columns:
+            return df
+        return df[df[col] == year].copy()
+
+    return (
+        _filter(standings),
+        teams,
+        _filter(games),
+        players,
+        draft_order,
+        _filter(draft_results),
+        rules,
+    )
+
+
 def get_active_season(games: pd.DataFrame, draft_results: pd.DataFrame = None) -> int:
     """
     Returns the latest season that has completed game results.

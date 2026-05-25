@@ -134,7 +134,7 @@
                 <div class="standings-stacked-card__header">
                     <span class="standings-stacked-card__rank">{{ row['Rank'] }}</span>
                     <span class="standings-stacked-card__name">{{ row['fullName'] }}</span>
-                    <span class="standings-stacked-card__score">{{ row['TotalWins'] }}W</span>
+                    <span class="standings-stacked-card__score{% if loop.first %} leader{% endif %}">{{ row['TotalWins'] }}W</span>
                 </div>
                 <div class="standings-stacked-card__teams">
                     {% set pd1 = row['ptDiff1'] or 0 %}
@@ -203,6 +203,7 @@
 </main>
 
 <div id="standings-cfg-data" style="display:none;" data-year="{{ year }}"
+    data-latest-week="{{ latest_week }}"
     data-orders="[{% for row in data %}{{ row.playerId }}{% if not loop.last %},{% endif %}{% endfor %}]"></div>
 {% endblock %}
 
@@ -212,6 +213,7 @@
     if (cfgEl) {
         window.STANDINGS_CONFIG = {
             year: parseInt(cfgEl.dataset.year, 10),
+            latestWeek: parseInt(cfgEl.dataset.latestWeek, 10),
             standingsOrderIds: JSON.parse(cfgEl.dataset.orders)
         };
     }
