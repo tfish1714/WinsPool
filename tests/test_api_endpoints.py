@@ -87,3 +87,87 @@ def test_api_predictions_explain_requires_auth():
     """GET /api/predictions/explain returns 401 without a token."""
     response = client.get("/api/predictions/explain?season=2024&week=1&home=KC&away=BUF")
     assert response.status_code == 401
+
+
+class TestPredictionFeaturesEndpoint:
+    """Tests for GET /api/prediction_features/{season}/{week}/{away}/{home}."""
+
+    def test_returns_feature_data_when_present(self, auth_token, monkeypatch):
+        from fastapi.testclient import TestClient
+        from main import app
+
+        # game_key format: W{week:02d}_{home_team}_{away_team}
+        # URL /{away_team}/{home_team} → away=KC, home=SF → key W08_SF_KC
+        fake_doc = {
+            "season": 2025,
+            "ensemble_version": "nn_v10+xgb_v4+lr_v2",
+            "created_at": "2025-11-01T00:00:00Z",
+            "games": {
+                "W08_SF_KC": {
+                    "game_key": "W08_SF_KC", "season": 2025, "week": 8,
+                    "away_team": "KC", "home_team": "SF",
+                    "nn_prob": 0.623, "xgb_prob": 0.589,
+                    "lr_prob": 0.601, "blended_prob": 0.611,
+                    "features": {"tm_elo_pre": 1550.0},
+                    "scaled_features": {"tm_elo_pre": 0.81},
+                    "feature_importance": [
+                        {"feature": "tm_elo_pre", "score": 0.31, "direction": "home"}
+                    ],
+                }
+            },
+        }
+        monkeypatch.setattr(
+            "routes.api_routes.get_prediction_features",
+            lambda season, **kw: fake_doc,
+        )
+
+        client = TestClient(app)
+        resp = client.get(
+            "/api/prediction_features/2025/8/KC/SF",
+            headers={"Authorization": auth_token},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["game_key"] == "W08_SF_KC"
+        assert data["nn_prob"] == 0.623
+        assert data["blended_prob"] == 0.611
+
+    def test_returns_404_when_no_season_data(self, auth_token, monkeypatch):
+        from fastapi.testclient import TestClient
+        from main import app
+
+        monkeypatch.setattr(
+            "routes.api_routes.get_prediction_features",
+            lambda season, **kw: None,
+        )
+
+        client = TestClient(app)
+        resp = client.get(
+            "/api/prediction_features/2025/8/KC/SF",
+            headers={"Authorization": auth_token},
+        )
+        assert resp.status_code == 404
+
+    def test_returns_404_when_game_not_found(self, auth_token, monkeypatch):
+        from fastapi.testclient import TestClient
+        from main import app
+
+        monkeypatch.setattr(
+            "routes.api_routes.get_prediction_features",
+            lambda season, **kw: {"season": 2025, "ensemble_version": "v1", "games": {}},
+        )
+
+        client = TestClient(app)
+        resp = client.get(
+            "/api/prediction_features/2025/8/KC/SF",
+            headers={"Authorization": auth_token},
+        )
+        assert resp.status_code == 404
+
+    def test_requires_auth(self):
+        from fastapi.testclient import TestClient
+        from main import app
+
+        client = TestClient(app)
+        resp = client.get("/api/prediction_features/2025/8/KC/SF")
+        assert resp.status_code == 401

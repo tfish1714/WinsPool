@@ -14,6 +14,7 @@ from services.draft_service import sanitize_state
 from services.session_service import require_auth
 import services.analysis_service as analysis
 from services.analysis_service import get_season_progress
+from services.cache_service import get_prediction_features
 
 logger = logging.getLogger(__name__)
 
@@ -222,4 +223,51 @@ def get_schedule(year: int, _auth: dict = Depends(require_auth)):
         return JSONResponse(content=sanitize_state(schedule_enriched.to_dict(orient="records")))
     except Exception as e:
         logger.exception("Unhandled error in /api/schedule")
+        return server_error()
+
+
+@router.get("/prediction_features/{season}/{week}/{away_team}/{home_team}")
+def get_game_prediction_features(
+    season: Annotated[int, Path(ge=2000, le=2030)],
+    week:   Annotated[int, Path(ge=1, le=22)],
+    away_team: str,
+    home_team: str,
+    _auth: dict = Depends(require_auth),
+):
+    """Feature audit data for one game (any logged-in user — shown in explain modal).
+
+    Returns the per-game audit record: raw features, scaled features, per-model
+    probabilities, and blended feature importance for the latest ensemble version.
+    Returns 404 if no feature audit data exists for this game.
+
+    URL path order is /{away_team}/{home_team}.  The game_key is built as
+    W{week:02d}_{home}_{away} to match the nflverse schedule convention
+    (home_team listed first), matching what feature_audit_service stores.
+    """
+    try:
+        from services.nn_feature_engine import _normalize_team
+        ht = _normalize_team(home_team)   # home team first in game_key
+        at = _normalize_team(away_team)   # away team second
+        game_key = f"W{int(week):02d}_{ht}_{at}"
+
+        doc = get_prediction_features(season)
+        if doc is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "No feature data for this season."},
+            )
+
+        game_data = doc.get("games", {}).get(game_key)
+        if game_data is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"No feature data for game {game_key}."},
+            )
+
+        return JSONResponse(content={
+            **game_data,
+            "ensemble_version": doc.get("ensemble_version"),
+        })
+    except Exception:
+        logger.exception("Unhandled error in get_game_prediction_features")
         return server_error()
