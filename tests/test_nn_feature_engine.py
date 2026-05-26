@@ -514,3 +514,38 @@ def test_home_field_advantage_neutral_is_zero(tmp_path):
     if not w2.empty:
         assert float(w2.iloc[0]["home_field_advantage"]) == 1.0, \
             f"Regular home game should have home_field_advantage=1.0, got {w2.iloc[0]['home_field_advantage']}"
+
+
+# ---------------------------------------------------------------------------
+# Task 8: Finalize output
+# ---------------------------------------------------------------------------
+
+def test_all_27_features_in_output(tmp_path):
+    """build_master_feature_table output must contain all 27 FEATURE_COLUMNS."""
+    from services.nn_feature_engine import build_master_feature_table, FEATURE_COLUMNS
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    missing = [f for f in FEATURE_COLUMNS if f not in df.columns]
+    assert not missing, f"Missing features: {missing}"
+
+
+def test_no_obsolete_features_in_output(tmp_path):
+    """Old features must not appear in build_master_feature_table output."""
+    from services.nn_feature_engine import build_master_feature_table
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    for old in ["tm_elo_pre", "opp_elo_pre", "off_pass_epa", "def_pass_epa",
+                "home_flag", "is_dome_flag", "travel_rest_disadvantage",
+                "qb_injury_flag", "off_rush_epa", "def_rush_epa", "early_down_pass_epa"]:
+        assert old not in df.columns, f"Obsolete column still in output: {old}"
+
+
+def test_aux_metadata_columns_in_output(tmp_path):
+    """Aux columns for projection engine must be present in the output."""
+    from services.nn_feature_engine import build_master_feature_table
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    for col in ["home_elo_pre", "away_elo_pre",
+                "home_trench_score", "away_trench_score",
+                "home_margin_roll", "away_margin_roll"]:
+        assert col in df.columns, f"Missing aux column: {col}"

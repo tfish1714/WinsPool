@@ -1304,16 +1304,29 @@ def build_master_feature_table(
     # --- Ensure all required columns exist and are numeric ---
     for col in FEATURE_COLUMNS:
         if col not in sched.columns:
+            logger.warning("Feature %s not computed — filling with 0.0", col)
             sched[col] = 0.0
         sched[col] = pd.to_numeric(sched[col], errors="coerce").fillna(0.0)
 
     sched = sched.dropna(subset=["home_win"]).reset_index(drop=True)
 
-    logger.info("Master Feature Table V2 assembled: %d rows, %d features.", len(sched), len(FEATURE_COLUMNS))
+    logger.info("Master Feature Table assembled: %d rows, %d features.", len(sched), len(FEATURE_COLUMNS))
 
-    # Build column list without duplicates (week lives in both metadata and FEATURE_COLUMNS)
+    # Metadata: always present
     meta = ["season", "week", "home_team", "away_team"]
-    # home_qb_out / away_qb_out are extra explanation columns (not model inputs)
-    extra = [c for c in ["home_qb_out", "away_qb_out"] if c in sched.columns]
-    out_cols = meta + [c for c in FEATURE_COLUMNS if c not in meta] + extra + ["home_win"]
-    return sched[out_cols]
+    # Aux cols for projection engine (not model inputs, exposed for downstream consumers)
+    aux = [c for c in [
+        "home_elo_pre", "away_elo_pre",
+        "home_trench_score", "away_trench_score",
+        "home_margin_roll", "away_margin_roll",
+        "home_qb_pressure_roll", "away_qb_pressure_roll",
+        "home_def_pressures_roll", "away_def_pressures_roll",
+        "h_off_pass", "h_off_rush", "h_off_early",
+        "h_def_pass", "h_def_rush", "h_def_early",
+        "a_off_pass", "a_off_rush", "a_off_early",
+        "a_def_pass", "a_def_rush", "a_def_early",
+        "home_qb_out", "away_qb_out",
+    ] if c in sched.columns]
+
+    out_cols = meta + [c for c in FEATURE_COLUMNS if c not in meta] + aux + ["home_win"]
+    return sched[[c for c in out_cols if c in sched.columns]]
