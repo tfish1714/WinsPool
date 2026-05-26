@@ -526,8 +526,10 @@ def _load_schedule(rd: Path) -> pd.DataFrame:
 
     df["div_game_flag"] = pd.to_numeric(df.get("div_game", 0), errors="coerce").fillna(0)
     df["playoff_flag"] = (df.get("game_type", "REG") != "REG").astype(float)
-    df["home_flag"] = 1.0
-    df["is_dome_flag"] = dome_mask.astype(float)
+    # home_field_advantage: 1.0 for regular home games, 0.0 for neutral sites
+    _location = df.get("location", pd.Series("Home", index=df.index)).fillna("Home").astype(str).str.strip()
+    df["home_field_advantage"] = (_location.str.lower() != "neutral").astype(float)
+    # is_dome_flag dropped — dome captured by passing_difficulty_index dome imputation (wind=0, temp=72)
     surf = df.get("surface", "").astype(str).str.lower()
     df["surface_type"] = surf.str.contains("turf|artificial").astype(float)
 
@@ -896,12 +898,16 @@ def _load_injury_flags(rd: Path) -> pd.DataFrame:
     if qb_out.empty:
         return pd.DataFrame()
 
+    # Two separate binary columns — fixes the both-injured=0 bug in the old signed diff.
+    # The join site selects the correct column based on team's role (home vs away).
     flags = (
         qb_out.groupby(["season", "week", "team"]).size()
         .reset_index(name="_n")
-        .assign(qb_injury_flag=1.0)
-        [["season", "week", "team", "qb_injury_flag"]]
+        [["season", "week", "team"]]
+        .copy()
     )
+    flags["home_qb_injury_flag"] = 1.0
+    flags["away_qb_injury_flag"] = 1.0
     return flags
 
 
@@ -1075,29 +1081,27 @@ def build_master_feature_table(
                     "home_def_pressures_roll", "away_def_pressures_roll"]:
             sched[col] = 0.0
 
-    # --- QB Starter Flag (snap-count; signed delta: +1 = away starter out, -1 = home starter out) ---
-    if starter_qb_flags:
-        _qb_df = pd.DataFrame(
-            [{"season": s, "week": w, "team": t, "flag": f}
-             for (s, w, t), f in starter_qb_flags.items()]
-        )
+    # --- QB Injury Flags (two separate binary flags — fixes both-injured=0 bug) ---
+    injury_flags = _load_injury_flags(rd)
+    if not injury_flags.empty:
         sched = sched.merge(
-            _qb_df.rename(columns={"team": "home_team", "flag": "_home_qb_out"}),
+            injury_flags[["season", "week", "team", "home_qb_injury_flag"]].rename(
+                columns={"team": "home_team"}),
             on=["season", "week", "home_team"], how="left",
         )
         sched = sched.merge(
-            _qb_df.rename(columns={"team": "away_team", "flag": "_away_qb_out"}),
+            injury_flags[["season", "week", "team", "away_qb_injury_flag"]].rename(
+                columns={"team": "away_team"}),
             on=["season", "week", "away_team"], how="left",
         )
-        sched["home_qb_out"] = sched["_home_qb_out"].fillna(0.0)
-        sched["away_qb_out"] = sched["_away_qb_out"].fillna(0.0)
-        # Positive = home team advantage (away starter is out)
-        sched["qb_injury_flag"] = sched["away_qb_out"] - sched["home_qb_out"]
-        sched = sched.drop(columns=["_home_qb_out", "_away_qb_out"])
+        sched["home_qb_injury_flag"] = sched["home_qb_injury_flag"].fillna(0.0)
+        sched["away_qb_injury_flag"] = sched["away_qb_injury_flag"].fillna(0.0)
     else:
-        sched["qb_injury_flag"] = 0.0
-        sched["home_qb_out"] = 0.0
-        sched["away_qb_out"] = 0.0
+        sched["home_qb_injury_flag"] = 0.0
+        sched["away_qb_injury_flag"] = 0.0
+    # Legacy aux cols for any downstream that still reads them
+    sched["home_qb_out"] = sched["home_qb_injury_flag"]
+    sched["away_qb_out"] = sched["away_qb_injury_flag"]
 
     # --- Rolling Point Differential (no leakage) ---
     if "home_score" in sched.columns and "away_score" in sched.columns:

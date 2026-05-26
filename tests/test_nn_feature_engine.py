@@ -458,3 +458,59 @@ def test_trench_is_signed_differential(tmp_path):
     assert df["trench_dominance_metric"].dtype in [np.float64, float]
     # Not all constant (z-scoring should produce variation if any team differs from average)
     assert df["trench_dominance_metric"].std() >= 0
+
+
+# ---------------------------------------------------------------------------
+# Task 7: QB injury flags + home_field_advantage
+# ---------------------------------------------------------------------------
+
+def test_qb_injury_split_two_flags(tmp_path):
+    """home_qb_injury_flag and away_qb_injury_flag must be present; old qb_injury_flag must not."""
+    from services.nn_feature_engine import build_master_feature_table
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    assert "home_qb_injury_flag" in df.columns
+    assert "away_qb_injury_flag" in df.columns
+    assert "qb_injury_flag" not in df.columns
+
+
+def test_both_qbs_injured_distinguishable(tmp_path):
+    """When both QBs are injured, home=1 and away=1 (not 0+0 like old diff)."""
+    from services.nn_feature_engine import _load_injury_flags
+    inj_dir = tmp_path / "injuries"
+    inj_dir.mkdir(parents=True, exist_ok=True)
+    inj_df = pd.DataFrame([
+        {"season": 2024, "week": 1, "team": "KC",  "position": "QB", "report_status": "Out"},
+        {"season": 2024, "week": 1, "team": "BUF", "position": "QB", "report_status": "Out"},
+    ])
+    inj_df.to_csv(inj_dir / "injuries_2024.csv", index=False)
+
+    result = _load_injury_flags(tmp_path)
+    assert not result.empty
+    kc  = result[(result["team"] == "KC")  & (result["season"] == 2024) & (result["week"] == 1)]
+    buf = result[(result["team"] == "BUF") & (result["season"] == 2024) & (result["week"] == 1)]
+    assert not kc.empty  and float(kc["home_qb_injury_flag"].iloc[0]) == 1.0
+    assert not buf.empty and float(buf["away_qb_injury_flag"].iloc[0]) == 1.0
+
+
+def test_home_field_advantage_neutral_is_zero(tmp_path):
+    """home_field_advantage must be 0.0 for games with location=='Neutral'."""
+    from services.nn_feature_engine import build_master_feature_table
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+    sched_path = rd / "schedules" / "games.csv"
+    sched_df = pd.read_csv(sched_path)
+    sched_df.loc[sched_df["week"] == 1, "location"] = "Neutral"
+    sched_df.loc[sched_df["week"] == 1, ["home_score", "away_score"]] = [24, 21]
+    sched_df.to_csv(sched_path, index=False)
+
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    assert "home_field_advantage" in df.columns
+    w1 = df[df["week"] == 1]
+    if not w1.empty:
+        assert float(w1.iloc[0]["home_field_advantage"]) == 0.0, \
+            f"Neutral-site home_field_advantage should be 0.0, got {w1.iloc[0]['home_field_advantage']}"
+
+    w2 = df[df["week"] == 2]
+    if not w2.empty:
+        assert float(w2.iloc[0]["home_field_advantage"]) == 1.0, \
+            f"Regular home game should have home_field_advantage=1.0, got {w2.iloc[0]['home_field_advantage']}"
