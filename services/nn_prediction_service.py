@@ -3,7 +3,7 @@
 Provides a TensorFlow/Keras feedforward neural network for predicting NFL
 game outcomes (home win probability) and projecting season win totals.
 
-Architecture: Input(26) -> Dense(48,ReLU) -> Dropout(0.4) ->
+Architecture: Input(27) -> Dense(48,ReLU) -> Dropout(0.4) ->
               Dense(24,ReLU) -> Dropout(0.4) -> Dense(1,Sigmoid)
 Loss: Binary cross-entropy
 
@@ -135,24 +135,25 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
                 pass
 
         explanation = {
-            "vegas_line":       vegas_spread,
-            "vegas_home_prob":  vegas_home_prob,
-            "model_spread":     model_spread,
-            "edge_vs_vegas":    edge_vs_vegas,
-            "elo_diff":         round(_f("tm_elo_pre") - _f("opp_elo_pre"), 1),
-            "roster_delta":     round(_f("roster_talent_delta"), 3),
-            "off_pass_epa":     round(_f("off_pass_epa"), 3),
-            "def_pass_epa":     round(_f("def_pass_epa"), 3),
-            "off_rush_epa":     round(_f("off_rush_epa"), 3),
-            "def_rush_epa":     round(_f("def_rush_epa"), 3),
-            "turnover_margin":  round(_f("turnover_margin_rolling"), 2),
-            "qb_injury":        round(_f("qb_injury_flag"), 1),
-            "home_qb_out":      round(_f("home_qb_out", 0.0), 1),
-            "away_qb_out":      round(_f("away_qb_out", 0.0), 1),
-            "rest_disadvantage":round(_f("travel_rest_disadvantage"), 2),
-            "trench_dominance": round(_f("trench_dominance_metric"), 3),
-            "off_roster_value": round(_f("off_roster_value_delta"), 3),
-            "def_roster_value": round(_f("def_roster_value_delta"), 3),
+            "vegas_line":           vegas_spread,
+            "vegas_home_prob":      vegas_home_prob,
+            "model_spread":         model_spread,
+            "edge_vs_vegas":        edge_vs_vegas,
+            "elo_diff":             round(_f("elo_diff"), 1),
+            "elo_confidence":       round(_f("elo_confidence"), 3),
+            "pass_epa_matchup":     round(_f("pass_epa_matchup"), 3),
+            "rush_epa_matchup":     round(_f("rush_epa_matchup"), 3),
+            "early_down_matchup":   round(_f("early_down_matchup"), 3),
+            "roster_delta":         round(_f("roster_talent_delta"), 3),
+            "turnover_margin":      round(_f("turnover_margin_rolling"), 2),
+            "point_diff_advantage": round(_f("point_diff_advantage"), 2),
+            "home_qb_out":          round(_f("home_qb_injury_flag"), 1),
+            "away_qb_out":          round(_f("away_qb_injury_flag"), 1),
+            "rest_advantage":       round(_f("rest_advantage"), 1),
+            "travel_disadvantage":  round(_f("net_travel_disadvantage"), 2),
+            "trench_dominance":     round(_f("trench_dominance_metric"), 3),
+            "off_roster_value":     round(_f("off_roster_value_delta"), 3),
+            "def_roster_value":     round(_f("def_roster_value_delta"), 3),
         }
 
         lookup[(int(row.season), int(row.week), ht, at)] = {

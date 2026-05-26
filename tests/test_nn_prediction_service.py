@@ -16,6 +16,7 @@ from services.nn_feature_engine import (
     GROWTH_MULTIPLIER,
     PRIME_MULTIPLIER,
     RAWDATA_DIR,
+    FEATURE_COLUMNS,
 )
 
 # Check TF availability without importing it — avoids 30s+ TF startup during
@@ -171,7 +172,7 @@ class TestFeatureTable:
             
     def test_feature_count(self, feature_table):
         if TF_AVAILABLE:
-            for col in NN_FEATURE_COLUMNS:
+            for col in FEATURE_COLUMNS:
                 assert col in feature_table.columns
 
     def test_no_nan_in_label(self, feature_table):
