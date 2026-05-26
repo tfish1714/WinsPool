@@ -143,4 +143,7 @@ export const ApiService = {
     async fetchAdminPredictionFeatures(season) {
         return fetchWithTimeout(`${API_BASE}/admin/prediction_features/${season}`);
     },
+    async fetchVsVegas(season, week) {
+        return fetchWithTimeout(`${API_BASE}/admin/predictions/vs-vegas?season=${season}&week=${week}`);
+    },
 };

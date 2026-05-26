@@ -350,6 +350,41 @@ async def save_and_broadcast_recap(body: SaveBroadcastRecapRequest, _: dict = De
         return server_error()
 
 
+@router.get("/admin/predictions/vs-vegas")
+async def get_predictions_vs_vegas(season: int, week: int, _: dict = Depends(require_admin)):
+    """All predictions for a given week sorted by |edge vs Vegas| (admin only)."""
+    try:
+        from services.cache_service import get_game_predictions
+        preds = get_game_predictions(season)
+        week_prefix = f"W{week:02d}_"
+        games = []
+        for key, pred in preds.items():
+            if not key.startswith(week_prefix):
+                continue
+            parts = key.split("_")
+            ht = parts[1] if len(parts) > 1 else "?"
+            at = parts[2] if len(parts) > 2 else "?"
+            ev = pred.get("edge_vs_vegas")
+            ex = pred.get("explanation") or {}
+            games.append({
+                "key":           key,
+                "home_team":     ht,
+                "away_team":     at,
+                "pred_winner":   pred.get("pred_winner"),
+                "pred_su_conf":  pred.get("pred_su_conf"),
+                "home_win_prob": pred.get("home_win_prob"),
+                "model_spread":  pred.get("model_spread"),
+                "vegas_line":    ex.get("vegas_line"),
+                "edge_vs_vegas": ev,
+                "pred_ats_pick": pred.get("pred_ats_pick"),
+            })
+        games.sort(key=lambda g: abs(g.get("edge_vs_vegas") or 0), reverse=True)
+        return JSONResponse(content={"season": season, "week": week, "games": games})
+    except Exception:
+        logger.exception("Unhandled error in get_predictions_vs_vegas")
+        return server_error()
+
+
 @_page_router.get("/admin/predictions", response_class=HTMLResponse)
 async def admin_predictions_page(
     request: Request,

@@ -23,12 +23,21 @@ modal?.addEventListener('click', e => { if (e.target === modal) hideModal(); });
 
 // ── Factor rendering ──────────────────────────────────────────────────────────
 
-function _arrow(val, higherIsBetter = true) {
-    if (val === null || val === undefined) return '';
-    const positive = higherIsBetter ? val > 0 : val < 0;
-    const color = positive ? 'var(--accent-green)' : (val === 0 ? 'var(--text-secondary)' : 'var(--accent-red)');
-    const sym   = val > 0 ? '▲' : (val < 0 ? '▼' : '–');
-    return `<span style="color:${color}; font-weight:700;">${sym}</span>`;
+/** Render team-name advantage label. val > 0 = home advantage. */
+function _teamAdv(val, home_team, away_team) {
+    const hColor = 'var(--accent-green)';
+    const aColor = 'var(--accent-gold)';
+    const team  = val > 0 ? home_team : away_team;
+    const color = val > 0 ? hColor : aColor;
+    return `<span style="color:${color}; font-weight:700;">${team}</span>`;
+}
+
+/** Format a signed spread line as "TEAM -X.X" or "Pick'em". */
+function _fmtLine(line, home_team, away_team) {
+    if (line == null) return null;
+    if (line === 0) return "Pick’em";
+    const fav = line > 0 ? home_team : away_team;
+    return `${fav} -${Math.abs(line).toFixed(1)}`;
 }
 
 function _bar(pct, color) {
@@ -57,109 +66,108 @@ function renderExplanation(data) {
     const predColor     = homeFavored ? 'var(--accent-green)' : 'var(--accent-gold)';
     const confBar       = _bar(pred_su_conf, predColor);
 
-    // Vegas line row
-    // nflverse convention: positive spread_line = home favored (e.g. DET -7 stored as +7)
-    let vegasHtml = '—';
-    if (ex?.vegas_line != null) {
-        const line    = ex.vegas_line;
-        const favTeam = line > 0 ? home_team : (line < 0 ? away_team : null);
-        const lineAbs = Math.abs(line);
-        vegasHtml = favTeam ? `${favTeam} -${lineAbs}` : 'Pick\'em';
-    }
-
-    // Model spread card content (same positive = home favored convention)
     const ms = model_spread ?? ex?.model_spread;
     const ev = edge_vs_vegas ?? ex?.edge_vs_vegas;
-    let modelSpreadHtml = '—';
-    let edgeBadgeHtml   = '';
-    if (ms != null) {
-        const msFav  = ms > 0 ? home_team : (ms < 0 ? away_team : null);
-        const msAbs  = Math.abs(ms);
-        modelSpreadHtml = msFav ? `${msFav} -${msAbs}` : 'Pick\'em';
 
+    // ── Top cards ──────────────────────────────────────────────────────────────
+
+    // Card 1: ML Pick
+    const pickCard = `
+        <div style="flex:1; min-width:130px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
+            <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">ML Pick</div>
+            <div style="font-size:1.3rem; font-weight:800; color:${predColor};">${pred_winner}</div>
+            <div style="font-size:0.75rem;">${pred_su_conf}% confidence</div>
+            ${confBar}
+        </div>`;
+
+    // Card 2: Vegas vs Model lines
+    const vegasLine  = ex?.vegas_line ?? null;
+    const vegasStr   = _fmtLine(vegasLine,  home_team, away_team);
+    const modelStr   = _fmtLine(ms,         home_team, away_team);
+    let linesCard = '';
+    if (vegasStr || modelStr) {
+        let edgeLine = '';
         if (ev != null) {
             const edgeAbs = Math.abs(ev);
-            // ev > 0: model likes home MORE than Vegas → home has edge ATS
-            // ev < 0: model likes home LESS than Vegas → away has edge ATS
-            const edgeDir = ev > 0 ? home_team : (ev < 0 ? away_team : null);
-            if (edgeDir && edgeAbs >= 0.5) {
-                const isSignificant = edgeAbs >= 2;
-                edgeBadgeHtml = `<div style="margin-top:4px; font-size:0.72rem; color:${isSignificant ? 'var(--pos)' : 'var(--ink-2)'};">
-                    ${isSignificant ? '⚡' : '·'} ${edgeDir} +${edgeAbs}pts vs Vegas
-                </div>`;
-            } else {
-                edgeBadgeHtml = `<div style="margin-top:4px; font-size:0.72rem; color:var(--ink-2);">≈ Agrees with Vegas</div>`;
-            }
+            const edgeTeam = ev > 0 ? home_team : away_team;
+            const edgeColor = edgeAbs >= 3 ? 'var(--accent-green)' : (edgeAbs >= 1.5 ? 'var(--ink-2)' : 'var(--text-secondary)');
+            const edgeSig   = edgeAbs >= 3 ? '⚡' : (edgeAbs >= 1.5 ? '·' : '');
+            edgeLine = edgeAbs >= 0.5
+                ? `<div style="margin-top:5px; font-size:0.73rem; color:${edgeColor};">${edgeSig} ${edgeTeam} +${edgeAbs.toFixed(1)} edge vs Vegas</div>`
+                : `<div style="margin-top:5px; font-size:0.73rem; color:var(--text-secondary);">≈ Agrees with Vegas</div>`;
         }
+        linesCard = `
+            <div style="flex:1.4; min-width:150px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
+                <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:5px;">Lines</div>
+                <div style="display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:0.82rem; align-items:center;">
+                    ${vegasStr ? `<span style="color:var(--text-secondary); font-size:0.72rem;">Vegas</span><span style="font-weight:600; font-family:'JetBrains Mono',monospace;">${vegasStr}</span>` : ''}
+                    ${modelStr ? `<span style="color:var(--text-secondary); font-size:0.72rem;">Model</span><span style="font-weight:600; font-family:'JetBrains Mono',monospace;">${modelStr}</span>` : ''}
+                </div>
+                ${edgeLine}
+            </div>`;
     }
 
-    // Elo
-    const _up   = `<span style="color:var(--accent-green); font-weight:700;">▲</span>`;
-    const _down = `<span style="color:var(--accent-red);   font-weight:700;">▼</span>`;
+    // Card 3: ATS pick (only if it differs from SU, or always show)
+    const atsDiffers = pred_ats_pick && pred_ats_pick !== pred_winner;
+    const atsCard = pred_ats_pick ? `
+        <div style="flex:1; min-width:110px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
+            <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">ATS Pick</div>
+            <div style="font-size:1.3rem; font-weight:800; color:${atsDiffers ? 'var(--accent-gold)' : predColor};">${pred_ats_pick}</div>
+            <div style="font-size:0.72rem; color:var(--text-secondary);">${atsDiffers ? '⚡ differs from SU' : 'vs spread'}</div>
+        </div>` : '';
+
+    // ── Factor rows ────────────────────────────────────────────────────────────
 
     let eloHtml = '—';
     if (ex?.elo_diff != null) {
         const d = ex.elo_diff;
-        const favTeam = d > 0 ? home_team : (d < 0 ? away_team : null);
         const pts = Math.abs(d);
-        eloHtml = favTeam ? `${_up} ${favTeam} +${pts.toFixed(0)} Elo` : '≈ Even';
+        eloHtml = pts < 5 ? '≈ Even'
+            : `${_teamAdv(d, home_team, away_team)} +${pts.toFixed(0)} Elo pts`;
     }
 
-    // Roster quality grade (z-score diff: home_grade − away_grade, range ≈ ±3)
     let rosterHtml = '—';
     if (ex?.roster_delta != null) {
         const d = ex.roster_delta;
-        rosterHtml = Math.abs(d) < 0.2
-            ? `≈ Even`
-            : `${_up} ${d > 0 ? home_team : away_team} edge (${d > 0 ? '+' : ''}${d.toFixed(2)})`;
+        rosterHtml = Math.abs(d) < 0.2 ? '≈ Even'
+            : `${_teamAdv(d, home_team, away_team)} edge (${d > 0 ? '+' : ''}${d.toFixed(2)})`;
     }
 
-    // Pass EPA matchup (signed diff: positive = home advantage)
     let passHtml = '—';
     if (ex?.pass_epa_matchup != null) {
         const net = ex.pass_epa_matchup;
-        passHtml = Math.abs(net) < 0.01
-            ? '≈ Even'
-            : `${net >= 0 ? _up : _down} ${net >= 0 ? home_team : away_team} +${Math.abs(net).toFixed(3)} EPA/play`;
+        passHtml = Math.abs(net) < 0.01 ? '≈ Even'
+            : `${_teamAdv(net, home_team, away_team)} +${Math.abs(net).toFixed(3)} EPA/play`;
     }
 
-    // Rush EPA matchup (signed diff: positive = home advantage)
     let rushHtml = '—';
     if (ex?.rush_epa_matchup != null) {
         const net = ex.rush_epa_matchup;
-        rushHtml = Math.abs(net) < 0.005
-            ? '≈ Even'
-            : `${net >= 0 ? _up : _down} ${net >= 0 ? home_team : away_team} +${Math.abs(net).toFixed(3)} EPA/play`;
+        rushHtml = Math.abs(net) < 0.005 ? '≈ Even'
+            : `${_teamAdv(net, home_team, away_team)} +${Math.abs(net).toFixed(3)} EPA/play`;
     }
 
-    // Early down matchup (pass 80% + rush 20% combined, signed diff)
     let earlyDownHtml = '—';
     if (ex?.early_down_matchup != null) {
         const net = ex.early_down_matchup;
-        earlyDownHtml = Math.abs(net) < 0.01
-            ? '≈ Even'
-            : `${net >= 0 ? _up : _down} ${net >= 0 ? home_team : away_team} +${Math.abs(net).toFixed(3)} early EPA`;
+        earlyDownHtml = Math.abs(net) < 0.01 ? '≈ Even'
+            : `${_teamAdv(net, home_team, away_team)} +${Math.abs(net).toFixed(3)} early EPA`;
     }
 
-    // Score margin (rolling avg point differential, signed diff)
     let marginHtml = '—';
     if (ex?.point_diff_advantage != null) {
         const d = ex.point_diff_advantage;
-        marginHtml = Math.abs(d) < 0.5
-            ? '≈ Even'
-            : `${d > 0 ? _up : _down} ${d > 0 ? home_team : away_team} +${Math.abs(d).toFixed(1)} pts/gm`;
+        marginHtml = Math.abs(d) < 0.5 ? '≈ Even'
+            : `${_teamAdv(d, home_team, away_team)} +${Math.abs(d).toFixed(1)} pts/gm`;
     }
 
-    // Turnovers (rolling margin, real range ≈ ±1.5)
     let toHtml = '—';
     if (ex?.turnover_margin != null) {
         const t = ex.turnover_margin;
-        toHtml = Math.abs(t) < 0.1
-            ? '≈ Even'
-            : `${t > 0 ? _up : _down} ${t > 0 ? home_team : away_team} +${Math.abs(t).toFixed(2)}/gm`;
+        toHtml = Math.abs(t) < 0.1 ? '≈ Even'
+            : `${_teamAdv(t, home_team, away_team)} +${Math.abs(t).toFixed(2)} TO/gm`;
     }
 
-    // QB starter status — binary flags (0/1) per team
     let qbHtml = '—';
     {
         const hOut = ex?.home_qb_out ?? 0;
@@ -171,40 +179,31 @@ function renderExplanation(data) {
         } else if (aOut) {
             qbHtml = `<span style="color:var(--accent-red);">⚠ ${away_team} — backup QB</span>`;
         } else if (ex?.home_qb_out !== null && ex?.home_qb_out !== undefined) {
-            qbHtml = 'Starters playing';
+            qbHtml = 'Both starters active';
         }
     }
 
-    // Rest advantage (positive = home team has more days rest)
     let restHtml = '—';
     if (ex?.rest_advantage != null) {
         const r = ex.rest_advantage;
-        restHtml = Math.abs(r) < 0.5
-            ? '≈ Even rest'
-            : `${r > 0 ? _up : _down} ${r > 0 ? home_team : away_team} +${Math.abs(r).toFixed(0)} days rest`;
+        restHtml = Math.abs(r) < 0.5 ? '≈ Even rest'
+            : `${_teamAdv(r, home_team, away_team)} +${Math.abs(r).toFixed(0)} days`;
     }
 
-    // Travel disadvantage for away team (miles / 1000, 0 for neutral sites)
     let travelHtml = '—';
     if (ex?.travel_disadvantage != null) {
         const t = ex.travel_disadvantage;
-        travelHtml = t < 0.1
-            ? '≈ Short haul'
-            : `${_down} ${away_team} ${(t * 1000).toFixed(0)} mi traveled`;
+        const awayColor = 'var(--accent-gold)';
+        travelHtml = t < 0.1 ? '≈ Short haul'
+            : `<span style="color:${awayColor}; font-weight:700;">${away_team}</span> ${(t * 1000).toFixed(0)} mi traveled`;
     }
 
-    // Trench dominance (4-component z-score differential, range ≈ ±3)
     let trenchHtml = '—';
     if (ex?.trench_dominance != null) {
         const t = ex.trench_dominance;
-        trenchHtml = Math.abs(t) < 0.3
-            ? '≈ Even'
-            : `${t > 0 ? _up : _down} ${t > 0 ? home_team : away_team} trench edge`;
+        trenchHtml = Math.abs(t) < 0.3 ? '≈ Even'
+            : `${_teamAdv(t, home_team, away_team)} trench edge`;
     }
-
-    const atsNote = pred_ats_pick !== pred_winner
-        ? `<div style="margin-top:4px; font-size:0.72rem; color:var(--accent-gold);">⚡ Model disagrees with its own SU pick ATS (takes ${pred_ats_pick})</div>`
-        : '';
 
     const sourceNote = isProfileOnly
         ? `<div style="margin-top:0.75rem; padding:6px 10px; border-radius:6px; background:rgba(255,255,255,0.04); font-size:0.72rem; color:var(--text-secondary);">
@@ -213,18 +212,17 @@ function renderExplanation(data) {
         : '';
 
     const rows = [
-        _row('Vegas Line',       vegasHtml,      modelSpreadHtml !== '—' ? `Model: ${modelSpreadHtml}` : ''),
-        _row('Team Strength',    eloHtml,         isProfileOnly ? 'Prior season Elo' : 'Elo rating differential'),
-        _row('Roster Quality',   rosterHtml,      isProfileOnly ? 'Prior season talent delta' : 'Talent composite delta'),
-        _row('Passing Game',     passHtml,        'Pass EPA matchup (home − away net)'),
-        _row('Rushing Game',     rushHtml,        'Rush EPA matchup (home − away net)'),
-        _row('Early Downs',      earlyDownHtml,   'Early-down EPA combined (pass 80% + rush 20%)'),
-        _row('Score Margin',     marginHtml,      'Rolling avg point differential'),
-        _row('Turnovers',        toHtml,          'Rolling turnover margin'),
-        _row('QB Health',        qbHtml),
-        _row('Trench Play',      trenchHtml,      'OL + DL performance z-score differential'),
-        _row('Rest',             restHtml),
-        _row('Travel',           travelHtml,      'Away team distance traveled'),
+        _row('Team Strength',  eloHtml,       isProfileOnly ? 'Prior season Elo' : 'Elo rating differential'),
+        _row('Roster Quality', rosterHtml,    isProfileOnly ? 'Prior season talent delta' : 'Talent composite'),
+        _row('Passing Game',   passHtml,      'Pass EPA matchup differential'),
+        _row('Rushing Game',   rushHtml,      'Rush EPA matchup differential'),
+        _row('Early Downs',    earlyDownHtml, 'Early-down EPA (pass 80% + rush 20%)'),
+        _row('Score Margin',   marginHtml,    'Rolling avg point differential'),
+        _row('Turnovers',      toHtml,        'Rolling turnover margin'),
+        _row('QB Health',      qbHtml),
+        _row('Trench Play',    trenchHtml,    'OL + DL performance z-score'),
+        _row('Rest',           restHtml),
+        _row('Travel',         travelHtml,    'Away team distance traveled'),
     ].join('');
 
     return `
@@ -236,25 +234,11 @@ function renderExplanation(data) {
             ${away_team} @ ${home_team} &nbsp;·&nbsp; Week ${data.week} ${data.season}
         </div>
 
-        <div style="display:flex; gap:1rem; margin-bottom:1rem; flex-wrap:wrap;">
-            <div style="flex:1; min-width:120px; padding:10px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
-                <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">ML Pick</div>
-                <div style="font-size:1.3rem; font-weight:800; color:${predColor};">${pred_winner}</div>
-                <div style="font-size:0.75rem;">${pred_su_conf}% confidence</div>
-                ${confBar}
-            </div>
-            <div style="flex:1; min-width:120px; padding:10px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
-                <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">ATS Pick</div>
-                <div style="font-size:1.3rem; font-weight:800; color:var(--accent-gold);">${pred_ats_pick}</div>
-                <div style="font-size:0.75rem; color:var(--text-secondary);">Against the spread</div>
-            </div>
-            ${ms != null ? `<div style="flex:1; min-width:120px; padding:10px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
-                <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">Model Spread</div>
-                <div style="font-size:1.1rem; font-weight:700; font-family:'JetBrains Mono', monospace;">${modelSpreadHtml}</div>
-                ${edgeBadgeHtml}
-            </div>` : ''}
+        <div style="display:flex; gap:0.75rem; margin-bottom:1rem; flex-wrap:wrap;">
+            ${pickCard}
+            ${linesCard}
+            ${atsCard}
         </div>
-        ${atsNote}
 
         <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-secondary); margin:0.75rem 0 0.25rem;">
             Key Factors <span style="font-size:0.65rem;">(home team perspective)</span>
