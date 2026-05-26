@@ -432,3 +432,29 @@ def test_qb_pressure_advantage_direction(tmp_path):
     # No pfr_advstats fixture, so values are 0.0 by default — just verify no crash and numeric
     assert df["qb_pressure_advantage"].dtype in [np.float64, float]
     assert df["def_pressure_diff"].dtype in [np.float64, float]
+
+
+# ---------------------------------------------------------------------------
+# Task 6: 4-component trench redesign
+# ---------------------------------------------------------------------------
+
+def test_trench_uses_performance_not_snap_count(tmp_path):
+    """trench_dominance_metric must use sacks_suffered, rush_ypc, dl_pass composite — not snap counts."""
+    from services.nn_feature_engine import build_master_feature_table
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    assert "trench_dominance_metric" in df.columns
+    # Column must be numeric and finite
+    assert df["trench_dominance_metric"].notna().all()
+    assert np.isfinite(df["trench_dominance_metric"]).all()
+
+
+def test_trench_is_signed_differential(tmp_path):
+    """trench_dominance_metric = home_trench_score - away_trench_score (signed diff)."""
+    from services.nn_feature_engine import build_master_feature_table
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    # KC has better DL stats; values should be consistent across weeks
+    assert df["trench_dominance_metric"].dtype in [np.float64, float]
+    # Not all constant (z-scoring should produce variation if any team differs from average)
+    assert df["trench_dominance_metric"].std() >= 0

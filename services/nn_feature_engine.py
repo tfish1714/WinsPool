@@ -1203,33 +1203,69 @@ def build_master_feature_table(
     else:
         sched["roster_talent_delta"] = 0.0
 
-    # --- Trench Dominance (OL snap quality + DL performance composite, z-scored per season) ---
-    # Pre-compute per-season normalization params so OL and DL contribute equally.
-    _trench_seasons: dict[int, dict] = {}
-    for (s, _t), v in roster_cache.items():
-        _trench_seasons.setdefault(s, {"ol": [], "dl": []})
-        _trench_seasons[s]["ol"].append(v.get("ol_av", 0.0))
-        _trench_seasons[s]["dl"].append(v.get("dl_perf", 0.0))
-    _trench_norm: dict[int, tuple] = {}
-    for s, arrs in _trench_seasons.items():
-        ol_mu, ol_sig = float(np.mean(arrs["ol"])), max(float(np.std(arrs["ol"])), 1.0)
-        dl_mu, dl_sig = float(np.mean(arrs["dl"])), max(float(np.std(arrs["dl"])), 1.0)
-        _trench_norm[s] = (ol_mu, ol_sig, dl_mu, dl_sig)
+    # --- Trench Dominance (4-component performance-based, z-scored per season+week) ---
+    # OL_pass = -sacks_suffered_roll     (fewer sacks = better pass protection)
+    # OL_run  = +off_rush_ypc_roll       (more yards/carry = better run blocking)
+    # DL_pass = +dl_pass_roll            (sacks×6 + qb_hits + tfl = more disruption)
+    # DL_run  = -def_rush_ypc_roll       (fewer yards/carry allowed = better run defense)
+    if not trench_stats.empty:
+        sched = sched.merge(
+            trench_stats.rename(columns={"team": "home_team",
+                                          "sacks_suffered_roll": "h_sacks_suf",
+                                          "dl_pass_roll": "h_dl_pass"}),
+            on=["season", "week", "home_team"], how="left",
+        )
+        sched = sched.merge(
+            trench_stats.rename(columns={"team": "away_team",
+                                          "sacks_suffered_roll": "a_sacks_suf",
+                                          "dl_pass_roll": "a_dl_pass"}),
+            on=["season", "week", "away_team"], how="left",
+        )
+        for c in ["h_sacks_suf", "a_sacks_suf", "h_dl_pass", "a_dl_pass"]:
+            sched[c] = sched.get(c, pd.Series(0.0, index=sched.index)).fillna(0.0)
+    else:
+        sched["h_sacks_suf"] = sched["a_sacks_suf"] = 0.0
+        sched["h_dl_pass"]   = sched["a_dl_pass"]   = 0.0
 
-    def _trench(row):
-        s = int(row["season"])
-        h = roster_cache.get((s, row["home_team"]), {})
-        a = roster_cache.get((s, row["away_team"]), {})
-        if s not in _trench_norm:
-            return h.get("ol_av", 0.0) - a.get("ol_av", 0.0)
-        ol_mu, ol_sig, dl_mu, dl_sig = _trench_norm[s]
-        h_z = (h.get("ol_av", ol_mu) - ol_mu) / ol_sig + (h.get("dl_perf", dl_mu) - dl_mu) / dl_sig
-        a_z = (a.get("ol_av", ol_mu) - ol_mu) / ol_sig + (a.get("dl_perf", dl_mu) - dl_mu) / dl_sig
-        return h_z - a_z
+    # Four raw component values (h_ = home, a_ = away); negate where lower = better
+    sched["h_OL_pass"] = -sched["h_sacks_suf"]
+    sched["a_OL_pass"] = -sched["a_sacks_suf"]
+    sched["h_OL_run"]  = sched.get("h_off_ypc", pd.Series(4.0, index=sched.index)).fillna(4.0)
+    sched["a_OL_run"]  = sched.get("a_off_ypc", pd.Series(4.0, index=sched.index)).fillna(4.0)
+    sched["h_DL_pass"] = sched["h_dl_pass"]
+    sched["a_DL_pass"] = sched["a_dl_pass"]
+    sched["h_DL_run"]  = -sched.get("h_def_ypc", pd.Series(4.0, index=sched.index)).fillna(4.0)
+    sched["a_DL_run"]  = -sched.get("a_def_ypc", pd.Series(4.0, index=sched.index)).fillna(4.0)
 
-    sched["trench_dominance_metric"] = (
-        sched.apply(_trench, axis=1) if (roster_cache and not sched.empty) else 0.0
+    # Z-score each component within (season, week) pooling home+away values
+    _trench_components = ["OL_pass", "OL_run", "DL_pass", "DL_run"]
+    for _comp in _trench_components:
+        _stacked = pd.concat(
+            [sched[["season", "week", f"h_{_comp}"]].rename(columns={f"h_{_comp}": "_v"}),
+             sched[["season", "week", f"a_{_comp}"]].rename(columns={f"a_{_comp}": "_v"})],
+            ignore_index=True,
+        )
+        _sw = _stacked.groupby(["season", "week"])["_v"].agg(["mean", "std"]).reset_index()
+        _sw.columns = ["season", "week", f"_mu_{_comp}", f"_sig_{_comp}"]
+        sched = sched.merge(_sw, on=["season", "week"], how="left")
+        _sig_col = f"_sig_{_comp}"
+        sched[_sig_col] = sched[_sig_col].fillna(1.0).clip(lower=1e-6)
+        for _side in ["h", "a"]:
+            _raw = f"{_side}_{_comp}"
+            sched[f"{_side}_{_comp}_z"] = (sched[_raw] - sched[f"_mu_{_comp}"]) / sched[_sig_col]
+        sched.drop(columns=[f"_mu_{_comp}", f"_sig_{_comp}"], inplace=True)
+
+    sched["home_trench_score"] = sum(sched[f"h_{c}_z"] for c in _trench_components)
+    sched["away_trench_score"] = sum(sched[f"a_{c}_z"] for c in _trench_components)
+    sched["trench_dominance_metric"] = sched["home_trench_score"] - sched["away_trench_score"]
+
+    # Drop interim trench columns (leave trench_score as aux metadata for projection engine)
+    _drop_trench = (
+        [f"{s}_{c}" for s in ["h", "a"] for c in ["OL_pass", "OL_run", "DL_pass", "DL_run",
+                                                    "OL_pass_z", "OL_run_z", "DL_pass_z", "DL_run_z"]]
+        + ["h_sacks_suf", "a_sacks_suf", "h_dl_pass", "a_dl_pass"]
     )
+    sched.drop(columns=[c for c in _drop_trench if c in sched.columns], inplace=True)
 
     # --- Roster Value (season-level WAR proxy; EPA + kicker FG+ + punter gross avg) ---
     try:
