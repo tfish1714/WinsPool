@@ -235,6 +235,17 @@ def write_game_predictions(season: int, predictions: dict) -> None:
 # games value: {game_key: per-game audit dict from feature_audit_service}
 
 
+def _deserialize_prediction_features(doc: dict) -> dict:
+    """Expand games_json string back to a dict (Firestore write path uses a JSON
+    string to avoid the per-document index-entry limit)."""
+    if doc and "games_json" in doc and "games" not in doc:
+        try:
+            doc = {**doc, "games": json.loads(doc["games_json"])}
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("Failed to deserialize games_json in prediction_features doc")
+    return doc
+
+
 def get_prediction_features(
     season: int,
     ensemble_version: str | None = None,
@@ -272,7 +283,7 @@ def get_prediction_features(
             if ensemble_version:
                 doc_id = f"{season}_{ensemble_version}"
                 doc = db.collection("prediction_features").document(doc_id).get()
-                return doc.to_dict() if doc.exists else None
+                return _deserialize_prediction_features(doc.to_dict()) if doc.exists else None
             else:
                 docs = list(
                     db.collection("prediction_features")
@@ -281,7 +292,7 @@ def get_prediction_features(
                     .limit(1)
                     .stream()
                 )
-                return docs[0].to_dict() if docs else None
+                return _deserialize_prediction_features(docs[0].to_dict()) if docs else None
         except Exception:
             logger.exception("Failed to fetch prediction_features for season=%s", season)
             return None
@@ -291,6 +302,8 @@ def write_prediction_features(
     season: int,
     ensemble_version: str,
     games: dict,
+    *,
+    use_local: bool | None = None,
 ) -> None:
     """Persist the prediction features doc (local JSON or Firestore).
 
@@ -298,9 +311,13 @@ def write_prediction_features(
         season: NFL season year.
         ensemble_version: e.g. "nn_v10+xgb_v4+lr_v2".
         games: {game_key: per-game audit dict} from compute_feature_audit().
+        use_local: Override the _USE_LOCAL env setting.  Pass True to force
+                   local JSON, False to force Firestore.  None = auto.
     """
     if "/" in ensemble_version or "\\" in ensemble_version or ".." in ensemble_version:
         raise ValueError(f"Invalid ensemble_version: {ensemble_version!r}")
+
+    _local = _USE_LOCAL if use_local is None else use_local
 
     from datetime import datetime, timezone
     payload = {
@@ -309,7 +326,7 @@ def write_prediction_features(
         "created_at":       datetime.now(timezone.utc).isoformat(),
         "games":            games,
     }
-    if _USE_LOCAL:
+    if _local:
         _GAME_PRED_DIR.mkdir(parents=True, exist_ok=True)
         p = _GAME_PRED_DIR / f"prediction_features_{season}_{ensemble_version}.json"
         with open(p, "w") as f:
@@ -319,6 +336,13 @@ def write_prediction_features(
             from services.db_service import get_db
             db = get_db()
             doc_id = f"{season}_{ensemble_version}"
-            db.collection("prediction_features").document(doc_id).set(payload)
+            # Store games as a JSON string to avoid Firestore's per-document
+            # index-entry limit (~40 k entries).  A full season with 300 games
+            # and 26 features each exceeds the limit as a nested map.
+            firestore_payload = {
+                **{k: v for k, v in payload.items() if k != "games"},
+                "games_json": json.dumps(games, default=str),
+            }
+            db.collection("prediction_features").document(doc_id).set(firestore_payload)
         except Exception:
             logger.exception("Failed to write prediction_features to Firestore season=%s", season)
