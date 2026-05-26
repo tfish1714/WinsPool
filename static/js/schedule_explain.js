@@ -114,18 +114,40 @@ function renderExplanation(data) {
             : `${_up} ${d > 0 ? home_team : away_team} edge (${d > 0 ? '+' : ''}${d.toFixed(2)})`;
     }
 
-    // Pass EPA
+    // Pass EPA matchup (signed diff: positive = home advantage)
     let passHtml = '—';
-    if (ex?.off_pass_epa != null && ex?.def_pass_epa != null) {
-        const net = ex.off_pass_epa - ex.def_pass_epa;
-        passHtml = `${_up} ${net >= 0 ? home_team : away_team} +${Math.abs(net).toFixed(3)} EPA/play`;
+    if (ex?.pass_epa_matchup != null) {
+        const net = ex.pass_epa_matchup;
+        passHtml = Math.abs(net) < 0.01
+            ? '≈ Even'
+            : `${net >= 0 ? _up : _down} ${net >= 0 ? home_team : away_team} +${Math.abs(net).toFixed(3)} EPA/play`;
     }
 
-    // Rush EPA
+    // Rush EPA matchup (signed diff: positive = home advantage)
     let rushHtml = '—';
-    if (ex?.off_rush_epa != null && ex?.def_rush_epa != null) {
-        const net = ex.off_rush_epa - ex.def_rush_epa;
-        rushHtml = `${_up} ${net >= 0 ? home_team : away_team} +${Math.abs(net).toFixed(3)} EPA/play`;
+    if (ex?.rush_epa_matchup != null) {
+        const net = ex.rush_epa_matchup;
+        rushHtml = Math.abs(net) < 0.005
+            ? '≈ Even'
+            : `${net >= 0 ? _up : _down} ${net >= 0 ? home_team : away_team} +${Math.abs(net).toFixed(3)} EPA/play`;
+    }
+
+    // Early down matchup (pass 80% + rush 20% combined, signed diff)
+    let earlyDownHtml = '—';
+    if (ex?.early_down_matchup != null) {
+        const net = ex.early_down_matchup;
+        earlyDownHtml = Math.abs(net) < 0.01
+            ? '≈ Even'
+            : `${net >= 0 ? _up : _down} ${net >= 0 ? home_team : away_team} +${Math.abs(net).toFixed(3)} early EPA`;
+    }
+
+    // Score margin (rolling avg point differential, signed diff)
+    let marginHtml = '—';
+    if (ex?.point_diff_advantage != null) {
+        const d = ex.point_diff_advantage;
+        marginHtml = Math.abs(d) < 0.5
+            ? '≈ Even'
+            : `${d > 0 ? _up : _down} ${d > 0 ? home_team : away_team} +${Math.abs(d).toFixed(1)} pts/gm`;
     }
 
     // Turnovers (rolling margin, real range ≈ ±1.5)
@@ -134,41 +156,50 @@ function renderExplanation(data) {
         const t = ex.turnover_margin;
         toHtml = Math.abs(t) < 0.1
             ? '≈ Even'
-            : `${_up} ${t > 0 ? home_team : away_team} +${Math.abs(t).toFixed(2)}/gm`;
+            : `${t > 0 ? _up : _down} ${t > 0 ? home_team : away_team} +${Math.abs(t).toFixed(2)}/gm`;
     }
 
-    // QB starter status — always shown as a negative for the team missing their starter
+    // QB starter status — binary flags (0/1) per team
     let qbHtml = '—';
     {
-        const hOut = ex?.home_qb_out ?? (ex?.qb_injury < 0 ? 1 : 0);
-        const aOut = ex?.away_qb_out ?? (ex?.qb_injury > 0 ? 1 : 0);
+        const hOut = ex?.home_qb_out ?? 0;
+        const aOut = ex?.away_qb_out ?? 0;
         if (hOut && aOut) {
             qbHtml = `<span style="color:var(--accent-gold);">⚠ Both teams — backup QBs</span>`;
         } else if (hOut) {
             qbHtml = `<span style="color:var(--accent-red);">⚠ ${home_team} — backup QB</span>`;
         } else if (aOut) {
             qbHtml = `<span style="color:var(--accent-red);">⚠ ${away_team} — backup QB</span>`;
-        } else if (ex?.qb_injury !== null && ex?.qb_injury !== undefined) {
+        } else if (ex?.home_qb_out !== null && ex?.home_qb_out !== undefined) {
             qbHtml = 'Starters playing';
         }
     }
 
-    // Rest/travel
+    // Rest advantage (positive = home team has more days rest)
     let restHtml = '—';
-    if (ex?.rest_disadvantage != null) {
-        const r = ex.rest_disadvantage;
-        restHtml = Math.abs(r) < 0.1
-            ? '≈ Even'
-            : `${_down} ${r > 0 ? home_team : away_team} disadvantaged`;
+    if (ex?.rest_advantage != null) {
+        const r = ex.rest_advantage;
+        restHtml = Math.abs(r) < 0.5
+            ? '≈ Even rest'
+            : `${r > 0 ? _up : _down} ${r > 0 ? home_team : away_team} +${Math.abs(r).toFixed(0)} days rest`;
     }
 
-    // Trench dominance (snap-weighted O-line score, real range ≈ ±750)
+    // Travel disadvantage for away team (miles / 1000, 0 for neutral sites)
+    let travelHtml = '—';
+    if (ex?.travel_disadvantage != null) {
+        const t = ex.travel_disadvantage;
+        travelHtml = t < 0.1
+            ? '≈ Short haul'
+            : `${_down} ${away_team} ${(t * 1000).toFixed(0)} mi traveled`;
+    }
+
+    // Trench dominance (4-component z-score differential, range ≈ ±3)
     let trenchHtml = '—';
     if (ex?.trench_dominance != null) {
         const t = ex.trench_dominance;
-        trenchHtml = Math.abs(t) < 50
+        trenchHtml = Math.abs(t) < 0.3
             ? '≈ Even'
-            : `${_up} ${t > 0 ? home_team : away_team} O-line edge`;
+            : `${t > 0 ? _up : _down} ${t > 0 ? home_team : away_team} trench edge`;
     }
 
     const atsNote = pred_ats_pick !== pred_winner
@@ -182,15 +213,18 @@ function renderExplanation(data) {
         : '';
 
     const rows = [
-        _row('Vegas Line',       vegasHtml,   modelSpreadHtml !== '—' ? `Model: ${modelSpreadHtml}` : ''),
-        _row('Team Strength',    eloHtml,     isProfileOnly ? 'Prior season Elo' : 'Elo rating differential'),
-        _row('Roster Quality',   rosterHtml,  isProfileOnly ? 'Prior season talent delta' : 'Talent composite delta'),
-        _row('Passing Game',     passHtml,    'Off EPA – Def EPA allowed'),
-        _row('Rushing Game',     rushHtml,    'Off EPA – Def EPA allowed'),
-        _row('Turnovers',        toHtml,      'Rolling turnover margin'),
+        _row('Vegas Line',       vegasHtml,      modelSpreadHtml !== '—' ? `Model: ${modelSpreadHtml}` : ''),
+        _row('Team Strength',    eloHtml,         isProfileOnly ? 'Prior season Elo' : 'Elo rating differential'),
+        _row('Roster Quality',   rosterHtml,      isProfileOnly ? 'Prior season talent delta' : 'Talent composite delta'),
+        _row('Passing Game',     passHtml,        'Pass EPA matchup (home − away net)'),
+        _row('Rushing Game',     rushHtml,        'Rush EPA matchup (home − away net)'),
+        _row('Early Downs',      earlyDownHtml,   'Early-down EPA combined (pass 80% + rush 20%)'),
+        _row('Score Margin',     marginHtml,      'Rolling avg point differential'),
+        _row('Turnovers',        toHtml,          'Rolling turnover margin'),
         _row('QB Health',        qbHtml),
-        _row('Trench Play',      trenchHtml,  'O-line / D-line dominance'),
-        _row('Travel / Rest',    restHtml),
+        _row('Trench Play',      trenchHtml,      'OL + DL performance z-score differential'),
+        _row('Rest',             restHtml),
+        _row('Travel',           travelHtml,      'Away team distance traveled'),
     ].join('');
 
     return `
