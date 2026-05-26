@@ -22,10 +22,7 @@
     select.pred-select { background: var(--glass-bg); border: 1px solid var(--glass-border);
                          color: var(--text-primary); padding: 6px 10px; border-radius: 6px;
                          font-size: 0.85rem; min-width: 120px; }
-    .tab-btn { background: none; border: none; color: var(--text-secondary); font-size: 0.85rem;
-               padding: 6px 14px; border-radius: 6px; cursor: pointer; transition: background 0.15s; }
-    .tab-btn.active { background: rgba(255,255,255,0.08); color: var(--text-primary); font-weight: 600; }
-    .tab-btn:hover:not(.active) { background: rgba(255,255,255,0.04); }
+    /* Tab styles inherited from global style.css .tab-btn */
 </style>
 {% endblock %}
 
@@ -42,9 +39,9 @@
     </header>
 
     <!-- Tabs -->
-    <div style="display:flex; gap:4px; margin-bottom:1.25rem;">
-        <button class="tab-btn active" data-tab="feature-debug">Feature Debug</button>
-        <button class="tab-btn" data-tab="vs-vegas">Vegas Edge</button>
+    <div class="admin-tab-bar">
+        <button class="admin-tab-btn active" data-tab="feature-debug">Feature Debug</button>
+        <button class="admin-tab-btn" data-tab="vs-vegas">Vegas Edge</button>
     </div>
 
     <!-- ── TAB: Feature Debug ────────────────────────────────────────────── -->

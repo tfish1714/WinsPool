@@ -10,9 +10,9 @@ import { ApiService } from './api.js';
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 
-document.querySelectorAll('.tab-btn').forEach(btn => {
+document.querySelectorAll('.admin-tab-btn[data-tab]').forEach(btn => {
     btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.admin-tab-btn[data-tab]').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         const tab = btn.dataset.tab;
         document.getElementById('tab-feature-debug').style.display = tab === 'feature-debug' ? '' : 'none';
