@@ -71,20 +71,62 @@ class NNProjectionEngine:
                 logger.warning("Preseason roster build failed: %s", exc)
 
     def _build_team_profiles(self, feature_table: pd.DataFrame, proxy_season: int) -> pd.DataFrame:
-        """Build per-team average feature profiles."""
+        """Build per-team average feature profiles from the proxy season.
+
+        Each team gets one row with:
+        - averages of all FEATURE_COLUMNS (for fallback)
+        - aux columns: elo_pre, per-team off/def EPA rolls, margin_roll, pressure rolls, trench_score
+        """
         s_proxy = feature_table[feature_table["season"] == proxy_season].copy()
         if s_proxy.empty:
             latest = feature_table["season"].max()
             s_proxy = feature_table[feature_table["season"] == latest].copy()
 
-        home_avg = s_proxy.groupby("home_team")[NN_FEATURE_COLUMNS].mean().reset_index()
-        home_avg.rename(columns={"home_team": "team"}, inplace=True)
+        # Home appearances: team = home_team, aux cols prefixed h_ or home_
+        home_rename = {
+            "home_team": "team",
+            "home_elo_pre": "elo_pre",
+            "home_trench_score": "trench_score",
+            "home_margin_roll": "margin_roll",
+            "home_qb_pressure_roll": "qb_pressure_roll",
+            "home_def_pressures_roll": "def_pressures_roll",
+            "h_off_pass": "off_pass_epa_roll", "h_off_rush": "off_rush_epa_roll",
+            "h_off_early": "off_early_roll",
+            "h_def_pass": "def_pass_epa_roll", "h_def_rush": "def_rush_epa_roll",
+            "h_def_early": "def_early_roll",
+        }
+        away_rename = {
+            "away_team": "team",
+            "away_elo_pre": "elo_pre",
+            "away_trench_score": "trench_score",
+            "away_margin_roll": "margin_roll",
+            "away_qb_pressure_roll": "qb_pressure_roll",
+            "away_def_pressures_roll": "def_pressures_roll",
+            "a_off_pass": "off_pass_epa_roll", "a_off_rush": "off_rush_epa_roll",
+            "a_off_early": "off_early_roll",
+            "a_def_pass": "def_pass_epa_roll", "a_def_rush": "def_rush_epa_roll",
+            "a_def_early": "def_early_roll",
+        }
 
-        away_avg = s_proxy.groupby("away_team")[NN_FEATURE_COLUMNS].mean().reset_index()
-        away_avg.rename(columns={"away_team": "team"}, inplace=True)
+        aux_target_cols = list(set(home_rename.values()) - {"team"})
+        profile_cols = NN_FEATURE_COLUMNS + [c for c in aux_target_cols if c not in NN_FEATURE_COLUMNS]
+
+        def _extract_side(rename_map, role_col):
+            available = {k: v for k, v in rename_map.items() if k in s_proxy.columns}
+            sub = s_proxy.rename(columns=available)
+            if "team" not in sub.columns and role_col in sub.columns:
+                sub = sub.rename(columns={role_col: "team"})
+            available_profile = [c for c in profile_cols if c in sub.columns]
+            if not available_profile:
+                return pd.DataFrame()
+            return sub.groupby("team")[available_profile].mean().reset_index()
+
+        home_avg = _extract_side(home_rename, "home_team")
+        away_avg = _extract_side(away_rename, "away_team")
 
         combined = pd.concat([home_avg, away_avg], ignore_index=True)
-        return combined.groupby("team")[NN_FEATURE_COLUMNS].mean().reset_index()
+        avail = [c for c in profile_cols if c in combined.columns]
+        return combined.groupby("team")[avail].mean().reset_index()
 
     def game_win_probability(self, home_team: str, away_team: str) -> dict:
         """Compute the blended NN+XGB+LR ensemble probability.
@@ -92,47 +134,82 @@ class NNProjectionEngine:
         Returns:
             Dict containing 'home_win_prob' and model-level probabilities.
         """
-        profile_dict = {}
-        for _, row in self._team_profiles.iterrows():
-            profile_dict[row["team"]] = {c: row[c] for c in NN_FEATURE_COLUMNS}
+        profile_dict = {row["team"]: row.to_dict()
+                        for _, row in self._team_profiles.iterrows()}
 
         hp = profile_dict.get(home_team, {})
         ap = profile_dict.get(away_team, {})
 
         features = {}
         for col in NN_FEATURE_COLUMNS:
-            if col == "home_flag":
-                features[col] = 1.0
+            if col == "home_field_advantage":
+                features[col] = 1.0  # projection engine always predicts regular home games
+
+            elif col == "elo_diff":
+                h_elo = hp.get("elo_pre", 1500.0)
+                a_elo = ap.get("elo_pre", 1500.0)
+                features[col] = h_elo - a_elo
+
+            elif col == "elo_confidence":
+                features[col] = abs(features.get("elo_diff", 0.0)) / 25.0
+
+            elif col == "pass_epa_matchup":
+                features[col] = (
+                    (hp.get("off_pass_epa_roll", 0.0) - ap.get("def_pass_epa_roll", 0.0))
+                    - (ap.get("off_pass_epa_roll", 0.0) - hp.get("def_pass_epa_roll", 0.0))
+                )
+
+            elif col == "rush_epa_matchup":
+                features[col] = (
+                    (hp.get("off_rush_epa_roll", 0.0) - ap.get("def_rush_epa_roll", 0.0))
+                    - (ap.get("off_rush_epa_roll", 0.0) - hp.get("def_rush_epa_roll", 0.0))
+                )
+
+            elif col == "early_down_matchup":
+                features[col] = (
+                    (hp.get("off_early_roll", 0.0) - ap.get("def_early_roll", 0.0))
+                    - (ap.get("off_early_roll", 0.0) - hp.get("def_early_roll", 0.0))
+                )
+
+            elif col == "point_diff_advantage":
+                features[col] = hp.get("margin_roll", 0.0) - ap.get("margin_roll", 0.0)
+
+            elif col == "qb_pressure_advantage":
+                # away_pressure - home_pressure (positive = home QB less pressured)
+                features[col] = ap.get("qb_pressure_roll", 0.0) - hp.get("qb_pressure_roll", 0.0)
+
+            elif col == "def_pressure_diff":
+                features[col] = hp.get("def_pressures_roll", 0.0) - ap.get("def_pressures_roll", 0.0)
+
             elif col == "trench_dominance_metric":
                 if self._preseason_roster and self._preseason_norm:
                     ol_mu, ol_sig, dl_mu, dl_sig = self._preseason_norm
                     h_pr = self._preseason_roster.get(home_team, {})
                     a_pr = self._preseason_roster.get(away_team, {})
-                    h_z = ((h_pr.get("ol_av",   ol_mu) - ol_mu) / ol_sig
+                    h_z = ((h_pr.get("ol_av", ol_mu) - ol_mu) / ol_sig
                            + (h_pr.get("dl_perf", dl_mu) - dl_mu) / dl_sig)
-                    a_z = ((a_pr.get("ol_av",   ol_mu) - ol_mu) / ol_sig
+                    a_z = ((a_pr.get("ol_av", ol_mu) - ol_mu) / ol_sig
                            + (a_pr.get("dl_perf", dl_mu) - dl_mu) / dl_sig)
                     features[col] = h_z - a_z
                 else:
-                    features[col] = hp.get(col, 0.0) - ap.get(col, 0.0)
-            elif col in (
-                "roster_talent_delta", "star_qb_value_delta",
-                "net_success_rate",
-                "high_leverage_regression_flag",
-            ):
-                features[col] = hp.get(col, 0.0) - ap.get(col, 0.0)
-            elif col.startswith("def_"):
-                off_equiv = col.replace("def_", "off_")
-                features[col] = ap.get(off_equiv, ap.get(col, 0.0))
-            elif col.startswith("opp_"):
-                raw = col.replace("opp_", "tm_")
-                features[col] = ap.get(raw, ap.get(col, 0.0))
-            elif col == "elo_confidence":
-                elo_diff = hp.get("tm_elo_pre", 1500) - ap.get("tm_elo_pre", 1500)
-                features[col] = abs(elo_diff / 25.0)
+                    features[col] = hp.get("trench_score", 0.0) - ap.get("trench_score", 0.0)
+
+            elif col == "net_travel_disadvantage":
+                try:
+                    from services.prediction_service import _get_travel_distance
+                    features[col] = _get_travel_distance(away_team, home_team) / 1000.0
+                except Exception:
+                    features[col] = hp.get(col, 0.0)
+
+            elif col in ("rest_advantage", "home_qb_injury_flag", "away_qb_injury_flag"):
+                features[col] = 0.0  # unknown for future games; model trained on 0-mean baseline
+
             elif col == "market_implied_team_total":
                 features[col] = hp.get(col, 22.0)
+
             else:
+                # Signed-differential features: use team profile averages
+                # (these average to ~0 across home+away appearances, which is correct)
                 features[col] = hp.get(col, 0.0)
 
         nn_prob  = self.svc.predict_game(features)
