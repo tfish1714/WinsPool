@@ -50,27 +50,29 @@ TEAM_ABBR_MAP = {
 TURNOVER_REGRESSION = 0.50
 
 FEATURE_COLUMNS = [
-    # Raw (9)
-    "tm_elo_pre", "opp_elo_pre",
-    "off_pass_epa", "def_pass_epa", "off_rush_epa", "def_rush_epa",
-    "turnover_margin_rolling",
-    "tm_point_diff", "opp_point_diff",
-    # Synthetic (8)
-    "early_down_pass_epa", "net_success_rate",
-    "elo_confidence",
+    # Elo (2)
+    "elo_diff", "elo_confidence",
+    # EPA matchup (3)
+    "pass_epa_matchup", "rush_epa_matchup", "early_down_matchup",
+    # Ball-control (2)
+    "turnover_margin_rolling", "net_success_rate",
+    # Score margin (1)
+    "point_diff_advantage",
+    # Game context (5)
     "market_implied_team_total", "passing_difficulty_index",
-    "travel_rest_disadvantage", "trench_dominance_metric",
+    "rest_advantage", "net_travel_disadvantage",
+    "trench_dominance_metric",
+    # Pressure (2)
+    "qb_pressure_advantage", "def_pressure_diff",
+    # QB health (2) — split to fix both-injured=0 bug
+    "home_qb_injury_flag", "away_qb_injury_flag",
+    # Roster Value (5)
     "roster_talent_delta",
-    # Pressure & Injury (5)  — pfr_advstats 2018+, injuries 2009+
-    "qb_pressure_rate", "opp_qb_pressure_rate",
-    "def_pressure_gen", "opp_def_pressure_gen",
-    "qb_injury_flag",
-    # Roster Value (4)  — EPA-based WAR proxy; 2000+; punter from PBP
     "off_roster_value_delta", "def_roster_value_delta",
     "st_value_delta", "qb_resilience_delta",
-    # Contextual (6)
-    "home_flag", "div_game_flag", "surface_type", "is_dome_flag", "playoff_flag",
-    "week",
+    # Contextual (5)
+    "home_field_advantage",   # 1.0 regular home, 0.0 neutral site
+    "div_game_flag", "surface_type", "playoff_flag", "week",
 ]
 
 
