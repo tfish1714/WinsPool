@@ -1,11 +1,12 @@
 """routes/auth_routes.py — Authentication and player profile endpoints."""
 import hashlib
 import logging
+import os
 import re
 import secrets
 import time
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from fastapi.responses import JSONResponse
 
 from routes.models import (
@@ -15,12 +16,28 @@ from services.db_service import (
     get_player_by_email, verify_password, get_password_hash, _is_legacy_sha256,
     update_player_credentials, increment_failed_setup_attempts, update_player_profile,
 )
-from services.session_service import create_token
+from services.session_service import create_token, _TOKEN_EXPIRY_SECONDS
 import services.email_service as email_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
+
+_IS_PROD = os.environ.get("ENVIRONMENT", "development").lower() == "production"
+
+
+def _set_session_cookie(response: JSONResponse, token: str) -> JSONResponse:
+    """Attach the session_token httpOnly cookie to a JSONResponse."""
+    response.set_cookie(
+        key="session_token",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=_IS_PROD,          # https-only in production, http-ok in dev
+        max_age=_TOKEN_EXPIRY_SECONDS,
+        path="/",
+    )
+    return response
 
 
 @router.get("/check_player")
@@ -91,13 +108,17 @@ async def set_password(body: SetPasswordRequest):
         update_player_credentials(str(player["playerId"]), hashed)
 
         role = player.get("role", "user")
-        return JSONResponse(content={
+        token = create_token(int(player["playerId"]), role)
+        resp = JSONResponse(content={
+            "status": "success",
             "message": "Password setup securely! Redirecting...",
             "playerId": str(player["playerId"]),
             "playerName": player.get("fullName"),
             "email": player.get("email"),
-            "role": role
+            "role": role,
+            "token": token,
         })
+        return _set_session_cookie(resp, token)
     except Exception as e:
         logger.exception("Unhandled error in set_password")
         return JSONResponse(status_code=500, content={"error": "An internal error occurred."})
@@ -166,7 +187,7 @@ async def login(body: LoginRequest):
 
         role = player.get("role", "user")
         token = create_token(int(player["playerId"]), role)
-        return JSONResponse(content={
+        resp = JSONResponse(content={
             "status": "success",
             "playerId": str(player["playerId"]),
             "playerName": player.get("fullName"),
@@ -174,9 +195,18 @@ async def login(body: LoginRequest):
             "role": role,
             "token": token,
         })
+        return _set_session_cookie(resp, token)
     except Exception as e:
         logger.exception("Unhandled error in login")
         return JSONResponse(status_code=500, content={"error": "An internal error occurred."})
+
+
+@router.post("/logout")
+async def logout():
+    """Clear the server-side session cookie."""
+    resp = JSONResponse(content={"status": "ok"})
+    resp.delete_cookie(key="session_token", path="/")
+    return resp
 
 
 @router.get("/profile")
@@ -275,7 +305,7 @@ async def verify_mfa(body: MfaVerifyRequest):
 
         role = player.get("role", "user")
         token = create_token(int(pid), role)
-        return JSONResponse(content={
+        resp = JSONResponse(content={
             "status": "success",
             "playerId": str(pid),
             "playerName": player.get("fullName"),
@@ -283,6 +313,7 @@ async def verify_mfa(body: MfaVerifyRequest):
             "role": role,
             "token": token,
         })
+        return _set_session_cookie(resp, token)
     except Exception as e:
         logger.exception("Unhandled error in MFA flow")
         return JSONResponse(status_code=500, content={"error": "An internal error occurred."})

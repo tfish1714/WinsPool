@@ -88,7 +88,11 @@ class App {
         }
 
         const logoutBtn = document.getElementById('logout-btn');
-        if (logoutBtn) logoutBtn.onclick = () => { AuthService.clearCredentials(); window.location.reload(); };
+        if (logoutBtn) logoutBtn.onclick = async () => {
+            await fetch('/api/logout', { method: 'POST' }).catch(() => {});
+            AuthService.clearCredentials();
+            window.location.reload();
+        };
     }
 
     async initDraftPage() {

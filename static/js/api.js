@@ -139,5 +139,8 @@ export const ApiService = {
             method: 'POST',
             body: JSON.stringify({ playerId, targetPlayerId, season, paid })
         });
-    }
+    },
+    async fetchAdminPredictionFeatures(season) {
+        return fetchWithTimeout(`${API_BASE}/admin/prediction_features/${season}`);
+    },
 };

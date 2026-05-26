@@ -4,7 +4,7 @@ import os
 import time
 
 import jwt
-from fastapi import Depends, Header, HTTPException
+from fastapi import Cookie, Depends, Header, HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -49,16 +49,33 @@ def decode_token(token: str) -> dict:
     return jwt.decode(token, _get_secret(), algorithms=[JWT_ALGORITHM])
 
 
-def require_auth(authorization: str = Header(default=None)) -> dict:
-    """FastAPI dependency: validates a Bearer JWT (any role).
+def _resolve_token(authorization: str | None, session_token: str | None) -> str:
+    """Extract a raw JWT from either the Authorization header or the session cookie.
 
-    Returns the decoded payload dict on success.
-    Raises HTTP 401 for missing, malformed, or expired tokens.
-    Use this on endpoints that any logged-in pool member may access.
+    Priority: Bearer header > session cookie.
+    Raises HTTP 401 if neither is present or the header is malformed.
     """
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header.")
-    token = authorization.removeprefix("Bearer ")
+    if authorization:
+        if not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing or invalid Authorization header.")
+        return authorization.removeprefix("Bearer ")
+    if session_token:
+        return session_token
+    raise HTTPException(status_code=401, detail="Missing or invalid Authorization header.")
+
+
+def require_auth(
+    authorization: str = Header(default=None),
+    session_token: str = Cookie(default=None),
+) -> dict:
+    """FastAPI dependency: validates a Bearer JWT or session cookie (any role).
+
+    Checks the Authorization: Bearer header first; falls back to the
+    session_token httpOnly cookie set by the login endpoint.  Returns the
+    decoded payload dict on success.
+    Raises HTTP 401 for missing, malformed, or expired tokens.
+    """
+    token = _resolve_token(authorization, session_token)
     try:
         payload = decode_token(token)
     except jwt.ExpiredSignatureError:
@@ -68,11 +85,12 @@ def require_auth(authorization: str = Header(default=None)) -> dict:
     return payload
 
 
-def require_admin(authorization: str = Header(default=None)) -> dict:
-    """FastAPI dependency: validates a Bearer JWT and asserts admin role."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header.")
-    token = authorization.removeprefix("Bearer ")
+def require_admin(
+    authorization: str = Header(default=None),
+    session_token: str = Cookie(default=None),
+) -> dict:
+    """FastAPI dependency: validates a Bearer JWT or session cookie, asserts admin role."""
+    token = _resolve_token(authorization, session_token)
     try:
         payload = decode_token(token)
     except jwt.ExpiredSignatureError:

@@ -5,6 +5,8 @@
  * then renders the feature table and per-model output when a game is selected.
  */
 
+import { ApiService } from './api.js';
+
 const seasonEl  = document.getElementById('pd-season');
 const weekEl    = document.getElementById('pd-week');
 const matchupEl = document.getElementById('pd-matchup');
@@ -14,11 +16,6 @@ const loadingEl = document.getElementById('pd-loading');
 const versionEl = document.getElementById('pd-version-badge');
 
 let _doc = null;  // full season doc from API
-
-function authHeaders() {
-    const token = localStorage.getItem('nfl_wins_token');
-    return token ? { Authorization: `Bearer ${token}` } : {};
-}
 
 // ── Fetch season doc ──────────────────────────────────────────────────────────
 
@@ -31,13 +28,7 @@ async function loadSeason(season) {
     matchupEl.disabled = true;
 
     try {
-        const resp = await fetch(`/api/admin/prediction_features/${season}`, { headers: authHeaders() });
-        if (!resp.ok) {
-            loadingEl.style.display = 'none';
-            emptyEl.style.display   = 'block';
-            return;
-        }
-        _doc = await resp.json();
+        _doc = await ApiService.fetchAdminPredictionFeatures(season);
         loadingEl.style.display = 'none';
         versionEl.textContent   = `Ensemble: ${_doc.ensemble_version || '—'}`;
         populateWeeks();
