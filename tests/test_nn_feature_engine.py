@@ -198,3 +198,166 @@ def test_sacks_suffered_roll_no_leakage(tmp_path):
     kc_w1 = result[(result["team"] == "KC") & (result["season"] == 2024) & (result["week"] == 1)]
     assert not kc_w1.empty, "KC week-1 2024 row missing"
     assert not np.isnan(float(kc_w1["sacks_suffered_roll"].iloc[0])), "Week-1 should not be NaN"
+
+
+# ---------------------------------------------------------------------------
+# Task 4: EPA matchup features in build_master_feature_table()
+# ---------------------------------------------------------------------------
+
+def _make_minimal_feature_table_inputs(tmp_path):
+    """Write minimal rawdata fixtures for build_master_feature_table."""
+    stats_dir = tmp_path / "stats_team"
+    stats_dir.mkdir(parents=True, exist_ok=True)
+    sched_dir = tmp_path / "schedules"
+    sched_dir.mkdir(parents=True, exist_ok=True)
+
+    # Two teams, 4 weeks (week 4 is the "unplayed" game)
+    rows = []
+    for week in range(1, 5):
+        rows.append({"season": 2024, "week": week, "team": "KC", "season_type": "REG",
+                     "passing_epa": 20.0 * week, "attempts": 30, "rushing_epa": 5.0, "carries": 20,
+                     "rushing_yards": 80.0, "passing_cpoe": 3.0,
+                     "sacks_suffered": 2.0, "def_sacks": 3.0, "def_qb_hits": 4.0,
+                     "def_tackles_for_loss": 5.0,
+                     "passing_interceptions": 0.5, "rushing_fumbles_lost": 0.2,
+                     "passing_first_downs": 10.0, "rushing_first_downs": 4.0,
+                     "receiving_first_downs": 0.0,
+                     "passing_tds": 2.0, "rushing_tds": 0.5,
+                     "def_interceptions": 1.0,
+                     "off_raw": 0.0, "def_raw": 0.0})
+        rows.append({"season": 2024, "week": week, "team": "BUF", "season_type": "REG",
+                     "passing_epa": 10.0 * week, "attempts": 28, "rushing_epa": 2.0, "carries": 18,
+                     "rushing_yards": 60.0, "passing_cpoe": 1.0,
+                     "sacks_suffered": 1.0, "def_sacks": 2.0, "def_qb_hits": 3.0,
+                     "def_tackles_for_loss": 4.0,
+                     "passing_interceptions": 1.0, "rushing_fumbles_lost": 0.3,
+                     "passing_first_downs": 8.0, "rushing_first_downs": 3.0,
+                     "receiving_first_downs": 0.0,
+                     "passing_tds": 1.5, "rushing_tds": 0.3,
+                     "def_interceptions": 0.5,
+                     "off_raw": 0.0, "def_raw": 0.0})
+    pd.DataFrame(rows).to_csv(stats_dir / "stats_team_week_2024.csv", index=False)
+
+    sched_rows = []
+    for week in range(1, 5):
+        sched_rows.append({
+            "season": 2024, "week": week,
+            "home_team": "KC", "away_team": "BUF",
+            "game_type": "REG",
+            "home_score": 28 if week < 4 else None,
+            "away_score": 21 if week < 4 else None,
+            "home_rest": 7, "away_rest": 7,
+            "total_line": 48.0, "spread_line": -3.0,
+            "temp": 55.0, "wind": 8.0, "roof": "outdoors",
+            "surface": "grass", "div_game": 0,
+            "location": "Home",
+        })
+    pd.DataFrame(sched_rows).to_csv(sched_dir / "games.csv", index=False)
+
+    # Elo CSV
+    elo_rows = [{"season": 2024, "week": w, "home_team": "KC", "away_team": "BUF",
+                 "home_elo_pre": 1550.0, "away_elo_pre": 1480.0} for w in range(1, 5)]
+    pd.DataFrame(elo_rows).to_csv(tmp_path / "elo_computed.csv", index=False)
+
+    return tmp_path
+
+
+def test_epa_matchup_columns_present(tmp_path):
+    """build_master_feature_table must contain pass_epa_matchup, rush_epa_matchup, early_down_matchup."""
+    from services.nn_feature_engine import build_master_feature_table
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    for col in ["pass_epa_matchup", "rush_epa_matchup", "early_down_matchup"]:
+        assert col in df.columns, f"Missing column: {col}"
+
+
+def _make_epa_diversity_fixture(tmp_path):
+    """4-team fixture so each team's defensive EPA is based on different opponents.
+
+    Schedule:
+      Wk1: KC(home) vs DEN, BUF(home) vs NE
+      Wk2: KC(home) vs NE,  BUF(home) vs DEN
+      Wk3: KC(home) vs BUF  ← test game
+
+    Team passing EPA/play:
+      KC=0.667 (20/30), BUF=0.357 (10/28), DEN=0.160 (4/25), NE=0.160 (4/25)
+
+    Expected pass_epa_matchup at wk3:
+      KC_off_roll = 0.667, KC_def_roll = 0.160 (DEN+NE opponents)
+      BUF_off_roll = 0.357, BUF_def_roll = 0.160 (NE+DEN opponents)
+      matchup = (0.667 - 0.160) - (0.357 - 0.160) = 0.507 - 0.197 = 0.310 > 0
+    """
+    stats_dir = tmp_path / "stats_team"
+    stats_dir.mkdir(parents=True, exist_ok=True)
+    sched_dir = tmp_path / "schedules"
+    sched_dir.mkdir(parents=True, exist_ok=True)
+
+    team_stats_base = {
+        "KC":  {"passing_epa": 20.0, "attempts": 30, "rushing_epa": 5.0, "carries": 20, "rushing_yards": 80.0, "passing_cpoe": 3.0},
+        "BUF": {"passing_epa": 10.0, "attempts": 28, "rushing_epa": 2.0, "carries": 18, "rushing_yards": 60.0, "passing_cpoe": 1.0},
+        "DEN": {"passing_epa": 4.0,  "attempts": 25, "rushing_epa": 1.0, "carries": 18, "rushing_yards": 45.0, "passing_cpoe": 0.2},
+        "NE":  {"passing_epa": 4.0,  "attempts": 25, "rushing_epa": 1.0, "carries": 18, "rushing_yards": 45.0, "passing_cpoe": 0.2},
+    }
+    rows = []
+    for week in range(1, 4):
+        for team, ts in team_stats_base.items():
+            rows.append({"season": 2024, "week": week, "team": team, "season_type": "REG",
+                         **ts, "sacks_suffered": 1.0, "def_sacks": 2.0, "def_qb_hits": 3.0,
+                         "def_tackles_for_loss": 2.0, "passing_interceptions": 0.5,
+                         "rushing_fumbles_lost": 0.1, "passing_first_downs": 8.0,
+                         "rushing_first_downs": 3.0, "receiving_first_downs": 0.0,
+                         "passing_tds": 1.5, "rushing_tds": 0.3, "def_interceptions": 0.5,
+                         "off_raw": 0.0, "def_raw": 0.0})
+    pd.DataFrame(rows).to_csv(stats_dir / "stats_team_week_2024.csv", index=False)
+
+    sched_rows = [
+        {"season": 2024, "week": 1, "home_team": "KC",  "away_team": "DEN", "game_type": "REG",
+         "home_score": 35, "away_score": 7,  "home_rest": 7, "away_rest": 7,
+         "total_line": 44.0, "spread_line": -14.0, "temp": 55.0, "wind": 8.0,
+         "roof": "outdoors", "surface": "grass", "div_game": 0, "location": "Home"},
+        {"season": 2024, "week": 1, "home_team": "BUF", "away_team": "NE",  "game_type": "REG",
+         "home_score": 24, "away_score": 17, "home_rest": 7, "away_rest": 7,
+         "total_line": 44.0, "spread_line": -3.0,  "temp": 55.0, "wind": 8.0,
+         "roof": "outdoors", "surface": "grass", "div_game": 0, "location": "Home"},
+        {"season": 2024, "week": 2, "home_team": "KC",  "away_team": "NE",  "game_type": "REG",
+         "home_score": 28, "away_score": 10, "home_rest": 7, "away_rest": 7,
+         "total_line": 44.0, "spread_line": -10.0, "temp": 55.0, "wind": 8.0,
+         "roof": "outdoors", "surface": "grass", "div_game": 0, "location": "Home"},
+        {"season": 2024, "week": 2, "home_team": "BUF", "away_team": "DEN", "game_type": "REG",
+         "home_score": 21, "away_score": 14, "home_rest": 7, "away_rest": 7,
+         "total_line": 44.0, "spread_line": -7.0,  "temp": 55.0, "wind": 8.0,
+         "roof": "outdoors", "surface": "grass", "div_game": 0, "location": "Home"},
+        {"season": 2024, "week": 3, "home_team": "KC",  "away_team": "BUF", "game_type": "REG",
+         "home_score": 28, "away_score": 21, "home_rest": 7, "away_rest": 7,
+         "total_line": 50.0, "spread_line": -3.0,  "temp": 55.0, "wind": 8.0,
+         "roof": "outdoors", "surface": "grass", "div_game": 0, "location": "Home"},
+    ]
+    pd.DataFrame(sched_rows).to_csv(sched_dir / "games.csv", index=False)
+
+    elo_rows = [
+        {"season": 2024, "week": 1, "home_team": "KC",  "away_team": "DEN", "home_elo_pre": 1550.0, "away_elo_pre": 1430.0},
+        {"season": 2024, "week": 1, "home_team": "BUF", "away_team": "NE",  "home_elo_pre": 1480.0, "away_elo_pre": 1440.0},
+        {"season": 2024, "week": 2, "home_team": "KC",  "away_team": "NE",  "home_elo_pre": 1550.0, "away_elo_pre": 1440.0},
+        {"season": 2024, "week": 2, "home_team": "BUF", "away_team": "DEN", "home_elo_pre": 1480.0, "away_elo_pre": 1430.0},
+        {"season": 2024, "week": 3, "home_team": "KC",  "away_team": "BUF", "home_elo_pre": 1550.0, "away_elo_pre": 1480.0},
+    ]
+    pd.DataFrame(elo_rows).to_csv(tmp_path / "elo_computed.csv", index=False)
+
+    return tmp_path
+
+
+def test_epa_matchup_formula(tmp_path):
+    """pass_epa_matchup = (home_off_pass - away_def_pass) - (away_off_pass - home_def_pass).
+
+    Uses a 4-team fixture so each team's defensive EPA roll is derived from different opponents.
+    KC (strong) and BUF (medium) each faced weak DEN/NE before meeting in week 3.
+    Expected: KC's matchup advantage = (KC_off - BUF_def) - (BUF_off - KC_def) > 0 ≈ 0.31.
+    """
+    from services.nn_feature_engine import build_master_feature_table
+    rd = _make_epa_diversity_fixture(tmp_path)
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    kc_vs_buf = df[(df["home_team"] == "KC") & (df["away_team"] == "BUF")]
+    assert not kc_vs_buf.empty, "KC vs BUF week-3 game missing from output"
+    val = float(kc_vs_buf.iloc[0]["pass_epa_matchup"])
+    # KC off >> BUF off; both faced weak DEN/NE defenders → KC has net advantage
+    assert val > 0, f"Expected positive pass_epa_matchup for KC vs BUF, got {val:.4f}"

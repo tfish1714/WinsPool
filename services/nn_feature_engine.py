@@ -922,7 +922,6 @@ def build_master_feature_table(
         raise ValueError("No schedule data found.")
     sched = sched[(sched["season"] >= min_season) & (sched["season"] <= max_season)].copy()
 
-    epa = _load_rolling_epa(rd)
     elo = _load_elo(rd)
     box = _load_box_stats_from_weekly(rd)
     pressure = _load_pressure_stats(rd)
@@ -933,30 +932,59 @@ def build_master_feature_table(
     roster_cache = compute_roster_features(snap_counts, nflverse_rosters, team_stats=stats_team_weekly)
     roster_perf_cache = compute_roster_performance(stats_team_weekly)
 
-    # --- Rolling EPA (per-game join on season + week + team) ---
+    # --- Rolling EPA + trench data loaders ---
+    epa = _load_rolling_epa(rd)
+    trench_stats = _load_trench_rolling_stats(rd)
+
+    # --- Rolling EPA (per-game join — 8 rolling columns for each side) ---
+    _epa_cols = ["h_off_pass", "h_off_rush", "h_off_early", "h_off_ypc",
+                 "h_def_pass", "h_def_rush", "h_def_early", "h_def_ypc",
+                 "a_off_pass", "a_off_rush", "a_off_early", "a_off_ypc",
+                 "a_def_pass", "a_def_rush", "a_def_early", "a_def_ypc"]
     if not epa.empty:
         sched = sched.merge(
-            epa.rename(columns={
-                "team": "home_team",
-                "off_pass_epa_roll": "off_pass_epa",
-                "off_rush_epa_roll": "off_rush_epa",
-                "early_down_epa_roll": "early_down_pass_epa",
-            }),
-            on=["season", "week", "home_team"],
-            how="left",
+            epa.rename(columns={"team": "home_team",
+                                 "off_pass_epa_roll":   "h_off_pass",
+                                 "off_rush_epa_roll":   "h_off_rush",
+                                 "off_early_down_roll": "h_off_early",
+                                 "off_rush_ypc_roll":   "h_off_ypc",
+                                 "def_pass_epa_roll":   "h_def_pass",
+                                 "def_rush_epa_roll":   "h_def_rush",
+                                 "def_early_down_roll": "h_def_early",
+                                 "def_rush_ypc_roll":   "h_def_ypc"}),
+            on=["season", "week", "home_team"], how="left",
         )
         sched = sched.merge(
-            epa[["season", "week", "team", "off_pass_epa_roll", "off_rush_epa_roll"]].rename(columns={
-                "team": "away_team",
-                "off_pass_epa_roll": "def_pass_epa",
-                "off_rush_epa_roll": "def_rush_epa",
-            }),
-            on=["season", "week", "away_team"],
-            how="left",
+            epa.rename(columns={"team": "away_team",
+                                 "off_pass_epa_roll":   "a_off_pass",
+                                 "off_rush_epa_roll":   "a_off_rush",
+                                 "off_early_down_roll": "a_off_early",
+                                 "off_rush_ypc_roll":   "a_off_ypc",
+                                 "def_pass_epa_roll":   "a_def_pass",
+                                 "def_rush_epa_roll":   "a_def_rush",
+                                 "def_early_down_roll": "a_def_early",
+                                 "def_rush_ypc_roll":   "a_def_ypc"}),
+            on=["season", "week", "away_team"], how="left",
         )
+        for c in _epa_cols:
+            sched[c] = sched.get(c, pd.Series(0.0, index=sched.index)).fillna(0.0)
     else:
-        for col in ["off_pass_epa", "def_pass_epa", "off_rush_epa", "def_rush_epa", "early_down_pass_epa"]:
-            sched[col] = 0.0
+        for c in _epa_cols:
+            sched[c] = 0.0
+
+    # EPA matchup formula: (home_off − away_def) − (away_off − home_def)
+    sched["pass_epa_matchup"] = (
+        (sched["h_off_pass"] - sched["a_def_pass"])
+        - (sched["a_off_pass"] - sched["h_def_pass"])
+    )
+    sched["rush_epa_matchup"] = (
+        (sched["h_off_rush"] - sched["a_def_rush"])
+        - (sched["a_off_rush"] - sched["h_def_rush"])
+    )
+    sched["early_down_matchup"] = (
+        (sched["h_off_early"] - sched["a_def_early"])
+        - (sched["a_off_early"] - sched["h_def_early"])
+    )
 
     # --- Rolling Box Stats (per-game join on season + week + team) ---
     if not box.empty:
