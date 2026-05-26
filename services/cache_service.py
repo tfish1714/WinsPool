@@ -336,12 +336,24 @@ def write_prediction_features(
             from services.db_service import get_db
             db = get_db()
             doc_id = f"{season}_{ensemble_version}"
-            # Store games as a JSON string to avoid Firestore's per-document
-            # index-entry limit (~40 k entries).  A full season with 300 games
-            # and 26 features each exceeds the limit as a nested map.
+            # Firestore has a 1 MB document limit.  A full season with ~270 games,
+            # each carrying 26 raw + 26 scaled feature vectors, exceeds it.
+            # Store a slim version: per-model probs + top-10 importance only.
+            # The full data (raw features, scaled features, all 26 importance rows)
+            # lives in the local JSON file.
+            slim_games = {
+                gk: {
+                    k: v for k, v in gdata.items()
+                    if k not in ("features", "scaled_features")
+                } | {
+                    "feature_importance": gdata.get("feature_importance", [])[:10]
+                }
+                for gk, gdata in games.items()
+            }
             firestore_payload = {
                 **{k: v for k, v in payload.items() if k != "games"},
-                "games_json": json.dumps(games, default=str),
+                "games_json": json.dumps(slim_games, default=str),
+                "full_data_local_only": True,
             }
             db.collection("prediction_features").document(doc_id).set(firestore_payload)
         except Exception:

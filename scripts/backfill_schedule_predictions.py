@@ -409,9 +409,16 @@ def main():
                 print(f"    Computing feature audit ({len(year_ft)} games)...")
                 audit_records = compute_feature_audit(year_ft, nn_svc, xgb_svc, lr_svc)
                 games_dict = {r["game_key"]: r for r in audit_records}
-                write_prediction_features(year, ensemble_version, games_dict,
-                                          use_local=write_local)
-                dest_label = "local" if write_local else "Firestore"
+                dests = []
+                if write_local:
+                    write_prediction_features(year, ensemble_version, games_dict,
+                                              use_local=True)
+                    dests.append("local")
+                if write_firestore:
+                    write_prediction_features(year, ensemble_version, games_dict,
+                                              use_local=False)
+                    dests.append("Firestore")
+                dest_label = ", ".join(dests) if dests else "dry-run"
                 print(f"    [ok] {len(games_dict)} games written [{dest_label}] -> prediction_features_{year}_{ensemble_version}")
             else:
                 print(f"    [warn] No feature rows for {year} -- feature audit skipped")
