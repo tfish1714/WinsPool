@@ -642,6 +642,60 @@ def _load_rolling_epa(rd: Path) -> pd.DataFrame:
     return df_paired[["season", "week", "team"] + roll_cols]
 
 
+def _load_trench_rolling_stats(rd: Path) -> pd.DataFrame:
+    """Rolling OL sacks-suffered and DL pass-rush composite per (season, week, team).
+
+    Returns two rolling columns:
+      sacks_suffered_roll  — rolling mean sacks allowed per game (OL_pass component)
+      dl_pass_roll         — rolling mean of (def_sacks×6 + def_qb_hits×1 + def_tfl×1)
+
+    OL_run (rush_ypc) and DL_run (opponents' rush_ypc) come from _load_rolling_epa().
+    Uses expanding mean shifted by 1 (no leakage). Week-1 NaN filled with prior-season avg.
+    """
+    df = _load_multi_season("stats_team/stats_team_week_*.csv", rd)
+    if df.empty:
+        return pd.DataFrame()
+
+    df["team"] = df["team"].apply(_normalize_team)
+    if "season_type" in df.columns:
+        df = df[df["season_type"] == "REG"].copy()
+
+    df["season"] = pd.to_numeric(df["season"], errors="coerce")
+    df["week"]   = pd.to_numeric(df["week"],   errors="coerce")
+    df = df.dropna(subset=["season", "week", "team"])
+
+    df["sacks_suffered"] = pd.to_numeric(df.get("sacks_suffered", 0), errors="coerce").fillna(0)
+    df["dl_pass_raw"] = (
+        pd.to_numeric(df.get("def_sacks",              0), errors="coerce").fillna(0) * DL_SACK_WEIGHT
+        + pd.to_numeric(df.get("def_qb_hits",          0), errors="coerce").fillna(0) * DL_HIT_WEIGHT
+        + pd.to_numeric(df.get("def_tackles_for_loss", 0), errors="coerce").fillna(0) * DL_TFL_WEIGHT
+    )
+
+    df = df.sort_values(["season", "team", "week"])
+
+    prior_avg = (
+        df.groupby(["season", "team"])[["sacks_suffered", "dl_pass_raw"]].mean()
+        .reset_index()
+        .rename(columns={"sacks_suffered": "_pa_sacks", "dl_pass_raw": "_pa_dl"})
+    )
+    prior_avg["join_season"] = prior_avg["season"] + 1
+
+    df["sacks_suffered_roll"] = df.groupby(["season", "team"])["sacks_suffered"].transform(
+        lambda s: s.expanding().mean().shift(1))
+    df["dl_pass_roll"] = df.groupby(["season", "team"])["dl_pass_raw"].transform(
+        lambda s: s.expanding().mean().shift(1))
+
+    df = df.merge(
+        prior_avg[["join_season", "team", "_pa_sacks", "_pa_dl"]],
+        left_on=["season", "team"], right_on=["join_season", "team"], how="left",
+    ).drop(columns=["join_season"], errors="ignore")
+
+    df["sacks_suffered_roll"] = df["sacks_suffered_roll"].fillna(df["_pa_sacks"]).fillna(0.0)
+    df["dl_pass_roll"]        = df["dl_pass_roll"].fillna(df["_pa_dl"]).fillna(0.0)
+
+    return df[["season", "week", "team", "sacks_suffered_roll", "dl_pass_roll"]]
+
+
 def _load_box_stats_from_weekly(rd: Path) -> pd.DataFrame:
     """Compute rolling turnovers and first downs from nflverse weekly team stats.
 

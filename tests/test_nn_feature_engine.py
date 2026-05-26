@@ -146,3 +146,55 @@ def test_no_leakage_week1(tmp_path):
     assert not kc_w1_2024.empty, "KC week-1 2024 row missing from rolling EPA output"
     val = float(kc_w1_2024["off_pass_epa_roll"].iloc[0])
     assert not np.isnan(val), "Week-1 value should be filled with prior-season average, not NaN"
+
+
+from services.nn_feature_engine import _load_trench_rolling_stats
+
+
+def _make_trench_stats_df():
+    """Minimal stats_team_week data with trench columns."""
+    rows = []
+    for season in [2023, 2024]:
+        for week in [1, 2, 3]:
+            rows.append({"season": season, "week": week, "team": "KC",
+                         "season_type": "REG",
+                         "sacks_suffered": 2.0, "rushing_yards": 80.0, "carries": 20,
+                         "def_sacks": 3.0, "def_qb_hits": 4.0, "def_tackles_for_loss": 5.0})
+            rows.append({"season": season, "week": week, "team": "BUF",
+                         "season_type": "REG",
+                         "sacks_suffered": 1.0, "rushing_yards": 60.0, "carries": 18,
+                         "def_sacks": 2.0, "def_qb_hits": 3.0, "def_tackles_for_loss": 4.0})
+    return pd.DataFrame(rows)
+
+
+def test_load_trench_rolling_stats_returns_expected_columns(tmp_path):
+    stats_dir = tmp_path / "stats_team"
+    stats_dir.mkdir()
+    _make_trench_stats_df().to_csv(stats_dir / "stats_team_week_2024.csv", index=False)
+    result = _load_trench_rolling_stats(tmp_path)
+    assert set(result.columns) == {"season", "week", "team", "sacks_suffered_roll", "dl_pass_roll"}
+
+
+def test_dl_pass_roll_uses_weighted_composite(tmp_path):
+    """dl_pass_roll = rolling mean of (def_sacks*6 + def_qb_hits*1 + def_tfl*1)."""
+    stats_dir = tmp_path / "stats_team"
+    stats_dir.mkdir()
+    _make_trench_stats_df().to_csv(stats_dir / "stats_team_week_2024.csv", index=False)
+    result = _load_trench_rolling_stats(tmp_path)
+    # KC: def_sacks=3, def_qb_hits=4, def_tfl=5 → composite = 3*6+4+5 = 27 each game
+    # Week-3 rolling = mean of weeks 1+2 = 27.0
+    kc_w3 = result[(result["team"] == "KC") & (result["season"] == 2024) & (result["week"] == 3)]
+    assert not kc_w3.empty
+    val = float(kc_w3["dl_pass_roll"].iloc[0])
+    assert abs(val - 27.0) < 0.5, f"Expected ~27.0, got {val}"
+
+
+def test_sacks_suffered_roll_no_leakage(tmp_path):
+    """Week-1 sacks_suffered_roll must be filled from prior-season avg, not NaN."""
+    stats_dir = tmp_path / "stats_team"
+    stats_dir.mkdir()
+    _make_trench_stats_df().to_csv(stats_dir / "stats_team_week_2024.csv", index=False)
+    result = _load_trench_rolling_stats(tmp_path)
+    kc_w1 = result[(result["team"] == "KC") & (result["season"] == 2024) & (result["week"] == 1)]
+    assert not kc_w1.empty, "KC week-1 2024 row missing"
+    assert not np.isnan(float(kc_w1["sacks_suffered_roll"].iloc[0])), "Week-1 should not be NaN"
