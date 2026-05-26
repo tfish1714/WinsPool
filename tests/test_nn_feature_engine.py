@@ -1,5 +1,4 @@
 """Unit tests for the redesigned nn_feature_engine feature set."""
-import pytest
 import numpy as np
 import pandas as pd
 
