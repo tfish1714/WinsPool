@@ -143,6 +143,6 @@ def test_no_leakage_week1(tmp_path):
 
     result = _load_rolling_epa(tmp_path)
     kc_w1_2024 = result[(result["team"] == "KC") & (result["season"] == 2024) & (result["week"] == 1)]
-    if not kc_w1_2024.empty:
-        val = float(kc_w1_2024["off_pass_epa_roll"].iloc[0])
-        assert not np.isnan(val), "Week-1 value should be filled with prior-season average, not NaN"
+    assert not kc_w1_2024.empty, "KC week-1 2024 row missing from rolling EPA output"
+    val = float(kc_w1_2024["off_pass_epa_roll"].iloc[0])
+    assert not np.isnan(val), "Week-1 value should be filled with prior-season average, not NaN"
