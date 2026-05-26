@@ -535,11 +535,17 @@ def _load_schedule(rd: Path) -> pd.DataFrame:
 
 
 def _load_rolling_epa(rd: Path) -> pd.DataFrame:
-    """Load per-play EPA from nflverse weekly team stats.
+    """Load per-play EPA and rush YPC with 8 rolling prior-game columns.
 
-    Returns per-(season, week, team) rolling prior-game averages using an
-    expanding mean shifted by 1 so each row contains only pre-game information.
-    Week-1 NaN values are filled with the prior season's average.
+    Offensive columns: off_pass_epa_roll, off_rush_epa_roll, off_early_down_roll,
+                       off_rush_ypc_roll
+    Defensive columns (via schedule pairing — opponent's offense = this team's D allowed):
+                       def_pass_epa_roll, def_rush_epa_roll, def_early_down_roll,
+                       def_rush_ypc_roll
+
+    All rolling values use expanding mean shifted by 1 (no data leakage).
+    Week-1 NaN is filled with the prior season's team average.
+    Early-down formula: pass_epa*0.6 + rush_epa*0.2 + cpoe*0.05
     """
     df = _load_multi_season("stats_team/stats_team_week_*.csv", rd)
     if df.empty:
@@ -553,61 +559,87 @@ def _load_rolling_epa(rd: Path) -> pd.DataFrame:
     df["season"] = pd.to_numeric(df["season"], errors="coerce")
     df = df.dropna(subset=["season", "week", "team"])
 
-    # Per-play EPA
-    for col, denom in [("passing_epa", "attempts"), ("rushing_epa", "carries")]:
-        if col in df.columns and denom in df.columns:
-            plays = pd.to_numeric(df[denom], errors="coerce").clip(lower=1)
-            df[f"{col}_play"] = pd.to_numeric(df[col], errors="coerce").fillna(0) / plays
-        elif col in df.columns:
-            df[f"{col}_play"] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+    # Per-play offensive rates
+    attempts = pd.to_numeric(df.get("attempts", pd.Series(1, index=df.index)), errors="coerce").clip(lower=1)
+    carries  = pd.to_numeric(df.get("carries",  pd.Series(1, index=df.index)), errors="coerce").clip(lower=1)
+    rush_yds = pd.to_numeric(df.get("rushing_yards", pd.Series(0, index=df.index)), errors="coerce").fillna(0)
+    cpoe     = pd.to_numeric(df.get("passing_cpoe", pd.Series(0, index=df.index)), errors="coerce").fillna(0)
 
-    if "passing_epa_play" not in df.columns:
-        df["passing_epa_play"] = 0.0
-    if "rushing_epa_play" not in df.columns:
-        df["rushing_epa_play"] = 0.0
+    df["pass_epa_play"] = pd.to_numeric(df.get("passing_epa", 0), errors="coerce").fillna(0) / attempts
+    df["rush_epa_play"] = pd.to_numeric(df.get("rushing_epa", 0), errors="coerce").fillna(0) / carries
+    df["rush_ypc"]      = rush_yds / carries
+    # Early-down composite: 0.6 pass EPA + 0.2 rush EPA + 0.05 cpoe
+    df["early_down_epa"] = df["pass_epa_play"] * 0.6 + df["rush_epa_play"] * 0.2 + cpoe * 0.05
 
-    cpoe = pd.to_numeric(df.get("passing_cpoe", 0), errors="coerce").fillna(0)
-    df["early_down_epa"] = df["passing_epa_play"] * 0.8 + cpoe * 0.05
+    # --- Schedule pairing: find each team's opponent per (season, week) ---
+    sched_path = rd / "schedules" / "games.csv"
+    if sched_path.exists():
+        sched_raw = _read_csv_safe(str(sched_path))
+        if not sched_raw.empty:
+            if "game_type" in sched_raw.columns:
+                sched_raw = sched_raw[sched_raw["game_type"] == "REG"].copy()
+            sched_raw["home_team"] = sched_raw["home_team"].apply(_normalize_team)
+            sched_raw["away_team"] = sched_raw["away_team"].apply(_normalize_team)
+            sched_raw["season"] = pd.to_numeric(sched_raw["season"], errors="coerce")
+            sched_raw["week"]   = pd.to_numeric(sched_raw["week"],   errors="coerce")
+            home_side = sched_raw[["season", "week", "home_team", "away_team"]].rename(
+                columns={"home_team": "team", "away_team": "opponent"})
+            away_side = sched_raw[["season", "week", "away_team", "home_team"]].rename(
+                columns={"away_team": "team", "home_team": "opponent"})
+            opp_lookup = pd.concat([home_side, away_side], ignore_index=True)
+        else:
+            opp_lookup = pd.DataFrame(columns=["season", "week", "team", "opponent"])
+    else:
+        opp_lookup = pd.DataFrame(columns=["season", "week", "team", "opponent"])
 
-    df = df.sort_values(["season", "team", "week"])
+    # Join opponent, then join opponent's per-play stats for that same game
+    df_paired = df.merge(opp_lookup, on=["season", "week", "team"], how="left")
+    opp_stats = df[["season", "week", "team",
+                    "pass_epa_play", "rush_epa_play", "early_down_epa", "rush_ypc"]].rename(columns={
+        "team":          "opponent",
+        "pass_epa_play": "opp_pass_epa_play",
+        "rush_epa_play": "opp_rush_epa_play",
+        "early_down_epa":"opp_early_down_epa",
+        "rush_ypc":      "opp_rush_ypc",
+    })
+    df_paired = df_paired.merge(opp_stats, on=["season", "week", "opponent"], how="left")
+    for c in ["opp_pass_epa_play", "opp_rush_epa_play", "opp_early_down_epa", "opp_rush_ypc"]:
+        df_paired[c] = df_paired[c].fillna(0.0)
 
-    # Prior season per-team averages (for week-1 fallback)
+    df_paired = df_paired.sort_values(["season", "team", "week"])
+
+    # Rolling expanding mean shifted by 1 (no leakage)
+    def _roll(col: str) -> pd.Series:
+        return df_paired.groupby(["season", "team"])[col].transform(
+            lambda s: s.expanding().mean().shift(1))
+
+    off_src = ["pass_epa_play", "rush_epa_play", "early_down_epa", "rush_ypc"]
+    def_src = ["opp_pass_epa_play", "opp_rush_epa_play", "opp_early_down_epa", "opp_rush_ypc"]
+    roll_cols = [
+        "off_pass_epa_roll", "off_rush_epa_roll", "off_early_down_roll", "off_rush_ypc_roll",
+        "def_pass_epa_roll", "def_rush_epa_roll", "def_early_down_roll", "def_rush_ypc_roll",
+    ]
+    for roll_col, src_col in zip(roll_cols, off_src + def_src):
+        df_paired[roll_col] = _roll(src_col)
+
+    # Prior-season team averages for week-1 NaN fill
+    src_all = off_src + def_src
     prior_avg = (
-        df.groupby(["season", "team"])[["passing_epa_play", "rushing_epa_play", "early_down_epa"]]
-        .mean()
-        .rename(columns={"passing_epa_play": "pass_avg", "rushing_epa_play": "rush_avg",
-                         "early_down_epa": "early_avg"})
+        df_paired.groupby(["season", "team"])[src_all].mean()
         .reset_index()
+        .rename(columns={c: f"_pa_{c}" for c in src_all})
     )
     prior_avg["join_season"] = prior_avg["season"] + 1
 
-    # Rolling expanding prior-game mean (shift(1) excludes current game)
-    df["off_pass_epa_roll"] = (
-        df.groupby(["season", "team"])["passing_epa_play"]
-        .transform(lambda s: s.expanding().mean().shift(1))
-    )
-    df["off_rush_epa_roll"] = (
-        df.groupby(["season", "team"])["rushing_epa_play"]
-        .transform(lambda s: s.expanding().mean().shift(1))
-    )
-    df["early_down_epa_roll"] = (
-        df.groupby(["season", "team"])["early_down_epa"]
-        .transform(lambda s: s.expanding().mean().shift(1))
-    )
-
-    # Fill week-1 NaN with prior season average
-    df = df.merge(
-        prior_avg[["join_season", "team", "pass_avg", "rush_avg", "early_avg"]],
-        left_on=["season", "team"],
-        right_on=["join_season", "team"],
-        how="left",
+    df_paired = df_paired.merge(
+        prior_avg[["join_season", "team"] + [f"_pa_{c}" for c in src_all]],
+        left_on=["season", "team"], right_on=["join_season", "team"], how="left",
     ).drop(columns=["join_season"], errors="ignore")
 
-    df["off_pass_epa_roll"] = df["off_pass_epa_roll"].fillna(df["pass_avg"]).fillna(0.0)
-    df["off_rush_epa_roll"] = df["off_rush_epa_roll"].fillna(df["rush_avg"]).fillna(0.0)
-    df["early_down_epa_roll"] = df["early_down_epa_roll"].fillna(df["early_avg"]).fillna(0.0)
+    for roll_col, src_col in zip(roll_cols, src_all):
+        df_paired[roll_col] = df_paired[roll_col].fillna(df_paired[f"_pa_{src_col}"]).fillna(0.0)
 
-    return df[["season", "week", "team", "off_pass_epa_roll", "off_rush_epa_roll", "early_down_epa_roll"]]
+    return df_paired[["season", "week", "team"] + roll_cols]
 
 
 def _load_box_stats_from_weekly(rd: Path) -> pd.DataFrame:

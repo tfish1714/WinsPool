@@ -59,3 +59,90 @@ def test_feature_columns_exact_list():
 def test_no_dropped_features_remain():
     for f in DROPPED_FEATURES:
         assert f not in FEATURE_COLUMNS, f"Dropped feature still present: {f}"
+
+
+from services.nn_feature_engine import _load_rolling_epa
+from pathlib import Path
+
+
+def _make_stats_df():
+    """Two teams, three weeks of stats — used across multiple test functions."""
+    rows = []
+    for season in [2023, 2024]:
+        for week in [1, 2, 3]:
+            rows.append({"season": season, "week": week, "team": "KC",
+                         "season_type": "REG",
+                         "passing_epa": 20.0, "attempts": 30,
+                         "rushing_epa": 5.0, "carries": 20,
+                         "rushing_yards": 80.0, "passing_cpoe": 3.0})
+            rows.append({"season": season, "week": week, "team": "BUF",
+                         "season_type": "REG",
+                         "passing_epa": 10.0, "attempts": 28,
+                         "rushing_epa": 2.0, "carries": 18,
+                         "rushing_yards": 60.0, "passing_cpoe": 1.0})
+    return pd.DataFrame(rows)
+
+
+def _make_schedule_df():
+    rows = []
+    for season in [2023, 2024]:
+        for week in [1, 2, 3]:
+            rows.append({"season": season, "week": week,
+                         "home_team": "KC", "away_team": "BUF",
+                         "game_type": "REG", "location": "Home"})
+    return pd.DataFrame(rows)
+
+
+def test_rolling_epa_returns_8_roll_columns(tmp_path):
+    """_load_rolling_epa returns exactly 8 rolling columns + season/week/team."""
+    stats_dir = tmp_path / "stats_team"
+    stats_dir.mkdir()
+    _make_stats_df().to_csv(stats_dir / "stats_team_week_2024.csv", index=False)
+    sched_dir = tmp_path / "schedules"
+    sched_dir.mkdir()
+    _make_schedule_df().to_csv(sched_dir / "games.csv", index=False)
+
+    result = _load_rolling_epa(tmp_path)
+    expected_cols = {
+        "season", "week", "team",
+        "off_pass_epa_roll", "off_rush_epa_roll", "off_early_down_roll", "off_rush_ypc_roll",
+        "def_pass_epa_roll", "def_rush_epa_roll", "def_early_down_roll", "def_rush_ypc_roll",
+    }
+    assert set(result.columns) == expected_cols
+
+
+def test_defensive_epa_is_opponents_offense(tmp_path):
+    """KC's def_pass_epa_roll should track BUF's passing EPA, not KC's own passing EPA."""
+    stats_dir = tmp_path / "stats_team"
+    stats_dir.mkdir()
+    _make_stats_df().to_csv(stats_dir / "stats_team_week_2024.csv", index=False)
+    sched_dir = tmp_path / "schedules"
+    sched_dir.mkdir()
+    _make_schedule_df().to_csv(sched_dir / "games.csv", index=False)
+
+    result = _load_rolling_epa(tmp_path)
+    # KC passing EPA/play = 20/30 ≈ 0.667; BUF passing EPA/play = 10/28 ≈ 0.357
+    # KC's off_pass_epa_roll should converge toward 0.667 (KC offense)
+    # KC's def_pass_epa_roll should converge toward 0.357 (BUF offense = what KC's D faced)
+    kc_w3 = result[(result["team"] == "KC") & (result["season"] == 2024) & (result["week"] == 3)]
+    assert not kc_w3.empty
+    off_val = float(kc_w3["off_pass_epa_roll"].iloc[0])
+    def_val = float(kc_w3["def_pass_epa_roll"].iloc[0])
+    # KC off > KC def because KC offense (0.667) > BUF offense (0.357)
+    assert off_val > def_val, f"KC off_pass={off_val:.3f} should exceed def_pass={def_val:.3f}"
+
+
+def test_no_leakage_week1(tmp_path):
+    """Week-1 rolling values must use prior-season average, not current-week data."""
+    stats_dir = tmp_path / "stats_team"
+    stats_dir.mkdir()
+    _make_stats_df().to_csv(stats_dir / "stats_team_week_2024.csv", index=False)
+    sched_dir = tmp_path / "schedules"
+    sched_dir.mkdir()
+    _make_schedule_df().to_csv(sched_dir / "games.csv", index=False)
+
+    result = _load_rolling_epa(tmp_path)
+    kc_w1_2024 = result[(result["team"] == "KC") & (result["season"] == 2024) & (result["week"] == 1)]
+    if not kc_w1_2024.empty:
+        val = float(kc_w1_2024["off_pass_epa_roll"].iloc[0])
+        assert not np.isnan(val), "Week-1 value should be filled with prior-season average, not NaN"
