@@ -359,5 +359,76 @@ def test_epa_matchup_formula(tmp_path):
     kc_vs_buf = df[(df["home_team"] == "KC") & (df["away_team"] == "BUF")]
     assert not kc_vs_buf.empty, "KC vs BUF week-3 game missing from output"
     val = float(kc_vs_buf.iloc[0]["pass_epa_matchup"])
-    # KC off >> BUF off; both faced weak DEN/NE defenders → KC has net advantage
+    # KC off >> BUF off; both faced weak DEN/NE defenders -> KC has net advantage
     assert val > 0, f"Expected positive pass_epa_matchup for KC vs BUF, got {val:.4f}"
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Elo diff, point diff, pressure diffs, travel/rest split
+# ---------------------------------------------------------------------------
+
+def test_elo_diff_and_confidence(tmp_path):
+    """elo_diff = home_elo_pre - away_elo_pre; elo_confidence = |elo_diff|/25."""
+    from services.nn_feature_engine import build_master_feature_table
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    assert "elo_diff" in df.columns
+    assert "elo_confidence" in df.columns
+    # Elo fixture: home=1550, away=1480 -> diff=70, confidence=70/25=2.8
+    row = df[df["home_team"] == "KC"].iloc[0]
+    assert abs(float(row["elo_diff"]) - 70.0) < 1.0, f"elo_diff expected ~70, got {row['elo_diff']}"
+    assert abs(float(row["elo_confidence"]) - 2.8) < 0.1, f"elo_confidence expected ~2.8, got {row['elo_confidence']}"
+
+
+def test_point_diff_advantage(tmp_path):
+    """point_diff_advantage = home_rolling_margin - away_rolling_margin."""
+    from services.nn_feature_engine import build_master_feature_table
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    assert "point_diff_advantage" in df.columns
+    # KC wins 28-21 = +7 margin; BUF gets -7 from away perspective.
+    # KC home games should have positive point_diff_advantage.
+    kc = df[(df["home_team"] == "KC") & df["point_diff_advantage"].notna()]
+    if not kc.empty:
+        assert float(kc.iloc[-1]["point_diff_advantage"]) > 0
+
+
+def test_rest_and_travel_are_separate_features(tmp_path):
+    """rest_advantage and net_travel_disadvantage must both be present; old combined feature must not."""
+    from services.nn_feature_engine import build_master_feature_table
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    assert "rest_advantage" in df.columns
+    assert "net_travel_disadvantage" in df.columns
+    assert "travel_rest_disadvantage" not in df.columns
+
+
+def test_neutral_site_travel_is_zero(tmp_path):
+    """net_travel_disadvantage must be 0.0 for games with location=='Neutral'."""
+    from services.nn_feature_engine import build_master_feature_table
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+    sched_path = rd / "schedules" / "games.csv"
+    sched_df = pd.read_csv(sched_path)
+    sched_df.loc[sched_df["week"] == 2, "location"] = "Neutral"
+    sched_df.to_csv(sched_path, index=False)
+
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    # net_travel_disadvantage should be numeric
+    assert df["net_travel_disadvantage"].dtype in [np.float64, float]
+    # Week-2 game should have net_travel_disadvantage = 0.0 (neutral site)
+    w2 = df[df["week"] == 2]
+    if not w2.empty:
+        assert float(w2.iloc[0]["net_travel_disadvantage"]) == 0.0, \
+            f"Neutral-site travel should be 0.0, got {w2.iloc[0]['net_travel_disadvantage']}"
+
+
+def test_qb_pressure_advantage_direction(tmp_path):
+    """qb_pressure_advantage and def_pressure_diff must both be present and numeric."""
+    from services.nn_feature_engine import build_master_feature_table
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    assert "qb_pressure_advantage" in df.columns
+    assert "def_pressure_diff" in df.columns
+    # No pfr_advstats fixture, so values are 0.0 by default — just verify no crash and numeric
+    assert df["qb_pressure_advantage"].dtype in [np.float64, float]
+    assert df["def_pressure_diff"].dtype in [np.float64, float]

@@ -1033,35 +1033,46 @@ def build_master_feature_table(
 
 
     # --- Market Synthetics ---
-    elo_diff = sched["tm_elo_pre"] - sched["opp_elo_pre"]
-    sched["elo_confidence"] = np.abs(elo_diff / 25.0)
+    sched["elo_diff"]       = sched["tm_elo_pre"] - sched["opp_elo_pre"]
+    sched["elo_confidence"] = np.abs(sched["elo_diff"] / 25.0)
+    # Keep raw elo as aux metadata for projection engine
+    sched["home_elo_pre"] = sched["tm_elo_pre"]
+    sched["away_elo_pre"] = sched["opp_elo_pre"]
 
     total = sched.get("total_line", pd.Series(44.0, index=sched.index)).fillna(44.0)
     sched["market_implied_team_total"] = total / 2
 
-    # --- Pressure Stats (per-game join on season + week + team) ---
+    # --- Pressure Stats (signed diffs; aux cols retained for projection engine) ---
     if pressure is not None and not pressure.empty:
-        pressure_cols = [c for c in pressure.columns if c not in ("season", "week", "team")]
         sched = sched.merge(
-            pressure.rename(columns={
-                "team": "home_team",
-                **{c: c for c in pressure_cols if "qb_pressure" in c},
-                **{"def_pressure_gen_roll": "def_pressure_gen"},
-            }),
+            pressure.rename(columns={"team": "home_team",
+                                     "qb_pressure_rate_roll": "_home_qb_press",
+                                     "def_pressure_gen_roll": "_home_def_press"}),
             on=["season", "week", "home_team"], how="left",
         )
         sched = sched.merge(
-            pressure.rename(columns={
-                "team": "away_team",
-                "qb_pressure_rate_roll": "opp_qb_pressure_rate",
-                "def_pressure_gen_roll": "opp_def_pressure_gen",
-            }),
+            pressure.rename(columns={"team": "away_team",
+                                     "qb_pressure_rate_roll": "_away_qb_press",
+                                     "def_pressure_gen_roll": "_away_def_press"}),
             on=["season", "week", "away_team"], how="left",
         )
-        if "qb_pressure_rate_roll" in sched.columns:
-            sched.rename(columns={"qb_pressure_rate_roll": "qb_pressure_rate"}, inplace=True)
+        for c in ["_home_qb_press", "_away_qb_press", "_home_def_press", "_away_def_press"]:
+            sched[c] = sched.get(c, pd.Series(0.0, index=sched.index)).fillna(0.0)
+        # Positive = home QB faces LESS pressure (home advantage)
+        sched["qb_pressure_advantage"] = sched["_away_qb_press"] - sched["_home_qb_press"]
+        # Positive = home defense generates MORE pressure
+        sched["def_pressure_diff"]     = sched["_home_def_press"] - sched["_away_def_press"]
+        # Aux cols kept for projection engine
+        sched["home_qb_pressure_roll"]   = sched["_home_qb_press"]
+        sched["away_qb_pressure_roll"]   = sched["_away_qb_press"]
+        sched["home_def_pressures_roll"] = sched["_home_def_press"]
+        sched["away_def_pressures_roll"] = sched["_away_def_press"]
+        sched.drop(columns=["_home_qb_press", "_away_qb_press",
+                            "_home_def_press", "_away_def_press"], inplace=True)
     else:
-        for col in ["qb_pressure_rate", "opp_qb_pressure_rate", "def_pressure_gen", "opp_def_pressure_gen"]:
+        for col in ["qb_pressure_advantage", "def_pressure_diff",
+                    "home_qb_pressure_roll", "away_qb_pressure_roll",
+                    "home_def_pressures_roll", "away_def_pressures_roll"]:
             sched[col] = 0.0
 
     # --- QB Starter Flag (snap-count; signed delta: +1 = away starter out, -1 = home starter out) ---
@@ -1149,20 +1160,27 @@ def build_master_feature_table(
         sched["tm_point_diff"] = 0.0
         sched["opp_point_diff"] = 0.0
 
-    # --- Travel + Rest Disadvantage ---
-    # Lazy import to avoid circular dependency with prediction_service
+    # Signed differential: positive = home team outscores opponents by more
+    sched["point_diff_advantage"] = sched["tm_point_diff"] - sched["opp_point_diff"]
+    # Aux metadata for projection engine
+    sched["home_margin_roll"] = sched["tm_point_diff"]
+    sched["away_margin_roll"] = sched["opp_point_diff"]
+
+    # --- Rest advantage (days) — already in sched from _load_schedule() ---
+    sched["rest_advantage"] = sched.get(
+        "rest_advantage", pd.Series(0, index=sched.index)
+    ).fillna(0.0)
+
+    # --- Net travel disadvantage (away team's travel; 0 for neutral sites) ---
     try:
         from services.prediction_service import _get_travel_distance
-        sched["travel_miles"] = sched.apply(
-            lambda r: _get_travel_distance(str(r["away_team"]), str(r["home_team"])), axis=1
-        )
-    except (ImportError, Exception):
-        sched["travel_miles"] = 0.0
-
-    # Combine rest advantage (home_rest - away_rest) with away team's travel distance.
-    # Both components favor the home team when positive: more rest + more away travel.
-    rest = sched.get("rest_advantage", pd.Series(0, index=sched.index)).fillna(0)
-    sched["travel_rest_disadvantage"] = rest + sched["travel_miles"] / 1500.0
+        def _net_travel(row):
+            if str(row.get("location", "Home")).strip().lower() == "neutral":
+                return 0.0
+            return _get_travel_distance(str(row["away_team"]), str(row["home_team"])) / 1000.0
+        sched["net_travel_disadvantage"] = sched.apply(_net_travel, axis=1)
+    except Exception:
+        sched["net_travel_disadvantage"] = 0.0
 
     # --- Roster Performance Grade (performance-based; replaces snap-count talent) ---
     if roster_perf_cache:
