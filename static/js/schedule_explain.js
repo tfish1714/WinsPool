@@ -359,3 +359,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 });
+
+// Delegated listener — handles .pred-explain-btn buttons added dynamically after DOMContentLoaded
+document.addEventListener('click', e => {
+    const btn = e.target.closest('.pred-explain-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    handleExplainClick(btn);
+});
