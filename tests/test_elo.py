@@ -1,4 +1,4 @@
-"""tests/test_elo.py -- Unit tests for Elo rating mechanics.
+"""tests/test_elo.py -- Unit tests for Elo rating mechanics (23 tests).
 
 Covers: Haversine travel distance, win probability, margin-of-victory multiplier,
 preseason reversion, and PredictionService initialization.

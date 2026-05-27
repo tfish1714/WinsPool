@@ -2,7 +2,6 @@
 single-game win probability output from PredictionService.
 """
 
-import pytest
 from services.prediction_service import (
     pythagorean_win_pct,
     pythagorean_projected_wins,

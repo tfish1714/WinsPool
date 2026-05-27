@@ -90,18 +90,18 @@ def prediction_games_df():
     return pd.DataFrame([
         # 2023 Season
         {"game_id": "2023_01_KC_DET",  "season": 2023, "week": 1, "game_type": "REG",
-         "home_team": "KC",  "away_team": "DET", "home_score": 21, "away_score": 20, "result": 1},
+         "home_team": "KC",  "away_team": "DET", "home_score": 21, "away_score": 20, "result": 1,  "spread_line": -3.0},
         {"game_id": "2023_01_BUF_NYJ", "season": 2023, "week": 1, "game_type": "REG",
-         "home_team": "BUF", "away_team": "NYJ", "home_score": 22, "away_score": 16, "result": 6},
+         "home_team": "BUF", "away_team": "NYJ", "home_score": 22, "away_score": 16, "result": 6,  "spread_line": -6.5},
         {"game_id": "2023_02_DET_KC",  "season": 2023, "week": 2, "game_type": "REG",
-         "home_team": "DET", "away_team": "KC",  "home_score": 31, "away_score": 17, "result": 14},
+         "home_team": "DET", "away_team": "KC",  "home_score": 31, "away_score": 17, "result": 14, "spread_line":  3.0},
         {"game_id": "2023_02_NYJ_BUF", "season": 2023, "week": 2, "game_type": "REG",
-         "home_team": "NYJ", "away_team": "BUF", "home_score": 10, "away_score": 24, "result": -14},
+         "home_team": "NYJ", "away_team": "BUF", "home_score": 10, "away_score": 24, "result": -14, "spread_line":  7.0},
         # 2024 Season
         {"game_id": "2024_01_KC_BUF",  "season": 2024, "week": 1, "game_type": "REG",
-         "home_team": "KC",  "away_team": "BUF", "home_score": 27, "away_score": 20, "result": 7},
+         "home_team": "KC",  "away_team": "BUF", "home_score": 27, "away_score": 20, "result": 7,  "spread_line": -2.5},
         {"game_id": "2024_01_DET_NYJ", "season": 2024, "week": 1, "game_type": "REG",
-         "home_team": "DET", "away_team": "NYJ", "home_score": 35, "away_score": 14, "result": 21},
+         "home_team": "DET", "away_team": "NYJ", "home_score": 35, "away_score": 14, "result": 21, "spread_line": -7.5},
         {"game_id": "2024_02_BUF_KC",  "season": 2024, "week": 2, "game_type": "REG",
-         "home_team": "BUF", "away_team": "KC",  "home_score": None, "away_score": None, "result": None},
+         "home_team": "BUF", "away_team": "KC",  "home_score": None, "away_score": None, "result": None, "spread_line": -3.0},
     ])
