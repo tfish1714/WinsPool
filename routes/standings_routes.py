@@ -75,6 +75,8 @@ async def wins_pool_by_year(request: Request, year: int):
         sorted_df = analysis.calculate_wins_pool_standings(standings, draft_results, players, year, games)
         current_year = get_active_season(games)
         available_years = get_available_years(all_draft_results, all_games)
+        if year not in available_years:
+            available_years = sorted(available_years + [year])
 
         schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
         latest_week = get_latest_week_for_year(games, year)
@@ -120,11 +122,15 @@ async def wins_pool_weekbyweek(request: Request, year: int):
     schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
     record_by_week = analysis.player_winsbyWeek(schedule_enriched, sorted_players=sorted_player_names)
 
+    _yrs = get_available_years(all_draft_results, all_games)
+    if year not in _yrs:
+        _yrs = sorted(_yrs + [year])
+
     return templates.TemplateResponse(request, "weekbyweek.html", {
         "table": record_by_week.rename(columns=_first_name).to_html(classes="wp-data-table", index=True, border=0),
         "current_year": get_active_season(games),
         "year": year,
-        "available_years": get_available_years(all_draft_results, all_games),
+        "available_years": _yrs,
     })
 
 
@@ -149,11 +155,15 @@ async def playoff_race_by_year(request: Request, year: int):
     except Exception:
         race_data = []
 
+    _yrs = get_available_years(all_draft_results, all_games)
+    if year not in _yrs:
+        _yrs = sorted(_yrs + [year])
+
     return templates.TemplateResponse(request, "playoff_race.html", {
         "race": race_data,
         "year": year,
         "current_year": get_active_season(games),
-        "available_years": get_available_years(all_draft_results, all_games),
+        "available_years": _yrs,
     })
 @router.get("/schedule")
 async def schedule_redirect():

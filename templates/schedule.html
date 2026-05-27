@@ -14,7 +14,7 @@
             </div>
             <div class="wp-top-right">
                 <select id="year-pick" class="season-select" onchange="window.location='/schedule/' + this.value" aria-label="Season">
-                    {% for y in available_years %}
+                    {% for y in available_years | sort(reverse=True) %}
                     <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }} Season</option>
                     {% endfor %}
                 </select>

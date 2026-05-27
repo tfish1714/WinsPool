@@ -21,7 +21,7 @@
                 <div class="week-pill">WEEK {{ current_week }}</div>
                 {% endif %}
                 <select id="year-pick" class="season-select" onchange="window.location='/wins-pool/' + this.value" aria-label="Season">
-                    {% for y in available_years %}
+                    {% for y in available_years | sort(reverse=True) %}
                     <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }} Season</option>
                     {% endfor %}
                 </select>
