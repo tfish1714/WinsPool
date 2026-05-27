@@ -28,11 +28,8 @@ async def overall_history(request: Request):
 
     if not standings_master.empty and "season" in standings_master.columns:
         for yr in standings_master["season"].unique():
-            yr_standings = standings_master[standings_master["season"] == yr]
-            yr_draft = (
-                all_draft_results[all_draft_results["season"] == yr]
-                if not all_draft_results.empty else pd.DataFrame()
-            )
+            yr_standings = filter_season(standings_master, yr)
+            yr_draft = filter_season(all_draft_results, yr)
             if not yr_standings.empty and not yr_draft.empty:
                 drafted = set(yr_draft["team"].dropna().unique())
                 for _, u in yr_standings[~yr_standings["team"].isin(drafted)].iterrows():
