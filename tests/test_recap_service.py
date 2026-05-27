@@ -4,19 +4,12 @@ from unittest.mock import patch
 from services.recap_service import extract_weekly_data
 
 @patch("services.recap_service.load_data")
-def test_extract_weekly_data(mock_load_data):
+def test_extract_weekly_data(mock_load_data, sample_games_df):
     """
-    Verify that the context extraction logic accurately parses games to find 
+    Verify that the context extraction logic accurately parses games to find
     "Notable Wins" and "Bad Beats" returning the string payload.
     """
-    games = pd.DataFrame([
-        {
-            "season": 2024, "week": 1, "game_type": "REG", 
-            "home_team": "BUF", "away_team": "MIA", 
-            "home_score": 35, "away_score": 30, "result": 5, 
-            "spread_line": -10.0 # BUF favored, won by 5. MIA ATS cover.
-        }
-    ])
+    games = sample_games_df
     draft_results = pd.DataFrame([
         {"season": 2024, "team": "BUF", "playerId": 1},
         {"season": 2024, "team": "MIA", "playerId": 2}

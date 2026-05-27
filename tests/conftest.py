@@ -1,5 +1,6 @@
 import os
 import pytest
+import pandas as pd
 from unittest.mock import patch, MagicMock
 import sys
 import pathlib
@@ -50,6 +51,21 @@ def mock_firestore():
         mock_db = MagicMock()
         mock_get_db.return_value = mock_db
         yield mock_db
+
+@pytest.fixture
+def sample_games_df():
+    """Minimal NFL games DataFrame (3 rows) for unit tests.
+    Covers: 2 completed games (week 1) and 1 unplayed game (week 2, result=-1000).
+    """
+    return pd.DataFrame([
+        {"season": 2024, "week": 1, "home_team": "KC",  "away_team": "BUF",
+         "home_score": 27, "away_score": 24, "result": 3.0,   "spread_line": -2.5},
+        {"season": 2024, "week": 1, "home_team": "PHI", "away_team": "DAL",
+         "home_score": 22, "away_score": 16, "result": 6.0,   "spread_line":  3.5},
+        {"season": 2024, "week": 2, "home_team": "SF",  "away_team": "SEA",
+         "home_score": 0,  "away_score": 0,  "result": -1000, "spread_line": -4.0},
+    ])
+
 
 @pytest.fixture
 def mock_gemini():

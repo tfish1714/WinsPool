@@ -1,6 +1,7 @@
 import pytest
 import os
 import sys
+import uuid
 import pandas as pd
 from unittest.mock import MagicMock, patch
 
@@ -8,6 +9,11 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from services.db_service import get_collection_df, add_player, get_player_by_email, delete_season_data
+
+
+def _test_email():
+    """Generate a unique test email to prevent Firestore collision on re-runs."""
+    return f"test_{uuid.uuid4().hex[:8]}@example.com"
 
 def test_db_players_structure():
     """Verify that players collection can be retrieved as a DataFrame."""
@@ -33,7 +39,7 @@ def test_add_player_integrity():
     All storage calls (Firestore, local pkl) are patched so this test never
     touches the real database or the .local_db/ pickle files.
     """
-    test_email = "test_stability_verify@example.com"
+    test_email = _test_email()
     test_name = "Stability Test User"
     test_nick = "StableNick"
 

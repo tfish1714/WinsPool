@@ -4,21 +4,15 @@ import time
 from unittest.mock import patch, MagicMock
 from services.cache_service import get_cached, write_cache, clear_data_cache, _DATA_CACHE
 
-@patch("services.cache_service._USE_LOCAL", True)
-@patch("services.cache_service.open", create=True)
-def test_local_cache_read_write(mock_open, mock_env_vars):
-    """
-    Verify that in local development mode, analytics data is correctly 
-    serialized and deserialized using local file I/O safely.
-    """
-    # Mock reading a successful cached json file
-    mock_file = MagicMock()
-    mock_file.read.return_value = '{"data": {"some": "value"}}'
-    mock_open.return_value.__enter__.return_value = mock_file
-    
-    result = get_cached("test_analytic", 2024, 1)
-    # The cache_service executes json loads dynamically natively
-    pass
+def test_local_cache_read_write(tmp_path, monkeypatch):
+    """Round-trip: write analytics cache entry, read it back, assert equal."""
+    monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+    monkeypatch.setattr("services.cache_service._LOCAL_CACHE_DIR", tmp_path)
+    from services.cache_service import write_cache, get_cached
+    payload = {"test_key": 42, "nested": {"a": 1}}
+    write_cache("test_metric", 2024, 1, payload)
+    result = get_cached("test_metric", 2024, 1)
+    assert result == payload
 
 @patch("services.cache_service._USE_LOCAL", False)
 def test_remote_firestore_cache_read(mock_firestore):
