@@ -58,11 +58,11 @@ def sample_games_df():
     Covers: 2 completed games (week 1) and 1 unplayed game (week 2, result=-1000).
     """
     return pd.DataFrame([
-        {"season": 2024, "week": 1, "home_team": "KC",  "away_team": "BUF",
+        {"season": 2024, "week": 1, "game_type": "REG", "home_team": "KC",  "away_team": "BUF",
          "home_score": 27, "away_score": 24, "result": 3.0,   "spread_line": -2.5},
-        {"season": 2024, "week": 1, "home_team": "PHI", "away_team": "DAL",
+        {"season": 2024, "week": 1, "game_type": "REG", "home_team": "PHI", "away_team": "DAL",
          "home_score": 22, "away_score": 16, "result": 6.0,   "spread_line":  3.5},
-        {"season": 2024, "week": 2, "home_team": "SF",  "away_team": "SEA",
+        {"season": 2024, "week": 2, "game_type": "REG", "home_team": "SF",  "away_team": "SEA",
          "home_score": 0,  "away_score": 0,  "result": -1000, "spread_line": -4.0},
     ])
 
@@ -82,3 +82,26 @@ def mock_gemini():
         mock_instance.generate_content.return_value = mock_response
         mock_model.return_value = mock_instance
         yield mock_model
+
+
+@pytest.fixture
+def prediction_games_df():
+    """7-game DataFrame across 2 seasons (2023 + 2024) for Elo/prediction tests."""
+    return pd.DataFrame([
+        # 2023 Season
+        {"game_id": "2023_01_KC_DET",  "season": 2023, "week": 1, "game_type": "REG",
+         "home_team": "KC",  "away_team": "DET", "home_score": 21, "away_score": 20, "result": 1},
+        {"game_id": "2023_01_BUF_NYJ", "season": 2023, "week": 1, "game_type": "REG",
+         "home_team": "BUF", "away_team": "NYJ", "home_score": 22, "away_score": 16, "result": 6},
+        {"game_id": "2023_02_DET_KC",  "season": 2023, "week": 2, "game_type": "REG",
+         "home_team": "DET", "away_team": "KC",  "home_score": 31, "away_score": 17, "result": 14},
+        {"game_id": "2023_02_NYJ_BUF", "season": 2023, "week": 2, "game_type": "REG",
+         "home_team": "NYJ", "away_team": "BUF", "home_score": 10, "away_score": 24, "result": -14},
+        # 2024 Season
+        {"game_id": "2024_01_KC_BUF",  "season": 2024, "week": 1, "game_type": "REG",
+         "home_team": "KC",  "away_team": "BUF", "home_score": 27, "away_score": 20, "result": 7},
+        {"game_id": "2024_01_DET_NYJ", "season": 2024, "week": 1, "game_type": "REG",
+         "home_team": "DET", "away_team": "NYJ", "home_score": 35, "away_score": 14, "result": 21},
+        {"game_id": "2024_02_BUF_KC",  "season": 2024, "week": 2, "game_type": "REG",
+         "home_team": "BUF", "away_team": "KC",  "home_score": None, "away_score": None, "result": None},
+    ])
