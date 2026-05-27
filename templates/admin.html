@@ -29,7 +29,6 @@
         <button class="admin-tab-btn tab-btn" data-tab="recap-section">AI Recaps</button>
         <button class="admin-tab-btn tab-btn" data-tab="elo-section">Elo Ratings</button>
         <button class="admin-tab-btn tab-btn" data-tab="accuracy-section">ML Accuracy</button>
-        <button class="admin-tab-btn tab-btn" data-tab="predictions-section">Predictions</button>
     </div>
 
     <!-- Season Management Card -->
@@ -306,60 +305,10 @@
         </div>
     </div>
 
-    <!-- Per-Game Predictions Tab -->
-    <div id="predictions-section" class="tab-content card-glass hidden" style="height: auto;">
-        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.5rem;">
-            <div>
-                <h2 style="margin:0 0 0.25rem;">Predictions</h2>
-                <p style="margin:0; color:var(--text-secondary); font-size:0.85rem;">Per-game picks vs actual results. Incorrect predictions highlighted in red.</p>
-            </div>
-            <a href="/admin/predictions" target="_blank" style="font-size:0.8rem; color:var(--text-secondary); text-decoration:none;">Feature Debug ↗</a>
-        </div>
-
-        <!-- Selectors -->
-        <div class="card-glass" style="padding:1.25rem; margin-bottom:1.5rem;">
-            <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end;">
-                <div>
-                    <label style="font-size:0.75rem; color:var(--text-secondary); display:block; margin-bottom:4px;">Season</label>
-                    <select id="pg-season" class="admin-input" style="min-width:110px;"></select>
-                </div>
-                <div>
-                    <label style="font-size:0.75rem; color:var(--text-secondary); display:block; margin-bottom:4px;">Week</label>
-                    <select id="pg-week" class="admin-input" style="min-width:110px;"></select>
-                </div>
-                <button id="pg-load" class="btn-glass" style="padding:6px 18px; font-size:0.85rem;">Load</button>
-            </div>
-        </div>
-
-        <!-- Results -->
-        <div id="pg-results" style="display:none;">
-            <div class="card-glass" style="padding:1.25rem;">
-                <div id="pg-summary"></div>
-                <table class="feat-table" id="pg-table">
-                    <thead>
-                        <tr>
-                            <th>Matchup</th>
-                            <th>Model Pick</th>
-                            <th>Actual</th>
-                            <th style="text-align:center;">✓/✗</th>
-                            <th>Model Line</th>
-                            <th>Vegas</th>
-                            <th>Edge</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-        </div>
-        <div id="pg-empty"   style="color:var(--text-secondary); text-align:center; padding:2rem; display:none;">No predictions found for this week.</div>
-        <div id="pg-loading" style="color:var(--text-secondary); text-align:center; padding:2rem; display:none;">Loading…</div>
-    </div>
-
     <p id="admin-message" style="margin-top: 1rem; text-align: center; font-weight: 600;"></p>
 </div>
 
 <script type="module" src="/static/js/admin_main.js"></script>
 <script type="module" src="/static/js/admin_elo.js"></script>
 <script type="module" src="/static/js/admin_accuracy.js"></script>
-<script type="module" src="/static/js/admin_predictions_games.js"></script>
 {% endblock %}

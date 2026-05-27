@@ -23,6 +23,98 @@ function _bar(pct) {
     </div>`;
 }
 
+function _pgFmtSpread(line, home, away) {
+    if (line == null) return '<span style="color:var(--text-secondary);">—</span>';
+    if (line === 0)   return "Pick'em";
+    const fav = line > 0 ? home : away;
+    return `${fav} -${Math.abs(line).toFixed(1)}`;
+}
+
+function _pgCorrectIcon(isCorrect) {
+    if (isCorrect === null || isCorrect === undefined)
+        return '<span style="color:var(--text-secondary);">—</span>';
+    return isCorrect
+        ? '<span style="color:var(--accent-green); font-weight:700;">✓</span>'
+        : '<span style="color:var(--accent-red);   font-weight:700;">✗</span>';
+}
+
+function _pgEdgeStr(ev, home, away) {
+    if (ev == null) return '<span style="color:var(--text-secondary);">—</span>';
+    const abs = Math.abs(ev);
+    const dir = ev > 0 ? home : away;
+    const cls = abs >= 3 ? 'edge-high' : abs >= 1.5 ? 'edge-mid' : 'edge-low';
+    return `<span class="${cls}">${dir} +${abs.toFixed(1)}${abs >= 3 ? ' ⚡' : ''}</span>`;
+}
+
+async function loadGameDetail(season, week, containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (container.dataset.loaded === '1') return; // already fetched
+
+    try {
+        const _token  = localStorage.getItem('nfl_wins_token');
+        const _headers = _token ? { 'Authorization': `Bearer ${_token}` } : {};
+        const resp = await fetch(
+            `/api/admin/predictions/games?season=${season}&week=${week}`,
+            { headers: _headers }
+        );
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        container.dataset.loaded = '1';
+
+        if (!data.games || !data.games.length) {
+            container.innerHTML =
+                '<div style="color:var(--text-secondary);text-align:center;padding:0.5rem 0;">No predictions for this week.</div>';
+            return;
+        }
+
+        const gameRows = data.games.map(g => {
+            const rowBg     = g.is_correct === false ? 'background:rgba(239,68,68,0.05);' : '';
+            const pickColor = g.pred_winner === g.home_team ? 'var(--accent-green)' : 'var(--accent-gold)';
+            const actColor  = g.actual_winner === g.home_team ? 'var(--accent-green)' : 'var(--accent-gold)';
+            const debugUrl  = `/admin/predictions?season=${season}&week=${week}&home=${g.home_team}&away=${g.away_team}`;
+            return `<tr style="${rowBg}">
+                <td style="padding:4px 8px;">
+                    <span style="font-weight:600;">${g.away_team} @ ${g.home_team}</span>
+                    <a href="${debugUrl}" target="_blank"
+                        title="Feature Debug"
+                        style="margin-left:6px; color:var(--text-secondary); font-size:0.7rem; text-decoration:none;">🔍</a>
+                </td>
+                <td style="padding:4px 8px; color:${pickColor};">
+                    ${g.pred_winner ?? '—'}
+                    ${g.pred_su_conf != null ? `<span style="color:var(--text-secondary);font-size:0.72rem;">${g.pred_su_conf}%</span>` : ''}
+                </td>
+                <td style="padding:4px 8px; color:${g.actual_winner ? actColor : 'var(--text-secondary)'};">
+                    ${g.actual_winner ?? '—'}
+                </td>
+                <td style="padding:4px 8px; text-align:center;">${_pgCorrectIcon(g.is_correct)}</td>
+                <td style="padding:4px 8px;">${_pgFmtSpread(g.model_spread, g.home_team, g.away_team)}</td>
+                <td style="padding:4px 8px;">${_pgFmtSpread(g.vegas_line, g.home_team, g.away_team)}</td>
+                <td style="padding:4px 8px;">${_pgEdgeStr(g.edge_vs_vegas, g.home_team, g.away_team)}</td>
+            </tr>`;
+        }).join('');
+
+        container.innerHTML = `
+            <table style="width:100%; border-collapse:collapse; font-size:0.8rem; margin-top:0.25rem;">
+                <thead>
+                    <tr style="color:var(--text-secondary);font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;">
+                        <th style="padding:4px 8px;text-align:left;">Matchup</th>
+                        <th style="padding:4px 8px;text-align:left;">Model Pick</th>
+                        <th style="padding:4px 8px;text-align:left;">Actual</th>
+                        <th style="padding:4px 8px;text-align:center;">✓/✗</th>
+                        <th style="padding:4px 8px;text-align:left;">Model Line</th>
+                        <th style="padding:4px 8px;text-align:left;">Vegas</th>
+                        <th style="padding:4px 8px;text-align:left;">Edge</th>
+                    </tr>
+                </thead>
+                <tbody>${gameRows}</tbody>
+            </table>`;
+    } catch (err) {
+        container.innerHTML =
+            `<div style="color:var(--accent-red);padding:0.5rem 0;font-size:0.8rem;">Error: ${err.message}</div>`;
+    }
+}
+
 function renderSeasonTable(seasons) {
     const table = document.getElementById('acc-season-table');
     if (!seasons || seasons.length === 0) {
@@ -75,10 +167,21 @@ function renderWeekPanel(seasonData) {
     title.textContent = `${seasonData.season} — Week-by-Week Accuracy`;
 
     const rows = seasonData.by_week.map(w => `
-        <tr>
-            <td style="padding:8px 14px; font-weight:600;">Week ${w.week}</td>
+        <tr class="acc-week-row" data-season="${seasonData.season}" data-week="${w.week}"
+            style="cursor:pointer; transition:background 0.15s;"
+            onmouseover="this.style.background='rgba(255,255,255,0.04)'"
+            onmouseout="this.style.background=''">
+            <td style="padding:8px 14px; font-weight:600;">
+                Week ${w.week}
+                <span style="font-size:0.65rem; color:var(--text-secondary); margin-left:4px;">▶</span>
+            </td>
             <td style="padding:8px 14px; text-align:right;">${w.correct}/${w.total}</td>
             <td style="padding:8px 14px; min-width:160px;">${_bar(w.accuracy)}</td>
+        </tr>
+        <tr class="acc-game-expansion" data-expansion-week="${w.week}" style="display:none;">
+            <td colspan="3" style="padding:0.5rem 1rem 0.75rem 2rem; background:rgba(0,0,0,0.2);">
+                <div id="acc-games-${seasonData.season}-${w.week}" style="font-size:0.82rem;"></div>
+            </td>
         </tr>
     `).join('');
 
@@ -94,6 +197,23 @@ function renderWeekPanel(seasonData) {
             <tbody>${rows}</tbody>
         </table>
     `;
+
+    table.querySelectorAll('.acc-week-row').forEach(row => {
+        row.addEventListener('click', () => {
+            const season = parseInt(row.dataset.season);
+            const week   = parseInt(row.dataset.week);
+            const expansion = table.querySelector(`[data-expansion-week="${week}"]`);
+            if (!expansion) return;
+            const isOpen = expansion.style.display !== 'none';
+            expansion.style.display = isOpen ? 'none' : '';
+            if (!isOpen) {
+                loadGameDetail(season, week, `acc-games-${season}-${week}`);
+            }
+            // Toggle chevron direction
+            const chevron = row.querySelector('span');
+            if (chevron) chevron.textContent = isOpen ? '▶' : '▼';
+        });
+    });
 
     panel.style.display = 'block';
     panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
