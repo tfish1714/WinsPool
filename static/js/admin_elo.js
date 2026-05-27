@@ -253,6 +253,7 @@ class EloExplorer {
                 plugins: {
                     legend: { display: false },
                     tooltip: {
+                        itemSort: (a, b) => (b.parsed.y ?? 0) - (a.parsed.y ?? 0),
                         backgroundColor: 'rgba(0,0,0,0.85)',
                         titleColor: 'rgba(255,255,255,0.9)',
                         bodyColor: 'rgba(255,255,255,0.75)',
