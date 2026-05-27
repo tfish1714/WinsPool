@@ -64,7 +64,20 @@ class App {
 
             const adminLink = document.getElementById('admin-nav-link');
             if (adminLink) {
-                adminLink.style.display = (role === 'admin') ? 'flex' : 'none';
+                if (role === 'admin') {
+                    adminLink.classList.remove('admin-hidden');
+                } else {
+                    adminLink.classList.add('admin-hidden');
+                }
+            }
+
+            const adminLinkDrawer = document.getElementById('admin-nav-link-drawer');
+            if (adminLinkDrawer) {
+                if (role === 'admin') {
+                    adminLinkDrawer.classList.remove('admin-hidden');
+                } else {
+                    adminLinkDrawer.classList.add('admin-hidden');
+                }
             }
 
             // Show admin elements on draft page if admin

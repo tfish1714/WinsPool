@@ -171,3 +171,15 @@ class TestPredictionFeaturesEndpoint:
         client = TestClient(app)
         resp = client.get("/api/prediction_features/2025/8/KC/SF")
         assert resp.status_code == 401
+
+
+def test_base_html_admin_link_uses_visibility_not_display():
+    """admin-nav-link must not use inline display:none (causes layout shift)."""
+    import pathlib
+    src = pathlib.Path("templates/base.html").read_text()
+    assert 'id="admin-nav-link"' in src
+    assert 'admin-hidden' in src
+    # The admin-nav-link line must not have display: none
+    for line in src.splitlines():
+        if 'admin-nav-link' in line:
+            assert 'display: none' not in line, "admin-nav-link must not use display:none"

@@ -1141,6 +1141,9 @@ tr:hover {
     color: var(--accent-gold) !important;
 }
 
+/* Reserve layout space for admin nav link until auth resolves */
+.admin-hidden { visibility: hidden; }
+
 /* Progress Section */
 .progress-main {
     max-width: 1400px;
