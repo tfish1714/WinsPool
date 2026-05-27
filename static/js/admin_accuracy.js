@@ -23,10 +23,12 @@ function _bar(pct) {
     </div>`;
 }
 
+const _esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
 function _pgFmtSpread(line, home, away) {
     if (line == null) return '<span style="color:var(--text-secondary);">—</span>';
     if (line === 0)   return "Pick'em";
-    const fav = line > 0 ? home : away;
+    const fav = line > 0 ? _esc(home) : _esc(away);
     return `${fav} -${Math.abs(line).toFixed(1)}`;
 }
 
@@ -41,15 +43,15 @@ function _pgCorrectIcon(isCorrect) {
 function _pgEdgeStr(ev, home, away) {
     if (ev == null) return '<span style="color:var(--text-secondary);">—</span>';
     const abs = Math.abs(ev);
-    const dir = ev > 0 ? home : away;
+    const dir = _esc(ev > 0 ? home : away);
     const cls = abs >= 3 ? 'edge-high' : abs >= 1.5 ? 'edge-mid' : 'edge-low';
     return `<span class="${cls}">${dir} +${abs.toFixed(1)}${abs >= 3 ? ' ⚡' : ''}</span>`;
 }
 
 async function loadGameDetail(season, week, containerId) {
     const container = document.getElementById(containerId);
-    if (!container) return;
-    if (container.dataset.loaded === '1') return; // already fetched
+    if (!container || container.dataset.loaded === '1') return;
+    container.innerHTML = '<div style="padding:8px;color:var(--text-secondary);font-size:0.8rem;">Loading…</div>';
 
     try {
         const _token  = localStorage.getItem('nfl_wins_token');
@@ -72,20 +74,20 @@ async function loadGameDetail(season, week, containerId) {
             const rowBg     = g.is_correct === false ? 'background:rgba(239,68,68,0.05);' : '';
             const pickColor = g.pred_winner === g.home_team ? 'var(--accent-green)' : 'var(--accent-gold)';
             const actColor  = g.actual_winner === g.home_team ? 'var(--accent-green)' : 'var(--accent-gold)';
-            const debugUrl  = `/admin/predictions?season=${season}&week=${week}&home=${g.home_team}&away=${g.away_team}`;
+            const debugUrl  = `/admin/predictions?season=${season}&week=${week}&home=${encodeURIComponent(g.home_team)}&away=${encodeURIComponent(g.away_team)}`;
             return `<tr style="${rowBg}">
                 <td style="padding:4px 8px;">
-                    <span style="font-weight:600;">${g.away_team} @ ${g.home_team}</span>
+                    <span style="font-weight:600;">${_esc(g.away_team)} @ ${_esc(g.home_team)}</span>
                     <a href="${debugUrl}" target="_blank"
                         title="Feature Debug"
                         style="margin-left:6px; color:var(--text-secondary); font-size:0.7rem; text-decoration:none;">🔍</a>
                 </td>
                 <td style="padding:4px 8px; color:${pickColor};">
-                    ${g.pred_winner ?? '—'}
+                    ${g.pred_winner != null ? _esc(g.pred_winner) : '—'}
                     ${g.pred_su_conf != null ? `<span style="color:var(--text-secondary);font-size:0.72rem;">${g.pred_su_conf}%</span>` : ''}
                 </td>
                 <td style="padding:4px 8px; color:${g.actual_winner ? actColor : 'var(--text-secondary)'};">
-                    ${g.actual_winner ?? '—'}
+                    ${g.actual_winner != null ? _esc(g.actual_winner) : '—'}
                 </td>
                 <td style="padding:4px 8px; text-align:center;">${_pgCorrectIcon(g.is_correct)}</td>
                 <td style="padding:4px 8px;">${_pgFmtSpread(g.model_spread, g.home_team, g.away_team)}</td>
@@ -178,7 +180,7 @@ function renderWeekPanel(seasonData) {
             <td style="padding:8px 14px; text-align:right;">${w.correct}/${w.total}</td>
             <td style="padding:8px 14px; min-width:160px;">${_bar(w.accuracy)}</td>
         </tr>
-        <tr class="acc-game-expansion" data-expansion-week="${w.week}" style="display:none;">
+        <tr class="acc-game-expansion" data-expansion-week="${w.week}" data-season="${seasonData.season}" style="display:none;">
             <td colspan="3" style="padding:0.5rem 1rem 0.75rem 2rem; background:rgba(0,0,0,0.2);">
                 <div id="acc-games-${seasonData.season}-${w.week}" style="font-size:0.82rem;"></div>
             </td>
@@ -202,7 +204,7 @@ function renderWeekPanel(seasonData) {
         row.addEventListener('click', () => {
             const season = parseInt(row.dataset.season);
             const week   = parseInt(row.dataset.week);
-            const expansion = table.querySelector(`[data-expansion-week="${week}"]`);
+            const expansion = table.querySelector(`[data-expansion-week="${week}"][data-season="${season}"]`);
             if (!expansion) return;
             const isOpen = expansion.style.display !== 'none';
             expansion.style.display = isOpen ? 'none' : '';
