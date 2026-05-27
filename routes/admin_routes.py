@@ -19,7 +19,7 @@ from routes.models import (
     SetTempPasswordRequest, SeasonRequest, RecapWeekRequest,
     RecapYearRequest, GenerateRecapRequest, SaveBroadcastRecapRequest,
 )
-from services.cache_service import get_prediction_features
+from services.cache_service import get_game_predictions, get_prediction_features
 from services.data_service import load_data
 from services.response_helpers import server_error
 from services.db_service import (
@@ -382,6 +382,79 @@ async def get_predictions_vs_vegas(season: int, week: int, _: dict = Depends(req
         return JSONResponse(content={"season": season, "week": week, "games": games})
     except Exception:
         logger.exception("Unhandled error in get_predictions_vs_vegas")
+        return server_error()
+
+
+@router.get("/admin/predictions/games")
+async def get_predictions_games(season: int, week: int, _: dict = Depends(require_admin)):
+    """Per-game predictions with actual winner for a week (admin only).
+
+    Returns all predictions for the given season/week with actual_winner
+    from nfl_games. actual_winner and is_correct are null for future games.
+    """
+    try:
+        from services.nn_feature_engine import _normalize_team
+
+        preds = get_game_predictions(season)
+
+        # Build actual-winner lookup from nfl_games
+        _, _, all_games, _, _, _, _ = load_data()
+        result_lookup: dict = {}
+        if all_games is not None and not all_games.empty:
+            played = all_games[
+                all_games['result'].notna() & (all_games['result'] != -1000)
+            ]
+            for _, row in played.iterrows():
+                wk = row.get('week')
+                ht = _normalize_team(str(row.get('home_team', '') or ''))
+                at = _normalize_team(str(row.get('away_team', '') or ''))
+                res = row.get('result', 0)
+                if not wk or not ht or not at:
+                    continue
+                key = f"W{int(wk):02d}_{ht}_{at}"
+                if res > 0:
+                    result_lookup[key] = ht
+                elif res < 0:
+                    result_lookup[key] = at
+
+        week_prefix = f"W{week:02d}_"
+        games = []
+        for key, pred in preds.items():
+            if not key.startswith(week_prefix):
+                continue
+            parts = key.split("_")
+            ht = parts[1] if len(parts) > 1 else "?"
+            at = parts[2] if len(parts) > 2 else "?"
+            ex = pred.get("explanation") or {}
+            actual_winner = result_lookup.get(key)
+            pw = pred.get("pred_winner")
+            is_correct = None
+            if actual_winner is not None and pw is not None:
+                is_correct = (_normalize_team(str(pw)) == actual_winner)
+            games.append({
+                "key":           key,
+                "away_team":     at,
+                "home_team":     ht,
+                "pred_winner":   pw,
+                "pred_su_conf":  pred.get("pred_su_conf"),
+                "model_spread":  pred.get("model_spread"),
+                "vegas_line":    ex.get("vegas_line"),
+                "edge_vs_vegas": pred.get("edge_vs_vegas"),
+                "pred_ats_pick": pred.get("pred_ats_pick"),
+                "actual_winner": actual_winner,
+                "is_correct":    is_correct,
+            })
+
+        def _sort_key(g):
+            ic = g["is_correct"]
+            if ic is False: return 0
+            if ic is None:  return 1
+            return 2
+
+        games.sort(key=_sort_key)
+        return JSONResponse(content={"season": season, "week": week, "games": games})
+    except Exception:
+        logger.exception("Unhandled error in get_predictions_games")
         return server_error()
 
 

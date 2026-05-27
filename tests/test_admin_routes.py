@@ -404,3 +404,88 @@ class TestAdminPredictionFeaturesEndpoint:
             headers={"Authorization": auth_token},  # non-admin user
         )
         assert resp.status_code in (401, 403)
+
+
+class TestPredictionsGames:
+    """Tests for GET /api/admin/predictions/games."""
+
+    def test_requires_admin(self, auth_token):
+        """Non-admin token is rejected."""
+        resp = client.get(
+            "/api/admin/predictions/games?season=2024&week=1",
+            headers={"Authorization": auth_token},
+        )
+        assert resp.status_code in (401, 403)
+
+    def test_requires_token(self):
+        """Missing token is rejected."""
+        resp = client.get("/api/admin/predictions/games?season=2024&week=1")
+        assert resp.status_code in (401, 403)
+
+    def test_happy_path_returns_games_list(self, admin_token):
+        """Returns JSON with season, week, and games list for valid params."""
+        from unittest.mock import patch
+        import pandas as pd
+        mock_preds = {
+            "W01_KC_BUF": {
+                "pred_winner": "KC",
+                "pred_su_conf": 65.0,
+                "model_spread": 3.5,
+                "edge_vs_vegas": 1.0,
+                "pred_ats_pick": "KC",
+                "explanation": {"vegas_line": 2.5},
+            }
+        }
+        mock_games = pd.DataFrame([{
+            "week": 1, "home_team": "KC", "away_team": "BUF", "result": 7.0,
+        }])
+        with patch("routes.admin_routes.get_game_predictions", return_value=mock_preds), \
+             patch("routes.admin_routes.load_data", return_value=(
+                 None, None, mock_games, None, None, None, None
+             )):
+            resp = client.get(
+                "/api/admin/predictions/games?season=2024&week=1",
+                headers={"Authorization": admin_token},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["season"] == 2024
+        assert body["week"] == 1
+        assert isinstance(body["games"], list)
+        assert len(body["games"]) == 1
+        game = body["games"][0]
+        assert game["away_team"] == "BUF"
+        assert game["home_team"] == "KC"
+        assert game["actual_winner"] == "KC"
+        assert game["is_correct"] is True
+        assert "model_spread" in game
+        assert "vegas_line" in game
+
+    def test_future_game_has_null_actual_winner(self, admin_token):
+        """Unplayed game returns actual_winner=null, is_correct=null."""
+        from unittest.mock import patch
+        import pandas as pd
+        mock_preds = {
+            "W18_SF_SEA": {
+                "pred_winner": "SF",
+                "pred_su_conf": 60.0,
+                "model_spread": 4.0,
+                "edge_vs_vegas": 0.5,
+                "pred_ats_pick": "SF",
+                "explanation": {"vegas_line": 3.5},
+            }
+        }
+        mock_games = pd.DataFrame()
+        with patch("routes.admin_routes.get_game_predictions", return_value=mock_preds), \
+             patch("routes.admin_routes.load_data", return_value=(
+                 None, None, mock_games, None, None, None, None
+             )):
+            resp = client.get(
+                "/api/admin/predictions/games?season=2025&week=18",
+                headers={"Authorization": admin_token},
+            )
+        assert resp.status_code == 200
+        games = resp.json()["games"]
+        assert len(games) == 1
+        assert games[0]["actual_winner"] is None
+        assert games[0]["is_correct"] is None
