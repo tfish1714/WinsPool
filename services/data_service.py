@@ -246,7 +246,7 @@ def load_data_season(year: int):
             return df
         return df[df[col] == year].copy()
 
-    return (
+    return DataBundle(
         _filter(bundle.standings),
         bundle.teams,
         _filter(bundle.games),
