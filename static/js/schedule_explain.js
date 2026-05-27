@@ -271,28 +271,47 @@ function renderFeatureAuditSection(featureData, homeTeam, awayTeam) {
             </div>
         </div>`;
 
-    // Top-5 feature importance bar chart
-    const top5 = (feature_importance || []).slice(0, 5);
-    if (!top5.length) return modelRow;
+    // Feature importance bar chart — top 5 visible, rest collapsible
+    const allFeatures = feature_importance || [];
+    if (!allFeatures.length) return modelRow;
 
-    const maxScore = Math.max(...top5.map(f => Math.abs(f.score)), 0.0001);
+    const TOP_N = 5;
+    const maxScore = Math.max(...allFeatures.map(f => Math.abs(f.score)), 0.0001);
+    const auditId  = `feat-audit-${Date.now()}`;
 
-    const bars = top5.map(f => {
-        const pct  = Math.round((Math.abs(f.score) / maxScore) * 100);
-        const dir  = f.direction === 'home' ? homeTeam : awayTeam;
+    function _featureBar(f) {
+        const pct   = Math.round((Math.abs(f.score) / maxScore) * 100);
+        const dir   = f.direction === 'home' ? homeTeam : awayTeam;
         const color = f.direction === 'home' ? 'var(--accent-green)' : 'var(--accent-gold)';
         const label = f.feature.replace(/_/g, ' ');
         return `
             <div style="margin-bottom:7px;">
                 <div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:2px;">
                     <span style="color:var(--text-secondary);">${label}</span>
-                    <span style="color:${color}; font-weight:600;">${dir}</span>
+                    <span style="color:${color}; font-weight:600;">${dir} <span style="font-weight:400;color:var(--text-secondary);font-size:0.68rem;">${f.score.toFixed(3)}</span></span>
                 </div>
                 <div style="height:5px; background:rgba(255,255,255,0.07); border-radius:3px; overflow:hidden;">
                     <div style="width:${pct}%; height:100%; background:${color}; border-radius:3px;"></div>
                 </div>
             </div>`;
-    }).join('');
+    }
+
+    const topBars  = allFeatures.slice(0, TOP_N).map(_featureBar).join('');
+    const restBars = allFeatures.slice(TOP_N).map(_featureBar).join('');
+
+    const expandToggle = restBars ? `
+        <div id="${auditId}-rest" style="display:none;">${restBars}</div>
+        <button id="${auditId}-toggle"
+            onclick="(function(btn){
+                const el = document.getElementById('${auditId}-rest');
+                const open = el.style.display !== 'none';
+                el.style.display = open ? 'none' : '';
+                btn.textContent = open ? 'Show all ${allFeatures.length} features ▾' : 'Show less ▴';
+            })(this)"
+            style="margin-top:6px; background:none; border:none; color:var(--text-secondary); font-size:0.72rem;
+                   cursor:pointer; padding:0; text-decoration:underline;">
+            Show all ${allFeatures.length} features ▾
+        </button>` : '';
 
     const versionNote = ensemble_version
         ? `<div style="font-size:0.68rem; color:var(--text-secondary); margin-top:8px; text-align:right;">${ensemble_version}</div>`
@@ -301,7 +320,8 @@ function renderFeatureAuditSection(featureData, homeTeam, awayTeam) {
     return `${modelRow}
         <div style="background:rgba(255,255,255,0.04); border-radius:8px; padding:10px 14px; margin-bottom:12px;">
             <div style="font-size:0.72rem; color:var(--text-secondary); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.05em;">Top factors (blended importance)</div>
-            ${bars}
+            ${topBars}
+            ${expandToggle}
             ${versionNote}
         </div>`;
 }

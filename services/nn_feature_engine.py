@@ -1316,6 +1316,7 @@ def build_master_feature_table(
     meta = ["season", "week", "home_team", "away_team"]
     # Aux cols for projection engine (not model inputs, exposed for downstream consumers)
     aux = [c for c in [
+        "spread_line",          # Vegas line — not a model input, kept for explanation/edge display
         "home_elo_pre", "away_elo_pre",
         "home_trench_score", "away_trench_score",
         "home_margin_roll", "away_margin_roll",
