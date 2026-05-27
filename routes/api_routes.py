@@ -172,6 +172,19 @@ def get_prediction_accuracy(_auth: dict = Depends(require_auth)):
             'correct': overall_correct,
             'accuracy': round(overall_correct / overall_total * 100, 1) if overall_total else 0,
         }
+
+        # ── Attach model version from prediction_features filenames ────────
+        import re as _re
+        version_map: dict = {}
+        feat_files = sorted(local_db.glob('prediction_features_*.json')) if local_db.exists() else []
+        for ff in feat_files:
+            m = _re.match(r'prediction_features_(\d{4})_(.+)\.json', ff.name)
+            if m:
+                version_map[int(m.group(1))] = m.group(2)  # last file (sorted ascending) wins
+
+        for row in seasons_list:
+            row['model_version'] = version_map.get(row['season'])
+
         return JSONResponse(content={'seasons': seasons_list, 'overall': overall})
     except Exception as e:
         logger.exception("Unhandled error in /api/predictions/accuracy")

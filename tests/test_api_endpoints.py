@@ -173,6 +173,17 @@ class TestPredictionFeaturesEndpoint:
         assert resp.status_code == 401
 
 
+def test_accuracy_response_includes_model_version(auth_token):
+    """GET /api/predictions/accuracy must include model_version on each season row."""
+    resp = client.get("/api/predictions/accuracy", headers={"Authorization": auth_token})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "seasons" in data
+    # Every season row must have a model_version key (value can be None)
+    for row in data["seasons"]:
+        assert "model_version" in row, f"Season {row.get('season')} missing model_version"
+
+
 def test_base_html_admin_link_uses_visibility_not_display():
     """admin-nav-link must not use inline display:none (causes layout shift)."""
     import pathlib

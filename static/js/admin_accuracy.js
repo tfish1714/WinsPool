@@ -38,7 +38,8 @@ function renderSeasonTable(seasons) {
             <td style="padding:10px 14px; font-weight:700; color:var(--accent-gold);">${s.season}</td>
             <td style="padding:10px 14px; text-align:right;">${s.correct}/${s.total}</td>
             <td style="padding:10px 14px; min-width:160px;">${_bar(s.accuracy)}</td>
-            <td style="padding:10px 14px; font-size:0.8rem; color:var(--text-secondary);">↗ click for weekly breakdown</td>
+            <td style="padding:10px 14px; font-size:0.72rem; color:var(--text-secondary); font-family:monospace; white-space:nowrap;">${s.model_version || '—'}</td>
+            <td style="padding:10px 14px; font-size:0.8rem; color:var(--text-secondary);">↗ weekly</td>
         </tr>
     `).join('');
 
@@ -49,6 +50,7 @@ function renderSeasonTable(seasons) {
                     <th style="padding:8px 14px; text-align:left;">Season</th>
                     <th style="padding:8px 14px; text-align:right;">Correct / Total</th>
                     <th style="padding:8px 14px; text-align:left;">SU Accuracy</th>
+                    <th style="padding:8px 14px; text-align:left;">Ensemble</th>
                     <th style="padding:8px 14px;"></th>
                 </tr>
             </thead>
