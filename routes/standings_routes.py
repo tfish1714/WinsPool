@@ -20,6 +20,23 @@ router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
 
+def _fmt_gametime(gt) -> str:
+    """Convert a 24-hour Eastern time string '13:00' → '1:00 PM'.
+    Returns '' if the value is missing, -1000, or unparseable.
+    """
+    import datetime as _dt
+    if gt is None or gt in (-1000, '-1000', 'nan', '', float('nan')):
+        return ''
+    try:
+        h, m = str(gt).strip().split(':')
+        t = _dt.time(int(h), int(m))
+        # lstrip('0') removes leading zero on both Windows and Unix
+        formatted = t.strftime('%I:%M %p').lstrip('0') or t.strftime('%I:%M %p')
+        return formatted  # e.g. "1:00 PM" or "4:25 PM"
+    except Exception:
+        return ''
+
+
 def _first_name(name: str) -> str:
     if not name or name == 'Undrafted':
         return name or 'Undrafted'
@@ -165,6 +182,10 @@ async def schedule_by_year(request: Request, year: int):
 
     from services.cache_service import merge_game_predictions
     schedule_enriched = merge_game_predictions(schedule_enriched, year)
+
+    if not schedule_enriched.empty and 'gametime' in schedule_enriched.columns:
+        schedule_enriched = schedule_enriched.copy()
+        schedule_enriched['gametime_display'] = schedule_enriched['gametime'].apply(_fmt_gametime)
 
     latest_week = get_latest_week_for_year(games, year) if not games.empty else 1
     unique_weeks = (

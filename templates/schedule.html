@@ -91,9 +91,14 @@
                     </div>
                 </div>
                 <div class="game-info-aside">
-                    <span
-                        class="game-status-label {% if row['result'] != -1000 %}status-final{% else %}status-live{% endif %}">
-                        {{ 'Final' if row['result'] != -1000 else 'Live' }}
+                    <span class="game-status-label {% if row['result'] is number and row['result'] != -1000 %}status-final{% endif %}">
+                        {%- if row['result'] is number and row['result'] != -1000 -%}
+                            Final
+                        {%- elif row.get('gametime_display') -%}
+                            {{ row['gametime_display'] }}
+                        {%- else -%}
+                            —
+                        {%- endif -%}
                     </span>
                     {% if row['spread_line'] is not none or row['total_line'] is not none %}
                     <div class="game-odds"
