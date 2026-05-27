@@ -27,6 +27,7 @@ from services.db_service import (
     delete_season_data, get_collection_df, get_password_hash, save_weekly_recap,
     set_member_paid, update_player_credentials, update_player_profile,
 )
+from services.constants import PASSWORD_COMPLEXITY_RE
 from services.draft_service import sanitize_state, wipe_draft_cache
 from services.session_service import require_admin
 import services.ai_service as ai_service
@@ -224,8 +225,7 @@ async def admin_set_temp_password(body: SetTempPasswordRequest, _: dict = Depend
         if not body.targetPlayerId or not body.tempPassword:
             return JSONResponse(status_code=400, content={"error": "targetPlayerId and tempPassword are required."})
 
-        pw_regex = r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$"
-        if not re.match(pw_regex, body.tempPassword):
+        if not re.match(PASSWORD_COMPLEXITY_RE, body.tempPassword):
             return JSONResponse(status_code=400, content={
                 "error": "Temporary password must be 12+ characters with uppercase, lowercase, number, and symbol."
             })
@@ -412,10 +412,18 @@ async def get_predictions_games(season: int, week: int, _: dict = Depends(requir
                 if not wk or not ht or not at:
                     continue
                 key = f"W{int(wk):02d}_{ht}_{at}"
+                winner = None
                 if res > 0:
-                    result_lookup[key] = ht
+                    winner = ht
                 elif res < 0:
-                    result_lookup[key] = at
+                    winner = at
+                sl = row.get('spread_line')
+                result_lookup[key] = {
+                    "winner":      winner,
+                    "home_score":  int(row.get('home_score')) if row.get('home_score') is not None else None,
+                    "away_score":  int(row.get('away_score')) if row.get('away_score') is not None else None,
+                    "spread_line": float(sl) if sl is not None and str(sl) not in ('', 'nan') else None,
+                }
 
         week_prefix = f"W{week:02d}_"
         games = []
@@ -426,22 +434,35 @@ async def get_predictions_games(season: int, week: int, _: dict = Depends(requir
             ht = parts[1] if len(parts) > 1 else "?"
             at = parts[2] if len(parts) > 2 else "?"
             ex = pred.get("explanation") or {}
-            actual_winner = result_lookup.get(key)
+            result_entry  = result_lookup.get(key, {})
+            actual_winner = result_entry.get("winner") if isinstance(result_entry, dict) else result_entry
             pw = pred.get("pred_winner")
             is_correct = None
             if actual_winner is not None and pw is not None:
                 is_correct = (_normalize_team(str(pw)) == actual_winner)
+
+            # Vegas line: prefer stored explanation value, fall back to live schedule data
+            vegas_line = ex.get("vegas_line")
+            if vegas_line is None and isinstance(result_entry, dict):
+                vegas_line = result_entry.get("spread_line")
+            model_spread = pred.get("model_spread")
+            edge_vs_vegas = pred.get("edge_vs_vegas")
+            if edge_vs_vegas is None and model_spread is not None and vegas_line is not None:
+                edge_vs_vegas = round(model_spread - vegas_line, 1)
+
             games.append({
                 "key":           key,
                 "away_team":     at,
                 "home_team":     ht,
                 "pred_winner":   pw,
                 "pred_su_conf":  pred.get("pred_su_conf"),
-                "model_spread":  pred.get("model_spread"),
-                "vegas_line":    ex.get("vegas_line"),
-                "edge_vs_vegas": pred.get("edge_vs_vegas"),
+                "model_spread":  model_spread,
+                "vegas_line":    vegas_line,
+                "edge_vs_vegas": edge_vs_vegas,
                 "pred_ats_pick": pred.get("pred_ats_pick"),
                 "actual_winner": actual_winner,
+                "home_score":    result_entry.get("home_score") if isinstance(result_entry, dict) else None,
+                "away_score":    result_entry.get("away_score") if isinstance(result_entry, dict) else None,
                 "is_correct":    is_correct,
             })
 

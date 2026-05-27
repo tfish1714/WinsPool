@@ -11,6 +11,7 @@ from services.data_service import (
     get_latest_week_for_year, get_active_season,
 )
 from services.response_helpers import server_error
+from services.utils import abbreviate_player_name as _first_name, filter_season
 import services.db_service as db
 import services.analysis_service as analysis
 
@@ -37,17 +38,6 @@ def _fmt_gametime(gt) -> str:
         return ''
 
 
-def _first_name(name: str) -> str:
-    if not name or name == 'Undrafted':
-        return name or 'Undrafted'
-    if name == 'Overall Record':
-        return 'Overall'
-    parts = str(name).strip().split()
-    if len(parts) >= 2:
-        return f"{parts[0]} {parts[-1][0]}."
-    return parts[0] if parts else name
-
-
 @router.get("/profile")
 async def user_profile(request: Request):
     return templates.TemplateResponse(request, "profile.html")
@@ -68,9 +58,9 @@ async def wins_pool_by_year(request: Request, year: int):
         all_st, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
 
         # Filter for the specific year in-memory
-        standings = all_st[all_st['season'] == year] if not all_st.empty else all_st
-        games = all_games[all_games['season'] == year] if not all_games.empty else all_games
-        draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
+        standings = filter_season(all_st, year)
+        games = filter_season(all_games, year)
+        draft_results = filter_season(all_draft_results, year)
 
         sorted_df = analysis.calculate_wins_pool_standings(standings, draft_results, players, year, games)
         current_year = get_active_season(games)
@@ -111,9 +101,9 @@ async def wins_pool_weekbyweek(request: Request, year: int):
     all_st, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
 
     # Filter for the specific year in-memory
-    standings_df = all_st[all_st['season'] == year] if not all_st.empty else all_st
-    games = all_games[all_games['season'] == year] if not all_games.empty else all_games
-    draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
+    standings_df = filter_season(all_st, year)
+    games = filter_season(all_games, year)
+    draft_results = filter_season(all_draft_results, year)
 
     # Calculate standings to get the ranked player order
     standings_ranked = analysis.calculate_wins_pool_standings(standings_df, draft_results, players, year)
@@ -145,9 +135,9 @@ async def playoff_race_by_year(request: Request, year: int):
     all_st, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
 
     # Filter for the specific year in-memory
-    standings = all_st[all_st['season'] == year] if not all_st.empty else all_st
-    games = all_games[all_games['season'] == year] if not all_games.empty else all_games
-    draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
+    standings = filter_season(all_st, year)
+    games = filter_season(all_games, year)
+    draft_results = filter_season(all_draft_results, year)
 
     try:
         schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
@@ -181,8 +171,8 @@ async def schedule_by_year(request: Request, year: int):
     if year not in available_years:
         available_years = sorted(available_years + [year])
 
-    games = all_games[all_games['season'] == year] if not all_games.empty else all_games
-    draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
+    games = filter_season(all_games, year)
+    draft_results = filter_season(all_draft_results, year)
 
     if games.empty:
         from services.sandbox_service import get_future_schedule

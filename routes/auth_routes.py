@@ -16,6 +16,7 @@ from services.db_service import (
     get_player_by_email, verify_password, get_password_hash, _is_legacy_sha256,
     update_player_credentials, increment_failed_setup_attempts, update_player_profile,
 )
+from services.constants import PASSWORD_COMPLEXITY_RE
 from services.session_service import create_token, _TOKEN_EXPIRY_SECONDS
 import services.email_service as email_service
 
@@ -97,8 +98,7 @@ async def set_password(body: SetPasswordRequest):
                 return JSONResponse(status_code=429, content={"error": "Too many failed attempts. Account locked for 30 minutes."})
             return JSONResponse(status_code=400, content={"error": "Passwords do not match."})
 
-        pw_regex = r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$"
-        if not re.match(pw_regex, password):
+        if not re.match(PASSWORD_COMPLEXITY_RE, password):
             locked = _record_setup_failure()
             if locked:
                 return JSONResponse(status_code=429, content={"error": "Too many failed attempts. Account locked for 30 minutes."})
@@ -262,8 +262,7 @@ async def update_profile(body: UpdateProfileRequest):
         if new_email:
             updates["email"] = new_email
         if new_password:
-            pw_regex = r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$"
-            if not re.match(pw_regex, new_password):
+            if not re.match(PASSWORD_COMPLEXITY_RE, new_password):
                 return JSONResponse(status_code=400, content={"error": "New password too weak."})
             updates["password_hash"] = get_password_hash(new_password)
 

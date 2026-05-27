@@ -5,21 +5,11 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from services.data_service import load_data, get_available_years, get_active_season
+from services.utils import abbreviate_player_name as _first_name, filter_season
 import services.analysis_service as analysis
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
-
-
-def _first_name(name: str) -> str:
-    if not name or name == 'Undrafted':
-        return name or 'Undrafted'
-    if name == 'Overall Record':
-        return 'Overall'
-    parts = str(name).strip().split()
-    if len(parts) >= 2:
-        return f"{parts[0]} {parts[-1][0]}."
-    return parts[0] if parts else name
 
 
 # ─── Overall History ──────────────────────────────────────────────────────────
@@ -71,10 +61,10 @@ async def overall_history(request: Request):
     for yr in available_years:
         try:
             # Derived from master data in-memory
-            standings = standings_master[standings_master["season"] == yr] if not standings_master.empty else standings_master
-            games = all_games[all_games["season"] == yr] if not all_games.empty else all_games
-            draft_results = all_draft_results[all_draft_results["season"] == yr] if not all_draft_results.empty else all_draft_results
-            
+            standings = filter_season(standings_master, yr)
+            games = filter_season(all_games, yr)
+            draft_results = filter_season(all_draft_results, yr)
+
             # players, teams, draft_order, and rules are already "all" data
             yr_standings = analysis.calculate_wins_pool_standings(standings, draft_results, players, yr)
             if yr_standings.empty:
@@ -144,10 +134,10 @@ async def headtohead_history(request: Request):
     for yr in available_years:
         try:
             # Deriving from master data in-memory
-            standings = standings_master[standings_master["season"] == yr] if not standings_master.empty else standings_master
-            games = all_games[all_games["season"] == yr] if not all_games.empty else all_games
-            draft_results = all_draft_results[all_draft_results["season"] == yr] if not all_draft_results.empty else all_draft_results
-            
+            standings = filter_season(standings_master, yr)
+            games = filter_season(all_games, yr)
+            draft_results = filter_season(all_draft_results, yr)
+
             sched = analysis.get_enriched_schedule(games, draft_results, players, yr)
             if not sched.empty:
                 all_schedules.append(sched)
@@ -180,9 +170,9 @@ async def headtohead_by_year(request: Request, year: int):
     all_st, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
 
     # Filter in-memory
-    standings = all_st[all_st['season'] == year] if not all_st.empty else all_st
-    games = all_games[all_games['season'] == year] if not all_games.empty else all_games
-    draft_results = all_draft_results[all_draft_results['season'] == year] if not all_draft_results.empty else all_draft_results
+    standings = filter_season(all_st, year)
+    games = filter_season(all_games, year)
+    draft_results = filter_season(all_draft_results, year)
 
     try:
         sched = analysis.get_enriched_schedule(games, draft_results, players, year)
