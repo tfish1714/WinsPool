@@ -113,6 +113,11 @@
                                 <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: normal;">
                                     ATS: {{ row['pred_ats_pick'] }}
                                 </div>
+                                {% if row['edge_vs_vegas'] is not none and row['edge_vs_vegas']|float|abs >= 3 %}
+                                <div style="margin-top:5px; font-size:0.68rem; font-weight:700; color:var(--accent-green); letter-spacing:0.01em;">
+                                    ⚡ vs Vegas: {{ row['home_team'] if row['edge_vs_vegas']|float > 0 else row['away_team'] }} +{{ (row['edge_vs_vegas']|float|abs)|round(1) }}
+                                </div>
+                                {% endif %}
                             </div>
                             <button class="pred-explain-btn"
                                 data-season="{{ row['season'] }}"

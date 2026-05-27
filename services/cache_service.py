@@ -185,7 +185,7 @@ def merge_game_predictions(df: pd.DataFrame, season: int) -> pd.DataFrame:
     if not preds:
         return df
     df = df.copy()
-    for col in ('pred_winner', 'pred_su_conf', 'pred_ats_pick', 'pred_prob'):
+    for col in ('pred_winner', 'pred_su_conf', 'pred_ats_pick', 'pred_prob', 'edge_vs_vegas', 'model_spread'):
         if col not in df.columns:
             df[col] = None
 
@@ -198,7 +198,7 @@ def merge_game_predictions(df: pd.DataFrame, season: int) -> pd.DataFrame:
         return f"W{int(wk):02d}_{ht}_{at}"
 
     keys = df.apply(_key, axis=1)
-    for col in ('pred_winner', 'pred_su_conf', 'pred_ats_pick', 'pred_prob'):
+    for col in ('pred_winner', 'pred_su_conf', 'pred_ats_pick', 'pred_prob', 'edge_vs_vegas', 'model_spread'):
         df[col] = keys.map(lambda k, c=col: preds.get(k, {}).get(c) if k else None)
     return df
 
