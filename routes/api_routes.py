@@ -197,6 +197,7 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
     try:
         from services.cache_service import get_game_predictions
         from services.nn_feature_engine import _normalize_team
+        import math
         ht = _normalize_team(home)
         at = _normalize_team(away)
         key = f"W{week:02d}_{ht}_{at}"
@@ -204,6 +205,35 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
         pred = preds.get(key)
         if not pred:
             return not_found("No prediction found for this game.")
+
+        # If the stored explanation has no vegas_line, fall back to nfl_games.spread_line.
+        # This is the same fallback used by /admin/predictions/games.
+        ex = dict(pred.get("explanation") or {})
+        if ex.get("vegas_line") is None:
+            _, _, all_games, _, _, _, _ = load_data()
+            if not all_games.empty and "spread_line" in all_games.columns:
+                mask = (
+                    (all_games["season"] == season) &
+                    (all_games["week"] == week) &
+                    (all_games["home_team"].apply(_normalize_team) == ht) &
+                    (all_games["away_team"].apply(_normalize_team) == at)
+                )
+                row = all_games[mask]
+                if not row.empty:
+                    sl = row.iloc[0].get("spread_line")
+                    try:
+                        sv = float(sl)
+                        if not math.isnan(sv):
+                            ex["vegas_line"] = round(sv, 1)
+                            if ex.get("edge_vs_vegas") is None and pred.get("model_spread") is not None:
+                                ex["edge_vs_vegas"] = round(pred["model_spread"] - sv, 1)
+                    except (TypeError, ValueError):
+                        pass
+            pred = {**pred, "explanation": ex}
+            # Also patch top-level edge_vs_vegas if still missing
+            if pred.get("edge_vs_vegas") is None and ex.get("edge_vs_vegas") is not None:
+                pred = {**pred, "edge_vs_vegas": ex["edge_vs_vegas"]}
+
         return JSONResponse(content={
             "key": key,
             "home_team": ht,
