@@ -27,6 +27,8 @@ def main():
                         help="Print what would be deleted without deleting anything.")
     parser.add_argument("--force-local", action="store_true",
                         help="Run even if USE_LOCAL_DATA=True (local pkl only mode).")
+    parser.add_argument("--yes", "-y", action="store_true",
+                        help="Skip confirmation prompt (for CI/scripted use).")
     args = parser.parse_args()
 
     use_local = os.environ.get("USE_LOCAL_DATA", "False").lower() == "true"
@@ -38,7 +40,12 @@ def main():
     from services.db_service import get_db
     db = get_db()
     if db is None:
-        print("ERROR: Could not connect to Firestore. Check FIREBASE_CREDENTIALS.")
+        use_local_env = os.environ.get("USE_LOCAL_DATA", "False").lower() == "true"
+        if use_local_env and args.force_local:
+            print("ERROR: USE_LOCAL_DATA=True prevents get_db() from returning a Firestore client.")
+            print("  Unset USE_LOCAL_DATA before running with --force-local.")
+        else:
+            print("ERROR: Could not connect to Firestore. Check FIREBASE_CREDENTIALS env var.")
         sys.exit(1)
 
     # Query by nickName and fullName separately (Firestore doesn't support OR across fields natively)
@@ -64,29 +71,48 @@ def main():
         print("\n[DRY RUN] No deletions performed.")
         return
 
-    confirm = input(f"\nDelete {len(to_delete)} records from Firestore? (yes/no): ").strip().lower()
-    if confirm != "yes":
-        print("Aborted.")
-        return
+    if not args.yes:
+        confirm = input(f"\nDelete {len(to_delete)} records from Firestore players collection? (yes/no): ").strip().lower()
+        if confirm != "yes":
+            print("Aborted.")
+            return
 
     # Delete in batches of 500
     BATCH_SIZE = 500
     deleted = 0
     batch = db.batch()
     batch_count = 0
+    current_batch_refs = []
 
     for doc_id, _, _ in to_delete:
-        batch.delete(players_ref.document(doc_id))
+        doc_ref = players_ref.document(doc_id)
+        batch.delete(doc_ref)
+        current_batch_refs.append(doc_ref)
         batch_count += 1
         deleted += 1
         if batch_count >= BATCH_SIZE:
-            batch.commit()
-            print(f"  Committed batch of {batch_count}...")
+            try:
+                batch.commit()
+                print(f"  Committed batch of {batch_count}...")
+            except Exception as e:
+                print(f"ERROR: Batch commit failed: {e}")
+                print(f"  The following records may NOT have been deleted:")
+                for doc_ref in current_batch_refs:
+                    print(f"    {doc_ref.id}")
+                sys.exit(1)
             batch = db.batch()
+            current_batch_refs = []
             batch_count = 0
 
     if batch_count > 0:
-        batch.commit()
+        try:
+            batch.commit()
+        except Exception as e:
+            print(f"ERROR: Batch commit failed: {e}")
+            print(f"  The following records may NOT have been deleted:")
+            for doc_ref in current_batch_refs:
+                print(f"    {doc_ref.id}")
+            sys.exit(1)
 
     print(f"\nDeleted {deleted} test player(s).")
     print("\nNext step: rebuild local pkl files:")
