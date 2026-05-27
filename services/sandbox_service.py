@@ -12,7 +12,7 @@ def get_future_schedule(year: int) -> pd.DataFrame:
     """
     from services.data_service import load_data
 
-    _, _, prior_games, _, _, _, _ = load_data(year=year - 1)
+    prior_games = load_data(year=year - 1).games
 
     if prior_games.empty or "home_team" not in prior_games.columns:
         return pd.DataFrame()

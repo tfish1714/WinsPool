@@ -6,10 +6,21 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 import numpy as np
 import time
-from typing import Tuple, Dict, Any, List
+from typing import Tuple, Dict, Any, List, NamedTuple
 from services.db_service import get_collection_df
 from services.utils import get_team_logo_url
 from services.constants import UNDRAFTED_SENTINEL
+
+
+class DataBundle(NamedTuple):
+    """Named 7-tuple returned by load_data(). All fields are pandas DataFrames."""
+    standings:          "pd.DataFrame"
+    teams:              "pd.DataFrame"
+    games:              "pd.DataFrame"
+    players:            "pd.DataFrame"
+    draft_order:        "pd.DataFrame"
+    draft_results:      "pd.DataFrame"
+    draft_order_rules:  "pd.DataFrame"
 
 
 def get_team_logo(team_code: str) -> str:
@@ -208,7 +219,7 @@ def load_data(year: int = None):
         players = players.dropna(subset=['playerId'])
         players = players.sort_values('playerId').drop_duplicates(subset=['playerId'], keep='last').reset_index(drop=True)
 
-    res = (standings, teams, games, players, draft_order, draft_results, draft_order_rules)
+    res = DataBundle(standings, teams, games, players, draft_order, draft_results, draft_order_rules)
     _DATA_CACHE[key] = res
     _CACHE_TIMESTAMPS[key] = current_time
     
@@ -228,7 +239,7 @@ def load_data_season(year: int):
 
     Returns: (standings, teams, games, players, draft_order, draft_results, rules)
     """
-    standings, teams, games, players, draft_order, draft_results, rules = load_data()
+    bundle = load_data()
 
     def _filter(df, col='season'):
         if df.empty or col not in df.columns:
@@ -236,13 +247,13 @@ def load_data_season(year: int):
         return df[df[col] == year].copy()
 
     return (
-        _filter(standings),
-        teams,
-        _filter(games),
-        players,
-        draft_order,
-        _filter(draft_results),
-        rules,
+        _filter(bundle.standings),
+        bundle.teams,
+        _filter(bundle.games),
+        bundle.players,
+        bundle.draft_order,
+        _filter(bundle.draft_results),
+        bundle.draft_order_rules,
     )
 
 

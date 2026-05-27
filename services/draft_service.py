@@ -55,7 +55,7 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
         season_val = d_order_temp['season'].max()
         if pd.isna(season_val):
             # Avoid reloading everything just to get the season if possible, but for first load it's fine
-            _, _, _, _, d_order, _, _ = load_data()
+            d_order = load_data().draft_order
             season = int(d_order['season'].iloc[0]) if not d_order.empty else 2024
         else:
             season = int(season_val)
@@ -75,7 +75,9 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
     # 2. Load Data (GRANULAR: Only fetches current season as we use cached analytics)
     if is_debug: 
         logger.debug("draft_state: fetching granular season data for %s...", season)
-    standings, _, games_master, players_df, d_order, results, rules = load_data(year=season)
+    _bundle = load_data(year=season)
+    standings, games_master, players_df = _bundle.standings, _bundle.games, _bundle.players
+    d_order, results, rules = _bundle.draft_order, _bundle.draft_results, _bundle.draft_order_rules
 
     if is_debug:
         logger.debug("draft_state: data fetch took %.3fs", time.time() - t_start_fetch)
