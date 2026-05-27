@@ -64,12 +64,22 @@ class EloExplorer {
             const _token = AuthService.getToken();
             const _headers = _token ? { 'Authorization': `Bearer ${_token}` } : {};
             const resp = await fetch(`/api/admin/elo_history?playerId=${encodeURIComponent(playerId)}`, { headers: _headers });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                this._teamGrid.innerHTML =
+                    `<p style="color:var(--accent-gold);font-size:0.85rem;">
+                        ${err.error || 'Elo history unavailable.'}
+                        ${resp.status === 404 ? '<br><span style="color:var(--text-secondary);font-size:0.78rem;">Run <code>python scripts/compute_elo.py</code> locally, then sync rawdata to GCS or bundle in the image.</span>' : ''}
+                    </p>`;
+                return;
+            }
             this._data = await resp.json();
             this._buildSeasonDropdowns();
             this._buildTeamGrid();
             this._showEmpty();
         } catch (e) {
             console.error('Failed to load Elo history', e);
+            this._teamGrid.innerHTML = `<p style="color:var(--accent-red);font-size:0.85rem;">Failed to load: ${e.message}</p>`;
         }
     }
 

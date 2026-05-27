@@ -114,17 +114,37 @@ def get_prediction_accuracy(_auth: dict = Depends(require_auth)):
                     result_lookup[key] = at
                 # ties: key not stored → skipped in accuracy
 
-        # Scan all game_predictions_*.json files for locked predictions
+        # Discover which seasons have predictions.
+        # Local mode: glob .local_db/game_predictions_*.json
+        # Production mode (no .local_db): list Firestore game_predictions collection
         local_db = pathlib.Path('.local_db')
         seasons_data = {}
         overall_correct = overall_total = 0
 
         pred_files = sorted(local_db.glob('game_predictions_*.json')) if local_db.exists() else []
-        for pfile in pred_files:
+        if pred_files:
+            candidate_seasons = []
+            for pfile in pred_files:
+                try:
+                    candidate_seasons.append(int(pfile.stem.split('_')[-1]))
+                except ValueError:
+                    pass
+        else:
+            # Production: enumerate from Firestore
+            candidate_seasons = []
             try:
-                season = int(pfile.stem.split('_')[-1])
-            except ValueError:
-                continue
+                from services.db_service import get_db
+                db_client = get_db()
+                if db_client:
+                    for doc in db_client.collection('game_predictions').stream():
+                        try:
+                            candidate_seasons.append(int(doc.id))
+                        except ValueError:
+                            pass
+            except Exception:
+                pass
+
+        for season in candidate_seasons:
             preds = get_game_predictions(season)
             if not preds:
                 continue
@@ -173,14 +193,25 @@ def get_prediction_accuracy(_auth: dict = Depends(require_auth)):
             'accuracy': round(overall_correct / overall_total * 100, 1) if overall_total else 0,
         }
 
-        # ── Attach model version from prediction_features filenames ────────
+        # ── Attach model version from prediction_features ─────────────────
         import re as _re
         version_map: dict = {}
         feat_files = sorted(local_db.glob('prediction_features_*.json')) if local_db.exists() else []
-        for ff in feat_files:
-            m = _re.match(r'prediction_features_(\d{4})_(.+)\.json', ff.name)
-            if m:
-                version_map[int(m.group(1))] = m.group(2)  # last file (sorted ascending) wins
+        if feat_files:
+            for ff in feat_files:
+                m = _re.match(r'prediction_features_(\d{4})_(.+)\.json', ff.name)
+                if m:
+                    version_map[int(m.group(1))] = m.group(2)
+        else:
+            # Production: read ensemble_version field from Firestore prediction_features collection
+            try:
+                from services.cache_service import get_prediction_features
+                for s_row in seasons_list:
+                    doc = get_prediction_features(s_row['season'])
+                    if doc and doc.get('ensemble_version'):
+                        version_map[s_row['season']] = doc['ensemble_version']
+            except Exception:
+                pass
 
         for row in seasons_list:
             row['model_version'] = version_map.get(row['season'])
