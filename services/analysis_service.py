@@ -73,6 +73,7 @@ def format_team_record(team: str, records: Dict[str, Dict[str, int]]) -> str:
     return f"{r['W']}-{r['L']}"
 
 def get_remaining_games(player: str, schedule: pd.DataFrame) -> int:
+    """Return the count of unplayed games remaining for a player's drafted teams."""
     filtered = schedule[
         (schedule['result'].isna()) &
         ((schedule['fullName_away'] == player) | (schedule['fullName_home'] == player))
@@ -84,6 +85,7 @@ def get_remaining_games(player: str, schedule: pd.DataFrame) -> int:
     ).sum())
 
 def player_winsbyWeek(schedule: pd.DataFrame, sorted_players: List[str] = None) -> pd.DataFrame:
+    """Return a DataFrame of cumulative wins per player broken down by week."""
     df = schedule[['week', 'fullName_away', 'fullName_home', 'result']].dropna(subset=['result'])
     if df.empty:
         return pd.DataFrame()
@@ -148,6 +150,11 @@ def player_winsbyWeek(schedule: pd.DataFrame, sorted_players: List[str] = None) 
     return result_df
 
 def create_what_if_scenario_matrix(schedule: pd.DataFrame, record_by_week: pd.DataFrame, step: float = 0.166666666666) -> pd.DataFrame:
+    """Build a matrix of hypothetical final-standings outcomes across remaining games.
+
+    Iterates over win-probability steps to estimate how often each player
+    finishes in each rank given uncertain remaining results.
+    """
     transpose_record_by_week = record_by_week.T
     all_players = transpose_record_by_week.index
 
@@ -264,6 +271,7 @@ def calculate_playoff_race(schedule: pd.DataFrame, standings_df: pd.DataFrame) -
 
 
 def player_winlossmatrix(schedule: pd.DataFrame) -> pd.DataFrame:
+    """Return a head-to-head win/loss record matrix between every player pair."""
     if schedule.empty or not all(c in schedule.columns for c in ['fullName_away', 'fullName_home', 'result']):
         return pd.DataFrame()
 
@@ -346,6 +354,11 @@ def player_winlossmatrix(schedule: pd.DataFrame) -> pd.DataFrame:
     return record_matrix
 
 def reshape_wins_pool_standings(df: pd.DataFrame) -> pd.DataFrame:
+    """Pivot per-team win rows into a wide-format standings DataFrame (one row per player).
+
+    Each player row gets wins1/wins2/wins3, ptDiff1/2/3, and global_record1/2/3
+    columns corresponding to their three drafted teams.
+    """
     grouped = df.groupby(['playerId', 'fullName', 'season']).apply(
         lambda x: x[['team', 'wins', 'ptDiff', 'global_record']].values.flatten(),
         include_groups=False,
@@ -370,6 +383,12 @@ def reshape_wins_pool_standings(df: pd.DataFrame) -> pd.DataFrame:
     return reshaped_df
 
 def apply_tiebreakers(reshaped_df: pd.DataFrame) -> pd.DataFrame:
+    """Sort standings using the 6-tier tiebreaker cascade.
+
+    Tiers (highest to lowest priority): total wins, worst-team wins,
+    best-team wins, total point differential, head-to-head record,
+    preseason projected wins. Ascending sort flags vary per tier.
+    """
     if reshaped_df.empty: return reshaped_df
     reshaped_df['Tiebreaker1_WorstTeamWins'] = reshaped_df[['wins1', 'wins2', 'wins3']].min(axis=1)
     reshaped_df['Tiebreaker2_2ndWorstTeamWins'] = reshaped_df[['wins1', 'wins2', 'wins3']].apply(
@@ -395,6 +414,12 @@ def apply_tiebreakers(reshaped_df: pd.DataFrame) -> pd.DataFrame:
     return sorted_df[cols]
 
 def get_enriched_schedule(games, draft_results, players, season):
+    """Join games with draft ownership, player metadata, standings, and predictions.
+
+    Performs a 5-way merge so each game row carries the owning player's name,
+    their team's season record, and ML win-probability for display in the
+    schedule tab.
+    """
     import time
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_op = time.time()
@@ -445,6 +470,12 @@ def get_enriched_schedule(games, draft_results, players, season):
     return final_merged
 
 def calculate_wins_pool_standings(standings, draft_results, players, season, games=None):
+    """Compute per-player cumulative win totals from game results and draft assignments.
+
+    Merges standings with draft_results and players to produce a DataFrame
+    with one row per (player, team) pair and columns for wins, point
+    differential, and global record.
+    """
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     if draft_results.empty or 'season' not in draft_results.columns:
         return pd.DataFrame()
