@@ -88,7 +88,8 @@ def _rest_adj(week_gap: int, rest: int) -> float:
     produce as few as 10 rest days, indistinguishable from a Thursday→Sunday
     turnaround.
 
-    Not stored in ratings: the adjustment affects E for this game only.
+    Returns Elo points to add to effective rating for this game's win-probability
+    calculation only; does not modify stored post-game ratings.
     """
     if week_gap >= 2:
         return BYE_BONUS
@@ -222,6 +223,7 @@ def compute_elo(
     all_seasons_games = all_seasons_games.sort_values(["season", "week"]).reset_index(drop=True)
 
     elo: dict[str, float] = {}
+    last_week: dict[tuple, int] = {}  # (team, season) → last week number played
     current_season = None
     rows = []
 
@@ -230,6 +232,15 @@ def compute_elo(
         week = int(game["week"])
         home = str(game["home_team"])
         away = str(game["away_team"])
+
+        # Week-gap: how many schedule weeks since this team last played?
+        # Defaults to 1 (no bye) for Week 1 when no prior entry exists.
+        home_week_gap = week - last_week.get((home, season), week - 1)
+        away_week_gap = week - last_week.get((away, season), week - 1)
+
+        # Calendar rest days — already in games.csv, used only for short-rest detection.
+        home_rest = int(game["home_rest"]) if pd.notna(game["home_rest"]) else 7
+        away_rest = int(game["away_rest"]) if pd.notna(game["away_rest"]) else 7
 
         # Season regression at start of each new season
         if season != current_season:
@@ -256,9 +267,15 @@ def compute_elo(
             home_pre, away_pre,
             game["home_score"], game["away_score"],
             quarters,
+            home_week_gap=home_week_gap,
+            away_week_gap=away_week_gap,
+            home_rest=home_rest,
+            away_rest=away_rest,
         )
         elo[home] = new_home
         elo[away] = new_away
+        last_week[(home, season)] = week
+        last_week[(away, season)] = week
 
         # Only record rows in the requested output range
         if season >= min_season:

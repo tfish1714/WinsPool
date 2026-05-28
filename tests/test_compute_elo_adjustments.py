@@ -155,11 +155,13 @@ class TestComputeEloWeekGap:
                  home_score=28, away_score=21, home_rest=7, away_rest=7),
         ]
 
-        # Schedule A: KC plays week 2 then week 3 (no bye, week_gap=1 at week 3)
+        # Schedule A: KC plays week 2 then week 3 (no bye, week_gap=1 at week 3).
+        # KC loses week 2 so their Elo stays lower than the bye-bonus can cover;
+        # this isolates the bye effect rather than confounding it with extra wins.
         rows_no_bye = base_rows + [
             dict(game_id="w2a", season=2024, game_type="REG", week=2,
                  home_team="BUF", away_team="KC",
-                 home_score=17, away_score=24, home_rest=7, away_rest=7),
+                 home_score=24, away_score=17, home_rest=7, away_rest=7),
             dict(game_id="w3a", season=2024, game_type="REG", week=3,
                  home_team="KC", away_team="BUF",
                  home_score=21, away_score=17, home_rest=7, away_rest=7),
