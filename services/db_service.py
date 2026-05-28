@@ -156,6 +156,7 @@ def get_collection_df(collection_name: str, filters: list = None) -> pd.DataFram
 
 
 def update_player_cell(player_id: int, cell: str):
+    """Update the phone number (cell) field on a player's document."""
     update_player_profile(str(player_id), {"cell": cell})
 
 def get_player_role(player_id: str) -> str:
@@ -241,6 +242,7 @@ def add_player(full_name: str, nick_name: str, email: str, phone: str = ""):
 
 
 def add_draft_result(season: int, draft_pick: int, player_id: int, team: str, executed_by: str = None, time_taken_seconds: float = None):
+    """Write a single draft pick result to Firestore and the local pkl cache."""
     doc_id = f"{season}_{draft_pick}"
     data = {
         "season": season,
@@ -267,6 +269,7 @@ def add_draft_result(season: int, draft_pick: int, player_id: int, team: str, ex
     clear_data_cache(season)
 
 def delete_draft_pick(season: int, draft_pick: int):
+    """Delete a specific draft pick document from Firestore and local pkl."""
     doc_id = f"{season}_{draft_pick}"
     db = get_db()
     if db:
@@ -281,6 +284,7 @@ def delete_draft_pick(season: int, draft_pick: int):
     clear_data_cache(season)
 
 def delete_draft_results_for_season(season: int):
+    """Delete all draft_results documents for the given season from Firestore and local pkl."""
     db = get_db()
     if db:
         from google.cloud.firestore_v1.base_query import FieldFilter
@@ -327,6 +331,7 @@ def delete_season_data(season: int):
 
 
 def add_draft_order(season: int, draft_order: int, player_id: int):
+    """Create a draft_order entry mapping a player to their draft position for a season."""
     doc_id = f"{season}_{draft_order}"
     data = {
         "season": season,
@@ -348,6 +353,7 @@ def add_draft_order(season: int, draft_order: int, player_id: int):
 
 
 def add_draft_rule(season: int, draft_order: int, pick_one: int, pick_two: int, pick_three: int):
+    """Persist the three pick-slot assignments for a player's draft order rule."""
     doc_id = f"{season}_{draft_order}"
     data = {
         "season": season,
