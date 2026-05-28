@@ -29,7 +29,7 @@ except ImportError:
     XGB_AVAILABLE = False
 
 from services.nn_feature_engine import FEATURE_COLUMNS, _normalize_team
-from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
+from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, PROB_CLIP_MIN, PROB_CLIP_MAX
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ def compute_feature_audit(
     lr_probs  = lr_svc.model.predict_proba(X_lr)[:, 1]
     blended   = np.clip(
         NN_WEIGHT * nn_probs + XGB_WEIGHT * xgb_probs + LR_WEIGHT * lr_probs,
-        0.02, 0.98,
+        PROB_CLIP_MIN, PROB_CLIP_MAX,
     )
 
     # ── NN importance: input × gradient ───────────────────────────────────

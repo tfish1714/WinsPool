@@ -88,12 +88,13 @@ def _rest_adj(week_gap: int, rest: int) -> float:
     produce as few as 10 rest days, indistinguishable from a Thursday→Sunday
     turnaround.
 
-    Returns Elo points to add to effective rating for this game's win-probability
-    calculation only; does not modify stored post-game ratings.
+    Returns Elo points added to the effective (not stored) pre-game rating for
+    win-probability computation. This shifts E and therefore the Elo delta for
+    the game, but does not appear in the stored home_elo_pre / away_elo_pre columns.
     """
     if week_gap >= 2:
         return BYE_BONUS
-    if rest <= 4:
+    if rest <= 4:  # minimum observed is 4 days (Thanksgiving / TNF)
         return -SHORT_REST_PENALTY
     return 0.0
 

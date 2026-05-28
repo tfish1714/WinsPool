@@ -35,6 +35,7 @@ from services.nn_feature_engine import build_master_feature_table, FEATURE_COLUM
 from services.nn_prediction_service import NNPredictionService
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
+from services.constants import PROB_CLIP_MIN, PROB_CLIP_MAX
 
 LABEL_COLUMN  = "home_win"
 HOME_ADV_PTS  = 2.5     # for MOV power rating
@@ -107,7 +108,7 @@ def _load_elo_probs(rawdata_dir: pathlib.Path) -> pd.DataFrame:
     df["away_team"] = df["away_team"].apply(_normalize_team)
     df["season"]    = pd.to_numeric(df["season"], errors="coerce")
     df["week"]      = pd.to_numeric(df["week"],   errors="coerce")
-    df["elo_prob"]  = pd.to_numeric(df["home_exp"], errors="coerce").clip(0.02, 0.98)
+    df["elo_prob"]  = pd.to_numeric(df["home_exp"], errors="coerce").clip(PROB_CLIP_MIN, PROB_CLIP_MAX)
     return df[["season", "week", "home_team", "away_team", "elo_prob"]].dropna()
 
 
@@ -143,7 +144,7 @@ def _load_mov_probs(rawdata_dir: pathlib.Path) -> pd.DataFrame:
         hp = pwr.get(game["home_team"], 0.0)
         ap = pwr.get(game["away_team"], 0.0)
         spread = (hp - ap) + HOME_ADV_PTS
-        prob = float(np.clip(1.0 / (1.0 + np.exp(-spread / 6.5)), 0.02, 0.98))
+        prob = float(np.clip(1.0 / (1.0 + np.exp(-spread / 6.5)), PROB_CLIP_MIN, PROB_CLIP_MAX))
         rows.append({"season": game["season"], "week": game["week"],
                      "home_team": game["home_team"], "away_team": game["away_team"],
                      "mov_prob": prob})
