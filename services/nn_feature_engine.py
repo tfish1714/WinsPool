@@ -15,6 +15,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from services.constants import ELO_TO_SPREAD
+
 logger = logging.getLogger(__name__)
 
 RAWDATA_DIR = Path(__file__).parent.parent / "rawdata"
@@ -1040,7 +1042,7 @@ def build_master_feature_table(
 
     # --- Market Synthetics ---
     sched["elo_diff"]       = sched["tm_elo_pre"] - sched["opp_elo_pre"]
-    sched["elo_confidence"] = np.abs(sched["elo_diff"] / 25.0)
+    sched["elo_confidence"] = np.abs(sched["elo_diff"] / ELO_TO_SPREAD)
     # Keep raw elo as aux metadata for projection engine
     sched["home_elo_pre"] = sched["tm_elo_pre"]
     sched["away_elo_pre"] = sched["opp_elo_pre"]

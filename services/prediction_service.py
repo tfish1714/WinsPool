@@ -23,7 +23,7 @@ import math
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
-from services.constants import UNDRAFTED_SENTINEL
+from services.constants import UNDRAFTED_SENTINEL, ELO_TO_SPREAD
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -592,7 +592,7 @@ class PredictionService:
             "adjustments": round(adjustments, 1),
             "travel_miles": round(travel_miles, 0),
             "elo_weight": w,
-            "predicted_spread": round(elo_diff / 25.0, 1),
+            "predicted_spread": round(elo_diff / ELO_TO_SPREAD, 1),
         }
 
     # -------------------------------------------------------------------
@@ -804,7 +804,7 @@ class PredictionService:
                 # A team at 1505 Elo is an 8.5-win team. Each 25 Elo ~= 1 point spread
                 # ~= 0.03 win probability per game ~= 0.5 wins over 17 games.
                 elo_above_mean = elo - ELO_MEAN
-                projected_wins = 8.5 + (elo_above_mean / 25.0) * 0.5
+                projected_wins = 8.5 + (elo_above_mean / ELO_TO_SPREAD) * 0.5
 
             # Composite confidence: blend Elo rank signal with Pythagorean projection
             # Normalize Elo to a 0-1 scale (typical range 1300-1700)
@@ -889,7 +889,7 @@ class PredictionService:
                 projected = pythagorean_projected_wins(pf, pa, total_games=17)
             else:
                 elo_above_mean = elo - ELO_MEAN
-                projected = 8.5 + (elo_above_mean / 25.0) * 0.5
+                projected = 8.5 + (elo_above_mean / ELO_TO_SPREAD) * 0.5
 
             result[team] = round(projected, 1)
 

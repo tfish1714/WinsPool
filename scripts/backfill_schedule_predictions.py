@@ -51,7 +51,7 @@ from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
 from services.nn_projection_engine import NNProjectionEngine
 from services.cache_service import get_game_predictions, write_game_predictions, write_prediction_features
-from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
+from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, PROB_CLIP_MIN, PROB_CLIP_MAX, SPREAD_TO_PROB_SCALE
 from services.feature_audit_service import compute_feature_audit
 
 
@@ -97,8 +97,8 @@ def _profile_predictions_for_year(year: int, schedule_df: pd.DataFrame,
             spread = game.get("spread_line")
             sl_val = float(spread) if pd.notna(spread) else None
 
-            hp_clip = min(0.98, max(0.02, hp))
-            model_spread = round(7.5 * float(np.log(hp_clip / (1.0 - hp_clip))), 1)
+            hp_clip = min(PROB_CLIP_MAX, max(PROB_CLIP_MIN, hp))
+            model_spread = round(SPREAD_TO_PROB_SCALE * float(np.log(hp_clip / (1.0 - hp_clip))), 1)
             vegas_spread = round(sl_val, 1) if sl_val is not None else None
             edge_vs_vegas = round(model_spread - sl_val, 1) if sl_val is not None else None
 
@@ -108,7 +108,7 @@ def _profile_predictions_for_year(year: int, schedule_df: pd.DataFrame,
                     ats = ht if model_spread > sl_val else at
                 except (ValueError, TypeError):
                     pass
-            vhp = round(1 / (1 + np.exp(-sl_val / 7.5)), 4) if sl_val is not None else None
+            vhp = round(1 / (1 + np.exp(-sl_val / SPREAD_TO_PROB_SCALE)), 4) if sl_val is not None else None
 
             # Extract prior-season profile values for the explanation
             h = profile_dict.get(ht, {})

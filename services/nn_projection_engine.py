@@ -8,7 +8,7 @@ import logging
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional
-from services.constants import UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
+from services.constants import UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, PROB_CLIP_MIN, PROB_CLIP_MAX, ELO_TO_SPREAD, SPREAD_TO_PROB_SCALE
 
 from services.nn_feature_engine import (
     build_master_feature_table,
@@ -151,7 +151,7 @@ class NNProjectionEngine:
                 features[col] = h_elo - a_elo
 
             elif col == "elo_confidence":
-                features[col] = abs(features.get("elo_diff", 0.0)) / 25.0
+                features[col] = abs(features.get("elo_diff", 0.0)) / ELO_TO_SPREAD
 
             elif col == "pass_epa_matchup":
                 features[col] = (
@@ -218,7 +218,7 @@ class NNProjectionEngine:
 
         blended = float(np.clip(
             NN_WEIGHT * nn_prob + XGB_WEIGHT * xgb_prob + LR_WEIGHT * lr_prob,
-            0.02, 0.98,
+            PROB_CLIP_MIN, PROB_CLIP_MAX,
         ))
 
         return {
@@ -386,8 +386,8 @@ def enrich_schedule_with_nn_predictions(
         if pd.notna(spread):
             try:
                 sv = float(spread)
-                hp_clip = min(0.98, max(0.02, home_prob))
-                implied = 7.5 * np.log(hp_clip / (1.0 - hp_clip))
+                hp_clip = min(PROB_CLIP_MAX, max(PROB_CLIP_MIN, home_prob))
+                implied = SPREAD_TO_PROB_SCALE * np.log(hp_clip / (1.0 - hp_clip))
                 ats = home if implied > sv else away
             except (ValueError, TypeError):
                 pass

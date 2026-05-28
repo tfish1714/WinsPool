@@ -52,7 +52,7 @@ DEFAULT_MODEL_PATH = MODEL_DIR / "nn_v1.keras"
 REGISTRY_PATH = MODEL_DIR / "model_registry.json"
 
 from services.nn_feature_engine import FEATURE_COLUMNS, _normalize_team
-from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
+from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, PROB_CLIP_MIN, PROB_CLIP_MAX, SPREAD_TO_PROB_SCALE
 
 LABEL_COLUMN = "home_win"
 
@@ -87,7 +87,7 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
     nn_p  = nn_svc.model.predict(nn_svc.scaler.transform(X), verbose=0).flatten()
     xgb_p = xgb_svc.model.predict_proba(xgb_svc.scaler.transform(X))[:, 1]
     lr_p  = lr_svc.model.predict_proba(lr_svc.scaler.transform(X))[:, 1]
-    blended = np.clip(NN_WEIGHT * nn_p + XGB_WEIGHT * xgb_p + LR_WEIGHT * lr_p, 0.02, 0.98)
+    blended = np.clip(NN_WEIGHT * nn_p + XGB_WEIGHT * xgb_p + LR_WEIGHT * lr_p, PROB_CLIP_MIN, PROB_CLIP_MAX)
 
     lookup = {}
     for i, row in enumerate(feature_table.itertuples(index=False)):
@@ -98,10 +98,10 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
         winner = ht if hp >= 0.5 else at
         conf   = round(min(99.0, max(50.0, (hp if hp >= 0.5 else 1.0 - hp) * 100)), 1)
 
-        hp_clip = np.clip(hp, 0.02, 0.98)
+        hp_clip = np.clip(hp, PROB_CLIP_MIN, PROB_CLIP_MAX)
         # nflverse convention: positive spread_line = home favored (e.g. DET -7 stored as +7).
         # model_spread matches this: positive = home favored.
-        model_spread = round(7.5 * float(np.log(hp_clip / (1.0 - hp_clip))), 1)
+        model_spread = round(SPREAD_TO_PROB_SCALE * float(np.log(hp_clip / (1.0 - hp_clip))), 1)
 
         # Vegas spread used for post-hoc comparison only (not a model feature).
         # edge_vs_vegas > 0: model likes home MORE than Vegas → home has edge ATS.
@@ -130,7 +130,7 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
         vegas_home_prob = None
         if vegas_spread is not None:
             try:
-                vegas_home_prob = round(1 / (1 + np.exp(-vegas_spread / 7.5)), 4)
+                vegas_home_prob = round(1 / (1 + np.exp(-vegas_spread / SPREAD_TO_PROB_SCALE)), 4)
             except Exception:
                 pass
 

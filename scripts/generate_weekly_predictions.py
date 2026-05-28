@@ -46,7 +46,7 @@ from services.nn_prediction_service import (
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
 
-from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
+from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, ELO_TO_SPREAD, PROB_CLIP_MIN, PROB_CLIP_MAX
 
 
 def _default_season() -> int:
@@ -93,7 +93,7 @@ def _predict_game(nn_svc: NNPredictionService, xgb_svc: XGBPredictionService,
             features[col] = ap.get(col.replace("opp_", "tm_"), ap.get(col, 0.0))
         elif col == "vegas_elo_spread_delta":
             elo_diff = hp.get("tm_elo_pre", 1500) - ap.get("tm_elo_pre", 1500)
-            features[col] = abs((elo_diff / 25.0) - hp.get("spread_line", 0))
+            features[col] = abs((elo_diff / ELO_TO_SPREAD) - hp.get("spread_line", 0))
         elif col == "market_implied_team_total":
             features[col] = hp.get(col, 22.0)
         else:
@@ -104,7 +104,7 @@ def _predict_game(nn_svc: NNPredictionService, xgb_svc: XGBPredictionService,
     lr_prob  = lr_svc.predict_game(features)
     return float(np.clip(
         NN_WEIGHT * nn_prob + XGB_WEIGHT * xgb_prob + LR_WEIGHT * lr_prob,
-        0.02, 0.98,
+        PROB_CLIP_MIN, PROB_CLIP_MAX,
     ))
 
 
