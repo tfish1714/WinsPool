@@ -44,6 +44,8 @@ GARBAGE_THRESHOLD = 17  # point lead that triggers garbage time discount
 MOV_MIN = 0.5      # minimum margin-of-victory multiplier
 MOV_MAX = 2.0      # maximum margin-of-victory multiplier
 REGRESSION = 1.0 / 3.0  # fraction of distance to 1500 pulled back each off-season
+BYE_BONUS = 8.0          # temporary Elo boost for team coming off bye (week_gap >= 2)
+SHORT_REST_PENALTY = 3.0  # temporary Elo penalty for team with <= 4 days rest (TNF)
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +80,23 @@ def _quarter_actual(home_q: int, away_q: int) -> float:
     return 0.5
 
 
+def _rest_adj(week_gap: int, rest: int) -> float:
+    """Temporary Elo offset for bye week or short rest.
+
+    Bye detection uses week number gap (not calendar days) because calendar
+    rest varies with surrounding game days — a Monday game before a bye can
+    produce as few as 10 rest days, indistinguishable from a Thursday→Sunday
+    turnaround.
+
+    Not stored in ratings: the adjustment affects E for this game only.
+    """
+    if week_gap >= 2:
+        return BYE_BONUS
+    if rest <= 4:
+        return -SHORT_REST_PENALTY
+    return 0.0
+
+
 # ---------------------------------------------------------------------------
 # Core Elo update
 # ---------------------------------------------------------------------------
@@ -88,16 +107,25 @@ def _update_game(
     home_score: int,
     away_score: int,
     quarters: dict | None,
+    home_week_gap: int = 1,
+    away_week_gap: int = 1,
+    home_rest: int = 7,
+    away_rest: int = 7,
 ) -> tuple[float, float, float]:
     """
     Apply all Elo updates for one game.
 
-    quarters: dict with keys home_q1..q4, home_ot, away_q1..q4, away_ot
+    quarters: dict with keys home_q1..q4, home_ot, away_ot
               or None if quarter scores unavailable.
+    home_week_gap / away_week_gap: schedule weeks since team's last game.
+                                   >= 2 means the team had a bye.
+    home_rest / away_rest: calendar days since last game (for short-rest detection).
 
     Returns (new_home_elo, new_away_elo, pre_game_expected_home).
     """
-    E = _expected(home_elo, away_elo)
+    home_adj = _rest_adj(home_week_gap, home_rest)
+    away_adj = _rest_adj(away_week_gap, away_rest)
+    E = _expected(home_elo + home_adj, away_elo + away_adj)
 
     # --- Quarter-by-quarter updates ---
     if quarters is not None:
