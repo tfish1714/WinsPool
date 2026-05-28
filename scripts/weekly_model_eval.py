@@ -189,7 +189,7 @@ def _evaluate_weeks(
         print(
             f"  Week {week:>2} | {n_correct}/{n_games} correct "
             f"({accuracy*100:.1f}%) | Brier: {brier:.4f} | "
-            f"LogLoss: {ll:.4f} | "
+            f"LogLoss: {f'{ll:.4f}' if ll is not None else 'N/A'} | "
             f"Season R2 YTD: {season_r2 if season_r2 is not None else 'N/A'}"
         )
 
