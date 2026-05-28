@@ -35,6 +35,7 @@ def _get_secret() -> str:
 
 
 def create_token(player_id: int, role: str) -> str:
+    """Create a signed JWT containing player_id, role, issued-at, and expiry (7 days)."""
     now = int(time.time())
     payload = {
         "sub": str(player_id),
@@ -46,6 +47,11 @@ def create_token(player_id: int, role: str) -> str:
 
 
 def decode_token(token: str) -> dict:
+    """Decode and verify a JWT, returning the payload dict.
+
+    Raises jwt.ExpiredSignatureError if the token is expired, and
+    jwt.InvalidTokenError for any other verification failure.
+    """
     return jwt.decode(token, _get_secret(), algorithms=[JWT_ALGORITHM])
 
 
