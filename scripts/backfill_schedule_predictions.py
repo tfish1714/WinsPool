@@ -97,7 +97,7 @@ def _profile_predictions_for_year(year: int, schedule_df: pd.DataFrame,
             spread = game.get("spread_line")
             sl_val = float(spread) if pd.notna(spread) else None
 
-            hp_clip = min(PROB_CLIP_MAX, max(PROB_CLIP_MIN, hp))
+            hp_clip = float(np.clip(hp, PROB_CLIP_MIN, PROB_CLIP_MAX))
             model_spread = round(SPREAD_TO_PROB_SCALE * float(np.log(hp_clip / (1.0 - hp_clip))), 1)
             vegas_spread = round(sl_val, 1) if sl_val is not None else None
             edge_vs_vegas = round(model_spread - sl_val, 1) if sl_val is not None else None

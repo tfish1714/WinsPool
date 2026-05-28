@@ -8,7 +8,10 @@ import logging
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional
-from services.constants import UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, PROB_CLIP_MIN, PROB_CLIP_MAX, ELO_TO_SPREAD, SPREAD_TO_PROB_SCALE
+from services.constants import (
+    UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT,
+    PROB_CLIP_MIN, PROB_CLIP_MAX, ELO_TO_SPREAD, SPREAD_TO_PROB_SCALE,
+)
 
 from services.nn_feature_engine import (
     build_master_feature_table,
