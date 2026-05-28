@@ -34,7 +34,8 @@ from services.nn_prediction_service import (
 )
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
-from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
+from sklearn.metrics import log_loss as sklearn_log_loss
+from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, PROB_CLIP_MIN, PROB_CLIP_MAX
 
 REPORTS_DIR = pathlib.Path(__file__).parent.parent / "reports"
 ACCURACY_CSV = REPORTS_DIR / "nn_weekly_accuracy.csv"
@@ -50,6 +51,7 @@ CSV_FIELDS = [
     "avg_prob_correct",   # calibration: how confident when right
     "avg_prob_wrong",     # calibration: how confident when wrong
     "brier_score",        # lower is better; 0 = perfect
+    "log_loss",           # cross-entropy loss; lower is better; ~0.693 = random
     "season_r2_ytd",      # season-level R2 using all weeks up to this one
     "season_mae_ytd",
 ]
@@ -99,7 +101,7 @@ def _evaluate_weeks(
 
     blended = np.clip(
         NN_WEIGHT * nn_probs + XGB_WEIGHT * xgb_probs + LR_WEIGHT * lr_probs,
-        0.02, 0.98,
+        PROB_CLIP_MIN, PROB_CLIP_MAX,
     )
 
     season_data = season_data.copy()
@@ -137,6 +139,13 @@ def _evaluate_weeks(
         # Brier score: mean squared error of probability vs 0/1 outcome
         brier = float(np.mean((week_data["pred_home_wp"].values - week_data["home_win"].values) ** 2))
 
+        # Log loss — exclude ties (home_win == 0.5); probabilities already clipped [0.02, 0.98]
+        non_tie = week_data[week_data["home_win"] != 0.5]
+        ll = float(sklearn_log_loss(
+            non_tie["home_win"].values,
+            non_tie["pred_home_wp"].values,
+        )) if len(non_tie) > 0 else None
+
         # Season-level YTD: sum probabilities to get projected wins vs actual for all weeks <= this one
         ytd = season_data[season_data["week"] <= week]
         season_r2 = None
@@ -172,6 +181,7 @@ def _evaluate_weeks(
             "avg_prob_correct": round(avg_prob_correct, 4),
             "avg_prob_wrong": round(avg_prob_wrong, 4),
             "brier_score": round(brier, 4),
+            "log_loss": round(ll, 4) if ll is not None else None,
             "season_r2_ytd": season_r2,
             "season_mae_ytd": season_mae,
         })
@@ -179,6 +189,7 @@ def _evaluate_weeks(
         print(
             f"  Week {week:>2} | {n_correct}/{n_games} correct "
             f"({accuracy*100:.1f}%) | Brier: {brier:.4f} | "
+            f"LogLoss: {ll:.4f} | "
             f"Season R2 YTD: {season_r2 if season_r2 is not None else 'N/A'}"
         )
 

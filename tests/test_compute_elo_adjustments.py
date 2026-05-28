@@ -194,3 +194,38 @@ class TestComputeEloWeekGap:
             f"Bye-week home_exp ({E_with_bye:.4f}) should exceed "
             f"no-bye home_exp ({E_no_bye:.4f})"
         )
+
+
+# ---------------------------------------------------------------------------
+# weekly_model_eval: log loss field
+# ---------------------------------------------------------------------------
+
+class TestLogLossField:
+
+    def test_log_loss_in_csv_fields(self):
+        """CSV_FIELDS must contain 'log_loss' for it to be written to the report."""
+        from scripts.weekly_model_eval import CSV_FIELDS
+        assert "log_loss" in CSV_FIELDS
+
+    def test_log_loss_computation(self):
+        """Validate sklearn log_loss behaves as expected at known values."""
+        from sklearn.metrics import log_loss
+        import numpy as np
+
+        # Confident correct predictions → very low log loss
+        actuals = np.array([1.0, 0.0, 1.0, 0.0])
+        preds   = np.array([0.95, 0.05, 0.95, 0.05])
+        ll = float(log_loss(actuals, preds))
+        assert ll < 0.1
+
+        # Random guessing (50/50) → ~0.693
+        preds_random = np.array([0.5, 0.5, 0.5, 0.5])
+        ll_random = float(log_loss(actuals, preds_random))
+        assert abs(ll_random - 0.693) < 0.01
+
+    def test_log_loss_positioned_after_brier(self):
+        """log_loss should appear immediately after brier_score in CSV_FIELDS."""
+        from scripts.weekly_model_eval import CSV_FIELDS
+        brier_idx = CSV_FIELDS.index("brier_score")
+        ll_idx = CSV_FIELDS.index("log_loss")
+        assert ll_idx == brier_idx + 1
