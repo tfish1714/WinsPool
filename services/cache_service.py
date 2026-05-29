@@ -146,9 +146,9 @@ def _cache_key(year):
 # Game-level ML predictions (separate from analytics_cache)
 # ---------------------------------------------------------------------------
 # Key schema: "W{wk:02d}_{home}_{away}" — zero-padded week + both team abbrs.
-# Three components needed because teams play each other in multiple weeks
-# across a full season (e.g. conference championship rematches of regular
-# season matchups). Season is implicit: one document per season in Firestore
+# Week is required to uniquely identify each game: multiple different matchups
+# happen each week, and a team can appear in different matchups across weeks.
+# Season is implicit: one document per season in Firestore
 # (keyed by season int) and one JSON file per season locally.
 # Each value: {pred_prob, pred_winner, pred_su_conf, pred_ats_pick}
 
