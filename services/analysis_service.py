@@ -437,7 +437,7 @@ def apply_tiebreakers(reshaped_df: pd.DataFrame) -> pd.DataFrame:
 def get_enriched_schedule(games, draft_results, players, season):
     """Join games with draft ownership, player metadata, standings, and predictions.
 
-    Performs a 5-way merge so each game row carries the owning player's name,
+    Performs a 6-way merge so each game row carries the owning player's name,
     their team's season record, and ML win-probability for display in the
     schedule tab.
     """
