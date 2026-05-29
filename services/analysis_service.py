@@ -399,7 +399,7 @@ def apply_tiebreakers(reshaped_df: pd.DataFrame) -> pd.DataFrame:
 
     Tiers (highest to lowest priority): total wins, worst-team wins,
     best-team wins, total point differential, head-to-head record,
-    preseason projected wins. Ascending sort flags vary per tier.
+    preseason projected wins. All tiers sort descending.
     """
     if reshaped_df.empty: return reshaped_df
     reshaped_df['Tiebreaker1_WorstTeamWins'] = reshaped_df[['wins1', 'wins2', 'wins3']].min(axis=1)
@@ -424,15 +424,16 @@ def apply_tiebreakers(reshaped_df: pd.DataFrame) -> pd.DataFrame:
     cols = ['Rank'] + [col for col in sorted_df.columns if col != 'Rank']
     return sorted_df[cols]
 
-# Five-way merge sequence:
+# Six-way merge sequence:
 #   1. today_games         — current-season REG games from nfl_games
 #   2. away draft_results  — maps away_team → playerId (who owns that team)
 #   3. players             — maps playerId → fullName_away
 #   4. home draft_results  — maps home_team → playerId_home_draft
 #   5. players again       — maps playerId_home_draft → fullName_home
-# Empty-string suffixes on merge 4 avoid column-name collisions with the
-# columns already added in merges 2-3. The final frame has one row per
-# game with both owners' names, their team season records, and ML predictions.
+#   6. winner draft_results + players — maps winning_team → fullName (winner's owner)
+# Empty-string suffixes on merges 4-6 avoid column-name collisions with the
+# columns already added in earlier merges. The final frame has one row per
+# game with both owners' names, the winner's owner, and ML predictions.
 def get_enriched_schedule(games, draft_results, players, season):
     """Join games with draft ownership, player metadata, standings, and predictions.
 
