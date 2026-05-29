@@ -15,6 +15,7 @@ from services.data_service import (
 from services.draft_service import load_draft_state, save_pick, undo_pick, reset_pick
 from services.db_service import get_collection_df, add_draft_order, add_draft_rule
 import services.analysis_service as analysis
+from services.constants import DRAFT_ROUNDS
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -322,9 +323,8 @@ async def route_draft_results_by_year(request: Request, year: int):
         }
         # Best by round: still uses raw wins (most wins in that round)
         sorted_awards = merged.sort_values(["TotalWinsBySeason", "draftPick"], ascending=[False, False])
-        for rnum, label, lo, hi in [(1, "Round 1 (Picks 1-10)", 1, 10),
-                                     (2, "Round 2 (Picks 11-20)", 11, 20),
-                                     (3, "Round 3 (Picks 21-30)", 21, 30)]:
+        for rnum, (lo, hi) in DRAFT_ROUNDS.items():
+            label = f"Round {rnum} (Picks {lo}-{hi})"
             rd = sorted_awards[(sorted_awards["draftPick"] >= lo) & (sorted_awards["draftPick"] <= hi)]
             if not rd.empty:
                 rb = rd.iloc[0]

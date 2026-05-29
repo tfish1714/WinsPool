@@ -10,7 +10,7 @@ try:
 except Exception:
     pass  # Option added in pandas 2.2; silently skip on older versions
 from typing import Dict, List, Any
-from services.constants import UNDRAFTED_SENTINEL
+from services.constants import UNDRAFTED_SENTINEL, TIEBREAKER_SORT_COLS
 
 logger = logging.getLogger(__name__)
 
@@ -403,9 +403,8 @@ def apply_tiebreakers(reshaped_df: pd.DataFrame) -> pd.DataFrame:
     reshaped_df['Tiebreaker6_BestTeamPtDiff'] = reshaped_df[['ptDiff1', 'ptDiff2', 'ptDiff3']].max(axis=1)
 
     sorted_df = reshaped_df.sort_values(
-        ['TotalWins','Tiebreaker1_WorstTeamWins', 'Tiebreaker2_2ndWorstTeamWins', 'Tiebreaker3_BestTeamWins',
-         'Tiebreaker4_WorstTeamPtDiff', 'Tiebreaker5_2ndWorstTeamPtDiff', 'Tiebreaker6_BestTeamPtDiff'],
-        ascending=[False,False, False, False, False, False, False]
+        TIEBREAKER_SORT_COLS,
+        ascending=[False] * len(TIEBREAKER_SORT_COLS),
     )
 
     sorted_df = sorted_df.reset_index(drop=True)
