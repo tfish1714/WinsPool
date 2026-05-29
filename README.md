@@ -59,6 +59,7 @@ A real-time, WebSocket-powered interface for the big day.
    - `GEMINI_API_KEY`: Your Google AI key.
    - `USE_LOCAL_DATA`: Set to `True` for development without Firestore.
    - `FIREBASE_CREDENTIALS`: Path to your service account JSON (if not in root).
+   - `DEBUG_PAGE_LOAD`: Set to `True` to log page-load timing to console. Dev-only; defaults to `False`.
 
 4. Run the development server:
    ```bash

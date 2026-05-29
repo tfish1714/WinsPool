@@ -115,7 +115,7 @@ import time
 # In-memory cache keyed by year (or 'all' for unfiltered load)
 _DATA_CACHE: dict = {}
 _CACHE_TIMESTAMPS: dict = {}
-_CACHE_TTL_SECONDS = 3600  # 1 hour - long-lived persistence
+_CACHE_TTL_SECONDS = 3600  # 1-hour TTL; long enough to avoid Firestore spam on every request, short enough to catch same-day data changes
 _LAST_REMOTE_CHECK = 0
 _REMOTE_CHECK_INTERVAL = 60 # Check Firestore for invalidation every 60 seconds
 
@@ -145,7 +145,11 @@ def _cache_key(year):
 # ---------------------------------------------------------------------------
 # Game-level ML predictions (separate from analytics_cache)
 # ---------------------------------------------------------------------------
-# One document per season; game_key = "W{wk:02d}_{home}_{away}"
+# Key schema: "W{wk:02d}_{home}_{away}" — zero-padded week + both team abbrs.
+# Three components needed because teams play each other in multiple weeks
+# across a full season (e.g. conference championship rematches of regular
+# season matchups). Season is implicit: one document per season in Firestore
+# (keyed by season int) and one JSON file per season locally.
 # Each value: {pred_prob, pred_winner, pred_su_conf, pred_ats_pick}
 
 _GAME_PRED_DIR = pathlib.Path('.local_db')

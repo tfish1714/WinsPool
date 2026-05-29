@@ -1,7 +1,11 @@
-# Sentinel used in the games DataFrame to indicate an undrafted team or unplayed game result.
+# Sentinel win-total for undrafted/unowned teams in standings calculations.
+# Chosen to sort below any realistic win total (max 17 wins in a season),
+# so undrafted slots always appear at the bottom without special-case logic.
 UNDRAFTED_SENTINEL = -1000
 
-# Ensemble blend weights (NN+XGB+LR). Must sum to 1.0.
+# Ensemble blend weights — tuned empirically; see reports/nn_weekly_accuracy.csv.
+# NN captures non-linear interactions; LR provides stability on sparse data;
+# XGB fills the gap on structured tabular signals. Must sum to 1.0.
 NN_WEIGHT  = 0.45
 XGB_WEIGHT = 0.20
 LR_WEIGHT  = 0.35
