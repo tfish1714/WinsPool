@@ -327,7 +327,7 @@ class TestSetTempPassword:
 
 class TestMembersPaid:
     def test_happy_path_calls_set_member_paid(self, admin_token):
-        """200 + set_member_paid called with season, playerId, paid flag."""
+        """200 + set_member_paid called with correct args and returns {"ok": true}."""
         with patch("routes.admin_routes.set_member_paid", return_value=True) as mock_paid:
             resp = client.post(
                 "/api/admin/members/paid",
@@ -335,16 +335,28 @@ class TestMembersPaid:
                 headers={"Authorization": admin_token},
             )
         assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
         mock_paid.assert_called_once_with(2025, 1, True)
 
+    def test_player_not_found_returns_ok_false(self, admin_token):
+        """set_member_paid returns False (player missing) → response is {"ok": false}."""
+        with patch("routes.admin_routes.set_member_paid", return_value=False):
+            resp = client.post(
+                "/api/admin/members/paid",
+                json={"targetPlayerId": 999, "season": 2025, "paid": True},
+                headers={"Authorization": admin_token},
+            )
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": False}
+
     def test_requires_admin_role(self, auth_token):
-        """Non-admin token is rejected with 401 or 403."""
+        """Non-admin token is rejected with 403."""
         resp = client.post(
             "/api/admin/members/paid",
             json={"targetPlayerId": 1, "season": 2025, "paid": True},
             headers={"Authorization": auth_token},
         )
-        assert resp.status_code in (401, 403)
+        assert resp.status_code == 403
 
     def test_requires_token(self):
         """Missing token is rejected with 401 or 403."""
@@ -489,39 +501,3 @@ class TestPredictionsGames:
         assert len(games) == 1
         assert games[0]["actual_winner"] is None
         assert games[0]["is_correct"] is None
-
-
-# ── /api/admin/members/paid ───────────────────────────────────────────────────
-
-class TestUpdateMemberPaid:
-
-    def test_happy_path_returns_ok_true(self, admin_token):
-        """Happy path: set_member_paid returns True → response is {"ok": true}."""
-        with patch("routes.admin_routes.set_member_paid", return_value=True):
-            resp = client.post(
-                "/api/admin/members/paid",
-                json={"season": 2024, "targetPlayerId": 1, "paid": True},
-                headers={"Authorization": admin_token},
-            )
-        assert resp.status_code == 200
-        assert resp.json() == {"ok": True}
-
-    def test_requires_admin_role(self, auth_token):
-        """Non-admin token → 403 Forbidden."""
-        resp = client.post(
-            "/api/admin/members/paid",
-            json={"season": 2024, "targetPlayerId": 1, "paid": True},
-            headers={"Authorization": auth_token},
-        )
-        assert resp.status_code == 403
-
-    def test_player_not_found_returns_ok_false(self, admin_token):
-        """set_member_paid returns False (player missing) → response is {"ok": false}."""
-        with patch("routes.admin_routes.set_member_paid", return_value=False):
-            resp = client.post(
-                "/api/admin/members/paid",
-                json={"season": 2024, "targetPlayerId": 999, "paid": True},
-                headers={"Authorization": admin_token},
-            )
-        assert resp.status_code == 200
-        assert resp.json() == {"ok": False}
