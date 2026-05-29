@@ -51,6 +51,16 @@ TEAM_ABBR_MAP = {
 
 TURNOVER_REGRESSION = 0.50
 
+# Features fed to the NN, XGB, and LR models. Three conceptual groups:
+#   Schedule-context (Elo, rest, home-field, travel): captures structural
+#     advantages that exist before the game starts.
+#   Recent-form (EPA matchup, turnover margin, point differential, pressure):
+#     rolling expanding-mean stats shifted 1 game to prevent data leakage.
+#   Season-context (roster talent, win rate, week, surface, playoff flag):
+#     longer-horizon signals that stabilise over the course of a season.
+# spread_line was intentionally removed to prevent Vegas-line leakage:
+# including it caused the model to back-solve the spread rather than
+# independently predict outcomes, which inflated accuracy artificially.
 FEATURE_COLUMNS = [
     # Elo (2)
     "elo_diff", "elo_confidence",

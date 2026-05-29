@@ -34,6 +34,13 @@ def _is_legacy_sha256(hashed_password: str) -> bool:
     )
 
 
+# Password verification supports two hash formats transparently:
+#   Legacy: 64-character lowercase hex string (SHA-256, no salt). These were
+#           created before bcrypt was introduced. Identified by _is_legacy_sha256().
+#   Modern: bcrypt hash starting with "$2b$" (12 rounds).
+# When a legacy hash is verified successfully, the caller (auth_routes.py)
+# is responsible for calling update_player_credentials() to upgrade the
+# stored hash to bcrypt — the migration is transparent to the user.
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against a stored hash.
 

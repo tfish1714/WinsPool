@@ -353,6 +353,12 @@ def player_winlossmatrix(schedule: pd.DataFrame) -> pd.DataFrame:
     record_matrix['Overall Record'] = overall['Overall Record']
     return record_matrix
 
+# Pivot from long format (one row per player-team pair) to wide format
+# (one row per player). Each player has 3 drafted teams, so the function
+# groups by player and flattens (team, wins, ptDiff, global_record) × 3
+# into columns wins1/wins2/wins3, ptDiff1/2/3, global_record1/2/3.
+# Teams are ordered by draft pick number because the DataFrame is already
+# sorted that way by the caller. TotalWins is derived here as the sum.
 def reshape_wins_pool_standings(df: pd.DataFrame) -> pd.DataFrame:
     """Pivot per-team win rows into a wide-format standings DataFrame (one row per player).
 
@@ -382,6 +388,12 @@ def reshape_wins_pool_standings(df: pd.DataFrame) -> pd.DataFrame:
                 pass
     return reshaped_df
 
+# Build six derived tiebreaker columns from the three per-team win and
+# point-differential columns, then sort by all seven columns descending.
+# Point-differential columns also sort descending: a higher (less negative)
+# differential is better, so descending puts the best differential first.
+# Column names and sort order are defined in TIEBREAKER_SORT_COLS
+# (services/constants.py) so the cascade can be audited in one place.
 def apply_tiebreakers(reshaped_df: pd.DataFrame) -> pd.DataFrame:
     """Sort standings using the 6-tier tiebreaker cascade.
 
@@ -412,6 +424,15 @@ def apply_tiebreakers(reshaped_df: pd.DataFrame) -> pd.DataFrame:
     cols = ['Rank'] + [col for col in sorted_df.columns if col != 'Rank']
     return sorted_df[cols]
 
+# Five-way merge sequence:
+#   1. today_games         — current-season REG games from nfl_games
+#   2. away draft_results  — maps away_team → playerId (who owns that team)
+#   3. players             — maps playerId → fullName_away
+#   4. home draft_results  — maps home_team → playerId_home_draft
+#   5. players again       — maps playerId_home_draft → fullName_home
+# Empty-string suffixes on merge 4 avoid column-name collisions with the
+# columns already added in merges 2-3. The final frame has one row per
+# game with both owners' names, their team season records, and ML predictions.
 def get_enriched_schedule(games, draft_results, players, season):
     """Join games with draft ownership, player metadata, standings, and predictions.
 
