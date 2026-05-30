@@ -1,10 +1,12 @@
 """routes/history_routes.py — Overall history and head-to-head routes."""
 import pandas as pd
-from fastapi import APIRouter, Request
+import json as _json
+
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from services.data_service import load_data, get_available_years, get_active_season
+from services.data_service import load_data, get_available_years, get_active_season, get_preseason_predictions
 from services.utils import abbreviate_player_name as _first_name, filter_season
 import services.analysis_service as analysis
 
@@ -79,6 +81,7 @@ async def overall_history(request: Request):
                         "1st": 0, "2nd": 0, "3rd": 0, "10th": 0,
                         "best": {"year": None, "wins": -1, "rank": 999},
                         "worst": {"year": None, "wins": 999, "rank": -1},
+                        "playerId": int(row.get("playerId", 0)),
                     }
                 ps = player_stats[p_name]
                 ps["total_wins"] += wins
@@ -183,4 +186,33 @@ async def headtohead_by_year(request: Request, year: int):
         "year": year,
         "current_year": get_active_season(games),
         "available_years": get_available_years(all_draft_results, all_games),
+    })
+
+
+# ─── Player Profile ───────────────────────────────────────────────────────────
+
+@router.get("/history/player/{player_id}")
+async def player_profile(request: Request, player_id: int):
+    standings_master, _, all_games, players, _, all_draft_results, _ = load_data()
+
+    player_row = players[players["playerId"] == player_id] if not players.empty else pd.DataFrame()
+    if player_row.empty:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    player_seasons = (
+        all_draft_results[all_draft_results["playerId"] == player_id]["season"].unique()
+        if not all_draft_results.empty else []
+    )
+    preseason_preds = {int(s): get_preseason_predictions(int(s)) for s in player_seasons}
+
+    analytics = analysis.get_player_analytics(
+        player_id, all_draft_results, standings_master, players, preseason_preds
+    )
+    if analytics is None:
+        raise HTTPException(status_code=404, detail="No analytics data for player")
+
+    return templates.TemplateResponse(request, "player_profile.html", {
+        "analytics": analytics,
+        "analytics_json": _json.dumps(analytics),
+        "current_year": get_active_season(all_games),
     })

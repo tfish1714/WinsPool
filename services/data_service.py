@@ -266,6 +266,8 @@ def get_active_season(games: pd.DataFrame, draft_results: pd.DataFrame = None) -
     """
     if games.empty or 'season' not in games.columns:
         return 2024
+    if 'result' not in games.columns:
+        return int(games['season'].max())
     has_results = games[games['result'].notna() & (games['result'] != UNDRAFTED_SENTINEL)]
     if has_results.empty:
         return 2024

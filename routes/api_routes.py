@@ -3,6 +3,8 @@ import logging
 import os
 import time
 
+import pandas as pd
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path
@@ -297,6 +299,36 @@ def get_schedule(year: int, _auth: dict = Depends(require_auth)):
         return JSONResponse(content=sanitize_state(schedule_enriched.to_dict(orient="records")))
     except Exception as e:
         logger.exception("Unhandled error in /api/schedule")
+        return server_error()
+
+
+@router.get("/player/{player_id}/analytics")
+def get_player_analytics_endpoint(
+    player_id: int,
+    _auth: dict = Depends(require_auth),
+):
+    """Multi-season analytics payload for Chart.js on the player profile page."""
+    try:
+        standings_master, _, _, players, _, all_draft_results, _ = load_data()
+        player_row = players[players["playerId"] == player_id] if not players.empty else pd.DataFrame()
+        if player_row.empty:
+            return not_found()
+
+        from services.data_service import get_preseason_predictions
+        player_seasons = (
+            all_draft_results[all_draft_results["playerId"] == player_id]["season"].unique()
+            if not all_draft_results.empty else []
+        )
+        preseason_preds = {int(s): get_preseason_predictions(int(s)) for s in player_seasons}
+
+        result = analysis.get_player_analytics(
+            player_id, all_draft_results, standings_master, players, preseason_preds
+        )
+        if result is None:
+            return not_found()
+        return JSONResponse(content=result)
+    except Exception:
+        logger.exception("Error in /api/player/%d/analytics", player_id)
         return server_error()
 
 

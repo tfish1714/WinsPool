@@ -610,9 +610,12 @@ def get_player_analytics(
                 "vsSlot": round(actual_wins - slot_avg, 1) if slot_avg is not None else None,
             })
 
-        pool = calculate_wins_pool_standings(yr_standings, all_season_draft, players, season)
-        pool_row = pool[pool["playerId"] == player_id] if not pool.empty else pd.DataFrame()
-        rank = int(pool_row.iloc[0]["Rank"]) if not pool_row.empty else 0
+        try:
+            pool = calculate_wins_pool_standings(yr_standings, all_season_draft, players, season)
+            pool_row = pool[pool["playerId"] == player_id] if not pool.empty else pd.DataFrame()
+            rank = int(pool_row.iloc[0]["Rank"]) if not pool_row.empty else 0
+        except Exception:
+            rank = 0
 
         seasons_data.append({"year": season, "rank": rank, "totalWins": total_wins, "picks": picks})
 

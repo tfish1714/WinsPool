@@ -138,3 +138,36 @@ def test_multi_season_best_worst_finish():
     assert best  is not None
     assert worst is not None
     assert best["rank"] != worst["rank"] or best["year"] != worst["year"]
+
+
+from fastapi.testclient import TestClient
+from unittest.mock import patch
+from main import app
+
+client = TestClient(app)
+
+
+def _mock_load_data():
+    standings = pd.DataFrame([
+        {"season": 2022, "team": "KC", "wins": 14, "scored": 400, "allowed": 300},
+    ])
+    players = pd.DataFrame([{"playerId": 1, "fullName": "Alice Smith", "nickName": "Alice"}])
+    draft = pd.DataFrame([
+        {"playerId": 1, "season": 2022, "draftPick": 1, "team": "KC"},
+    ])
+    games = pd.DataFrame([{"season": 2022}])
+    return standings, pd.DataFrame(), games, players, pd.DataFrame(), draft, pd.DataFrame()
+
+
+@patch("routes.history_routes.load_data", return_value=_mock_load_data())
+@patch("routes.history_routes.get_preseason_predictions", return_value={"KC": {"projected_wins": 12.0}})
+def test_player_profile_page_returns_200(mock_preds, mock_load):
+    resp = client.get("/history/player/1")
+    assert resp.status_code == 200
+
+
+@patch("routes.history_routes.load_data", return_value=_mock_load_data())
+@patch("routes.history_routes.get_preseason_predictions", return_value={})
+def test_player_profile_page_returns_404_for_unknown_player(mock_preds, mock_load):
+    resp = client.get("/history/player/999")
+    assert resp.status_code == 404
