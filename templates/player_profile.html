@@ -1,11 +1,132 @@
 {% extends "base.html" %}
 {% block title %}{{ analytics.player.fullName }} — Player Profile{% endblock %}
-
 {% block content %}
-<div class="page-header">
-    <h1>{{ analytics.player.fullName }}</h1>
-</div>
-<div id="player-profile-root"
-     data-player-id="{{ analytics.player.playerId }}"
-     data-analytics='{{ analytics | tojson }}'></div>
+
+{# Inline analytics data for player_profile.js #}
+<script id="analyticsData" type="application/json">{{ analytics | tojson }}</script>
+
+<main class="dashboard-main" style="display:block;">
+  <div class="card-glass page-card" style="height:auto; overflow:visible;">
+
+    {# ── Back link ── #}
+    <div style="margin-bottom:1rem;">
+      <a href="/history" style="color:var(--text-secondary); font-size:0.85rem; text-decoration:none;">
+        ← All-Time History
+      </a>
+    </div>
+
+    {# ── Career summary header ── #}
+    <header class="wp-top" style="margin-bottom:1.5rem;">
+      <div>
+        <div class="eyebrow">Player Profile</div>
+        <h1 class="wp-h1">{{ analytics.player.fullName }}</h1>
+      </div>
+    </header>
+
+    <div style="display:flex; gap:2rem; flex-wrap:wrap; margin-bottom:2rem; font-size:0.9rem; color:var(--text-secondary);">
+      <span><strong style="color:var(--text-primary);">{{ analytics.career.seasons }}</strong> seasons</span>
+      <span><strong style="color:var(--primary-color);">{{ analytics.career.totalWins }}</strong> total wins</span>
+      <span><strong style="color:var(--text-primary);">{{ analytics.career.avgWins }}</strong> avg wins/season</span>
+      {% if analytics.career.bestFinish %}
+      <span>Best finish: <strong style="color:var(--primary-color);">#{{ analytics.career.bestFinish.rank }}</strong> ({{ analytics.career.bestFinish.year }})</span>
+      {% endif %}
+      {% if analytics.career.worstFinish %}
+      <span>Worst finish: <strong style="color:var(--neg);">#{{ analytics.career.worstFinish.rank }}</strong> ({{ analytics.career.worstFinish.year }})</span>
+      {% endif %}
+    </div>
+
+    {# ── Chart cards ── #}
+    <style>
+      .profile-charts { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; margin-bottom:2rem; }
+      @media (max-width:480px) { .profile-charts { grid-template-columns:1fr; } }
+    </style>
+    <div class="profile-charts">
+
+      <div class="card-glass" style="padding:1rem;">
+        <h3 style="font-size:0.85rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:1px; margin-bottom:0.75rem;">
+          Wins Per Season
+        </h3>
+        <div style="position:relative; height:180px;">
+          <canvas id="winsTrendChart"></canvas>
+        </div>
+      </div>
+
+      <div class="card-glass" style="padding:1rem;">
+        <h3 style="font-size:0.85rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:1px; margin-bottom:0.75rem;">
+          Draft ROI vs Projection
+          <span title="Shows how each pick performed vs. our preseason win projection for that team."
+                style="cursor:help; margin-left:4px; opacity:0.6;">ⓘ</span>
+        </h3>
+        <div style="position:relative; height:180px;">
+          <canvas id="draftRoiChart"></canvas>
+        </div>
+      </div>
+
+      <div class="card-glass" style="padding:1rem;">
+        <h3 style="font-size:0.85rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:1px; margin-bottom:0.75rem;">
+          Final Rank by Season
+          <span title="Lower rank = better finish. Y-axis is inverted so improvement trends upward."
+                style="cursor:help; margin-left:4px; opacity:0.6;">ⓘ</span>
+        </h3>
+        <div style="position:relative; height:180px;">
+          <canvas id="rankChart"></canvas>
+        </div>
+      </div>
+
+    </div>
+
+    {# ── Table legend ── #}
+    <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:0.75rem;">
+      ± proj = vs preseason projection &nbsp;·&nbsp; ± slot = vs historical average for that pick number
+    </p>
+
+    {# ── Year-by-year table ── #}
+    <div class="table-container">
+      <table class="stacked-table">
+        <thead>
+          <tr>
+            <th>Year</th>
+            <th>Rank</th>
+            <th>Wins</th>
+            <th>
+              Pick 1
+              <span title="Difference between actual wins and preseason projection / historical pick-slot average."
+                    style="cursor:help; opacity:0.6;">ⓘ</span>
+            </th>
+            <th>Pick 2</th>
+            <th>Pick 3</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in analytics.seasons | sort(attribute='year', reverse=True) %}
+          <tr>
+            <td style="font-weight:700;">{{ s.year }}</td>
+            <td>#{{ s.rank }}</td>
+            <td style="color:var(--primary-color); font-weight:700;">{{ s.totalWins }}</td>
+            {% for pick in s.picks %}
+            <td style="font-size:0.82rem; line-height:1.6;">
+              <strong>{{ pick.team }}</strong> &nbsp;<span style="color:var(--text-secondary);">Pick #{{ pick.pickNum }}</span><br>
+              {{ pick.actualWins }}W
+              {% if pick.vsProjected is not none %}
+              <span style="color:{{ 'var(--primary-color)' if pick.vsProjected >= 0 else 'var(--neg)' }};">
+                {{ '%+.1f' | format(pick.vsProjected | float) }} proj
+              </span>
+              {% endif %}
+              {% if pick.vsSlot is not none %}
+              <span style="color:{{ 'var(--primary-color)' if pick.vsSlot >= 0 else 'var(--neg)' }};">
+                {{ '%+.1f' | format(pick.vsSlot | float) }} slot
+              </span>
+              {% endif %}
+            </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</main>
+
+<script src="/static/js/player_profile.js"></script>
 {% endblock %}
