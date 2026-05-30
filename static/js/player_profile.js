@@ -29,7 +29,13 @@
     document.addEventListener('DOMContentLoaded', function () {
         const raw = document.getElementById('analyticsData');
         if (!raw) return;
-        const data = JSON.parse(raw.textContent);
+        let data;
+        try {
+            data = JSON.parse(raw.textContent);
+        } catch (e) {
+            console.error('player_profile.js: failed to parse analyticsData JSON', e);
+            return;
+        }
         const seasons = data.seasons.slice().sort((a, b) => a.year - b.year);
         const years   = seasons.map(s => String(s.year));
 
@@ -72,7 +78,7 @@
         });
 
         // ── Chart 2: Draft ROI ────────────────────────────────────────────────
-        const pickColors = values => values.map(v => v >= 0 ? '#4ade80' : '#f87171');
+        const pickColors = values => values.map(v => v == null ? 'rgba(255,255,255,0.2)' : (v >= 0 ? '#4ade80' : '#f87171'));
 
         const roiDatasets = [0, 1, 2].map(idx => {
             const values = seasons.map(s => s.picks[idx] ? s.picks[idx].vsProjected : 0);
