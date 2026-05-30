@@ -549,6 +549,102 @@ def calculate_wins_pool_standings(standings, draft_results, players, season, gam
     return sorted_df
 
 
+def get_player_analytics(
+    player_id: int,
+    all_draft_results: pd.DataFrame,
+    standings_master: pd.DataFrame,
+    players: pd.DataFrame,
+    preseason_preds: dict,
+) -> dict | None:
+    """Multi-season analytics for one player.
+
+    preseason_preds: {season_int: {team_abbr: {"projected_wins": float}}}
+    Returns None if the player has no draft history.
+    """
+    from services.utils import filter_season
+
+    if all_draft_results.empty:
+        return None
+    player_draft = all_draft_results[all_draft_results["playerId"] == player_id]
+    if player_draft.empty:
+        return None
+
+    # League-wide avg wins per draft slot across all players/seasons
+    slot_avgs: dict[int, float] = {}
+    for pick_num in range(1, 31):
+        slot_picks = all_draft_results[all_draft_results["draftPick"] == pick_num]
+        wins_list = []
+        for _, row in slot_picks.iterrows():
+            yr_st = filter_season(standings_master, row["season"])
+            team_row = yr_st[yr_st["team"] == row["team"]]
+            if not team_row.empty:
+                wins_list.append(int(team_row.iloc[0].get("wins", 0)))
+        slot_avgs[pick_num] = round(sum(wins_list) / len(wins_list), 1) if wins_list else 0.0
+
+    available_seasons = sorted(int(s) for s in player_draft["season"].unique())
+    seasons_data = []
+
+    for season in available_seasons:
+        season_picks = filter_season(player_draft, season).sort_values("draftPick")
+        yr_standings = filter_season(standings_master, season)
+        all_season_draft = filter_season(all_draft_results, season)
+        season_preds = preseason_preds.get(season, {})
+
+        picks = []
+        total_wins = 0
+        for _, pick_row in season_picks.iterrows():
+            team = pick_row["team"]
+            pick_num = int(pick_row["draftPick"])
+            team_st = yr_standings[yr_standings["team"] == team]
+            actual_wins = int(team_st.iloc[0].get("wins", 0)) if not team_st.empty else 0
+            total_wins += actual_wins
+            projected = float(season_preds.get(team, {}).get("projected_wins", 0))
+            slot_avg = slot_avgs.get(pick_num, 0.0)
+            picks.append({
+                "pickNum": pick_num,
+                "team": team,
+                "actualWins": actual_wins,
+                "projectedWins": round(projected, 1),
+                "slotAvgWins": slot_avg,
+                "vsProjected": round(actual_wins - projected, 1),
+                "vsSlot": round(actual_wins - slot_avg, 1),
+            })
+
+        pool = calculate_wins_pool_standings(yr_standings, all_season_draft, players, season)
+        pool_row = pool[pool["playerId"] == player_id] if not pool.empty else pd.DataFrame()
+        rank = int(pool_row.iloc[0]["Rank"]) if not pool_row.empty else 0
+
+        seasons_data.append({"year": season, "rank": rank, "totalWins": total_wins, "picks": picks})
+
+    if not seasons_data:
+        return None
+
+    all_wins = [s["totalWins"] for s in seasons_data]
+    ranked = [s for s in seasons_data if s["rank"] > 0]
+    best_finish  = min(ranked, key=lambda s: s["rank"],  default=seasons_data[0])
+    worst_finish = max(ranked, key=lambda s: s["rank"],  default=seasons_data[-1])
+
+    p_row = players[players["playerId"] == player_id]
+    p = p_row.iloc[0] if not p_row.empty else pd.Series(dtype=object)
+
+    return {
+        "player": {
+            "playerId": player_id,
+            "fullName": str(p.get("fullName", "")),
+            "nickName": str(p.get("nickName", "")),
+        },
+        "career": {
+            "seasons": len(seasons_data),
+            "totalWins": sum(all_wins),
+            "avgWins": round(sum(all_wins) / len(all_wins), 1),
+            "bestFinish":  {"rank": best_finish["rank"],  "year": best_finish["year"]},
+            "worstFinish": {"rank": worst_finish["rank"], "year": worst_finish["year"]},
+        },
+        "seasons": seasons_data,
+        "slotAverages": slot_avgs,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Season progress computation (moved from data_service.py)
 # ---------------------------------------------------------------------------
