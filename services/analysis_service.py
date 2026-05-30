@@ -615,6 +615,7 @@ def get_player_analytics(
             pool_row = pool[pool["playerId"] == player_id] if not pool.empty else pd.DataFrame()
             rank = int(pool_row.iloc[0]["Rank"]) if not pool_row.empty else 0
         except Exception:
+            logger.warning("calculate_wins_pool_standings failed for player %d season %d", player_id, season, exc_info=True)
             rank = 0
 
         seasons_data.append({"year": season, "rank": rank, "totalWins": total_wins, "picks": picks})
