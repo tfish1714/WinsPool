@@ -83,3 +83,58 @@ def test_returns_none_for_unknown_player():
 
 def test_returns_none_for_empty_draft_results():
     assert get_player_analytics(1, pd.DataFrame(), _standings(), _players(), _preds()) is None
+
+
+def test_multi_season_best_worst_finish():
+    """bestFinish and worstFinish should differ across seasons with different ranks."""
+    import pandas as pd
+    from services.analysis_service import get_player_analytics
+
+    # Two players, two seasons; each player drafts 3 teams per season.
+    # 2021: player 1 drafts KC/SF/DAL (wins 12+11+10=33); player 2 drafts BUF/PHI/MIA (wins 9+8+7=24) → p1 rank 1
+    # 2022: player 1 drafts BUF/PHI/MIA (wins 9+8+7=24); player 2 drafts KC/SF/DAL (wins 14+13+12=39) → p1 rank 2
+    dr = pd.DataFrame([
+        {"playerId": 1, "season": 2021, "team": "KC",  "draftPick": 1},
+        {"playerId": 1, "season": 2021, "team": "SF",  "draftPick": 11},
+        {"playerId": 1, "season": 2021, "team": "DAL", "draftPick": 21},
+        {"playerId": 2, "season": 2021, "team": "BUF", "draftPick": 2},
+        {"playerId": 2, "season": 2021, "team": "PHI", "draftPick": 12},
+        {"playerId": 2, "season": 2021, "team": "MIA", "draftPick": 22},
+        {"playerId": 1, "season": 2022, "team": "BUF", "draftPick": 1},
+        {"playerId": 1, "season": 2022, "team": "PHI", "draftPick": 11},
+        {"playerId": 1, "season": 2022, "team": "MIA", "draftPick": 21},
+        {"playerId": 2, "season": 2022, "team": "KC",  "draftPick": 2},
+        {"playerId": 2, "season": 2022, "team": "SF",  "draftPick": 12},
+        {"playerId": 2, "season": 2022, "team": "DAL", "draftPick": 22},
+    ])
+    standings = pd.DataFrame([
+        {"season": 2021, "team": "KC",  "wins": 12},
+        {"season": 2021, "team": "SF",  "wins": 11},
+        {"season": 2021, "team": "DAL", "wins": 10},
+        {"season": 2021, "team": "BUF", "wins": 9},
+        {"season": 2021, "team": "PHI", "wins": 8},
+        {"season": 2021, "team": "MIA", "wins": 7},
+        {"season": 2022, "team": "KC",  "wins": 14},
+        {"season": 2022, "team": "SF",  "wins": 13},
+        {"season": 2022, "team": "DAL", "wins": 12},
+        {"season": 2022, "team": "BUF", "wins": 9},
+        {"season": 2022, "team": "PHI", "wins": 8},
+        {"season": 2022, "team": "MIA", "wins": 7},
+    ])
+    players = pd.DataFrame([
+        {"playerId": 1, "fullName": "Alice", "nickName": "Ali"},
+        {"playerId": 2, "fullName": "Bob",   "nickName": "Bob"},
+    ])
+    preseason_preds = {
+        2021: {"KC": {"projected_wins": 11.0}, "SF": {"projected_wins": 10.0}, "DAL": {"projected_wins": 9.0}},
+        2022: {"BUF": {"projected_wins": 8.0}, "PHI": {"projected_wins": 7.0}, "MIA": {"projected_wins": 6.0}},
+    }
+
+    result = get_player_analytics(1, dr, standings, players, preseason_preds)
+    assert result is not None
+    assert result["career"]["seasons"] == 2
+    best  = result["career"]["bestFinish"]
+    worst = result["career"]["worstFinish"]
+    assert best  is not None
+    assert worst is not None
+    assert best["rank"] != worst["rank"] or best["year"] != worst["year"]

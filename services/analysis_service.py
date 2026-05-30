@@ -10,7 +10,8 @@ try:
 except Exception:
     pass  # Option added in pandas 2.2; silently skip on older versions
 from typing import Dict, List, Any
-from services.constants import UNDRAFTED_SENTINEL, TIEBREAKER_SORT_COLS
+from services.constants import UNDRAFTED_SENTINEL, TIEBREAKER_SORT_COLS, DRAFT_ROUNDS
+from services.utils import filter_season
 
 logger = logging.getLogger(__name__)
 
@@ -561,8 +562,6 @@ def get_player_analytics(
     preseason_preds: {season_int: {team_abbr: {"projected_wins": float}}}
     Returns None if the player has no draft history.
     """
-    from services.utils import filter_season
-
     if all_draft_results.empty:
         return None
     player_draft = all_draft_results[all_draft_results["playerId"] == player_id]
@@ -570,8 +569,9 @@ def get_player_analytics(
         return None
 
     # League-wide avg wins per draft slot across all players/seasons
-    slot_avgs: dict[int, float] = {}
-    for pick_num in range(1, 31):
+    slot_avgs: dict[int, float | None] = {}
+    max_pick = max(hi for _, hi in DRAFT_ROUNDS.values())
+    for pick_num in range(1, max_pick + 1):
         slot_picks = all_draft_results[all_draft_results["draftPick"] == pick_num]
         wins_list = []
         for _, row in slot_picks.iterrows():
@@ -579,7 +579,7 @@ def get_player_analytics(
             team_row = yr_st[yr_st["team"] == row["team"]]
             if not team_row.empty:
                 wins_list.append(int(team_row.iloc[0].get("wins", 0)))
-        slot_avgs[pick_num] = round(sum(wins_list) / len(wins_list), 1) if wins_list else 0.0
+        slot_avgs[pick_num] = round(sum(wins_list) / len(wins_list), 1) if wins_list else None
 
     available_seasons = sorted(int(s) for s in player_draft["season"].unique())
     seasons_data = []
@@ -599,7 +599,7 @@ def get_player_analytics(
             actual_wins = int(team_st.iloc[0].get("wins", 0)) if not team_st.empty else 0
             total_wins += actual_wins
             projected = float(season_preds.get(team, {}).get("projected_wins", 0))
-            slot_avg = slot_avgs.get(pick_num, 0.0)
+            slot_avg = slot_avgs.get(pick_num)  # may be None if no historical data for this slot
             picks.append({
                 "pickNum": pick_num,
                 "team": team,
@@ -607,7 +607,7 @@ def get_player_analytics(
                 "projectedWins": round(projected, 1),
                 "slotAvgWins": slot_avg,
                 "vsProjected": round(actual_wins - projected, 1),
-                "vsSlot": round(actual_wins - slot_avg, 1),
+                "vsSlot": round(actual_wins - slot_avg, 1) if slot_avg is not None else None,
             })
 
         pool = calculate_wins_pool_standings(yr_standings, all_season_draft, players, season)
@@ -621,8 +621,8 @@ def get_player_analytics(
 
     all_wins = [s["totalWins"] for s in seasons_data]
     ranked = [s for s in seasons_data if s["rank"] > 0]
-    best_finish  = min(ranked, key=lambda s: s["rank"],  default=seasons_data[0])
-    worst_finish = max(ranked, key=lambda s: s["rank"],  default=seasons_data[-1])
+    best_finish  = min(ranked, key=lambda s: s["rank"]) if ranked else None
+    worst_finish = max(ranked, key=lambda s: s["rank"]) if ranked else None
 
     p_row = players[players["playerId"] == player_id]
     p = p_row.iloc[0] if not p_row.empty else pd.Series(dtype=object)
@@ -637,8 +637,8 @@ def get_player_analytics(
             "seasons": len(seasons_data),
             "totalWins": sum(all_wins),
             "avgWins": round(sum(all_wins) / len(all_wins), 1),
-            "bestFinish":  {"rank": best_finish["rank"],  "year": best_finish["year"]},
-            "worstFinish": {"rank": worst_finish["rank"], "year": worst_finish["year"]},
+            "bestFinish":  {"rank": best_finish["rank"],  "year": best_finish["year"]}  if best_finish  else None,
+            "worstFinish": {"rank": worst_finish["rank"], "year": worst_finish["year"]} if worst_finish else None,
         },
         "seasons": seasons_data,
         "slotAverages": {str(k): v for k, v in slot_avgs.items()},
