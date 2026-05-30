@@ -27,6 +27,7 @@
                         <th>Avg Wins</th>
                         <th>Best Season</th>
                         <th>Worst Season</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -51,6 +52,12 @@
                         <td style="font-size:0.85rem;"><span class="stacked-label">Worst</span><span
                                 style="color:var(--neg);font-weight:600;">{{ stat.worst.year
                                 }}</span> ({{ stat.worst.wins }}W, #{{ stat.worst.rank }})</td>
+                        <td>
+                            <a href="/history/player/{{ stat.playerId }}"
+                               style="font-size:0.8rem; color:var(--primary-color); text-decoration:none; white-space:nowrap;">
+                                View →
+                            </a>
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
