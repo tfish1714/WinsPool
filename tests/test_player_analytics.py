@@ -65,15 +65,16 @@ def test_picks_with_deltas():
     assert kc["actualWins"] == 14
     assert kc["projectedWins"] == 12.0
     assert kc["vsProjected"] == 2.0   # 14 - 12
+    assert kc["vsSlot"] == 0.0
     assert kc["pickNum"] == 1
 
 
 def test_slot_averages():
     result = get_player_analytics(1, _draft(), _standings(), _players(), _preds())
     sa = result["slotAverages"]
-    assert sa[1] == 14.0   # KC only pick at slot 1 across all seasons
-    assert sa[11] == 13.0  # SF
-    assert sa[21] == 12.0  # DAL
+    assert sa["1"] == 14.0   # KC only pick at slot 1 across all seasons
+    assert sa["11"] == 13.0  # SF
+    assert sa["21"] == 12.0  # DAL
 
 
 def test_returns_none_for_unknown_player():

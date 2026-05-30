@@ -641,7 +641,7 @@ def get_player_analytics(
             "worstFinish": {"rank": worst_finish["rank"], "year": worst_finish["year"]},
         },
         "seasons": seasons_data,
-        "slotAverages": slot_avgs,
+        "slotAverages": {str(k): v for k, v in slot_avgs.items()},
     }
 
 
