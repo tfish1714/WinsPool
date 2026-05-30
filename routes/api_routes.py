@@ -3,8 +3,6 @@ import logging
 import os
 import time
 
-import pandas as pd
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path
@@ -17,6 +15,7 @@ from services.session_service import require_auth
 import services.analysis_service as analysis
 from services.analysis_service import get_season_progress
 from services.cache_service import get_prediction_features
+from routes.history_routes import _get_player_analytics_data
 
 logger = logging.getLogger(__name__)
 
@@ -309,21 +308,7 @@ def get_player_analytics_endpoint(
 ):
     """Multi-season analytics payload for Chart.js on the player profile page."""
     try:
-        standings_master, _, _, players, _, all_draft_results, _ = load_data()
-        player_row = players[players["playerId"] == player_id] if not players.empty else pd.DataFrame()
-        if player_row.empty:
-            return not_found()
-
-        from services.data_service import get_preseason_predictions
-        player_seasons = (
-            all_draft_results[all_draft_results["playerId"] == player_id]["season"].unique()
-            if not all_draft_results.empty else []
-        )
-        preseason_preds = {int(s): get_preseason_predictions(int(s)) for s in player_seasons}
-
-        result = analysis.get_player_analytics(
-            player_id, all_draft_results, standings_master, players, preseason_preds
-        )
+        result = _get_player_analytics_data(player_id)
         if result is None:
             return not_found()
         return JSONResponse(content=result)

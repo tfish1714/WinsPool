@@ -1,6 +1,5 @@
 """routes/history_routes.py — Overall history and head-to-head routes."""
 import pandas as pd
-import json as _json
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -191,28 +190,27 @@ async def headtohead_by_year(request: Request, year: int):
 
 # ─── Player Profile ───────────────────────────────────────────────────────────
 
-@router.get("/history/player/{player_id}")
-async def player_profile(request: Request, player_id: int):
-    standings_master, _, all_games, players, _, all_draft_results, _ = load_data()
-
+def _get_player_analytics_data(player_id: int) -> dict | None:
+    """Load and compute analytics for one player. Returns None if player not found."""
+    standings_master, _, _, players, _, all_draft_results, _ = load_data()
     player_row = players[players["playerId"] == player_id] if not players.empty else pd.DataFrame()
     if player_row.empty:
-        raise HTTPException(status_code=404, detail="Player not found")
-
+        return None
     player_seasons = (
         all_draft_results[all_draft_results["playerId"] == player_id]["season"].unique()
         if not all_draft_results.empty else []
     )
     preseason_preds = {int(s): get_preseason_predictions(int(s)) for s in player_seasons}
-
-    analytics = analysis.get_player_analytics(
+    return analysis.get_player_analytics(
         player_id, all_draft_results, standings_master, players, preseason_preds
     )
-    if analytics is None:
-        raise HTTPException(status_code=404, detail="No analytics data for player")
 
+
+@router.get("/history/player/{player_id}")
+async def player_profile(request: Request, player_id: int):
+    analytics = _get_player_analytics_data(player_id)
+    if analytics is None:
+        raise HTTPException(status_code=404, detail="Player not found")
     return templates.TemplateResponse(request, "player_profile.html", {
         "analytics": analytics,
-        "analytics_json": _json.dumps(analytics),
-        "current_year": get_active_season(all_games),
     })

@@ -7,5 +7,5 @@
 </div>
 <div id="player-profile-root"
      data-player-id="{{ analytics.player.playerId }}"
-     data-analytics='{{ analytics_json }}'></div>
+     data-analytics='{{ analytics | tojson }}'></div>
 {% endblock %}

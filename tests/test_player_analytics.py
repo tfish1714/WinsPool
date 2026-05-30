@@ -171,3 +171,27 @@ def test_player_profile_page_returns_200(mock_preds, mock_load):
 def test_player_profile_page_returns_404_for_unknown_player(mock_preds, mock_load):
     resp = client.get("/history/player/999")
     assert resp.status_code == 404
+
+
+@patch("routes.history_routes._get_player_analytics_data")
+def test_api_player_analytics_returns_200(mock_data):
+    mock_data.return_value = {
+        "player": {"playerId": 1, "fullName": "Alice Smith", "nickName": "Alice"},
+        "career": {
+            "seasons": 1, "totalWins": 14, "avgWins": 14.0,
+            "bestFinish": {"rank": 1, "year": 2022},
+            "worstFinish": {"rank": 1, "year": 2022},
+        },
+        "seasons": [{"year": 2022, "rank": 1, "totalWins": 14, "picks": [
+            {"pickNum": 1, "team": "KC", "actualWins": 14,
+             "projectedWins": 12.0, "slotAvgWins": 14.0,
+             "vsProjected": 2.0, "vsSlot": 0.0},
+        ]}],
+        "slotAverages": {"1": 14.0},
+    }
+    from services.session_service import create_token
+    headers = {"Authorization": f"Bearer {create_token(player_id=1, role='user')}"}
+    resp = client.get("/api/player/1/analytics", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["player"]["playerId"] == 1
