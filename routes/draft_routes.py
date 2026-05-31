@@ -321,8 +321,8 @@ async def route_draft_results_by_year(request: Request, year: int):
             "pick_value": int(wv.get("pick_value", 0)),
             "win_rank": int(wv.get("win_rank", 0)),
         }
-        # Best by round: still uses raw wins (most wins in that round)
-        sorted_awards = merged.sort_values(["TotalWinsBySeason", "draftPick"], ascending=[False, False])
+        # Best by round: same pick_value metric as best overall (draft slot vs. league win rank)
+        sorted_awards = merged.sort_values(["pick_value", "TotalWinsBySeason"], ascending=[False, False])
         for rnum, (lo, hi) in DRAFT_ROUNDS.items():
             label = f"Round {rnum} (Picks {lo}-{hi})"
             rd = sorted_awards[(sorted_awards["draftPick"] >= lo) & (sorted_awards["draftPick"] <= hi)]
@@ -331,6 +331,8 @@ async def route_draft_results_by_year(request: Request, year: int):
                 best_by_round[rnum] = {
                     "label": label, "player": rb.get("fullName", ""), "team": rb.get("team", ""),
                     "pick": int(rb.get("draftPick", 0)), "wins": int(rb.get("TotalWinsBySeason", 0)),
+                    "pick_value": int(rb.get("pick_value", 0)) if rb.get("pick_value") is not None else None,
+                    "win_rank": int(rb.get("win_rank", 0)) if rb.get("win_rank") is not None else None,
                 }
 
     quickest = None

@@ -65,7 +65,10 @@
                     <img src="{{ get_team_logo(r.team) }}" class="tiny-logo" alt="">
                     {{ r.team }}
                 </div>
-                <div class="best-pick-detail">Pick #{{ r.pick }} · {{ r.wins }} wins</div>
+                <div class="best-pick-detail">Pick #{{ r.pick }} · {{ r.wins }} wins · Rank #{{ r.win_rank }}</div>
+                {% if r.pick_value is not none %}
+                <div class="best-pick-detail" style="color: var(--accent-green); font-weight: 700;">Pick Value: +{{ r.pick_value }}</div>
+                {% endif %}
             </div>
             {% endif %}
             {% endfor %}
