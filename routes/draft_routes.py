@@ -373,6 +373,19 @@ async def route_draft_results_by_year(request: Request, year: int):
     merged["projected_wins"] = merged.apply(get_proj, axis=1)
     merged["draft_value"] = merged.apply(calculate_draft_value, axis=1)
 
+    # Slot averages: league-wide avg wins per draft slot across all seasons
+    if not all_draft_results.empty and not all_st.empty and "wins" in all_st.columns:
+        dr_with_wins = pd.merge(
+            all_draft_results[["draftPick", "team", "season"]],
+            all_st[["team", "season", "wins"]],
+            on=["team", "season"],
+            how="left",
+        )
+        slot_avgs = dr_with_wins.groupby("draftPick")["wins"].mean().round(1).to_dict()
+    else:
+        slot_avgs = {}
+    merged["slot_avg_wins"] = merged["draftPick"].map(lambda p: slot_avgs.get(int(p)))
+
     # Undrafted teams with league-wide win rank
     undrafted_team_abbrs = sorted(season_teams - drafted_teams_set)
     undrafted_teams = []

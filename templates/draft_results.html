@@ -99,6 +99,7 @@
                         <th style="text-align: left;">Pick</th>
                         <th style="text-align: center;">Projected (Consensus)</th>
                         <th style="text-align: center;">Actual Wins</th>
+                        <th style="text-align: center;" title="Historical average wins for teams drafted at this pick slot across all seasons">Slot Avg</th>
                         <th style="text-align: center;">Value (Delta)</th>
                         <th style="text-align: center;">Win Rank</th>
                         <th style="text-align: center;">Pick Value</th>
@@ -133,6 +134,11 @@
                         </td>
                         <td style="text-align: center;"><span class="stacked-label">Actual</span>{{
                             row['TotalWinsBySeason'] | int }}</td>
+
+                        <td style="text-align: center; opacity: 0.8;">
+                            <span class="stacked-label">Slot Avg</span>
+                            {% if row['slot_avg_wins'] is not none %}{{ row['slot_avg_wins'] }}{% else %}-{% endif %}
+                        </td>
 
                         <td style="text-align: center; font-weight: bold;"
                             class="{% if proj > 0 %}{% if delta > 0 %}value-positive{% elif delta < 0 %}value-negative{% endif %}{% endif %}">
