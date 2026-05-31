@@ -556,10 +556,12 @@ def get_player_analytics(
     standings_master: pd.DataFrame,
     players: pd.DataFrame,
     preseason_preds: dict,
+    active_season: int | None = None,
 ) -> dict | None:
     """Multi-season analytics for one player.
 
     preseason_preds: {season_int: {team_abbr: {"projected_wins": float}}}
+    active_season: the current in-progress season; excluded from championship count.
     Returns None if the player has no draft history.
     """
     if all_draft_results.empty:
@@ -627,7 +629,7 @@ def get_player_analytics(
     ranked = [s for s in seasons_data if s["rank"] > 0]
     best_finish  = min(ranked, key=lambda s: s["rank"]) if ranked else None
     worst_finish = max(ranked, key=lambda s: s["rank"]) if ranked else None
-    championships = sum(1 for s in ranked if s["rank"] == 1)
+    championships = sum(1 for s in ranked if s["rank"] == 1 and s["year"] != active_season)
 
     p_row = players[players["playerId"] == player_id]
     p = p_row.iloc[0] if not p_row.empty else pd.Series(dtype=object)

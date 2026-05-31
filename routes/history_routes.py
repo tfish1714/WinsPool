@@ -192,7 +192,7 @@ async def headtohead_by_year(request: Request, year: int):
 
 def _get_player_analytics_data(player_id: int) -> dict | None:
     """Load and compute analytics for one player. Returns None if player not found."""
-    standings_master, _, _, players, _, all_draft_results, _ = load_data()
+    standings_master, _, all_games, players, _, all_draft_results, _ = load_data()
     player_row = players[players["playerId"] == player_id] if not players.empty else pd.DataFrame()
     if player_row.empty:
         return None
@@ -201,8 +201,10 @@ def _get_player_analytics_data(player_id: int) -> dict | None:
         if not all_draft_results.empty else []
     )
     preseason_preds = {int(s): get_preseason_predictions(int(s)) for s in player_seasons}
+    active_season = get_active_season(all_games)
     return analysis.get_player_analytics(
-        player_id, all_draft_results, standings_master, players, preseason_preds
+        player_id, all_draft_results, standings_master, players, preseason_preds,
+        active_season=active_season,
     )
 
 
