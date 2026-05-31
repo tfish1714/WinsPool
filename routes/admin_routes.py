@@ -497,7 +497,11 @@ async def get_sync_status(_: dict = Depends(require_admin)):
         season_games = all_games[all_games["season"] == active_season] if not all_games.empty else all_games.iloc[0:0]
         has_result = season_games[season_games["result"].notna() & (season_games["result"] != UNDRAFTED_SENTINEL)] if not season_games.empty else season_games.iloc[0:0]
         current_week = int(has_result["week"].max()) if not has_result.empty else 0
-        last_game_date = str(has_result["gameday"].max()) if not has_result.empty else None
+        _raw_date = has_result["gameday"].max() if not has_result.empty else None
+        try:
+            last_game_date = str(_raw_date) if _raw_date is not None and str(_raw_date) != "NaT" else None
+        except Exception:
+            last_game_date = None
         result["nfl_games"] = {
             "season": active_season,
             "current_week": current_week,
