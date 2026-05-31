@@ -27,6 +27,9 @@
       <span><strong style="color:var(--text-primary);">{{ analytics.career.seasons }}</strong> seasons</span>
       <span><strong style="color:var(--primary-color);">{{ analytics.career.totalWins }}</strong> total wins</span>
       <span><strong style="color:var(--text-primary);">{{ analytics.career.avgWins }}</strong> avg wins/season</span>
+      {% if analytics.career.championships > 0 %}
+      <span>🏆 <strong style="color:var(--primary-color);">{{ analytics.career.championships }}</strong> championship{{ 's' if analytics.career.championships != 1 else '' }}</span>
+      {% endif %}
       {% if analytics.career.bestFinish %}
       <span>Best finish: <strong style="color:var(--primary-color);">#{{ analytics.career.bestFinish.rank }}</strong> ({{ analytics.career.bestFinish.year }})</span>
       {% endif %}

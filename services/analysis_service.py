@@ -627,6 +627,7 @@ def get_player_analytics(
     ranked = [s for s in seasons_data if s["rank"] > 0]
     best_finish  = min(ranked, key=lambda s: s["rank"]) if ranked else None
     worst_finish = max(ranked, key=lambda s: s["rank"]) if ranked else None
+    championships = sum(1 for s in ranked if s["rank"] == 1)
 
     p_row = players[players["playerId"] == player_id]
     p = p_row.iloc[0] if not p_row.empty else pd.Series(dtype=object)
@@ -641,6 +642,7 @@ def get_player_analytics(
             "seasons": len(seasons_data),
             "totalWins": sum(all_wins),
             "avgWins": round(sum(all_wins) / len(all_wins), 1),
+            "championships": championships,
             "bestFinish":  {"rank": best_finish["rank"],  "year": best_finish["year"]}  if best_finish  else None,
             "worstFinish": {"rank": worst_finish["rank"], "year": worst_finish["year"]} if worst_finish else None,
         },

@@ -54,6 +54,7 @@ def test_career_summary():
     assert career["avgWins"] == 39.0
     assert career["bestFinish"]["year"] == 2022
     assert career["worstFinish"]["year"] == 2022
+    assert "championships" in career
 
 
 def test_picks_with_deltas():
@@ -138,6 +139,8 @@ def test_multi_season_best_worst_finish():
     assert best  is not None
     assert worst is not None
     assert best["rank"] != worst["rank"] or best["year"] != worst["year"]
+    # Player 1 wins 2021 (rank 1), loses 2022 (rank 2) → 1 championship
+    assert result["career"]["championships"] == 1
 
 
 from fastapi.testclient import TestClient
