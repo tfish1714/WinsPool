@@ -373,6 +373,14 @@ async def route_draft_results_by_year(request: Request, year: int):
     merged["projected_wins"] = merged.apply(get_proj, axis=1)
     merged["draft_value"] = merged.apply(calculate_draft_value, axis=1)
 
+    # Season winner: player with Rank == 1 in final pool standings
+    winner_player_id = None
+    pool = analysis.calculate_wins_pool_standings(standings, draft_results, players, year)
+    if not pool.empty and "Rank" in pool.columns:
+        winner_rows = pool[pool["Rank"] == 1]
+        if not winner_rows.empty:
+            winner_player_id = int(winner_rows.iloc[0]["playerId"])
+
     # Slot averages: league-wide avg wins per draft slot across all seasons
     if not all_draft_results.empty and not all_st.empty and "wins" in all_st.columns:
         dr_with_wins = pd.merge(
@@ -413,6 +421,7 @@ async def route_draft_results_by_year(request: Request, year: int):
         "quickest": quickest,
         "slowest": slowest,
         "undrafted_teams": undrafted_teams,
+        "winner_player_id": winner_player_id,
     })
 
 

@@ -112,7 +112,9 @@
                     {% set actual = row['TotalWinsBySeason'] | float if ('TotalWinsBySeason' in row and
                     row['TotalWinsBySeason'] is not string and row['TotalWinsBySeason'] is not none) else 0 %}
                     {% set delta = (actual - proj) | round(1) %}
-                    <tr {% if best_overall and row['team']==best_overall.team
+                    <tr {% if winner_player_id and row['playerId'] == winner_player_id
+                        %}style="border-left: 3px solid var(--primary-color); background: rgba(201,162,74,0.10);"
+                        {% elif best_overall and row['team']==best_overall.team
                         %}style="border-left: 3px solid var(--leader); background: var(--leader-soft);"
                         {% elif worst_overall and row['team']==worst_overall.team
                         %}style="border-left: 3px solid var(--accent-red); background: rgba(255,80,80,0.06);"
