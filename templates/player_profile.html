@@ -115,9 +115,11 @@
                 {{ '%+.1f' | format(pick.vsProjected | float) }} proj
               </span>
               {% endif %}
+              {% if pick.slotAvgWins is not none %}
+              <br><span style="color:var(--text-secondary);">slot avg {{ pick.slotAvgWins }}W
               {% if pick.vsSlot is not none %}
-              <span style="color:{{ 'var(--primary-color)' if pick.vsSlot >= 0 else 'var(--neg)' }};">
-                {{ '%+.1f' | format(pick.vsSlot | float) }} slot
+              <span style="color:{{ 'var(--primary-color)' if pick.vsSlot >= 0 else 'var(--neg)' }};">({{ '%+.1f' | format(pick.vsSlot | float) }})</span>
+              {% endif %}
               </span>
               {% endif %}
             </td>
