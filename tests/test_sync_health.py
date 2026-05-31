@@ -194,3 +194,44 @@ class TestComputeEloMetadata:
         assert meta["games_processed"] == 2
         assert meta["status"] == "ok"
         assert "completed_at" in meta
+
+
+class TestSyncNflverseMetadata:
+    def test_writes_sync_nflverse_metadata_on_success(self):
+        """main() calls save_metadata with correct shape after syncing."""
+        import importlib
+        import scripts.sync_nflverse_data as nfl_mod
+        importlib.reload(nfl_mod)
+
+        with patch("scripts.sync_nflverse_data.sync", return_value=({}, 8, 2, 0)), \
+             patch("scripts.sync_nflverse_data.save_metadata") as mock_save, \
+             patch("sys.argv", ["sync_nflverse_data.py"]), \
+             patch("sys.exit"):  # prevent sys.exit(0) from raising SystemExit
+            nfl_mod.main()
+
+        mock_save.assert_called_once()
+        call_args = mock_save.call_args[0]
+        assert call_args[0] == "sync_nflverse"
+        meta = call_args[1]
+        assert meta["datasets_synced"] == 8
+        assert meta["datasets_skipped"] == 2
+        assert meta["datasets_failed"] == 0
+        assert meta["status"] == "ok"
+        assert "completed_at" in meta
+        assert "season" in meta
+
+    def test_status_error_when_failures(self):
+        """status is 'error' when n_fail > 0."""
+        import importlib
+        import scripts.sync_nflverse_data as nfl_mod
+        importlib.reload(nfl_mod)
+
+        with patch("scripts.sync_nflverse_data.sync", return_value=({}, 5, 0, 2)), \
+             patch("scripts.sync_nflverse_data.save_metadata") as mock_save, \
+             patch("sys.argv", ["sync_nflverse_data.py"]), \
+             patch("sys.exit"):
+            nfl_mod.main()
+
+        meta = mock_save.call_args[0][1]
+        assert meta["status"] == "error"
+        assert meta["datasets_failed"] == 2

@@ -39,6 +39,9 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+from services.db_service import save_metadata
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -430,6 +433,19 @@ def main():
     if n_fail > 0:
         print("  NOTE: Failures may indicate files not yet available for this season.")
     print(f"{'='*65}")
+
+    try:
+        save_metadata("sync_nflverse", {
+            "completed_at": time.time(),
+            "season": max(seasons),
+            "datasets_synced": n_dl,
+            "datasets_skipped": n_skip,
+            "datasets_failed": n_fail,
+            "status": "ok" if n_fail == 0 else "error",
+            "error": None,
+        })
+    except Exception as _e:
+        print(f"  Warning: could not write sync metadata: {_e}")
 
     sys.exit(1 if n_fail > 0 else 0)
 
