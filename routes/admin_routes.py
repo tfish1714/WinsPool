@@ -6,6 +6,7 @@ import random
 import re
 import subprocess
 import sys
+import time
 
 from typing import Annotated
 
@@ -20,14 +21,14 @@ from routes.models import (
     RecapYearRequest, GenerateRecapRequest, SaveBroadcastRecapRequest,
 )
 from services.cache_service import get_game_predictions, get_prediction_features
-from services.data_service import load_data
+from services.data_service import load_data, get_active_season
 from services.response_helpers import server_error
 from services.db_service import (
     add_draft_order, add_draft_rule, add_player, delete_draft_results_for_season,
-    delete_season_data, get_collection_df, get_password_hash, save_weekly_recap,
+    delete_season_data, get_collection_df, get_metadata, get_password_hash, save_weekly_recap,
     set_member_paid, update_player_credentials, update_player_profile,
 )
-from services.constants import PASSWORD_COMPLEXITY_RE
+from services.constants import PASSWORD_COMPLEXITY_RE, UNDRAFTED_SENTINEL
 from services.draft_service import sanitize_state, wipe_draft_cache
 from services.session_service import require_admin
 import services.ai_service as ai_service
@@ -477,6 +478,139 @@ async def get_predictions_games(season: int, week: int, _: dict = Depends(requir
     except Exception:
         logger.exception("Unhandled error in get_predictions_games")
         return server_error()
+
+
+@router.get("/admin/sync_status")
+async def get_sync_status(_: dict = Depends(require_admin)):
+    """Admin: Health check on all calculated data and sync pipelines."""
+    try:
+        all_st, _, all_games, _, _, _, _ = load_data()
+        active_season = get_active_season(all_games)
+    except Exception:
+        logger.exception("sync_status: failed to load data")
+        return server_error()
+
+    result: dict = {}
+
+    # ── NFL Games ──────────────────────────────────────────────────────────
+    try:
+        season_games = all_games[all_games["season"] == active_season] if not all_games.empty else all_games.iloc[0:0]
+        has_result = season_games[season_games["result"].notna() & (season_games["result"] != UNDRAFTED_SENTINEL)] if not season_games.empty else season_games.iloc[0:0]
+        current_week = int(has_result["week"].max()) if not has_result.empty else 0
+        last_game_date = str(has_result["gameday"].max()) if not has_result.empty else None
+        result["nfl_games"] = {
+            "season": active_season,
+            "current_week": current_week,
+            "games_total": len(season_games),
+            "games_with_results": len(has_result),
+            "last_game_date": last_game_date,
+            "status": "ok" if len(has_result) > 0 else "error",
+        }
+    except Exception as e:
+        logger.warning("sync_status nfl_games: %s", e)
+        result["nfl_games"] = {"status": "error", "error": str(e)}
+
+    # ── Standings ──────────────────────────────────────────────────────────
+    try:
+        season_st = all_st[all_st["season"] == active_season] if not all_st.empty else all_st.iloc[0:0]
+        teams_count = int(season_st["team"].nunique()) if not season_st.empty else 0
+        result["standings"] = {
+            "season": active_season,
+            "week": result.get("nfl_games", {}).get("current_week", 0),
+            "teams_count": teams_count,
+            "status": "ok" if teams_count > 0 else "error",
+        }
+    except Exception as e:
+        logger.warning("sync_status standings: %s", e)
+        result["standings"] = {"status": "error", "error": str(e)}
+
+    # ── Predictions ────────────────────────────────────────────────────────
+    try:
+        preds = get_game_predictions(active_season)
+        locked = sum(1 for v in preds.values() if v.get("locked"))
+        unlocked = sum(1 for v in preds.values() if not v.get("locked"))
+        total = locked + unlocked
+        locked_through_week = 0
+        for key, v in preds.items():
+            if v.get("locked"):
+                try:
+                    locked_through_week = max(locked_through_week, int(key.split("_")[0][1:]))
+                except (ValueError, IndexError):
+                    pass
+        coverage_pct = round(locked / total * 100, 1) if total > 0 else 0.0
+        result["predictions"] = {
+            "season": active_season,
+            "locked": locked,
+            "unlocked": unlocked,
+            "locked_through_week": locked_through_week,
+            "coverage_pct": coverage_pct,
+            "status": "ok" if locked > 0 else ("warn" if total > 0 else "error"),
+        }
+    except Exception as e:
+        logger.warning("sync_status predictions: %s", e)
+        result["predictions"] = {"status": "error", "error": str(e)}
+
+    # ── Analytics Cache ────────────────────────────────────────────────────
+    try:
+        cache_meta = get_metadata("cache_control")
+        if cache_meta is None:
+            result["analytics_cache"] = {"status": "unknown"}
+        else:
+            last_rebuilt_at = cache_meta.get("last_update", 0)
+            age_hours = round((time.time() - float(last_rebuilt_at)) / 3600, 1)
+            result["analytics_cache"] = {
+                "last_rebuilt_at": last_rebuilt_at,
+                "age_hours": age_hours,
+                "status": "ok" if age_hours <= 12 else "warn",
+            }
+    except Exception as e:
+        logger.warning("sync_status analytics_cache: %s", e)
+        result["analytics_cache"] = {"status": "error", "error": str(e)}
+
+    # ── Elo ────────────────────────────────────────────────────────────────
+    try:
+        elo_meta = get_metadata("sync_elo")
+        if elo_meta is None:
+            result["elo"] = {"status": "unknown"}
+        else:
+            age_days = (time.time() - float(elo_meta.get("completed_at", 0))) / 86400
+            script_status = elo_meta.get("status", "unknown")
+            elo_status = "error" if script_status == "error" else ("warn" if age_days > 7 else "ok")
+            result["elo"] = {
+                "completed_at": elo_meta.get("completed_at"),
+                "season": elo_meta.get("season"),
+                "week": elo_meta.get("week"),
+                "games_processed": elo_meta.get("games_processed"),
+                "status": elo_status,
+                "error": elo_meta.get("error"),
+            }
+    except Exception as e:
+        logger.warning("sync_status elo: %s", e)
+        result["elo"] = {"status": "error", "error": str(e)}
+
+    # ── nflverse ───────────────────────────────────────────────────────────
+    try:
+        nflverse_meta = get_metadata("sync_nflverse")
+        if nflverse_meta is None:
+            result["nflverse"] = {"status": "unknown"}
+        else:
+            age_days = (time.time() - float(nflverse_meta.get("completed_at", 0))) / 86400
+            script_status = nflverse_meta.get("status", "unknown")
+            nflverse_status = "error" if script_status == "error" else ("warn" if age_days > 3 else "ok")
+            result["nflverse"] = {
+                "completed_at": nflverse_meta.get("completed_at"),
+                "season": nflverse_meta.get("season"),
+                "datasets_synced": nflverse_meta.get("datasets_synced"),
+                "datasets_skipped": nflverse_meta.get("datasets_skipped"),
+                "datasets_failed": nflverse_meta.get("datasets_failed"),
+                "status": nflverse_status,
+                "error": nflverse_meta.get("error"),
+            }
+    except Exception as e:
+        logger.warning("sync_status nflverse: %s", e)
+        result["nflverse"] = {"status": "error", "error": str(e)}
+
+    return JSONResponse(content=result)
 
 
 @_page_router.get("/admin/predictions", response_class=HTMLResponse)
