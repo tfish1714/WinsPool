@@ -26,6 +26,10 @@ import argparse
 import math
 import pathlib
 import sys
+import time
+
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+from services.db_service import save_metadata
 
 import pandas as pd
 
@@ -340,6 +344,18 @@ def main():
     print(f"\n  Saved -> {output_path}")
 
     _print_season_summary(final_elo)
+
+    try:
+        save_metadata("sync_elo", {
+            "completed_at": time.time(),
+            "season": int(df["season"].max()),
+            "week": int(df["week"].max()),
+            "games_processed": len(df),
+            "status": "ok",
+            "error": None,
+        })
+    except Exception as _e:
+        print(f"  Warning: could not write sync metadata: {_e}")
 
     print(f"\n{'='*65}")
     print(f"  Done. {len(df)} game rows written.")

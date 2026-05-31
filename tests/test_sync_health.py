@@ -164,3 +164,33 @@ class TestSyncStatus:
     def test_requires_token(self):
         resp = client.get("/api/admin/sync_status")
         assert resp.status_code in (401, 403)
+
+
+class TestComputeEloMetadata:
+    def test_writes_sync_elo_metadata_on_success(self, tmp_path):
+        """main() calls save_metadata with correct shape after computing Elo."""
+        import importlib
+        import scripts.compute_elo as elo_mod
+        importlib.reload(elo_mod)
+
+        fake_df = pd.DataFrame([
+            {"season": 2025, "week": 18, "home_elo": 1500, "away_elo": 1500},
+            {"season": 2024, "week": 18, "home_elo": 1490, "away_elo": 1510},
+        ])
+        out_csv = tmp_path / "elo_computed.csv"
+
+        with patch("scripts.compute_elo.compute_elo", return_value=(fake_df, {})), \
+             patch("scripts.compute_elo._print_season_summary"), \
+             patch("scripts.compute_elo.save_metadata") as mock_save, \
+             patch("sys.argv", ["compute_elo.py", "--output", str(out_csv)]):
+            elo_mod.main()
+
+        mock_save.assert_called_once()
+        call_args = mock_save.call_args[0]
+        assert call_args[0] == "sync_elo"
+        meta = call_args[1]
+        assert meta["season"] == 2025
+        assert meta["week"] == 18
+        assert meta["games_processed"] == 2
+        assert meta["status"] == "ok"
+        assert "completed_at" in meta
