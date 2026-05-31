@@ -93,6 +93,11 @@
         </div>
     </header>
 
+    <!-- Sync Health Bar -->
+    <div id="sync-health-bar" class="sync-health-bar">
+        <div class="health-chip"><span style="color:var(--text-secondary);">●</span>&nbsp;Loading health status…</div>
+    </div>
+
     <!-- Admin Sub-menu Tabs -->
     <div class="admin-tab-bar admin-tabs">
         <button class="admin-tab-btn tab-btn active" data-tab="player-section">Players</button>
@@ -401,4 +406,5 @@
 <script type="module" src="/static/js/admin_elo.js"></script>
 <script type="module" src="/static/js/admin_accuracy.js"></script>
 <script type="module" src="/static/js/schedule_explain.js"></script>
+<script src="/static/js/admin_health.js"></script>
 {% endblock %}
