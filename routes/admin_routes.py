@@ -21,7 +21,7 @@ from routes.models import (
     RecapYearRequest, GenerateRecapRequest, SaveBroadcastRecapRequest,
 )
 from services.cache_service import get_game_predictions, get_prediction_features
-from services.data_service import load_data, get_active_season
+from services.data_service import load_data, get_active_season, get_preseason_predictions
 from services.response_helpers import server_error
 from services.db_service import (
     add_draft_order, add_draft_rule, add_player, delete_draft_results_for_season,
@@ -615,6 +615,48 @@ async def get_sync_status(_: dict = Depends(require_admin)):
         result["nflverse"] = {"status": "error", "error": str(e)}
 
     return JSONResponse(content=result)
+
+
+@router.get("/admin/forecast")
+async def get_forecast(_: dict = Depends(require_admin)):
+    """Admin: 2026 season forecast — team win projections and per-game prediction metadata."""
+    try:
+        preds_2026 = get_game_predictions(2026)
+        preseason = get_preseason_predictions(2026)
+
+        team_projections = sorted(
+            [
+                {
+                    "team": team,
+                    "projected_wins": float(v["projected_wins"]),
+                    "std_dev": float(v["std_dev"]),
+                }
+                for team, v in preseason.items()
+            ],
+            key=lambda x: x["projected_wins"],
+            reverse=True,
+        )
+
+        weeks = sorted({int(k[1:3]) for k in preds_2026})
+
+        model_version = None
+        try:
+            feat_doc = get_prediction_features(2026)
+            if feat_doc:
+                model_version = feat_doc.get("ensemble_version")
+        except Exception:
+            pass
+
+        return JSONResponse(content={
+            "season": 2026,
+            "model_version": model_version,
+            "game_count": len(preds_2026),
+            "weeks": weeks,
+            "team_projections": team_projections,
+        })
+    except Exception:
+        logger.exception("forecast: unhandled error")
+        return server_error()
 
 
 @_page_router.get("/admin/predictions", response_class=HTMLResponse)
