@@ -319,14 +319,16 @@ function renderForecastCard(data) {
         projHtml = `<p style="color:var(--text-secondary);font-size:0.85rem;margin:0;">No preseason projections found. Run <code>python scripts/predict_season.py --season 2026</code>.</p>`;
     } else {
         const items = data.team_projections.map(t => {
-            const pct = Math.min((t.projected_wins / 17) * 100, 100).toFixed(1);
+            const wins = t.projected_wins ?? 0;
+            const sd   = t.std_dev ?? 0;
+            const pct  = Math.min((wins / 17) * 100, 100).toFixed(1);
             return `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;min-width:0;">
                 <span style="width:36px;font-size:0.8rem;font-weight:700;color:var(--text-primary);flex-shrink:0;">${_esc(t.team)}</span>
                 <div style="flex:1;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;min-width:60px;">
                     <div style="width:${pct}%;height:100%;background:var(--accent-green);border-radius:3px;"></div>
                 </div>
-                <span style="font-size:0.8rem;color:var(--text-primary);white-space:nowrap;width:36px;">${t.projected_wins.toFixed(1)}W</span>
-                <span style="font-size:0.72rem;color:var(--text-secondary);white-space:nowrap;">±${t.std_dev.toFixed(1)}</span>
+                <span style="font-size:0.8rem;color:var(--text-primary);white-space:nowrap;width:36px;">${wins.toFixed(1)}W</span>
+                <span style="font-size:0.72rem;color:var(--text-secondary);white-space:nowrap;">±${sd.toFixed(1)}</span>
             </div>`;
         }).join('');
         projHtml = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 2rem;">${items}</div>`;
@@ -356,7 +358,7 @@ function renderForecastCard(data) {
         <div style="border:1px solid var(--glass-border);border-radius:8px;padding:1.25rem;background:rgba(255,255,255,0.02);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:0.5rem;">
                 <h3 style="margin:0;font-size:1rem;">2026 Season Forecast${version}</h3>
-                <span style="font-size:0.8rem;color:var(--text-secondary);">${data.game_count} games · ${(data.weeks || []).length} weeks</span>
+                <span style="font-size:0.8rem;color:var(--text-secondary);">${_esc(data.game_count ?? 0)} games · ${(data.weeks || []).length} weeks</span>
             </div>
             <div style="margin-bottom:1.25rem;">
                 <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-secondary);margin-bottom:0.5rem;">Team Win Projections</div>
@@ -381,7 +383,7 @@ async function loadForecastData() {
         _forecastData = await resp.json();
         renderForecastCard(_forecastData);
     } catch (err) {
-        el.innerHTML = `<div style="padding:0.5rem 0;font-size:0.85rem;color:var(--text-secondary);">2026 forecast unavailable: ${_esc(err.message)}</div>`;
+        el.innerHTML = `<div style="padding:0.5rem 0;font-size:0.85rem;color:var(--accent-red);">2026 forecast unavailable: ${_esc(err.message)}</div>`;
     }
 }
 
