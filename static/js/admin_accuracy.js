@@ -336,15 +336,8 @@ function renderForecastCard(data) {
 
     const weekRows = (data.weeks || []).map(wk => {
         const cid = `forecast-games-${wk}`;
-        return `<div style="border-bottom:1px solid rgba(255,255,255,0.04);">
-            <div style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;"
-                 onclick="(function(row){
-                    const exp = row.parentElement.querySelector('.fc-expand');
-                    const open = exp.style.display !== 'none';
-                    exp.style.display = open ? 'none' : '';
-                    row.querySelector('.fc-chevron').innerHTML = open ? '&#9658;' : '&#9660;';
-                    if (!open) loadWeekGames(2026, ${wk}, '${cid}');
-                 })(this)">
+        return `<div class="fc-week-row" data-week="${wk}" data-cid="${_esc(cid)}" style="border-bottom:1px solid rgba(255,255,255,0.04);">
+            <div class="fc-week-header" style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;">
                 <span class="fc-chevron" style="font-size:0.65rem;color:var(--text-secondary);">&#9658;</span>
                 <span style="font-weight:600;font-size:0.9rem;">Week ${wk}</span>
             </div>
@@ -369,6 +362,17 @@ function renderForecastCard(data) {
                 ${weekRows}
             </div>
         </div>`;
+
+    el.querySelectorAll('.fc-week-row').forEach(row => {
+        row.querySelector('.fc-week-header').addEventListener('click', () => {
+            const exp     = row.querySelector('.fc-expand');
+            const chevron = row.querySelector('.fc-chevron');
+            const open    = exp.style.display !== 'none';
+            exp.style.display = open ? 'none' : '';
+            chevron.innerHTML = open ? '&#9658;' : '&#9660;';
+            if (!open) loadWeekGames(2026, parseInt(row.dataset.week, 10), row.dataset.cid);
+        });
+    });
 }
 
 async function loadForecastData() {
