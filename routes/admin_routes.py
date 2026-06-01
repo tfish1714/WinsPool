@@ -637,15 +637,15 @@ async def get_forecast(_: dict = Depends(require_admin)):
             reverse=True,
         )
 
-        weeks = sorted({int(k[1:3]) for k in preds_2026})
+        weeks = sorted({int(k[1:3]) for k in preds_2026 if len(k) >= 3 and k[1:3].isdigit()})
 
         model_version = None
         try:
             feat_doc = get_prediction_features(2026)
             if feat_doc:
                 model_version = feat_doc.get("ensemble_version")
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("forecast: could not load prediction_features: %s", _e)
 
         return JSONResponse(content={
             "season": 2026,
