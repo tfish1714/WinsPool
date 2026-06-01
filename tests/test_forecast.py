@@ -1,5 +1,4 @@
 """tests/test_forecast.py — Unit tests for GET /api/admin/forecast."""
-import pytest
 from unittest.mock import patch
 from starlette.testclient import TestClient
 
