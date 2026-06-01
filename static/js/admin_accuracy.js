@@ -7,6 +7,7 @@
  */
 
 let _accuracyData = null;
+let _forecastData = null;
 const _gameCache  = {};  // keyed by `${season}-${week}-${away}-${home}`
 
 // ── Formatting helpers ─────────────────────────────────────────────────────────
@@ -303,6 +304,87 @@ window._openGameFeatureModal = async function(season, week, away, home) {
     }
 };
 
+// ── 2026 Forecast card ────────────────────────────────────────────────────────
+
+function renderForecastCard(data) {
+    const el = document.getElementById('acc-forecast-section');
+    if (!el) return;
+
+    const version = data.model_version
+        ? `<span style="font-size:0.72rem;color:var(--text-secondary);font-family:monospace;margin-left:8px;">${_esc(data.model_version)}</span>`
+        : '';
+
+    let projHtml;
+    if (!data.team_projections || data.team_projections.length === 0) {
+        projHtml = `<p style="color:var(--text-secondary);font-size:0.85rem;margin:0;">No preseason projections found. Run <code>python scripts/predict_season.py --season 2026</code>.</p>`;
+    } else {
+        const items = data.team_projections.map(t => {
+            const pct = Math.min((t.projected_wins / 17) * 100, 100).toFixed(1);
+            return `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;min-width:0;">
+                <span style="width:36px;font-size:0.8rem;font-weight:700;color:var(--text-primary);flex-shrink:0;">${_esc(t.team)}</span>
+                <div style="flex:1;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;min-width:60px;">
+                    <div style="width:${pct}%;height:100%;background:var(--accent-green);border-radius:3px;"></div>
+                </div>
+                <span style="font-size:0.8rem;color:var(--text-primary);white-space:nowrap;width:36px;">${t.projected_wins.toFixed(1)}W</span>
+                <span style="font-size:0.72rem;color:var(--text-secondary);white-space:nowrap;">±${t.std_dev.toFixed(1)}</span>
+            </div>`;
+        }).join('');
+        projHtml = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 2rem;">${items}</div>`;
+    }
+
+    const weekRows = (data.weeks || []).map(wk => {
+        const cid = `forecast-games-${wk}`;
+        return `<div style="border-bottom:1px solid rgba(255,255,255,0.04);">
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;"
+                 onclick="(function(row){
+                    const exp = row.parentElement.querySelector('.fc-expand');
+                    const open = exp.style.display !== 'none';
+                    exp.style.display = open ? 'none' : '';
+                    row.querySelector('.fc-chevron').innerHTML = open ? '&#9658;' : '&#9660;';
+                    if (!open) loadWeekGames(2026, ${wk}, '${cid}');
+                 })(this)">
+                <span class="fc-chevron" style="font-size:0.65rem;color:var(--text-secondary);">&#9658;</span>
+                <span style="font-weight:600;font-size:0.9rem;">Week ${wk}</span>
+            </div>
+            <div class="fc-expand" style="display:none;padding:0.5rem 1rem 0.75rem 1.5rem;background:rgba(0,0,0,0.2);">
+                <div id="${cid}" style="font-size:0.82rem;"></div>
+            </div>
+        </div>`;
+    }).join('');
+
+    el.innerHTML = `
+        <div style="border:1px solid var(--glass-border);border-radius:8px;padding:1.25rem;background:rgba(255,255,255,0.02);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:0.5rem;">
+                <h3 style="margin:0;font-size:1rem;">2026 Season Forecast${version}</h3>
+                <span style="font-size:0.8rem;color:var(--text-secondary);">${data.game_count} games · ${(data.weeks || []).length} weeks</span>
+            </div>
+            <div style="margin-bottom:1.25rem;">
+                <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-secondary);margin-bottom:0.5rem;">Team Win Projections</div>
+                ${projHtml}
+            </div>
+            <div>
+                <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-secondary);margin-bottom:0.25rem;">Per-Game Predictions</div>
+                ${weekRows}
+            </div>
+        </div>`;
+}
+
+async function loadForecastData() {
+    const el = document.getElementById('acc-forecast-section');
+    if (!el) return;
+    el.innerHTML = '<div style="padding:1rem;color:var(--text-secondary);font-size:0.85rem;">Loading 2026 forecast…</div>';
+    try {
+        const token   = localStorage.getItem('nfl_wins_token');
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const resp = await fetch('/api/admin/forecast', { headers });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        _forecastData = await resp.json();
+        renderForecastCard(_forecastData);
+    } catch (err) {
+        el.innerHTML = `<div style="padding:0.5rem 0;font-size:0.85rem;color:var(--text-secondary);">2026 forecast unavailable: ${_esc(err.message)}</div>`;
+    }
+}
+
 // ── Season table ───────────────────────────────────────────────────────────────
 
 function renderSeasonTable(seasons) {
@@ -442,6 +524,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.admin-tabs .tab-btn').forEach(btn => {
         if (btn.dataset.tab === 'accuracy-section') {
             btn.addEventListener('click', () => {
+                if (!_forecastData) loadForecastData();
                 if (!_accuracyData) loadAccuracyData();
             });
         }
