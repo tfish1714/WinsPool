@@ -229,3 +229,94 @@ class TestVectorizedEpaUpdate:
         pass_delta = state[0, 0, 1]   # off_pass_epa
         rush_delta = state[0, 0, 2]   # off_rush_epa
         assert rush_delta == pytest.approx(pass_delta * 0.5, rel=0.01)
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _make_schedule(n_weeks: int = 4) -> pd.DataFrame:
+    """Alternating home/away schedule between STRONG and WEAK over n_weeks."""
+    rows = []
+    for wk in range(1, n_weeks + 1):
+        if wk % 2 == 1:
+            rows.append({"home_team": "STRONG", "away_team": "WEAK",
+                         "week": wk, "game_type": "REG",
+                         "spread_line": -7.0, "div_game": 0, "surface_type": 0})
+        else:
+            rows.append({"home_team": "WEAK", "away_team": "STRONG",
+                         "week": wk, "game_type": "REG",
+                         "spread_line": 7.0, "div_game": 0, "surface_type": 0})
+    return pd.DataFrame(rows)
+
+
+def _elo_only_predict(X: np.ndarray) -> np.ndarray:
+    """Logistic win probability from elo_diff alone — no model loading needed."""
+    elo_diff_idx = list(NN_FEATURE_COLUMNS).index("elo_diff")
+    elo_diff = X[:, elo_diff_idx]
+    return np.clip(1.0 / (1.0 + np.power(10.0, -elo_diff / 400.0)), 0.02, 0.98)
+
+
+# ── simulate_season tests ──────────────────────────────────────────────────────
+
+class TestSimulateSeason:
+    def test_returns_correct_top_level_keys(self, mock_engine):
+        mock_engine._batch_predict = _elo_only_predict
+        sched = _make_schedule(2)
+        result = mock_engine.simulate_season(sched, n_sims=200)
+        assert "team_stats" in result
+        assert "game_probs" in result
+
+    def test_team_stats_has_both_teams(self, mock_engine):
+        mock_engine._batch_predict = _elo_only_predict
+        result = mock_engine.simulate_season(_make_schedule(2), n_sims=200)
+        assert "STRONG" in result["team_stats"]
+        assert "WEAK"   in result["team_stats"]
+
+    def test_team_stats_has_all_percentile_keys(self, mock_engine):
+        mock_engine._batch_predict = _elo_only_predict
+        result = mock_engine.simulate_season(_make_schedule(2), n_sims=200)
+        for key in ("median_wins", "mean_wins", "std_dev", "p5", "p25", "p75", "p95"):
+            assert key in result["team_stats"]["STRONG"]
+
+    def test_wins_sum_to_total_games(self, mock_engine):
+        mock_engine._batch_predict = _elo_only_predict
+        n_weeks = 4
+        result = mock_engine.simulate_season(_make_schedule(n_weeks), n_sims=500)
+        total = (result["team_stats"]["STRONG"]["mean_wins"]
+                 + result["team_stats"]["WEAK"]["mean_wins"])
+        assert total == pytest.approx(n_weeks, abs=0.5)
+
+    def test_strong_team_projects_more_wins(self, mock_engine):
+        """200 Elo point gap → STRONG should project more wins than WEAK."""
+        mock_engine._batch_predict = _elo_only_predict
+        result = mock_engine.simulate_season(_make_schedule(18), n_sims=1000)
+        strong_wins = result["team_stats"]["STRONG"]["mean_wins"]
+        weak_wins   = result["team_stats"]["WEAK"]["mean_wins"]
+        assert strong_wins > 10.0, f"Expected >10 but got {strong_wins:.1f}"
+        assert weak_wins   <  8.0, f"Expected <8 but got {weak_wins:.1f}"
+
+    def test_game_probs_populated_for_future_games(self, mock_engine):
+        mock_engine._batch_predict = _elo_only_predict
+        result = mock_engine.simulate_season(_make_schedule(3), n_sims=200)
+        assert len(result["game_probs"]) == 3
+
+    def test_completed_results_applied_deterministically(self, mock_engine):
+        mock_engine._batch_predict = _elo_only_predict
+        # Mark week 1 as STRONG winning by 7 (home wins, positive margin)
+        completed = {"W01_STRONG_WEAK": 7.0}
+        result = mock_engine.simulate_season(_make_schedule(2), n_sims=200,
+                                              completed_results=completed)
+        # Week 1 should not appear in game_probs (it was completed)
+        assert "W01_STRONG_WEAK" not in result["game_probs"]
+        # Week 2 should appear (future)
+        assert "W02_WEAK_STRONG" in result["game_probs"]
+
+    def test_completed_games_credited_to_winner(self, mock_engine):
+        mock_engine._batch_predict = _elo_only_predict
+        # STRONG wins week 1 by 7 (STRONG is home, positive margin = home wins)
+        # WEAK wins week 2 by 3  (WEAK is home in week 2, positive margin = home WEAK wins)
+        completed = {"W01_STRONG_WEAK": 7.0, "W02_WEAK_STRONG": 3.0}
+        result = mock_engine.simulate_season(_make_schedule(2), n_sims=200,
+                                              completed_results=completed)
+        # All wins should be 1 each (1 game each, all completed deterministically)
+        assert result["team_stats"]["STRONG"]["mean_wins"] == pytest.approx(1.0, abs=0.01)
+        assert result["team_stats"]["WEAK"]["mean_wins"]   == pytest.approx(1.0, abs=0.01)

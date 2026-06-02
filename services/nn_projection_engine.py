@@ -459,6 +459,170 @@ class NNProjectionEngine:
             
         return team_idx, win_matrix
 
+    def simulate_season(
+        self,
+        schedule_df: pd.DataFrame,
+        n_sims: int = 10_000,
+        completed_results: dict = None,
+    ) -> dict:
+        """Dynamic week-by-week Monte Carlo season simulation.
+
+        Args:
+            schedule_df: Full season schedule with columns week, home_team, away_team.
+                         Should include game_type column; if absent, all rows are treated
+                         as regular season.
+            n_sims: Number of independent simulation trials.
+            completed_results: {game_key: margin} for already-played games.
+                               game_key format: "W{wk:02d}_{home}_{away}"
+                               margin = home_score - away_score (positive = home won).
+
+        Returns:
+            {
+                "team_stats":  {team: {median_wins, mean_wins, std_dev, p5, p25, p75, p95}},
+                "game_probs":  {game_key: {mean_prob, model_spread, home_team, away_team, week}},
+            }
+        """
+        from services.nn_feature_engine import _normalize_team, FEATURE_COLUMNS as NN_FC
+
+        if completed_results is None:
+            completed_results = {}
+
+        # Filter to regular season
+        if "game_type" in schedule_df.columns:
+            reg = schedule_df[schedule_df["game_type"] == "REG"].copy()
+        else:
+            reg = schedule_df.copy()
+
+        if reg.empty:
+            return {"team_stats": {}, "game_probs": {}}
+
+        # Normalize team abbreviations
+        reg["home_team"] = reg["home_team"].apply(lambda x: _normalize_team(str(x)))
+        reg["away_team"] = reg["away_team"].apply(lambda x: _normalize_team(str(x)))
+
+        # Build initial state and index
+        state_template, team_list, team_idx = self._build_initial_state()
+        n_teams = len(team_list)
+
+        # Broadcast initial state across all simulations: (n_sims, n_teams, 6)
+        state = np.tile(state_template[np.newaxis], (n_sims, 1, 1)).astype(np.float32)
+        win_matrix = np.zeros((n_sims, n_teams), dtype=np.float32)
+        game_probs_out = {}
+
+        # Pre-compute static feature arrays for all games
+        static_feats = self._precompute_static_features(reg)
+        col_idx = {c: i for i, c in enumerate(NN_FC)}
+        rng = np.random.default_rng(seed=42)
+
+        # Process weeks in ascending order
+        for week, week_df in reg.groupby("week", sort=True):
+            future_games = []
+
+            for _, game in week_df.iterrows():
+                ht = game["home_team"]
+                at = game["away_team"]
+                if ht not in team_idx or at not in team_idx:
+                    continue
+                h_idx = team_idx[ht]
+                a_idx = team_idx[at]
+                key = f"W{int(week):02d}_{ht}_{at}"
+
+                if key in completed_results:
+                    # Apply real result deterministically across all trials
+                    real_margin = float(completed_results[key])
+                    margins = np.full(n_sims, real_margin, dtype=np.float32)
+                    home_won = real_margin > 0
+                    win_matrix[:, h_idx] += float(home_won)
+                    win_matrix[:, a_idx] += float(not home_won)
+                    self._vectorized_elo_update(state, h_idx, a_idx, margins)
+                    self._vectorized_epa_update(state, h_idx, a_idx, margins)
+                else:
+                    future_games.append((ht, at, h_idx, a_idx, key))
+
+            if not future_games:
+                continue
+
+            # Build batched feature matrix: (G * n_sims, n_features)
+            G = len(future_games)
+            X_week = np.zeros((G * n_sims, len(NN_FC)), dtype=np.float32)
+
+            for g_i, (ht, at, h_idx, a_idx, key) in enumerate(future_games):
+                s, e = g_i * n_sims, (g_i + 1) * n_sims
+                base = static_feats.get(key, np.zeros(len(NN_FC), dtype=np.float32))
+                X_week[s:e] = np.broadcast_to(base, (n_sims, len(NN_FC))).copy()
+
+                # Overwrite dynamic features from current trial states
+                h_elo = state[:, h_idx, 0]
+                a_elo = state[:, a_idx, 0]
+                elo_diff = h_elo - a_elo
+
+                X_week[s:e, col_idx["elo_diff"]]            = elo_diff
+                X_week[s:e, col_idx["elo_confidence"]]      = np.abs(elo_diff) / ELO_TO_SPREAD
+                X_week[s:e, col_idx["pass_epa_matchup"]]    = (
+                    (state[:, h_idx, 1] - state[:, a_idx, 3])
+                    - (state[:, a_idx, 1] - state[:, h_idx, 3])
+                )
+                X_week[s:e, col_idx["rush_epa_matchup"]]    = (
+                    (state[:, h_idx, 2] - state[:, a_idx, 4])
+                    - (state[:, a_idx, 2] - state[:, h_idx, 4])
+                )
+                X_week[s:e, col_idx["point_diff_advantage"]] = (
+                    state[:, h_idx, 5] - state[:, a_idx, 5]
+                )
+
+            # Batch predict: (G * n_sims,) → reshape to (G, n_sims)
+            probs_flat = self._batch_predict(X_week)
+            probs_matrix = probs_flat.reshape(G, n_sims)
+
+            # Simulate outcomes and update state for each game
+            for g_i, (ht, at, h_idx, a_idx, key) in enumerate(future_games):
+                game_probs = probs_matrix[g_i].astype(np.float64)
+                mean_prob = float(np.mean(game_probs))
+                mean_prob_clipped = float(np.clip(mean_prob, PROB_CLIP_MIN, PROB_CLIP_MAX))
+
+                # Sample margins: per-trial implied spread → Normal(implied, MC_MARGIN_STD)
+                implied = SPREAD_TO_PROB_SCALE * np.log(
+                    np.clip(game_probs, PROB_CLIP_MIN, PROB_CLIP_MAX)
+                    / (1.0 - np.clip(game_probs, PROB_CLIP_MIN, PROB_CLIP_MAX))
+                )
+                margins = rng.normal(implied, MC_MARGIN_STD).astype(np.float32)
+
+                # Update win counts
+                win_matrix[:, h_idx] += (margins > 0).astype(np.float32)
+                win_matrix[:, a_idx] += (margins < 0).astype(np.float32)
+
+                # Update team state for future weeks
+                self._vectorized_elo_update(state, h_idx, a_idx, margins)
+                self._vectorized_epa_update(state, h_idx, a_idx, margins)
+
+                # Record game prediction
+                model_spread = float(
+                    SPREAD_TO_PROB_SCALE * np.log(mean_prob_clipped / (1.0 - mean_prob_clipped))
+                )
+                game_probs_out[key] = {
+                    "mean_prob":    round(mean_prob_clipped, 4),
+                    "model_spread": round(model_spread, 1),
+                    "home_team":    ht,
+                    "away_team":    at,
+                    "week":         int(week),
+                }
+
+        # Aggregate win distributions per team
+        team_stats = {}
+        for team, t_idx in team_idx.items():
+            w = win_matrix[:, t_idx]
+            team_stats[team] = {
+                "median_wins": float(np.median(w)),
+                "mean_wins":   float(np.mean(w)),
+                "std_dev":     float(np.std(w)),
+                "p5":          float(np.percentile(w, 5)),
+                "p25":         float(np.percentile(w, 25)),
+                "p75":         float(np.percentile(w, 75)),
+                "p95":         float(np.percentile(w, 95)),
+            }
+
+        return {"team_stats": team_stats, "game_probs": game_probs_out}
+
     def get_team_projected_wins(self, schedule_df: pd.DataFrame, n_sims: int = 5000) -> Dict[str, float]:
         """Produce season win totals via Monte Carlo simulation for Draft logic.
         
