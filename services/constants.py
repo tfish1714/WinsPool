@@ -22,6 +22,14 @@ PROB_CLIP_MAX = 0.98
 ELO_TO_SPREAD = 25.0        # Elo point difference ÷ this = point spread equivalent
 SPREAD_TO_PROB_SCALE = 7.5  # logistic scale: spread ÷ this → win probability
 
+# Monte Carlo simulation — game margin sampling and state update tuning.
+# MC_MARGIN_STD: std dev of NFL game margin distribution (~13 points real-world).
+# MC_EPA_SCALE: EPA nudge per point of simulated margin (tune if spread is too narrow/wide).
+# MC_EPA_RUSH_WEIGHT: rush EPA updates at half the weight of passing EPA.
+MC_MARGIN_STD      = 13.0
+MC_EPA_SCALE       = 0.004
+MC_EPA_RUSH_WEIGHT = 0.5
+
 # Pick boundaries for each draft round (inclusive both ends).
 # 10 players × 3 rounds = 30 total picks. Update if pool size ever changes.
 DRAFT_ROUNDS = {
