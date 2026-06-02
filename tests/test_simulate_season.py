@@ -158,3 +158,74 @@ class TestPrecomputeStaticFeatures:
         feats = mock_engine._precompute_static_features(sched)
         col_idx = {c: i for i, c in enumerate(NN_FEATURE_COLUMNS)}
         assert feats["W01_STRONG_WEAK"][col_idx["home_field_advantage"]] == 1.0
+
+
+class TestVectorizedEloUpdate:
+    def _make_state(self, n_sims, n_teams=2, strong_elo=1600.0, weak_elo=1400.0):
+        """state[n_sims, n_teams, 6]. Team 0 = strong, team 1 = weak."""
+        state = np.zeros((n_sims, n_teams, 6), dtype=np.float32)
+        state[:, 0, 0] = strong_elo
+        state[:, 1, 0] = weak_elo
+        return state
+
+    def test_elo_increases_for_winner(self, mock_engine):
+        n_sims = 100
+        state = self._make_state(n_sims)
+        initial_strong_elo = state[:, 0, 0].copy()
+        # Home team (idx 0 = STRONG) wins all trials
+        margins = np.full(n_sims, 7.0, dtype=np.float32)
+        mock_engine._vectorized_elo_update(state, h_idx=0, a_idx=1, margins=margins)
+        assert np.all(state[:, 0, 0] > initial_strong_elo), "Winner Elo should increase"
+
+    def test_elo_decreases_for_loser(self, mock_engine):
+        n_sims = 100
+        state = self._make_state(n_sims)
+        initial_weak_elo = state[:, 1, 0].copy()
+        margins = np.full(n_sims, 7.0, dtype=np.float32)
+        mock_engine._vectorized_elo_update(state, h_idx=0, a_idx=1, margins=margins)
+        assert np.all(state[:, 1, 0] < initial_weak_elo), "Loser Elo should decrease"
+
+    def test_elo_zero_sum(self, mock_engine):
+        n_sims = 100
+        state = self._make_state(n_sims)
+        total_before = state[:, 0, 0] + state[:, 1, 0]
+        margins = np.full(n_sims, 7.0, dtype=np.float32)
+        mock_engine._vectorized_elo_update(state, h_idx=0, a_idx=1, margins=margins)
+        total_after = state[:, 0, 0] + state[:, 1, 0]
+        np.testing.assert_allclose(total_before, total_after, rtol=1e-4)
+
+    def test_away_team_wins_when_negative_margin(self, mock_engine):
+        n_sims = 100
+        state = self._make_state(n_sims)
+        initial_weak_elo = state[:, 1, 0].copy()
+        # Negative margin → away team (WEAK, idx 1) wins
+        margins = np.full(n_sims, -7.0, dtype=np.float32)
+        mock_engine._vectorized_elo_update(state, h_idx=0, a_idx=1, margins=margins)
+        assert np.all(state[:, 1, 0] > initial_weak_elo), "Away winner's Elo should increase"
+
+
+class TestVectorizedEpaUpdate:
+    def test_winner_epa_increases(self, mock_engine):
+        n_sims = 50
+        state = np.zeros((n_sims, 2, 6), dtype=np.float32)
+        margins = np.full(n_sims, 14.0, dtype=np.float32)  # home wins by 14
+        mock_engine._vectorized_epa_update(state, h_idx=0, a_idx=1, margins=margins)
+        # Home team (winner) off_pass_epa (dim 1) should increase
+        assert np.all(state[:, 0, 1] > 0.0)
+
+    def test_loser_epa_decreases(self, mock_engine):
+        n_sims = 50
+        state = np.zeros((n_sims, 2, 6), dtype=np.float32)
+        margins = np.full(n_sims, 14.0, dtype=np.float32)
+        mock_engine._vectorized_epa_update(state, h_idx=0, a_idx=1, margins=margins)
+        # Away team (loser) off_pass_epa (dim 1) should decrease
+        assert np.all(state[:, 1, 1] < 0.0)
+
+    def test_rush_weight_is_half_passing(self, mock_engine):
+        n_sims = 50
+        state = np.zeros((n_sims, 2, 6), dtype=np.float32)
+        margins = np.full(n_sims, 10.0, dtype=np.float32)
+        mock_engine._vectorized_epa_update(state, h_idx=0, a_idx=1, margins=margins)
+        pass_delta = state[0, 0, 1]   # off_pass_epa
+        rush_delta = state[0, 0, 2]   # off_rush_epa
+        assert rush_delta == pytest.approx(pass_delta * 0.5, rel=0.01)

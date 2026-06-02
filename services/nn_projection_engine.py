@@ -371,6 +371,74 @@ class NNProjectionEngine:
         blended = NN_WEIGHT * nn_p + XGB_WEIGHT * xgb_p + LR_WEIGHT * lr_p
         return np.clip(blended, PROB_CLIP_MIN, PROB_CLIP_MAX).astype(np.float64)
 
+    def _vectorized_elo_update(
+        self,
+        state: np.ndarray,    # (n_sims, n_teams, 6) — mutated in-place
+        h_idx: int,
+        a_idx: int,
+        margins: np.ndarray,  # (n_sims,) — positive = home wins
+    ) -> None:
+        """Update Elo ratings in-place for all trials after a simulated game."""
+        home_wins = margins > 0
+        abs_margin = np.abs(margins)
+
+        h_elo = state[:, h_idx, 0]
+        a_elo = state[:, a_idx, 0]
+
+        # Elo diff from winner's perspective (home advantage = 48 pts)
+        winner_elo_diff = np.where(
+            home_wins,
+            h_elo - a_elo + 48.0,   # home won: home advantage helps them
+            a_elo - h_elo - 48.0,   # away won: home advantage hurt them
+        )
+
+        # Expected win probability for the actual winner
+        expected = 1.0 / (10.0 ** (-winner_elo_diff / 400.0) + 1.0)
+
+        # Margin-of-victory multiplier (FiveThirtyEight formula)
+        log_comp = np.log(np.maximum(abs_margin, 1.0) + 1.0)
+        autocorr = winner_elo_diff * 0.001 + 2.2
+        mov_mult = log_comp * (2.2 / np.maximum(autocorr, 0.01))
+
+        shift = 20.0 * (1.0 - expected) * mov_mult  # K = 20
+
+        state[:, h_idx, 0] = np.where(home_wins, h_elo + shift, h_elo - shift)
+        state[:, a_idx, 0] = np.where(home_wins, a_elo - shift, a_elo + shift)
+
+    def _vectorized_epa_update(
+        self,
+        state: np.ndarray,    # (n_sims, n_teams, 6) — mutated in-place
+        h_idx: int,
+        a_idx: int,
+        margins: np.ndarray,  # (n_sims,) — positive = home wins
+    ) -> None:
+        """Update EPA and margin_roll in-place for all trials after a simulated game."""
+        home_wins = margins > 0
+        abs_margin = np.abs(margins).astype(np.float32)
+
+        delta      = abs_margin * MC_EPA_SCALE
+        rush_delta = delta * MC_EPA_RUSH_WEIGHT
+        sign_h = np.where(home_wins,  1.0, -1.0).astype(np.float32)
+        sign_a = np.where(home_wins, -1.0,  1.0).astype(np.float32)
+
+        # off_pass_epa (dim 1), def_pass_epa (dim 3)
+        state[:, h_idx, 1] += sign_h * delta
+        state[:, a_idx, 1] += sign_a * delta
+        state[:, h_idx, 3] += sign_h * delta
+        state[:, a_idx, 3] += sign_a * delta
+
+        # off_rush_epa (dim 2), def_rush_epa (dim 4)
+        state[:, h_idx, 2] += sign_h * rush_delta
+        state[:, a_idx, 2] += sign_a * rush_delta
+        state[:, h_idx, 4] += sign_h * rush_delta
+        state[:, a_idx, 4] += sign_a * rush_delta
+
+        # margin_roll (dim 5) — exponential moving average toward game result
+        game_margin_h =  margins.astype(np.float32)
+        game_margin_a = -margins.astype(np.float32)
+        state[:, h_idx, 5] = 0.85 * state[:, h_idx, 5] + 0.15 * game_margin_h
+        state[:, a_idx, 5] = 0.85 * state[:, a_idx, 5] + 0.15 * game_margin_a
+
     def _run_monte_carlo(self, game_probs: list, all_teams: list, n_sims: int) -> dict:
         """Execute Monte Carlo season simulation over pre-computed game probabilities."""
         team_idx = {t: i for i, t in enumerate(all_teams)}
