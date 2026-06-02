@@ -132,6 +132,126 @@ class NNProjectionEngine:
         avail = [c for c in profile_cols if c in combined.columns]
         return combined.groupby("team")[avail].mean().reset_index()
 
+    def _build_initial_state(self) -> tuple:
+        """Extract per-team absolute state from loaded team profiles.
+
+        Returns:
+            state_template: float32 array of shape (n_teams, 6).
+                            Dims: [elo, off_pass_epa, off_rush_epa,
+                                    def_pass_epa, def_rush_epa, margin_roll]
+            team_list: sorted list of team abbreviations.
+            team_idx: {team: index into state_template}.
+        """
+        profile_dict = {row["team"]: row.to_dict() for _, row in self._team_profiles.iterrows()}
+        team_list = sorted(profile_dict.keys())
+        team_idx = {t: i for i, t in enumerate(team_list)}
+
+        state_template = np.zeros((len(team_list), 6), dtype=np.float32)
+        for team, idx in team_idx.items():
+            p = profile_dict[team]
+            state_template[idx, 0] = float(p.get("elo_pre",           1500.0))
+            state_template[idx, 1] = float(p.get("off_pass_epa_roll",    0.0))
+            state_template[idx, 2] = float(p.get("off_rush_epa_roll",    0.0))
+            state_template[idx, 3] = float(p.get("def_pass_epa_roll",    0.0))
+            state_template[idx, 4] = float(p.get("def_rush_epa_roll",    0.0))
+            state_template[idx, 5] = float(p.get("margin_roll",          0.0))
+
+        return state_template, team_list, team_idx
+
+    def _precompute_static_features(self, schedule_df: pd.DataFrame) -> dict:
+        """Build the time-invariant portion of the feature vector for each game.
+
+        The 5 dynamic features (elo_diff, elo_confidence, pass_epa_matchup,
+        rush_epa_matchup, point_diff_advantage) are left at 0.0 and overwritten
+        per-trial inside simulate_season().
+
+        Returns:
+            {game_key: float32 array of shape (n_features,)}
+        """
+        from services.nn_feature_engine import _normalize_team, FEATURE_COLUMNS as NN_FC
+        from services.prediction_service import _get_travel_distance
+
+        profile_dict = {row["team"]: row.to_dict() for _, row in self._team_profiles.iterrows()}
+        col_idx = {c: i for i, c in enumerate(NN_FC)}
+        static_feats = {}
+
+        for _, game in schedule_df.iterrows():
+            ht = _normalize_team(str(game.get("home_team", "") or ""))
+            at = _normalize_team(str(game.get("away_team", "") or ""))
+            wk = game.get("week")
+            if not ht or not at or wk is None:
+                continue
+
+            key = f"W{int(wk):02d}_{ht}_{at}"
+            hp = profile_dict.get(ht, {})
+            ap = profile_dict.get(at, {})
+
+            feat = np.zeros(len(NN_FC), dtype=np.float32)
+
+            # Game-context static values
+            feat[col_idx["home_field_advantage"]]   = 1.0
+            feat[col_idx["rest_advantage"]]         = 0.0
+            feat[col_idx["home_qb_injury_flag"]]    = 0.0
+            feat[col_idx["away_qb_injury_flag"]]    = 0.0
+            feat[col_idx["playoff_flag"]]           = 0.0
+            feat[col_idx["week"]]                   = float(wk)
+            feat[col_idx["div_game_flag"]]          = float(game.get("div_game", 0) or 0)
+            feat[col_idx["surface_type"]]           = float(game.get("surface_type", 0) or 0)
+
+            # Travel (away team perspective)
+            try:
+                feat[col_idx["net_travel_disadvantage"]] = _get_travel_distance(at, ht) / 1000.0
+            except Exception:
+                pass
+
+            # Team matchup features from profiles (static — prior-season baseline)
+            feat[col_idx["market_implied_team_total"]]  = float(hp.get("market_implied_team_total", 22.0))
+            feat[col_idx["passing_difficulty_index"]]   = float(hp.get("passing_difficulty_index", 0.0))
+            feat[col_idx["early_down_matchup"]]         = (
+                float(hp.get("off_early_roll", 0.0)) - float(ap.get("def_early_roll", 0.0))
+                - float(ap.get("off_early_roll", 0.0)) + float(hp.get("def_early_roll", 0.0))
+            )
+            feat[col_idx["turnover_margin_rolling"]]    = (
+                float(hp.get("turnover_margin_rolling", 0.0)) - float(ap.get("turnover_margin_rolling", 0.0))
+            )
+            feat[col_idx["net_success_rate"]]           = (
+                float(hp.get("net_success_rate", 0.0)) - float(ap.get("net_success_rate", 0.0))
+            )
+            feat[col_idx["qb_pressure_advantage"]]      = (
+                float(ap.get("qb_pressure_roll", 0.0)) - float(hp.get("qb_pressure_roll", 0.0))
+            )
+            feat[col_idx["def_pressure_diff"]]          = (
+                float(hp.get("def_pressures_roll", 0.0)) - float(ap.get("def_pressures_roll", 0.0))
+            )
+
+            # Trench: preseason roster if available, else profile average
+            if self._preseason_roster and self._preseason_norm:
+                ol_mu, ol_sig, dl_mu, dl_sig = self._preseason_norm
+                h_pr = self._preseason_roster.get(ht, {})
+                a_pr = self._preseason_roster.get(at, {})
+                h_z = ((h_pr.get("ol_av", ol_mu) - ol_mu) / ol_sig
+                       + (h_pr.get("dl_perf", dl_mu) - dl_mu) / dl_sig)
+                a_z = ((a_pr.get("ol_av", ol_mu) - ol_mu) / ol_sig
+                       + (a_pr.get("dl_perf", dl_mu) - dl_mu) / dl_sig)
+                feat[col_idx["trench_dominance_metric"]] = float(h_z - a_z)
+            else:
+                feat[col_idx["trench_dominance_metric"]] = (
+                    float(hp.get("trench_score", 0.0)) - float(ap.get("trench_score", 0.0))
+                )
+
+            # Roster value deltas (home-centric signed features from prior season)
+            feat[col_idx["roster_talent_delta"]]     = (
+                float(hp.get("roster_talent_delta", 0.0)) - float(ap.get("roster_talent_delta", 0.0))
+            )
+            feat[col_idx["off_roster_value_delta"]]  = float(hp.get("off_roster_value_delta", 0.0))
+            feat[col_idx["def_roster_value_delta"]]  = float(hp.get("def_roster_value_delta", 0.0))
+            feat[col_idx["st_value_delta"]]          = float(hp.get("st_value_delta", 0.0))
+            feat[col_idx["qb_resilience_delta"]]     = float(hp.get("qb_resilience_delta", 0.0))
+
+            static_feats[key] = feat
+
+        return static_feats
+
     def game_win_probability(self, home_team: str, away_team: str) -> dict:
         """Compute the blended NN+XGB+LR ensemble probability.
 

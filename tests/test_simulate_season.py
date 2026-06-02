@@ -106,3 +106,55 @@ class TestBatchPredict:
         result = mock_engine._batch_predict(X)
         expected = NN_WEIGHT * 0.8 + XGB_WEIGHT * 0.6 + LR_WEIGHT * 0.5
         assert np.allclose(result, expected, atol=0.001)
+
+
+class TestBuildInitialState:
+    def test_returns_correct_shapes(self, mock_engine):
+        state_template, team_list, team_idx = mock_engine._build_initial_state()
+        assert state_template.shape == (2, 6)   # 2 teams, 6 state dims
+        assert len(team_list) == 2
+        assert set(team_idx.keys()) == {"STRONG", "WEAK"}
+
+    def test_elo_extracted_correctly(self, mock_engine):
+        state_template, team_list, team_idx = mock_engine._build_initial_state()
+        assert state_template[team_idx["STRONG"], 0] == pytest.approx(1600.0)
+        assert state_template[team_idx["WEAK"],   0] == pytest.approx(1400.0)
+
+    def test_epa_extracted_correctly(self, mock_engine):
+        state_template, team_list, team_idx = mock_engine._build_initial_state()
+        # off_pass_epa (dim 1)
+        assert state_template[team_idx["STRONG"], 1] == pytest.approx(0.15)
+        assert state_template[team_idx["WEAK"],   1] == pytest.approx(-0.10)
+
+
+class TestPrecomputeStaticFeatures:
+    def _make_schedule(self):
+        return pd.DataFrame([
+            {"home_team": "STRONG", "away_team": "WEAK", "week": 1, "game_type": "REG",
+             "spread_line": -7.0, "div_game": 0, "surface_type": 0},
+        ])
+
+    def test_returns_entry_for_each_game(self, mock_engine):
+        sched = self._make_schedule()
+        feats = mock_engine._precompute_static_features(sched)
+        assert "W01_STRONG_WEAK" in feats
+
+    def test_static_array_correct_length(self, mock_engine):
+        sched = self._make_schedule()
+        feats = mock_engine._precompute_static_features(sched)
+        assert feats["W01_STRONG_WEAK"].shape == (len(NN_FEATURE_COLUMNS),)
+
+    def test_dynamic_features_zeroed(self, mock_engine):
+        sched = self._make_schedule()
+        feats = mock_engine._precompute_static_features(sched)
+        arr = feats["W01_STRONG_WEAK"]
+        col_idx = {c: i for i, c in enumerate(NN_FEATURE_COLUMNS)}
+        for dyn in ("elo_diff", "elo_confidence", "pass_epa_matchup",
+                    "rush_epa_matchup", "point_diff_advantage"):
+            assert arr[col_idx[dyn]] == 0.0, f"{dyn} should be 0 in static features"
+
+    def test_home_field_is_one(self, mock_engine):
+        sched = self._make_schedule()
+        feats = mock_engine._precompute_static_features(sched)
+        col_idx = {c: i for i, c in enumerate(NN_FEATURE_COLUMNS)}
+        assert feats["W01_STRONG_WEAK"][col_idx["home_field_advantage"]] == 1.0
