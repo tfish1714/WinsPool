@@ -71,10 +71,10 @@ Shape in memory: `state[n_sims, n_teams, 6]` — all trials start identical from
 **1. Sample margin**
 ```
 implied_spread = SPREAD_TO_PROB_SCALE × log(p / (1 - p))
-margin ~ Normal(implied_spread, σ=13.0)
+margin ~ Normal(implied_spread, σ=MC_MARGIN_STD)
 ```
 - Positive margin → home team wins; negative → away team wins.
-- σ=13.0 matches real NFL game-to-game variance.
+- `MC_MARGIN_STD` matches real NFL game-to-game variance (~13 points).
 - The sign of the sampled margin determines the winner for that trial (integrating win probability and margin in one draw).
 
 **2. Elo update**
@@ -89,16 +89,16 @@ K=20, home advantage=48 Elo points (existing constants).
 **3. EPA update**
 Small additive nudge proportional to simulated margin:
 ```
-epa_delta = |margin| × 0.004
+epa_delta = |margin| × MC_EPA_SCALE
 
 winner: off_pass_epa += epa_delta
-        off_rush_epa += epa_delta × 0.5   (rushing has lower weight)
+        off_rush_epa += epa_delta × MC_EPA_RUSH_WEIGHT
         def_pass_epa += epa_delta
-        def_rush_epa += epa_delta × 0.5
+        def_rush_epa += epa_delta × MC_EPA_RUSH_WEIGHT
 
 loser:  same fields -= respective deltas
 ```
-Scale 0.004 keeps updates small — a 7pt win nudges EPA by ~0.028. Prior-season baseline dominates early in the simulated season; momentum accumulates gradually over multiple weeks.
+`MC_EPA_SCALE` keeps updates small — a 7pt win nudges EPA by ~0.028. Prior-season baseline dominates early in the simulated season; momentum accumulates gradually over multiple weeks.
 
 ### Completed games (actual results):
 Real margins from `nfl_games` (`home_score - away_score`) are applied **deterministically** across all trials — every trial gets the same Elo/EPA update, since the actual result is known.
@@ -200,11 +200,26 @@ Locked/played game logic unchanged — completed games continue to use actual fe
 
 ---
 
+## New Constants (`services/constants.py`)
+
+Three new constants alongside the existing prediction constants (`PROB_CLIP_MIN`, `ELO_TO_SPREAD`, `SPREAD_TO_PROB_SCALE`, etc.):
+
+| Constant | Initial value | Meaning |
+|---|---|---|
+| `MC_MARGIN_STD` | `13.0` | Std dev of NFL game margin distribution (points) |
+| `MC_EPA_SCALE` | `0.004` | EPA update per point of simulated margin |
+| `MC_EPA_RUSH_WEIGHT` | `0.5` | Relative weight of rushing vs passing EPA updates |
+
+All three are tunable after observing the resulting win distribution. If the spread is still too narrow, increase `MC_EPA_SCALE`; if margins feel too volatile, lower `MC_MARGIN_STD`.
+
+---
+
 ## Files Changed
 
 | File | Change |
 |---|---|
-| `services/nn_projection_engine.py` | Add `simulate_season()`, update `initialize()` |
+| `services/constants.py` | Add `MC_MARGIN_STD`, `MC_EPA_SCALE`, `MC_EPA_RUSH_WEIGHT` |
+| `services/nn_projection_engine.py` | Add `simulate_season()` |
 | `scripts/predict_season.py` | Remove internal profile/MC logic; call engine |
 | `scripts/backfill_schedule_predictions.py` | Remove `_profile_predictions_for_year()`; call engine |
 
