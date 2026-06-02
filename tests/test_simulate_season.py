@@ -84,16 +84,25 @@ class TestBatchPredict:
         assert np.all(result >= 0.02) and np.all(result <= 0.98)
 
     def test_blends_models_correctly(self, mock_engine):
+        """Verify the weighted blend NN*0.45 + XGB*0.20 + LR*0.35 is applied correctly."""
+        from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
         X = np.ones((10, len(NN_FEATURE_COLUMNS)), dtype=np.float32)
+        mock_engine.svc.scaler = MagicMock()
         mock_engine.svc.scaler.transform = lambda x: x
-        mock_engine.svc.model.predict = MagicMock(return_value=np.full((10, 1), 0.7))
+        mock_engine.svc.model = MagicMock()
+        mock_engine.svc.model.predict = MagicMock(return_value=np.full((10, 1), 0.8))
+        mock_engine.xgb_svc.scaler = MagicMock()
         mock_engine.xgb_svc.scaler.transform = lambda x: x
+        mock_engine.xgb_svc.model = MagicMock()
         mock_engine.xgb_svc.model.predict_proba = MagicMock(
-            return_value=np.column_stack([np.full(10, 0.3), np.full(10, 0.7)])
+            return_value=np.column_stack([np.full(10, 0.4), np.full(10, 0.6)])
         )
+        mock_engine.lr_svc.scaler = MagicMock()
         mock_engine.lr_svc.scaler.transform = lambda x: x
+        mock_engine.lr_svc.model = MagicMock()
         mock_engine.lr_svc.model.predict_proba = MagicMock(
-            return_value=np.column_stack([np.full(10, 0.3), np.full(10, 0.7)])
+            return_value=np.column_stack([np.full(10, 0.5), np.full(10, 0.5)])
         )
         result = mock_engine._batch_predict(X)
-        assert np.allclose(result, 0.7, atol=0.01)
+        expected = NN_WEIGHT * 0.8 + XGB_WEIGHT * 0.6 + LR_WEIGHT * 0.5
+        assert np.allclose(result, expected, atol=0.001)
