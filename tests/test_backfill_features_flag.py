@@ -60,7 +60,7 @@ def test_features_flag_calls_write_prediction_features():
     }
 
     fake_engine = MagicMock()
-    fake_engine.simulate_season.return_value = {"game_probs": {}, "win_distributions": {}}
+    fake_engine.simulate_season.return_value = {"game_probs": {}, "team_stats": {}}
 
     with patch.object(bsp, "NNPredictionService", return_value=nn), \
          patch.object(bsp, "XGBPredictionService", return_value=xgb_svc), \
@@ -96,7 +96,7 @@ def test_no_features_flag_skips_write():
     fake_ft = _make_fake_ft(FEATURE_COLUMNS)
 
     fake_engine = MagicMock()
-    fake_engine.simulate_season.return_value = {"game_probs": {}, "win_distributions": {}}
+    fake_engine.simulate_season.return_value = {"game_probs": {}, "team_stats": {}}
 
     with patch.object(bsp, "NNPredictionService", return_value=nn), \
          patch.object(bsp, "XGBPredictionService", return_value=xgb_svc), \

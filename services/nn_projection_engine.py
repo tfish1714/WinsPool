@@ -421,17 +421,19 @@ class NNProjectionEngine:
         sign_h = np.where(home_wins,  1.0, -1.0).astype(np.float32)
         sign_a = np.where(home_wins, -1.0,  1.0).astype(np.float32)
 
-        # off_pass_epa (dim 1), def_pass_epa (dim 3)
+        # off_pass_epa (dim 1): winner off improves, loser off declines
         state[:, h_idx, 1] += sign_h * delta
         state[:, a_idx, 1] += sign_a * delta
-        state[:, h_idx, 3] += sign_h * delta
-        state[:, a_idx, 3] += sign_a * delta
+        # def_pass_epa (dim 3): winner def improves = LOWER epa allowed, loser def = HIGHER
+        state[:, h_idx, 3] -= sign_h * delta
+        state[:, a_idx, 3] -= sign_a * delta
 
-        # off_rush_epa (dim 2), def_rush_epa (dim 4)
+        # off_rush_epa (dim 2)
         state[:, h_idx, 2] += sign_h * rush_delta
         state[:, a_idx, 2] += sign_a * rush_delta
-        state[:, h_idx, 4] += sign_h * rush_delta
-        state[:, a_idx, 4] += sign_a * rush_delta
+        # def_rush_epa (dim 4)
+        state[:, h_idx, 4] -= sign_h * rush_delta
+        state[:, a_idx, 4] -= sign_a * rush_delta
 
         # margin_roll (dim 5) — exponential moving average toward game result
         game_margin_h =  margins.astype(np.float32)

@@ -97,8 +97,16 @@ def _build_predictions_map(year: int, ft_lookup: dict,
     if not schedule_df.empty:
         engine = NNProjectionEngine()  # already imported at top of file
         engine.initialize(year)
+        profile_dict = {row["team"]: row.to_dict() for _, row in engine._team_profiles.iterrows()}
         sim = engine.simulate_season(schedule_df, n_sims=10_000,
                                      completed_results=completed_results)
+
+        def _pf(d, col, default=0.0):
+            v = d.get(col, default)
+            try:
+                return float(v) if v is not None and not (isinstance(v, float) and np.isnan(v)) else default
+            except (TypeError, ValueError):
+                return default
 
         for key, gp in sim["game_probs"].items():
             if key in played_keys:
@@ -125,6 +133,22 @@ def _build_predictions_map(year: int, ft_lookup: dict,
             vhp    = (round(1.0 / (1.0 + np.exp(-sl_val / SPREAD_TO_PROB_SCALE)), 4)
                       if sl_val is not None else None)
 
+            h_prof = profile_dict.get(ht, {})
+            a_prof = profile_dict.get(at, {})
+
+            elo_diff_val     = round(_pf(h_prof, "elo_pre", 1500) - _pf(a_prof, "elo_pre", 1500), 1)
+            roster_delta_val = round(_pf(h_prof, "roster_talent_delta") - _pf(a_prof, "roster_talent_delta"), 3)
+            pass_epa_val     = round(
+                (_pf(h_prof, "off_pass_epa_roll") - _pf(a_prof, "def_pass_epa_roll"))
+                - (_pf(a_prof, "off_pass_epa_roll") - _pf(h_prof, "def_pass_epa_roll")), 3
+            )
+            rush_epa_val     = round(
+                (_pf(h_prof, "off_rush_epa_roll") - _pf(a_prof, "def_rush_epa_roll"))
+                - (_pf(a_prof, "off_rush_epa_roll") - _pf(h_prof, "def_rush_epa_roll")), 3
+            )
+            trench_val       = round(_pf(h_prof, "trench_score") - _pf(a_prof, "trench_score"), 1)
+            point_diff_val   = round(_pf(h_prof, "margin_roll") - _pf(a_prof, "margin_roll"), 2)
+
             result[key] = {
                 "pred_prob":     round(hp, 4),
                 "pred_winner":   winner,
@@ -138,18 +162,18 @@ def _build_predictions_map(year: int, ft_lookup: dict,
                     "vegas_home_prob":      vhp,
                     "model_spread":         ms,
                     "edge_vs_vegas":        edge,
-                    "elo_diff":             0.0,
-                    "roster_delta":         0.0,
-                    "pass_epa_matchup":     0.0,
-                    "rush_epa_matchup":     0.0,
+                    "elo_diff":             elo_diff_val,
+                    "roster_delta":         roster_delta_val,
+                    "pass_epa_matchup":     pass_epa_val,
+                    "rush_epa_matchup":     rush_epa_val,
                     "early_down_matchup":   0.0,
                     "turnover_margin":      0.0,
-                    "point_diff_advantage": 0.0,
+                    "point_diff_advantage": point_diff_val,
                     "home_qb_out":          0.0,
                     "away_qb_out":          0.0,
                     "rest_advantage":       0.0,
                     "travel_disadvantage":  0.0,
-                    "trench_dominance":     0.0,
+                    "trench_dominance":     trench_val,
                     "off_roster_value":     0.0,
                     "def_roster_value":     0.0,
                     "source": "mc_simulation (10000 trials)",

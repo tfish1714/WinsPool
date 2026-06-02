@@ -230,6 +230,17 @@ class TestVectorizedEpaUpdate:
         rush_delta = state[0, 0, 2]   # off_rush_epa
         assert rush_delta == pytest.approx(pass_delta * 0.5, rel=0.01)
 
+    def test_def_epa_moves_correctly(self, mock_engine):
+        """Winner's defensive EPA decreases (allowed less); loser's increases (allowed more)."""
+        n_sims = 50
+        state = np.zeros((n_sims, 2, 6), dtype=np.float32)
+        margins = np.full(n_sims, 14.0, dtype=np.float32)  # home wins by 14
+        mock_engine._vectorized_epa_update(state, h_idx=0, a_idx=1, margins=margins)
+        # Home team (winner) def_pass_epa (dim 3) should DECREASE (they allowed less)
+        assert np.all(state[:, 0, 3] < 0.0), "Winner def EPA should decrease"
+        # Away team (loser) def_pass_epa (dim 3) should INCREASE (they allowed more)
+        assert np.all(state[:, 1, 3] > 0.0), "Loser def EPA should increase"
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
