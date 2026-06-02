@@ -59,12 +59,16 @@ def test_features_flag_calls_write_prediction_features():
         (2025, 8, "KC", "SF"): {"pred_prob": 0.6, "pred_winner": "KC", "pred_su_conf": 60.0}
     }
 
+    fake_engine = MagicMock()
+    fake_engine.simulate_season.return_value = {"game_probs": {}, "win_distributions": {}}
+
     with patch.object(bsp, "NNPredictionService", return_value=nn), \
          patch.object(bsp, "XGBPredictionService", return_value=xgb_svc), \
          patch.object(bsp, "LRPredictionService", return_value=lr), \
          patch.object(bsp, "build_master_feature_table", return_value=fake_ft), \
          patch.object(bsp, "build_ensemble_lookup", return_value=fake_ft_lookup), \
-         patch.object(bsp, "_profile_predictions_for_year", return_value={}), \
+         patch.object(bsp, "NNProjectionEngine", return_value=fake_engine), \
+         patch("services.nn_feature_engine._load_schedule", return_value=pd.DataFrame()), \
          patch.object(bsp, "get_game_predictions", return_value={}), \
          patch.object(bsp, "write_game_predictions"), \
          patch.object(bsp, "write_prediction_features") as mock_wpf, \
@@ -91,12 +95,16 @@ def test_no_features_flag_skips_write():
     nn, xgb_svc, lr = _make_mocks(len(FEATURE_COLUMNS))
     fake_ft = _make_fake_ft(FEATURE_COLUMNS)
 
+    fake_engine = MagicMock()
+    fake_engine.simulate_season.return_value = {"game_probs": {}, "win_distributions": {}}
+
     with patch.object(bsp, "NNPredictionService", return_value=nn), \
          patch.object(bsp, "XGBPredictionService", return_value=xgb_svc), \
          patch.object(bsp, "LRPredictionService", return_value=lr), \
          patch.object(bsp, "build_master_feature_table", return_value=fake_ft), \
          patch.object(bsp, "build_ensemble_lookup", return_value={}), \
-         patch.object(bsp, "_profile_predictions_for_year", return_value={}), \
+         patch.object(bsp, "NNProjectionEngine", return_value=fake_engine), \
+         patch("services.nn_feature_engine._load_schedule", return_value=pd.DataFrame()), \
          patch.object(bsp, "get_game_predictions", return_value={}), \
          patch.object(bsp, "write_game_predictions"), \
          patch.object(bsp, "write_prediction_features") as mock_wpf:

@@ -56,134 +56,17 @@ from services.feature_audit_service import compute_feature_audit
 
 
 # ---------------------------------------------------------------------------
-# Profile predictions (future / unplayed games)
-# ---------------------------------------------------------------------------
-
-def _profile_predictions_for_year(year: int, schedule_df: pd.DataFrame,
-                                   played_keys: set) -> dict:
-    """Generate team-profile predictions for unplayed games in a season.
-
-    Uses the NNProjectionEngine (prior-season team averages) for games not
-    already covered by the feature table.  The explanation is populated with
-    prior-season profile values so the modal can show meaningful factors.
-    """
-    if schedule_df.empty:
-        return {}
-
-    engine = NNProjectionEngine()
-    engine.initialize(year)
-
-    # Build per-team profile lookup
-    profile_dict = {}
-    for _, row in engine._team_profiles.iterrows():
-        profile_dict[str(row["team"])] = row.to_dict()
-
-    out = {}
-    for _, game in schedule_df.iterrows():
-        ht = _normalize_team(str(game.get("home_team", "") or ""))
-        at = _normalize_team(str(game.get("away_team", "") or ""))
-        wk = game.get("week")
-        if not ht or not at or wk is None:
-            continue
-        key = f"W{int(wk):02d}_{ht}_{at}"
-        if key in played_keys:
-            continue
-        try:
-            prob_result = engine.game_win_probability(ht, at)
-            hp   = prob_result["home_win_prob"]
-            winner = ht if hp >= 0.5 else at
-            conf   = round(min(99.0, max(50.0, (hp if hp >= 0.5 else 1.0 - hp) * 100)), 1)
-
-            spread = game.get("spread_line")
-            sl_val = float(spread) if pd.notna(spread) else None
-
-            hp_clip = float(np.clip(hp, PROB_CLIP_MIN, PROB_CLIP_MAX))
-            model_spread = round(SPREAD_TO_PROB_SCALE * float(np.log(hp_clip / (1.0 - hp_clip))), 1)
-            vegas_spread = round(sl_val, 1) if sl_val is not None else None
-            edge_vs_vegas = round(model_spread - sl_val, 1) if sl_val is not None else None
-
-            ats = winner
-            if sl_val is not None:
-                try:
-                    ats = ht if model_spread > sl_val else at
-                except (ValueError, TypeError):
-                    pass
-            vhp = round(1 / (1 + np.exp(-sl_val / SPREAD_TO_PROB_SCALE)), 4) if sl_val is not None else None
-
-            # Extract prior-season profile values for the explanation
-            h = profile_dict.get(ht, {})
-            a = profile_dict.get(at, {})
-
-            def _pf(team_dict, col, default=0.0):
-                v = team_dict.get(col, default)
-                try:
-                    return float(v) if v is not None and not (isinstance(v, float) and np.isnan(v)) else default
-                except (TypeError, ValueError):
-                    return default
-
-            elo_diff          = round(_pf(h, "elo_pre", 1500) - _pf(a, "elo_pre", 1500), 1)
-            roster_delta      = round(_pf(h, "roster_talent_delta") - _pf(a, "roster_talent_delta"), 3)
-            pass_epa_matchup  = round(_pf(h, "pass_epa_matchup") - _pf(a, "pass_epa_matchup"), 3)
-            rush_epa_matchup  = round(_pf(h, "rush_epa_matchup") - _pf(a, "rush_epa_matchup"), 3)
-            early_down_match  = round(_pf(h, "early_down_matchup") - _pf(a, "early_down_matchup"), 3)
-            point_diff_adv    = round(_pf(h, "point_diff_advantage") - _pf(a, "point_diff_advantage"), 2)
-            turnover_mgn      = round(_pf(h, "turnover_margin_rolling") - _pf(a, "turnover_margin_rolling"), 2)
-            trench            = round(_pf(h, "trench_dominance_metric") - _pf(a, "trench_dominance_metric"), 1)
-            off_rv            = round(_pf(h, "off_roster_value_delta"), 3)
-            def_rv            = round(_pf(h, "def_roster_value_delta"), 3)
-
-            # Rest from schedule if available (home_rest - away_rest, same sign as feature engine's rest_advantage)
-            rest_adv = None
-            h_rest = game.get("home_rest")
-            a_rest = game.get("away_rest")
-            if pd.notna(h_rest) and pd.notna(a_rest):
-                rest_adv = round(float(h_rest) - float(a_rest), 1)
-
-            out[key] = {
-                "pred_prob":     round(float(hp), 4),
-                "pred_winner":   winner,
-                "pred_su_conf":  conf,
-                "pred_ats_pick": ats,
-                "model_spread":  model_spread,
-                "edge_vs_vegas": edge_vs_vegas,
-                "explanation": {
-                    "vegas_line":           vegas_spread,
-                    "vegas_home_prob":      vhp,
-                    "model_spread":         model_spread,
-                    "edge_vs_vegas":        edge_vs_vegas,
-                    "elo_diff":             elo_diff,
-                    "roster_delta":         roster_delta,
-                    "pass_epa_matchup":     pass_epa_matchup,
-                    "rush_epa_matchup":     rush_epa_matchup,
-                    "early_down_matchup":   early_down_match,
-                    "turnover_margin":      turnover_mgn,
-                    "point_diff_advantage": point_diff_adv,
-                    "home_qb_out":          0.0,
-                    "away_qb_out":          0.0,
-                    "rest_advantage":       rest_adv,
-                    "travel_disadvantage":  0.0,
-                    "trench_dominance":     trench,
-                    "off_roster_value":     off_rv,
-                    "def_roster_value":     def_rv,
-                    "source": "profile",
-                },
-            }
-        except Exception:
-            continue
-    return out
-
-
-# ---------------------------------------------------------------------------
 # Build full predictions map for one year
 # ---------------------------------------------------------------------------
 
 def _build_predictions_map(year: int, ft_lookup: dict,
                             schedule_df: pd.DataFrame,
+                            games_df: pd.DataFrame,
                             force: bool) -> dict:
     """Assemble the final predictions map for one season.
 
     1. Feature-table predictions for completed games → locked=True.
-    2. Team-profile predictions for future games → locked=False.
+    2. MC simulation via NNProjectionEngine.simulate_season() for future games → locked=False.
     3. Without --force: read existing store, preserve any already-locked entries
        (protects accuracy tracking if a game just became "completed" but the
        feature table hasn't caught up yet — or if a prior run locked predictions
@@ -194,24 +77,90 @@ def _build_predictions_map(year: int, ft_lookup: dict,
     for (s, wk, ht, at), pred in ft_lookup.items():
         if s == year:
             played_keys[f"W{wk:02d}_{ht}_{at}"] = pred
+    result = {k: {**v, "locked": True} for k, v in played_keys.items()}
 
-    # Build final map: played = locked, future = unlocked
-    result = {k: {**v, "locked": True}  for k, v in played_keys.items()}
+    # Build completed_results from actual nfl_games scores
+    completed_results = {}
+    if not games_df.empty and "result" in games_df.columns:
+        yr_games = games_df[games_df["season"] == year] if "season" in games_df.columns else games_df
+        for _, row in yr_games.iterrows():
+            if pd.notna(row.get("result")) and row.get("game_type") == "REG":
+                ht = _normalize_team(str(row.get("home_team", "") or ""))
+                at = _normalize_team(str(row.get("away_team", "") or ""))
+                wk = row.get("week")
+                if ht and at and wk is not None:
+                    key = f"W{int(wk):02d}_{ht}_{at}"
+                    completed_results[key] = float(row["result"])
 
-    # Profile predictions for unplayed games
-    profile = _profile_predictions_for_year(year, schedule_df, set(played_keys))
-    for k, v in profile.items():
-        result[k] = {**v, "locked": False}
+    # Run dynamic MC simulation for all games (completed apply deterministically,
+    # future games simulate forward from rebuilt team state)
+    if not schedule_df.empty:
+        engine = NNProjectionEngine()  # already imported at top of file
+        engine.initialize(year)
+        sim = engine.simulate_season(schedule_df, n_sims=10_000,
+                                     completed_results=completed_results)
 
-    if force:
-        return result
+        for key, gp in sim["game_probs"].items():
+            if key in played_keys:
+                continue  # never overwrite a locked feature-table prediction
+            ht   = gp["home_team"]
+            at   = gp["away_team"]
+            wk   = gp["week"]
+            hp   = gp["mean_prob"]
+            winner = ht if hp >= 0.5 else at
+            conf   = round(max(hp, 1.0 - hp) * 100, 1)
+            ms     = gp["model_spread"]
 
-    # Preserve any already-locked entries from a prior run (including ones
-    # locked by a previous run that aren't yet in the feature table this run).
-    existing = get_game_predictions(year)
-    for k, v in existing.items():
-        if v.get("locked") and k not in played_keys:
-            result[k] = v  # keep the frozen pre-game prediction
+            # Vegas line from schedule if available
+            sched_row = schedule_df[
+                (schedule_df["home_team"].apply(_normalize_team) == ht)
+                & (schedule_df["week"] == wk)
+            ]
+            sl_val = None
+            if not sched_row.empty and pd.notna(sched_row.iloc[0].get("spread_line")):
+                sl_val = float(sched_row.iloc[0]["spread_line"])
+
+            edge   = round(ms - sl_val, 1) if sl_val is not None else None
+            ats    = ht if ms > (sl_val or 0) else at
+            vhp    = (round(1.0 / (1.0 + np.exp(-sl_val / SPREAD_TO_PROB_SCALE)), 4)
+                      if sl_val is not None else None)
+
+            result[key] = {
+                "pred_prob":     round(hp, 4),
+                "pred_winner":   winner,
+                "pred_su_conf":  conf,
+                "pred_ats_pick": ats,
+                "model_spread":  ms,
+                "edge_vs_vegas": edge,
+                "locked": False,
+                "explanation": {
+                    "vegas_line":           sl_val,
+                    "vegas_home_prob":      vhp,
+                    "model_spread":         ms,
+                    "edge_vs_vegas":        edge,
+                    "elo_diff":             0.0,
+                    "roster_delta":         0.0,
+                    "pass_epa_matchup":     0.0,
+                    "rush_epa_matchup":     0.0,
+                    "early_down_matchup":   0.0,
+                    "turnover_margin":      0.0,
+                    "point_diff_advantage": 0.0,
+                    "home_qb_out":          0.0,
+                    "away_qb_out":          0.0,
+                    "rest_advantage":       0.0,
+                    "travel_disadvantage":  0.0,
+                    "trench_dominance":     0.0,
+                    "off_roster_value":     0.0,
+                    "def_roster_value":     0.0,
+                    "source": "mc_simulation (10000 trials)",
+                },
+            }
+
+    if not force:
+        existing = get_game_predictions(year)
+        for k, v in existing.items():
+            if v.get("locked") and k not in played_keys:
+                result[k] = v
 
     return result
 
@@ -361,7 +310,7 @@ def main():
         else:
             yr_schedule = pd.DataFrame()
 
-        predictions_map = _build_predictions_map(year, ft_lookup, yr_schedule, args.force)
+        predictions_map = _build_predictions_map(year, ft_lookup, yr_schedule, all_games, args.force)
 
         if not predictions_map:
             print(f"  {year}  no predictions available — skipped")
