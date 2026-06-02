@@ -403,6 +403,7 @@ async def get_predictions_games(season: int, week: int, _: dict = Depends(requir
         result_lookup: dict = {}
         if all_games is not None and not all_games.empty:
             played = all_games[
+                (all_games['season'] == season) &
                 all_games['result'].notna() & (all_games['result'] != -1000)
             ]
             for _, row in played.iterrows():

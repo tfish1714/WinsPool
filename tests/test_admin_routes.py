@@ -449,7 +449,7 @@ class TestPredictionsGames:
             }
         }
         mock_games = pd.DataFrame([{
-            "week": 1, "home_team": "KC", "away_team": "BUF", "result": 7.0,
+            "season": 2024, "week": 1, "home_team": "KC", "away_team": "BUF", "result": 7.0,
         }])
         with patch("routes.admin_routes.get_game_predictions", return_value=mock_preds), \
              patch("routes.admin_routes.load_data", return_value=(

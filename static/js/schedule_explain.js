@@ -134,17 +134,23 @@ function renderExplanation(data) {
     }
 
     let passHtml = '—';
-    if (ex?.pass_epa_matchup != null) {
-        const net = ex.pass_epa_matchup;
-        passHtml = Math.abs(net) < 0.01 ? '≈ Even'
-            : `${_teamAdv(net, home_team, away_team)} +${Math.abs(net).toFixed(3)} EPA/play`;
+    {
+        // pass_epa_matchup: computed by feature engine; preseason profiles store off_pass_epa/def_pass_epa instead
+        const net = ex?.pass_epa_matchup ?? ((ex?.off_pass_epa ?? null) !== null ? (ex.off_pass_epa - (ex.def_pass_epa ?? 0)) : null);
+        if (net != null) {
+            passHtml = Math.abs(net) < 0.01 ? '≈ Even'
+                : `${_teamAdv(net, home_team, away_team)} +${Math.abs(net).toFixed(3)} EPA/play`;
+        }
     }
 
     let rushHtml = '—';
-    if (ex?.rush_epa_matchup != null) {
-        const net = ex.rush_epa_matchup;
-        rushHtml = Math.abs(net) < 0.005 ? '≈ Even'
-            : `${_teamAdv(net, home_team, away_team)} +${Math.abs(net).toFixed(3)} EPA/play`;
+    {
+        // rush_epa_matchup: computed by feature engine; preseason profiles store off_rush_epa/def_rush_epa instead
+        const net = ex?.rush_epa_matchup ?? ((ex?.off_rush_epa ?? null) !== null ? (ex.off_rush_epa - (ex.def_rush_epa ?? 0)) : null);
+        if (net != null) {
+            rushHtml = Math.abs(net) < 0.005 ? '≈ Even'
+                : `${_teamAdv(net, home_team, away_team)} +${Math.abs(net).toFixed(3)} EPA/play`;
+        }
     }
 
     let earlyDownHtml = '—';
@@ -184,10 +190,13 @@ function renderExplanation(data) {
     }
 
     let restHtml = '—';
-    if (ex?.rest_advantage != null) {
-        const r = ex.rest_advantage;
-        restHtml = Math.abs(r) < 0.5 ? '≈ Even rest'
-            : `${_teamAdv(r, home_team, away_team)} +${Math.abs(r).toFixed(0)} days`;
+    {
+        // rest_advantage: feature engine uses this name; preseason backfill stores rest_disadvantage (same value)
+        const r = ex?.rest_advantage ?? ex?.rest_disadvantage ?? null;
+        if (r != null) {
+            restHtml = Math.abs(r) < 0.5 ? '≈ Even rest'
+                : `${_teamAdv(r, home_team, away_team)} +${Math.abs(r).toFixed(0)} days`;
+        }
     }
 
     let travelHtml = '—';

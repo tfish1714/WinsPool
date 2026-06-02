@@ -121,20 +121,18 @@ def _profile_predictions_for_year(year: int, schedule_df: pd.DataFrame,
                 except (TypeError, ValueError):
                     return default
 
-            elo_diff      = round(_pf(h, "tm_elo_pre", 1500) - _pf(a, "tm_elo_pre", 1500), 1)
-            # roster_talent_delta from profiles: home grade minus away grade
-            roster_delta  = round(_pf(h, "roster_talent_delta") - _pf(a, "roster_talent_delta"), 3)
-            # off EPA from home profile; def EPA = away team's offensive EPA (what home D faces)
-            off_pass_epa  = round(_pf(h, "off_pass_epa"), 3)
-            def_pass_epa  = round(_pf(a, "off_pass_epa"), 3)
-            off_rush_epa  = round(_pf(h, "off_rush_epa"), 3)
-            def_rush_epa  = round(_pf(a, "off_rush_epa"), 3)
-            turnover_mgn  = round(_pf(h, "turnover_margin_rolling"), 2)
-            trench        = round(_pf(h, "trench_dominance_metric") - _pf(a, "trench_dominance_metric"), 1)
-            off_rv        = round(_pf(h, "off_roster_value_delta"), 3)
-            def_rv        = round(_pf(h, "def_roster_value_delta"), 3)
+            elo_diff          = round(_pf(h, "elo_pre", 1500) - _pf(a, "elo_pre", 1500), 1)
+            roster_delta      = round(_pf(h, "roster_talent_delta") - _pf(a, "roster_talent_delta"), 3)
+            pass_epa_matchup  = round(_pf(h, "pass_epa_matchup") - _pf(a, "pass_epa_matchup"), 3)
+            rush_epa_matchup  = round(_pf(h, "rush_epa_matchup") - _pf(a, "rush_epa_matchup"), 3)
+            early_down_match  = round(_pf(h, "early_down_matchup") - _pf(a, "early_down_matchup"), 3)
+            point_diff_adv    = round(_pf(h, "point_diff_advantage") - _pf(a, "point_diff_advantage"), 2)
+            turnover_mgn      = round(_pf(h, "turnover_margin_rolling") - _pf(a, "turnover_margin_rolling"), 2)
+            trench            = round(_pf(h, "trench_dominance_metric") - _pf(a, "trench_dominance_metric"), 1)
+            off_rv            = round(_pf(h, "off_roster_value_delta"), 3)
+            def_rv            = round(_pf(h, "def_roster_value_delta"), 3)
 
-            # Rest/travel from schedule if available
+            # Rest from schedule if available (home_rest - away_rest, same sign as feature engine's rest_advantage)
             rest_adv = None
             h_rest = game.get("home_rest")
             a_rest = game.get("away_rest")
@@ -149,24 +147,24 @@ def _profile_predictions_for_year(year: int, schedule_df: pd.DataFrame,
                 "model_spread":  model_spread,
                 "edge_vs_vegas": edge_vs_vegas,
                 "explanation": {
-                    "vegas_line":        vegas_spread,
-                    "vegas_home_prob":   vhp,
-                    "model_spread":      model_spread,
-                    "edge_vs_vegas":     edge_vs_vegas,
-                    "elo_diff":          elo_diff,
-                    "roster_delta":      roster_delta,
-                    "off_pass_epa":      off_pass_epa,
-                    "def_pass_epa":      def_pass_epa,
-                    "off_rush_epa":      off_rush_epa,
-                    "def_rush_epa":      def_rush_epa,
-                    "turnover_margin":   turnover_mgn,
-                    "qb_injury":         0.0,
-                    "home_qb_out":       0.0,
-                    "away_qb_out":       0.0,
-                    "rest_disadvantage": rest_adv,
-                    "trench_dominance":  trench,
-                    "off_roster_value":  off_rv,
-                    "def_roster_value":  def_rv,
+                    "vegas_line":           vegas_spread,
+                    "vegas_home_prob":      vhp,
+                    "model_spread":         model_spread,
+                    "edge_vs_vegas":        edge_vs_vegas,
+                    "elo_diff":             elo_diff,
+                    "roster_delta":         roster_delta,
+                    "pass_epa_matchup":     pass_epa_matchup,
+                    "rush_epa_matchup":     rush_epa_matchup,
+                    "early_down_matchup":   early_down_match,
+                    "turnover_margin":      turnover_mgn,
+                    "point_diff_advantage": point_diff_adv,
+                    "home_qb_out":          0.0,
+                    "away_qb_out":          0.0,
+                    "rest_advantage":       rest_adv,
+                    "travel_disadvantage":  0.0,
+                    "trench_dominance":     trench,
+                    "off_roster_value":     off_rv,
+                    "def_roster_value":     def_rv,
                     "source": "profile",
                 },
             }
