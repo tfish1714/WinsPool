@@ -11,6 +11,7 @@ from typing import Dict, List, Optional
 from services.constants import (
     UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT,
     PROB_CLIP_MIN, PROB_CLIP_MAX, ELO_TO_SPREAD, SPREAD_TO_PROB_SCALE,
+    MC_MARGIN_STD, MC_EPA_SCALE, MC_EPA_RUSH_WEIGHT,
 )
 
 from services.nn_feature_engine import (
@@ -233,6 +234,22 @@ class NNProjectionEngine:
             "xgb_home_prob": round(float(xgb_prob), 4),
             "lr_home_prob":  round(float(lr_prob),  4),
         }
+
+    def _batch_predict(self, X: np.ndarray) -> np.ndarray:
+        """Run the NN+XGB+LR ensemble on a feature batch.
+
+        Args:
+            X: Raw (unscaled) feature matrix of shape (N, n_features).
+
+        Returns:
+            Blended win probabilities of shape (N,), clipped to [PROB_CLIP_MIN, PROB_CLIP_MAX].
+        """
+        X_f = X.astype(np.float32)
+        nn_p  = self.svc.model.predict(self.svc.scaler.transform(X_f), verbose=0).flatten()
+        xgb_p = self.xgb_svc.model.predict_proba(self.xgb_svc.scaler.transform(X_f))[:, 1]
+        lr_p  = self.lr_svc.model.predict_proba(self.lr_svc.scaler.transform(X_f))[:, 1]
+        blended = NN_WEIGHT * nn_p + XGB_WEIGHT * xgb_p + LR_WEIGHT * lr_p
+        return np.clip(blended, PROB_CLIP_MIN, PROB_CLIP_MAX).astype(np.float64)
 
     def _run_monte_carlo(self, game_probs: list, all_teams: list, n_sims: int) -> dict:
         """Execute Monte Carlo season simulation over pre-computed game probabilities."""
