@@ -457,6 +457,152 @@ def _load_player_epa(prior_season: int, rawdata_dir) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Preseason Player Profiles
+# ---------------------------------------------------------------------------
+
+# Position group sets
+_OFF_OL_POS = {"LT", "LG", "C", "RG", "RT"}
+
+# Depth-chart snap allocation weights for pass game (QB=65%, WR/TE=35%)
+_WR_TE_WEIGHTS = {"WR_1": 0.40, "WR_2": 0.25, "WR_3": 0.10,
+                  "TE_1": 0.20, "TE_2": 0.05}
+
+# Depth-chart snap allocation weights for rush game (RB=75%, OL normalised=25%)
+_RB_WEIGHTS = {"RB_1": 0.50, "RB_2": 0.25}
+
+
+def _preseason_offense(
+    depth_charts: pd.DataFrame,
+    player_epa: pd.DataFrame,
+    roster: pd.DataFrame,
+    snap_counts: pd.DataFrame,
+    season: int,
+) -> dict:
+    """Build per-team offensive EPA estimates from depth chart + prior-season player stats.
+
+    Returns {team: {off_pass_epa, off_rush_epa, qb_tier, ol_av}}.
+    """
+    epa_by_id:   dict = {}
+    epa_by_name: dict = {}
+    if not player_epa.empty:
+        for _, row in player_epa.iterrows():
+            epa_by_id[str(row["player_id"])] = row.to_dict()
+            epa_by_name[str(row["player_display_name"]).lower()] = row.to_dict()
+
+    def _lg_avg(col: str, min_vol: str, min_val: int) -> float:
+        if player_epa.empty:
+            return 0.0
+        qualified = player_epa[player_epa[min_vol] >= min_val]
+        if qualified.empty:
+            return 0.0
+        return float(qualified[col].mean())
+
+    lg_pass_rate  = _lg_avg("pass_epa_rate", "attempts", 100)
+    lg_recv_rate  = _lg_avg("recv_epa_rate", "targets",  20)
+    lg_rush_rate  = _lg_avg("rush_epa_rate", "carries",  50)
+
+    ROOKIE_DISC = 0.75
+
+    def _lookup(gsis_id: str, name: str) -> dict | None:
+        row = epa_by_id.get(str(gsis_id))
+        if row is None:
+            row = epa_by_name.get(str(name).lower())
+        return row
+
+    sep1 = pd.Timestamp(f"{season}-09-01")
+    roster_cp = roster.copy()
+    roster_cp["birth_date"] = pd.to_datetime(roster_cp["birth_date"], errors="coerce")
+    roster_cp["age"] = ((sep1 - roster_cp["birth_date"]).dt.days / 365.25)
+    pfr_to_snaps = {}
+    if not snap_counts.empty:
+        sc = snap_counts.copy()
+        if "game_type" in sc.columns:
+            sc = sc[sc["game_type"] == "REG"]
+        sc["offense_snaps"] = pd.to_numeric(sc["offense_snaps"], errors="coerce").fillna(0)
+        pfr_to_snaps = sc.groupby("pfr_player_id")["offense_snaps"].sum().to_dict()
+        name_snaps = sc.groupby("player")["offense_snaps"].sum().to_dict()
+    else:
+        name_snaps = {}
+    ol_vets = pd.to_numeric(
+        pd.Series(list(pfr_to_snaps.values())), errors="coerce"
+    ).dropna()
+    ol_median = float(ol_vets.median()) if not ol_vets.empty else 300.0
+
+    gsis_to_pfr = {}
+    if not roster_cp.empty and "gsis_id" in roster_cp.columns and "pfr_id" in roster_cp.columns:
+        gsis_to_pfr = {str(r["gsis_id"]): str(r["pfr_id"])
+                       for _, r in roster_cp.iterrows()
+                       if pd.notna(r.get("pfr_id"))}
+
+    result = {}
+    for team, grp in depth_charts.groupby("team"):
+        off_pass_epa = 0.0
+        off_rush_epa = 0.0
+        qb_tier      = lg_pass_rate * ROOKIE_DISC
+        ol_av        = 0.0
+
+        # QB (65% of off_pass_epa)
+        qb_rows = grp[(grp["pos_abb"] == "QB") & (grp["pos_rank"] == 1)]
+        if not qb_rows.empty:
+            r = qb_rows.iloc[0]
+            data = _lookup(r["gsis_id"], r["player_name"])
+            rate = data["pass_epa_rate"] if data and data.get("attempts", 0) >= 100 \
+                else lg_pass_rate * ROOKIE_DISC
+            qb_tier = rate
+            off_pass_epa += 0.65 * rate
+
+        # WR/TE (35% of off_pass_epa split by slot weights)
+        for pos_abb, base_key in [("WR", "WR"), ("TE", "TE")]:
+            for rank in [1, 2, 3]:
+                weight_key = f"{base_key}_{rank}"
+                if weight_key not in _WR_TE_WEIGHTS:
+                    continue
+                slot_rows = grp[(grp["pos_abb"] == pos_abb) & (grp["pos_rank"] == rank)]
+                if slot_rows.empty:
+                    rate = lg_recv_rate * ROOKIE_DISC
+                else:
+                    data = _lookup(slot_rows.iloc[0]["gsis_id"], slot_rows.iloc[0]["player_name"])
+                    rate = data["recv_epa_rate"] if data and data.get("targets", 0) >= 10 \
+                        else lg_recv_rate * ROOKIE_DISC
+                off_pass_epa += _WR_TE_WEIGHTS[weight_key] * rate
+
+        # RB
+        for rank, weight in [(1, 0.50), (2, 0.25)]:
+            rb_rows = grp[(grp["pos_abb"] == "RB") & (grp["pos_rank"] == rank)]
+            if rb_rows.empty:
+                rate = lg_rush_rate * ROOKIE_DISC
+            else:
+                data = _lookup(rb_rows.iloc[0]["gsis_id"], rb_rows.iloc[0]["player_name"])
+                rate = data["rush_epa_rate"] if data and data.get("carries", 0) >= 30 \
+                    else lg_rush_rate * ROOKIE_DISC
+            off_rush_epa += weight * rate
+
+        # OL snap × age quality (also stored as ol_av for trench metric)
+        ol_grp = grp[grp["pos_abb"].isin(_OFF_OL_POS)]
+        for _, p in ol_grp.iterrows():
+            gid  = str(p["gsis_id"])
+            name = str(p["player_name"])
+            pfr  = gsis_to_pfr.get(gid, "")
+            roster_match = roster_cp[roster_cp["gsis_id"] == gid]
+            age = float(roster_match["age"].iloc[0]) if not roster_match.empty \
+                and pd.notna(roster_match["age"].iloc[0]) else 26.0
+            mult = compute_age_multiplier(age, "T")
+            snaps = pfr_to_snaps.get(pfr) or name_snaps.get(name) or (ol_median * 0.5)
+            ol_av += float(snaps) * mult
+
+        off_rush_epa += 0.25 * (ol_av / max(ol_median * 5, 1))
+
+        result[team] = {
+            "off_pass_epa": off_pass_epa,
+            "off_rush_epa": off_rush_epa,
+            "qb_tier":      qb_tier,
+            "ol_av":        ol_av,
+        }
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Snap-Count QB Starter Flag
 # ---------------------------------------------------------------------------
 
