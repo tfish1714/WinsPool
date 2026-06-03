@@ -378,3 +378,50 @@ class TestComputePreseasonPlayerProfiles:
         from services.nn_feature_engine import compute_preseason_player_profiles
         result = compute_preseason_player_profiles(2026, tmp_path)
         assert result == {}
+
+
+class TestNNProjectionEngineInitialize:
+    def test_preseason_profiles_set_when_snap_empty(self, tmp_path, monkeypatch):
+        """When no 2026 snap data exists, initialize() should set _preseason_profiles."""
+        import services.nn_projection_engine as eng_mod
+        from unittest.mock import patch
+
+        fake_profiles = {"KC": {"off_pass_epa": 0.1, "off_rush_epa": 0.05,
+                                "def_pass_epa": -0.1, "def_rush_epa": -0.05,
+                                "ol_av": 1200.0, "dl_perf": 80.0, "qb_tier": 0.18}}
+
+        with patch("services.nn_projection_engine.NNPredictionService"), \
+             patch("services.nn_projection_engine.XGBPredictionService"), \
+             patch("services.nn_projection_engine.LRPredictionService"), \
+             patch("services.nn_projection_engine.build_master_feature_table",
+                   return_value=pd.DataFrame()), \
+             patch("services.nn_projection_engine.compute_preseason_player_profiles",
+                   return_value=fake_profiles) as mock_fn, \
+             patch.object(eng_mod.NNProjectionEngine, "_build_team_profiles",
+                          return_value=pd.DataFrame()):
+            engine = eng_mod.NNProjectionEngine()
+            engine.initialize(2026)
+
+        mock_fn.assert_called_once()
+        assert hasattr(engine, "_preseason_profiles")
+        assert engine._preseason_profiles == fake_profiles
+
+    def test_preseason_roster_and_norm_not_set(self, tmp_path, monkeypatch):
+        """_preseason_roster and _preseason_norm should not be set after initialize()."""
+        import services.nn_projection_engine as eng_mod
+        from unittest.mock import patch
+
+        with patch("services.nn_projection_engine.NNPredictionService"), \
+             patch("services.nn_projection_engine.XGBPredictionService"), \
+             patch("services.nn_projection_engine.LRPredictionService"), \
+             patch("services.nn_projection_engine.build_master_feature_table",
+                   return_value=pd.DataFrame()), \
+             patch("services.nn_projection_engine.compute_preseason_player_profiles",
+                   return_value={}), \
+             patch.object(eng_mod.NNProjectionEngine, "_build_team_profiles",
+                          return_value=pd.DataFrame()):
+            engine = eng_mod.NNProjectionEngine()
+            engine.initialize(2026)
+
+        assert not hasattr(engine, "_preseason_roster") or engine._preseason_roster == {}
+        assert not hasattr(engine, "_preseason_norm") or engine._preseason_norm is None

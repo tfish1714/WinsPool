@@ -20,6 +20,7 @@ from services.nn_feature_engine import (
     _read_csv_safe,
     _normalize_team,
     compute_preseason_roster_features,
+    compute_preseason_player_profiles,
 )
 from services.nn_prediction_service import (
     NNPredictionService,
@@ -42,8 +43,11 @@ class NNProjectionEngine:
         self.lr_svc = LRPredictionService()
         self.lr_svc.load_model()
         self._team_profiles = pd.DataFrame()
-        self._preseason_roster: dict = {}   # {team: {"ol_av": float, "dl_perf": float}}
-        self._preseason_norm: tuple | None = None  # (ol_mu, ol_sig, dl_mu, dl_sig)
+        self._preseason_profiles: dict = {}  # {team: {off_pass_epa, off_rush_epa, ...}}
+        # Legacy attributes kept as empty defaults so _precompute_static_features fallback
+        # doesn't AttributeError on older code paths
+        self._preseason_roster: dict = {}
+        self._preseason_norm: tuple | None = None
 
     def initialize(self, season: int):
         """Pre-compute the feature profiles required for predictions.
@@ -58,21 +62,15 @@ class NNProjectionEngine:
         snap_empty = not snap_path.exists() or pd.read_csv(snap_path, nrows=1).empty
         if snap_empty:
             try:
-                self._preseason_roster = compute_preseason_roster_features(season, RAWDATA_DIR)
-                if self._preseason_roster:
+                self._preseason_profiles = compute_preseason_player_profiles(season, RAWDATA_DIR)
+                if self._preseason_profiles:
                     logger.info(
-                        "Preseason roster profiles built for %d teams (season %d)",
-                        len(self._preseason_roster), season,
-                    )
-                    # Normalization params from league-wide preseason distribution
-                    ol_vals = [v.get("ol_av",   0.0) for v in self._preseason_roster.values()]
-                    dl_vals = [v.get("dl_perf", 0.0) for v in self._preseason_roster.values()]
-                    self._preseason_norm = (
-                        float(np.mean(ol_vals)), max(float(np.std(ol_vals)), 1.0),
-                        float(np.mean(dl_vals)), max(float(np.std(dl_vals)), 1.0),
+                        "Preseason player profiles built for %d teams (season %d)",
+                        len(self._preseason_profiles), season,
                     )
             except Exception as exc:
-                logger.warning("Preseason roster build failed: %s", exc)
+                logger.warning("Preseason player profile build failed: %s", exc)
+                self._preseason_profiles = {}
 
     def _build_team_profiles(self, feature_table: pd.DataFrame, proxy_season: int) -> pd.DataFrame:
         """Build per-team average feature profiles from the proxy season.
