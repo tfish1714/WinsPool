@@ -327,3 +327,54 @@ class TestPreseasonDefense:
             _fake_def_snap_counts(), season=2026
         )
         assert "CCC" in result
+
+
+class TestComputePreseasonPlayerProfiles:
+    def _write_files(self, tmp_path, season=2026):
+        prior = season - 1
+        (tmp_path / "stats_player").mkdir(exist_ok=True)
+        _fake_player_stats().to_csv(
+            tmp_path / "stats_player" / f"stats_player_regpost_{prior}.csv", index=False)
+
+        (tmp_path / "depth_charts").mkdir(exist_ok=True)
+        dc = pd.concat([_fake_depth_chart(), _fake_def_depth_chart()], ignore_index=True)
+        dc.to_csv(tmp_path / "depth_charts" / f"depth_charts_{season}.csv", index=False)
+
+        (tmp_path / "rosters").mkdir(exist_ok=True)
+        pd.concat([_fake_roster(), _fake_def_roster()], ignore_index=True).to_csv(
+            tmp_path / "rosters" / f"roster_{season}.csv", index=False)
+
+        (tmp_path / "pfr_advstats").mkdir(exist_ok=True)
+        _fake_def_advstats().to_csv(
+            tmp_path / "pfr_advstats" / f"advstats_week_def_{prior}.csv", index=False)
+
+        (tmp_path / "snap_counts").mkdir(exist_ok=True)
+        pd.concat([_fake_snap_counts(), _fake_def_snap_counts()], ignore_index=True).to_csv(
+            tmp_path / "snap_counts" / f"snap_counts_{prior}.csv", index=False)
+
+    def test_returns_dict_with_teams(self, tmp_path):
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        self._write_files(tmp_path)
+        result = compute_preseason_player_profiles(2026, tmp_path)
+        assert isinstance(result, dict)
+        assert "AAA" in result
+
+    def test_all_required_keys_present(self, tmp_path):
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        self._write_files(tmp_path)
+        result = compute_preseason_player_profiles(2026, tmp_path)
+        for key in ("off_pass_epa", "off_rush_epa", "def_pass_epa",
+                    "def_rush_epa", "ol_av", "dl_perf", "qb_tier"):
+            assert key in result["AAA"], f"Missing: {key}"
+
+    def test_epa_values_are_floats(self, tmp_path):
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        self._write_files(tmp_path)
+        result = compute_preseason_player_profiles(2026, tmp_path)
+        for key in ("off_pass_epa", "off_rush_epa", "def_pass_epa", "def_rush_epa"):
+            assert isinstance(result["AAA"][key], float), f"{key} is not float"
+
+    def test_returns_empty_dict_if_files_missing(self, tmp_path):
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        result = compute_preseason_player_profiles(2026, tmp_path)
+        assert result == {}

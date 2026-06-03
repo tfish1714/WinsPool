@@ -771,6 +771,63 @@ def _preseason_defense(
     return result
 
 
+def compute_preseason_player_profiles(target_season: int, rawdata_dir) -> dict:
+    """Build per-team EPA quality estimates from projected roster + prior-season player stats.
+
+    Replaces compute_preseason_roster_features() for all position groups.
+    Returns {team: {off_pass_epa, off_rush_epa, def_pass_epa, def_rush_epa,
+                    ol_av, dl_perf, qb_tier}}.
+    Returns {} if required files (roster or depth_charts) are missing.
+    """
+    prior = target_season - 1
+    rd = Path(rawdata_dir)
+
+    roster_path  = rd / "rosters"      / f"roster_{target_season}.csv"
+    dc_path      = rd / "depth_charts" / f"depth_charts_{target_season}.csv"
+    adv_def_path = rd / "pfr_advstats" / f"advstats_week_def_{prior}.csv"
+    snap_path    = rd / "snap_counts"  / f"snap_counts_{prior}.csv"
+
+    if not roster_path.exists() or not dc_path.exists():
+        return {}
+
+    roster      = pd.read_csv(roster_path, low_memory=False)
+    depth_chart = pd.read_csv(dc_path,     low_memory=False)
+    depth_chart["team"] = depth_chart["team"].apply(_normalize_team)
+    if "team" in roster.columns:
+        roster["team"] = roster["team"].apply(_normalize_team)
+
+    def_advstats = pd.read_csv(adv_def_path, low_memory=False) \
+        if adv_def_path.exists() else pd.DataFrame()
+    snap_counts  = pd.read_csv(snap_path,    low_memory=False) \
+        if snap_path.exists() else pd.DataFrame()
+
+    player_epa = _load_player_epa(prior, rawdata_dir)
+
+    off = _preseason_offense(depth_chart, player_epa, roster, snap_counts, target_season)
+    dfe = _preseason_defense(depth_chart, def_advstats, roster, snap_counts, target_season)
+
+    all_teams = set(off) | set(dfe)
+    raw: dict = {}
+    for team in all_teams:
+        raw[team] = {
+            **off.get(team, {"off_pass_epa": 0.0, "off_rush_epa": 0.0,
+                             "qb_tier": 0.0, "ol_av": 0.0}),
+            **dfe.get(team, {"def_pass_epa": 0.0, "def_rush_epa": 0.0, "dl_perf": 0.0}),
+        }
+
+    if not raw:
+        return {}
+
+    # Normalize each EPA dimension: subtract league mean so average team = 0
+    for dim in ("off_pass_epa", "off_rush_epa", "def_pass_epa", "def_rush_epa"):
+        vals = [v[dim] for v in raw.values()]
+        mu = float(np.mean(vals))
+        for team in raw:
+            raw[team][dim] = float(raw[team][dim] - mu)
+
+    return raw
+
+
 # ---------------------------------------------------------------------------
 # Snap-Count QB Starter Flag
 # ---------------------------------------------------------------------------
