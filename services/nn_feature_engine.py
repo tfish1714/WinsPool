@@ -590,7 +590,8 @@ def _preseason_offense(
             snaps = pfr_to_snaps.get(pfr) or name_snaps.get(name) or (ol_median * 0.5)
             ol_av += float(snaps) * mult
 
-        off_rush_epa += 0.25 * (ol_av / max(ol_median * 5, 1))
+        # ol_av is stored for the trench metric but NOT added to off_rush_epa;
+        # adding it here produced values ±30K (out of scale vs. EPA rates).
 
         result[team] = {
             "off_pass_epa": off_pass_epa,
