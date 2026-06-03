@@ -154,6 +154,16 @@ class NNProjectionEngine:
             state_template[idx, 4] = float(p.get("def_rush_epa_roll",    0.0))
             state_template[idx, 5] = float(p.get("margin_roll",          0.0))
 
+        # Override EPA dims 1-4 with bottom-up preseason player profiles when available
+        if self._preseason_profiles:
+            for team, idx in team_idx.items():
+                pp = self._preseason_profiles.get(team, {})
+                if pp:
+                    state_template[idx, 1] = float(pp.get("off_pass_epa", state_template[idx, 1]))
+                    state_template[idx, 2] = float(pp.get("off_rush_epa", state_template[idx, 2]))
+                    state_template[idx, 3] = float(pp.get("def_pass_epa", state_template[idx, 3]))
+                    state_template[idx, 4] = float(pp.get("def_rush_epa", state_template[idx, 4]))
+
         return state_template, team_list, team_idx
 
     def _precompute_static_features(self, schedule_df: pd.DataFrame) -> dict:
@@ -222,8 +232,25 @@ class NNProjectionEngine:
                 float(hp.get("def_pressures_roll", 0.0)) - float(ap.get("def_pressures_roll", 0.0))
             )
 
-            # Trench: preseason roster if available, else profile average
-            if self._preseason_roster and self._preseason_norm:
+            # Trench: preseason player profiles → legacy roster → profile average
+            if self._preseason_profiles:
+                h_pr = self._preseason_profiles.get(ht, {})
+                a_pr = self._preseason_profiles.get(at, {})
+                if h_pr and a_pr:
+                    all_ol = [v.get("ol_av", 0.0) for v in self._preseason_profiles.values()]
+                    all_dl = [v.get("dl_perf", 0.0) for v in self._preseason_profiles.values()]
+                    ol_mu, ol_sig = float(np.mean(all_ol)), max(float(np.std(all_ol)), 1.0)
+                    dl_mu, dl_sig = float(np.mean(all_dl)), max(float(np.std(all_dl)), 1.0)
+                    h_z = ((h_pr.get("ol_av", ol_mu) - ol_mu) / ol_sig
+                           + (h_pr.get("dl_perf", dl_mu) - dl_mu) / dl_sig)
+                    a_z = ((a_pr.get("ol_av", ol_mu) - ol_mu) / ol_sig
+                           + (a_pr.get("dl_perf", dl_mu) - dl_mu) / dl_sig)
+                    feat[col_idx["trench_dominance_metric"]] = float(h_z - a_z)
+                else:
+                    feat[col_idx["trench_dominance_metric"]] = (
+                        float(hp.get("trench_score", 0.0)) - float(ap.get("trench_score", 0.0))
+                    )
+            elif self._preseason_roster and self._preseason_norm:
                 ol_mu, ol_sig, dl_mu, dl_sig = self._preseason_norm
                 h_pr = self._preseason_roster.get(ht, {})
                 a_pr = self._preseason_roster.get(at, {})

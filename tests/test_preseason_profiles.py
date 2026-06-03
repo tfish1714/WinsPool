@@ -425,3 +425,87 @@ class TestNNProjectionEngineInitialize:
 
         assert not hasattr(engine, "_preseason_roster") or engine._preseason_roster == {}
         assert not hasattr(engine, "_preseason_norm") or engine._preseason_norm is None
+
+
+class TestPreseasonProfilesWiredIntoSimulation:
+    def _make_engine_with_profiles(self, profiles: dict):
+        """Return an engine with _team_profiles and _preseason_profiles set."""
+        from unittest.mock import patch
+        with patch("services.nn_projection_engine.NNPredictionService"), \
+             patch("services.nn_projection_engine.XGBPredictionService"), \
+             patch("services.nn_projection_engine.LRPredictionService"):
+            from services.nn_projection_engine import NNProjectionEngine
+            from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+            engine = NNProjectionEngine()
+
+        engine._team_profiles = pd.DataFrame([
+            {"team": "KC",  "elo_pre": 1580.0,
+             "off_pass_epa_roll": 0.05, "off_rush_epa_roll": 0.02,
+             "def_pass_epa_roll": 0.03, "def_rush_epa_roll": 0.01,
+             "margin_roll": 5.0,
+             **{c: 0.0 for c in NN_FC}},
+            {"team": "TEN", "elo_pre": 1420.0,
+             "off_pass_epa_roll": -0.05, "off_rush_epa_roll": -0.02,
+             "def_pass_epa_roll": -0.03, "def_rush_epa_roll": -0.01,
+             "margin_roll": -5.0,
+             **{c: 0.0 for c in NN_FC}},
+        ])
+        engine._preseason_profiles = profiles
+        engine._preseason_norm = None
+        return engine
+
+    def test_preseason_epa_overrides_profile_epa(self):
+        """_build_initial_state() should use preseason_profiles EPA, not team_profiles EPA."""
+        profiles = {
+            "KC":  {"off_pass_epa": 0.25, "off_rush_epa": 0.10,
+                    "def_pass_epa": -0.15, "def_rush_epa": -0.08,
+                    "ol_av": 1500.0, "dl_perf": 100.0, "qb_tier": 0.25},
+            "TEN": {"off_pass_epa": -0.20, "off_rush_epa": -0.05,
+                    "def_pass_epa": 0.10, "def_rush_epa": 0.05,
+                    "ol_av": 800.0, "dl_perf": 40.0, "qb_tier": -0.05},
+        }
+        engine = self._make_engine_with_profiles(profiles)
+        state, team_list, team_idx = engine._build_initial_state()
+
+        kc  = team_idx["KC"]
+        ten = team_idx["TEN"]
+        # Dim 1 = off_pass_epa: should come from preseason_profiles
+        assert state[kc, 1] == pytest.approx(0.25, abs=0.01)
+        assert state[ten, 1] == pytest.approx(-0.20, abs=0.01)
+
+    def test_elo_not_overridden_by_profiles(self):
+        """Elo (dim 0) should come from team_profiles elo_pre, not preseason_profiles."""
+        profiles = {
+            "KC":  {"off_pass_epa": 0.1, "off_rush_epa": 0.0,
+                    "def_pass_epa": 0.0, "def_rush_epa": 0.0,
+                    "ol_av": 1000.0, "dl_perf": 50.0, "qb_tier": 0.1},
+            "TEN": {"off_pass_epa": -0.1, "off_rush_epa": 0.0,
+                    "def_pass_epa": 0.0, "def_rush_epa": 0.0,
+                    "ol_av": 800.0, "dl_perf": 30.0, "qb_tier": -0.05},
+        }
+        engine = self._make_engine_with_profiles(profiles)
+        state, _, team_idx = engine._build_initial_state()
+
+        assert state[team_idx["KC"],  0] == pytest.approx(1580.0)
+        assert state[team_idx["TEN"], 0] == pytest.approx(1420.0)
+
+    def test_trench_metric_uses_profiles_ol_dl(self):
+        """_precompute_static_features() uses ol_av/dl_perf from _preseason_profiles."""
+        profiles = {
+            "KC":  {"off_pass_epa": 0.1, "off_rush_epa": 0.0,
+                    "def_pass_epa": 0.0, "def_rush_epa": 0.0,
+                    "ol_av": 2000.0, "dl_perf": 200.0, "qb_tier": 0.1},
+            "TEN": {"off_pass_epa": -0.1, "off_rush_epa": 0.0,
+                    "def_pass_epa": 0.0, "def_rush_epa": 0.0,
+                    "ol_av": 500.0, "dl_perf": 20.0, "qb_tier": -0.1},
+        }
+        engine = self._make_engine_with_profiles(profiles)
+        sched = pd.DataFrame([
+            {"home_team": "KC", "away_team": "TEN", "week": 1, "game_type": "REG"}
+        ])
+        feats = engine._precompute_static_features(sched)
+        from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+        col_idx = {c: i for i, c in enumerate(NN_FC)}
+        trench = feats["W01_KC_TEN"][col_idx["trench_dominance_metric"]]
+        # KC has much better OL+DL than TEN → positive trench for KC as home team
+        assert trench > 0
