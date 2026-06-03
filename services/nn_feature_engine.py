@@ -602,6 +602,175 @@ def _preseason_offense(
     return result
 
 
+_DEF_DL_POS = {"LDE", "RDE", "LDT", "RDT", "NT"}
+_DEF_LB_POS = {"WLB", "MLB", "SLB", "LILB", "RILB"}
+_DEF_CB_POS = {"LCB", "RCB", "NB"}
+_DEF_S_POS  = {"SS", "FS"}
+
+# def_pass_epa weights: DL=45%, LB=20%, CB/S=35%
+_DEF_PASS_WEIGHTS = {"dl": 0.45, "lb": 0.20, "cb_s": 0.35}
+# def_rush_epa weights: DL=60%, LB=40%
+_DEF_RUSH_WEIGHTS = {"dl": 0.60, "lb": 0.40}
+
+
+def _preseason_defense(
+    depth_charts: pd.DataFrame,
+    def_advstats: pd.DataFrame,
+    roster: pd.DataFrame,
+    snap_counts: pd.DataFrame,
+    season: int,
+) -> dict:
+    """Build per-team defensive EPA estimates from depth chart + prior-season advstats.
+
+    Returns {team: {def_pass_epa, def_rush_epa, dl_perf}}.
+    def_pass_epa is negative when a team's coverage is better than league average.
+    """
+    adv_by_pfr:  dict = {}
+    adv_by_name: dict = {}
+    if not def_advstats.empty:
+        adv = def_advstats.copy()
+        if "game_type" in adv.columns:
+            adv = adv[adv["game_type"] == "REG"]
+        num_cols = ["def_sacks", "def_pressures", "def_times_hitqb",
+                    "def_tackles_combined", "def_targets",
+                    "def_yards_allowed_per_tgt", "def_passer_rating_allowed"]
+        for c in num_cols:
+            if c in adv.columns:
+                adv[c] = pd.to_numeric(adv[c], errors="coerce").fillna(0.0)
+        agg = adv.groupby("pfr_player_id")[num_cols].sum().reset_index()
+        if "def_targets" in agg.columns:
+            agg["def_yards_per_tgt_avg"] = (
+                agg["def_yards_allowed_per_tgt"] / agg["def_targets"].clip(lower=1)
+            )
+            agg["def_passer_rtg_avg"] = (
+                agg["def_passer_rating_allowed"] / agg["def_targets"].clip(lower=1)
+            )
+
+        for _, row in agg.iterrows():
+            adv_by_pfr[str(row["pfr_player_id"])] = row.to_dict()
+        name_agg = adv.groupby("pfr_player_name")[num_cols].sum().reset_index()
+        for _, row in name_agg.iterrows():
+            adv_by_name[str(row["pfr_player_name"]).lower()] = row.to_dict()
+
+    snap_by_pfr: dict = {}
+    if not snap_counts.empty:
+        sc = snap_counts.copy()
+        if "game_type" in sc.columns:
+            sc = sc[sc["game_type"] == "REG"]
+        sc["defense_snaps"] = pd.to_numeric(sc["defense_snaps"], errors="coerce").fillna(0)
+        snap_by_pfr = sc.groupby("pfr_player_id")["defense_snaps"].sum().to_dict()
+
+    gsis_to_pfr = {}
+    if not roster.empty and "gsis_id" in roster.columns and "pfr_id" in roster.columns:
+        gsis_to_pfr = {str(r["gsis_id"]): str(r["pfr_id"])
+                       for _, r in roster.iterrows()
+                       if pd.notna(r.get("pfr_id"))}
+
+    all_dl_scores = [
+        (v.get("def_sacks", 0) * DL_SACK_WEIGHT
+         + v.get("def_pressures", 0) * DL_PRESSURE_WEIGHT
+         + v.get("def_times_hitqb", 0) * DL_HIT_WEIGHT)
+        / max(snap_by_pfr.get(k, 1), 1)
+        for k, v in adv_by_pfr.items()
+        if snap_by_pfr.get(k, 0) > 100
+    ]
+    lg_dl_score_per_snap = float(np.mean(all_dl_scores)) if all_dl_scores else 0.01
+
+    all_cb_ytgt = [
+        v.get("def_yards_per_tgt_avg", v.get("def_yards_allowed_per_tgt", 9.0))
+        for v in adv_by_pfr.values()
+        if v.get("def_targets", 0) >= 20
+    ]
+    lg_cb_ytgt = float(np.mean(all_cb_ytgt)) if all_cb_ytgt else 9.0
+
+    ROOKIE_DISC = 0.75
+
+    def _get_adv(gsis_id: str, name: str) -> dict | None:
+        pfr = gsis_to_pfr.get(str(gsis_id), "")
+        row = adv_by_pfr.get(pfr)
+        if row is None:
+            row = adv_by_name.get(str(name).lower())
+        return row
+
+    def _dl_score(gsis_id: str, name: str) -> float:
+        pfr  = gsis_to_pfr.get(str(gsis_id), "")
+        snps = snap_by_pfr.get(pfr, 0)
+        adv  = _get_adv(gsis_id, name)
+        if adv is None or snps < 50:
+            return lg_dl_score_per_snap * ROOKIE_DISC * 500
+        raw = (adv.get("def_sacks", 0) * DL_SACK_WEIGHT
+               + adv.get("def_pressures", 0) * DL_PRESSURE_WEIGHT
+               + adv.get("def_times_hitqb", 0) * DL_HIT_WEIGHT)
+        return float(raw)
+
+    def _cb_coverage_score(gsis_id: str, name: str) -> float:
+        """Inverted coverage quality: negative = better than average (less EPA allowed)."""
+        adv = _get_adv(gsis_id, name)
+        if adv is None or adv.get("def_targets", 0) < 10:
+            return 0.0
+        ytgt = adv.get("def_yards_per_tgt_avg", adv.get("def_yards_allowed_per_tgt", lg_cb_ytgt))
+        return -(ytgt - lg_cb_ytgt) / max(lg_cb_ytgt, 1.0)
+
+    result = {}
+    for team, grp in depth_charts.groupby("team"):
+        dl_pass_score = 0.0
+        dl_rush_score = 0.0
+        lb_pass_score = 0.0
+        lb_rush_score = 0.0
+        cb_s_score    = 0.0
+        dl_perf_total = 0.0
+
+        dl_grp = grp[grp["pos_abb"].isin(_DEF_DL_POS) & (grp["pos_rank"] <= 2)]
+        for _, p in dl_grp.iterrows():
+            score = _dl_score(p["gsis_id"], p["player_name"])
+            pfr   = gsis_to_pfr.get(str(p["gsis_id"]), "")
+            snps  = snap_by_pfr.get(pfr, 500)
+            per_snap = score / max(snps, 1)
+            dl_pass_score += per_snap
+            dl_rush_score += per_snap
+            dl_perf_total += score
+
+        lb_grp = grp[grp["pos_abb"].isin(_DEF_LB_POS) & (grp["pos_rank"] <= 2)]
+        for _, p in lb_grp.iterrows():
+            adv = _get_adv(p["gsis_id"], p["player_name"])
+            pfr = gsis_to_pfr.get(str(p["gsis_id"]), "")
+            snps = snap_by_pfr.get(pfr, 500)
+            if adv:
+                rush_contrib = (adv.get("def_tackles_combined", 0)
+                                + adv.get("def_sacks", 0) * 2) / max(snps, 1)
+                pass_contrib = (adv.get("def_pressures", 0)
+                                + adv.get("def_sacks", 0) * 3) / max(snps, 1)
+            else:
+                rush_contrib = pass_contrib = lg_dl_score_per_snap * ROOKIE_DISC
+            lb_pass_score += pass_contrib
+            lb_rush_score += rush_contrib
+
+        cb_grp = grp[grp["pos_abb"].isin(_DEF_CB_POS | _DEF_S_POS) & (grp["pos_rank"] == 1)]
+        for _, p in cb_grp.iterrows():
+            cb_s_score += _cb_coverage_score(p["gsis_id"], p["player_name"])
+        if len(cb_grp) > 0:
+            cb_s_score /= len(cb_grp)
+
+        # Negate: higher quality scores → more negative EPA allowed (better defense)
+        def_pass_epa = -(
+            _DEF_PASS_WEIGHTS["dl"]   * dl_pass_score
+            + _DEF_PASS_WEIGHTS["lb"]   * lb_pass_score
+            + _DEF_PASS_WEIGHTS["cb_s"] * cb_s_score
+        )
+        def_rush_epa = -(
+            _DEF_RUSH_WEIGHTS["dl"] * dl_rush_score
+            + _DEF_RUSH_WEIGHTS["lb"] * lb_rush_score
+        )
+
+        result[team] = {
+            "def_pass_epa": def_pass_epa,
+            "def_rush_epa": def_rush_epa,
+            "dl_perf":      dl_perf_total,
+        }
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Snap-Count QB Starter Flag
 # ---------------------------------------------------------------------------

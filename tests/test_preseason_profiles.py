@@ -204,3 +204,126 @@ class TestPreseasonOffense:
         )
         for key in ("off_pass_epa", "off_rush_epa", "qb_tier", "ol_av"):
             assert key in result["AAA"], f"Missing key: {key}"
+
+
+def _fake_def_advstats() -> pd.DataFrame:
+    """Minimal advstats_week_def for DL/LB/CB players."""
+    return pd.DataFrame([
+        # DL (good pass rusher)
+        {"pfr_player_id": "DEF00001", "pfr_player_name": "DE Star",
+         "game_type": "REG", "def_sacks": 12.0, "def_pressures": 40.0,
+         "def_times_hitqb": 15.0, "def_tackles_combined": 30.0,
+         "def_targets": 0.0, "def_yards_allowed_per_tgt": 0.0,
+         "def_passer_rating_allowed": 0.0},
+        # CB (good coverage — low yards/target allowed)
+        {"pfr_player_id": "DEF00002", "pfr_player_name": "CB Good",
+         "game_type": "REG", "def_sacks": 0.0, "def_pressures": 0.0,
+         "def_times_hitqb": 0.0, "def_tackles_combined": 20.0,
+         "def_targets": 60.0, "def_yards_allowed_per_tgt": 5.0,
+         "def_passer_rating_allowed": 70.0},
+        # CB (bad coverage — high yards/target allowed)
+        {"pfr_player_id": "DEF00003", "pfr_player_name": "CB Bad",
+         "game_type": "REG", "def_sacks": 0.0, "def_pressures": 0.0,
+         "def_times_hitqb": 0.0, "def_tackles_combined": 20.0,
+         "def_targets": 60.0, "def_yards_allowed_per_tgt": 12.0,
+         "def_passer_rating_allowed": 110.0},
+    ])
+
+
+def _fake_def_snap_counts() -> pd.DataFrame:
+    return pd.DataFrame([
+        {"pfr_player_id": "DEF00001", "player": "DE Star",
+         "game_type": "REG", "offense_snaps": 0, "defense_snaps": 700},
+        {"pfr_player_id": "DEF00002", "player": "CB Good",
+         "game_type": "REG", "offense_snaps": 0, "defense_snaps": 600},
+        {"pfr_player_id": "DEF00003", "player": "CB Bad",
+         "game_type": "REG", "offense_snaps": 0, "defense_snaps": 580},
+    ])
+
+
+def _fake_def_depth_chart() -> pd.DataFrame:
+    return pd.DataFrame([
+        # DL
+        {"team": "AAA", "pos_abb": "LDE", "pos_rank": 1,
+         "player_name": "DE Star", "gsis_id": "00-0030"},
+        {"team": "AAA", "pos_abb": "RDE", "pos_rank": 1,
+         "player_name": "DE Backup", "gsis_id": "00-0031"},
+        # CB
+        {"team": "AAA", "pos_abb": "LCB", "pos_rank": 1,
+         "player_name": "CB Good", "gsis_id": "00-0040"},
+        {"team": "AAA", "pos_abb": "RCB", "pos_rank": 1,
+         "player_name": "CB Bad",  "gsis_id": "00-0041"},
+        # SS/FS
+        {"team": "AAA", "pos_abb": "SS", "pos_rank": 1,
+         "player_name": "Safety One", "gsis_id": "00-0050"},
+    ])
+
+
+def _fake_def_roster() -> pd.DataFrame:
+    return pd.DataFrame([
+        {"gsis_id": "00-0030", "pfr_id": "DEF00001", "full_name": "DE Star",
+         "position": "DE", "birth_date": "1997-01-01", "years_exp": 4},
+        {"gsis_id": "00-0040", "pfr_id": "DEF00002", "full_name": "CB Good",
+         "position": "CB", "birth_date": "1998-06-01", "years_exp": 3},
+        {"gsis_id": "00-0041", "pfr_id": "DEF00003", "full_name": "CB Bad",
+         "position": "CB", "birth_date": "1999-01-01", "years_exp": 2},
+    ])
+
+
+class TestPreseasonDefense:
+    def test_returns_expected_teams(self):
+        from services.nn_feature_engine import _preseason_defense
+        result = _preseason_defense(
+            _fake_def_depth_chart(), _fake_def_advstats(),
+            _fake_def_roster(), _fake_def_snap_counts(), season=2026
+        )
+        assert "AAA" in result
+
+    def test_output_has_required_keys(self):
+        from services.nn_feature_engine import _preseason_defense
+        result = _preseason_defense(
+            _fake_def_depth_chart(), _fake_def_advstats(),
+            _fake_def_roster(), _fake_def_snap_counts(), season=2026
+        )
+        for key in ("def_pass_epa", "def_rush_epa", "dl_perf"):
+            assert key in result["AAA"], f"Missing key: {key}"
+
+    def test_good_dl_produces_positive_dl_perf(self):
+        from services.nn_feature_engine import _preseason_defense
+        result = _preseason_defense(
+            _fake_def_depth_chart(), _fake_def_advstats(),
+            _fake_def_roster(), _fake_def_snap_counts(), season=2026
+        )
+        # DE Star has 12 sacks + 40 pressures → high dl_perf
+        assert result["AAA"]["dl_perf"] > 0
+
+    def test_good_cb_improves_def_pass_epa(self):
+        from services.nn_feature_engine import _preseason_defense
+        # Build two teams: AAA with good CB, BBB with bad CB
+        dc_good = pd.DataFrame([
+            {"team": "AAA", "pos_abb": "LCB", "pos_rank": 1,
+             "player_name": "CB Good", "gsis_id": "00-0040"},
+        ])
+        dc_bad = pd.DataFrame([
+            {"team": "BBB", "pos_abb": "LCB", "pos_rank": 1,
+             "player_name": "CB Bad", "gsis_id": "00-0041"},
+        ])
+        dc = pd.concat([dc_good, dc_bad], ignore_index=True)
+        result = _preseason_defense(
+            dc, _fake_def_advstats(), _fake_def_roster(),
+            _fake_def_snap_counts(), season=2026
+        )
+        # Good CB → better (lower) def_pass_epa (less EPA allowed)
+        assert result["AAA"]["def_pass_epa"] < result["BBB"]["def_pass_epa"]
+
+    def test_missing_player_does_not_crash(self):
+        from services.nn_feature_engine import _preseason_defense
+        dc = pd.DataFrame([
+            {"team": "CCC", "pos_abb": "LDE", "pos_rank": 1,
+             "player_name": "Unknown DE", "gsis_id": "99-9999"},
+        ])
+        result = _preseason_defense(
+            dc, _fake_def_advstats(), _fake_def_roster(),
+            _fake_def_snap_counts(), season=2026
+        )
+        assert "CCC" in result
