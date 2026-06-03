@@ -418,6 +418,45 @@ def compute_preseason_roster_features(target_season: int, rawdata_dir) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Player EPA Loading
+# ---------------------------------------------------------------------------
+
+def _load_player_epa(prior_season: int, rawdata_dir) -> pd.DataFrame:
+    """Load and aggregate per-player season EPA totals from stats_player.
+
+    Returns one row per player with cumulative REG-season EPA totals and
+    per-play rate columns (pass_epa_rate, recv_epa_rate, rush_epa_rate).
+    Returns empty DataFrame if file not found.
+    """
+    path = Path(rawdata_dir) / "stats_player" / f"stats_player_regpost_{prior_season}.csv"
+    if not path.exists():
+        return pd.DataFrame()
+
+    df = pd.read_csv(path, low_memory=False)
+    df = df[df["season_type"] == "REG"].copy()
+    if df.empty:
+        return pd.DataFrame()
+
+    for col in ("passing_epa", "rushing_epa", "receiving_epa", "attempts", "carries", "targets"):
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+
+    agg = df.groupby(["player_id", "player_display_name", "position", "recent_team"], as_index=False).agg(
+        passing_epa=("passing_epa", "sum"),
+        rushing_epa=("rushing_epa", "sum"),
+        receiving_epa=("receiving_epa", "sum"),
+        attempts=("attempts", "sum"),
+        carries=("carries", "sum"),
+        targets=("targets", "sum"),
+    )
+
+    agg["pass_epa_rate"] = agg["passing_epa"] / agg["attempts"].clip(lower=1)
+    agg["recv_epa_rate"] = agg["receiving_epa"] / agg["targets"].clip(lower=1)
+    agg["rush_epa_rate"] = agg["rushing_epa"] / agg["carries"].clip(lower=1)
+
+    return agg
+
+
+# ---------------------------------------------------------------------------
 # Snap-Count QB Starter Flag
 # ---------------------------------------------------------------------------
 
