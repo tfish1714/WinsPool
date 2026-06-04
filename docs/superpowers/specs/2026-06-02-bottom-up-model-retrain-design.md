@@ -60,6 +60,23 @@ Candidates (to be finalized in brainstorm):
 
 ---
 
+## Known Feature Engineering Debt (fix during retrain)
+
+### `off_roster_value_delta` and `def_roster_value_delta` — home-only bug
+
+Both features are currently computed using only the **home team's** value with no away-team subtraction, despite their "delta" naming:
+
+```python
+feat[col_idx["off_roster_value_delta"]] = float(hp.get("off_roster_value_delta", 0.0))  # hp only, no ap
+feat[col_idx["def_roster_value_delta"]] = float(hp.get("def_roster_value_delta", 0.0))  # hp only, no ap
+```
+
+The correct design is a matchup differential (`hp_value - ap_value`), consistent with how `roster_talent_delta` and `early_down_matchup` are computed. As a workaround, the preseason simulation spec (2026-06-03-preseason-simulation-spread-design.md) also writes them home-only to stay compatible with the trained model.
+
+**Fix during retrain:** change both to `hp_value - ap_value`, regenerate historical training data with the corrected formula, and retrain. The corrected features should improve matchup prediction accuracy since they currently give the model no signal about the *away* team's roster quality for these dimensions.
+
+---
+
 ## Out of Scope
 
 - UI changes
