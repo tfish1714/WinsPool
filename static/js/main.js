@@ -150,7 +150,7 @@ class App {
     // --- Draft Logic ---
 
     renderDraftState(state) {
-        const { active_pick, draft_board, available_teams, draft_ready, preseason_predictions, team_schedules, season, elo_predictions } = state;
+        const { active_pick, draft_board, available_teams, draft_ready, preseason_predictions, team_schedules, season } = state;
 
         // Update Year Context
         const yearDisplay = document.getElementById('season-display');
@@ -174,13 +174,13 @@ class App {
         this.processDraftBanners(state);
 
         // Render Board
-        UiRenderer.renderDraftBoard(draft_board, active_pick, this.user.playerId, this.draftSummary, state.all_players ? state.all_players.length : 10, this.user.role, preseason_predictions, elo_predictions);
+        UiRenderer.renderDraftBoard(draft_board, active_pick, this.user.playerId, this.draftSummary, state.all_players ? state.all_players.length : 10, this.user.role, preseason_predictions);
 
         // Render Admin Portfolio
         if (this.user.role === 'admin') {
             const adminPanel = document.getElementById('admin-portfolio-section');
             if (adminPanel) adminPanel.style.display = 'block';
-            UiRenderer.renderAdminPortfolio(draft_board, state.all_players, elo_predictions, preseason_predictions);
+            UiRenderer.renderAdminPortfolio(draft_board, state.all_players, preseason_predictions);
         } else {
             const adminPanel = document.getElementById('admin-portfolio-section');
             if (adminPanel) adminPanel.style.display = 'none';
@@ -188,7 +188,7 @@ class App {
 
 
         // Render Teams
-        UiRenderer.renderTeamGrid(available_teams, this.selectedTeam, this.user.role, preseason_predictions, team_schedules, elo_predictions);
+        UiRenderer.renderTeamGrid(available_teams, this.selectedTeam, this.user.role, preseason_predictions, team_schedules);
 
         // Setup Admin Overrides (Cleanup old select if it exists)
         if (this.user.role === 'admin') {

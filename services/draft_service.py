@@ -123,21 +123,6 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
     preseason_predictions = get_preseason_predictions(int(season))
     team_schedules = {t: get_team_schedule(t, games_season, int(season)) for t in all_nfl_teams}
     
-    # Elo-based projections (Sourced from CACHE to eliminate draft lag)
-    elo_predictions = {}
-    try:
-        from services.cache_service import get_cached
-        t2 = time.time()
-        # Source the pre-calculated Week 0 prediction snapshot
-        snapshot = get_cached('prediction_snapshot', int(season), 0)
-        if snapshot and 'team_projections' in snapshot:
-            elo_predictions = snapshot['team_projections']
-            logger.debug("draft_state: loaded %d cached Elo projections for %s Week 0 (%.3fs)", len(elo_predictions), season, time.time() - t2)
-        else:
-            logger.warning("draft_state: no cached 'prediction_snapshot' found for %s Week 0. elo_predictions is EMPTY.", season)
-    except Exception as e:
-        logger.exception("Unhandled error in WebSocket draft handler")
-
     # 6. Player Info Metadata
     all_players_info = []
     valid_players = players_df.dropna(subset=['playerId'])
@@ -180,7 +165,7 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
         "available_teams": available_teams, "draft_ready": True,
         "connected_players": list(connected_players), "all_players": all_players_info,
         "pick_start_time": pick_start_time, "preseason_predictions": preseason_predictions,
-        "team_schedules": team_schedules, "elo_predictions": elo_predictions,
+        "team_schedules": team_schedules,
     }
     
     import copy
