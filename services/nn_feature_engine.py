@@ -605,6 +605,8 @@ def _preseason_offense(
 
 _DEF_DL_POS = {"LDE", "RDE", "LDT", "RDT", "NT"}
 _DEF_LB_POS = {"WLB", "MLB", "SLB", "LILB", "RILB"}
+# Minimum sacks for a SLB/WLB to be reclassified as a DL-equivalent edge rusher
+_EDGE_LB_SACK_THRESHOLD = 5.0
 _DEF_CB_POS = {"LCB", "RCB", "NB"}
 _DEF_S_POS  = {"SS", "FS"}
 
@@ -721,7 +723,20 @@ def _preseason_defense(
         cb_s_score    = 0.0
         dl_perf_total = 0.0
 
-        dl_grp = grp[grp["pos_abb"].isin(_DEF_DL_POS) & (grp["pos_rank"] <= 2)]
+        # In a base 3-4, SLB/WLB starters function as edge rushers (Myles Garrett,
+        # Micah Parsons, T.J. Watt, etc.). Promote them to the DL group only when
+        # their prior-season sack total confirms pass-rush production.
+        edge_lb = grp[grp["pos_abb"].isin({"SLB", "WLB"}) & (grp["pos_rank"] == 1)]
+        edge_rush_rows = [
+            p for _, p in edge_lb.iterrows()
+            if (_get_adv(p["gsis_id"], p["player_name"]) or {}).get("def_sacks", 0)
+               >= _EDGE_LB_SACK_THRESHOLD
+        ]
+        dl_base = grp[grp["pos_abb"].isin(_DEF_DL_POS) & (grp["pos_rank"] <= 2)]
+        dl_grp = pd.concat(
+            [dl_base] + ([pd.DataFrame(edge_rush_rows)] if edge_rush_rows else []),
+            ignore_index=True,
+        )
         for _, p in dl_grp.iterrows():
             score = _dl_score(p["gsis_id"], p["player_name"])
             pfr   = gsis_to_pfr.get(str(p["gsis_id"]), "")

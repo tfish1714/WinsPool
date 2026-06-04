@@ -328,6 +328,47 @@ class TestPreseasonDefense:
         )
         assert "CCC" in result
 
+    def test_slb_edge_rusher_counts_as_dl(self):
+        """SLB with ≥5 sacks (3-4 edge rusher like Garrett/Parsons) gets DL credit."""
+        from services.nn_feature_engine import _preseason_defense
+        # DE Star has 12 sacks in fake advstats — qualifies as edge rusher
+        dc_slb = pd.DataFrame([
+            {"team": "A", "pos_abb": "SLB", "pos_rank": 1,
+             "player_name": "DE Star", "gsis_id": "00-0030"},
+        ])
+        dc_de = pd.DataFrame([
+            {"team": "B", "pos_abb": "LDE", "pos_rank": 1,
+             "player_name": "DE Star", "gsis_id": "00-0030"},
+        ])
+        dc = pd.concat([dc_slb, dc_de], ignore_index=True)
+        result = _preseason_defense(
+            dc, _fake_def_advstats(), _fake_def_roster(),
+            _fake_def_snap_counts(), season=2026
+        )
+        # SLB with elite sacks should match LDE in dl_perf
+        assert result["A"]["dl_perf"] == pytest.approx(result["B"]["dl_perf"], rel=0.01)
+        assert result["A"]["def_pass_epa"] < 0
+
+    def test_slb_coverage_lb_does_not_count_as_dl(self):
+        """SLB with low sacks (coverage LB, not edge rusher) stays in LB path only."""
+        from services.nn_feature_engine import _preseason_defense
+        # CB Good has def_sacks=0 in fake advstats — does NOT qualify as edge rusher
+        dc_slb_cov = pd.DataFrame([
+            {"team": "A", "pos_abb": "SLB", "pos_rank": 1,
+             "player_name": "CB Good", "gsis_id": "00-0040"},
+        ])
+        dc_de = pd.DataFrame([
+            {"team": "B", "pos_abb": "LDE", "pos_rank": 1,
+             "player_name": "CB Good", "gsis_id": "00-0040"},
+        ])
+        dc = pd.concat([dc_slb_cov, dc_de], ignore_index=True)
+        result = _preseason_defense(
+            dc, _fake_def_advstats(), _fake_def_roster(),
+            _fake_def_snap_counts(), season=2026
+        )
+        # Coverage LB at SLB should NOT produce DL pass-rush dl_perf
+        assert result["A"]["dl_perf"] == pytest.approx(0.0, abs=0.1)
+
 
 class TestComputePreseasonPlayerProfiles:
     def _write_files(self, tmp_path, season=2026):
