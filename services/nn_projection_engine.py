@@ -12,6 +12,7 @@ from services.constants import (
     UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT,
     PROB_CLIP_MIN, PROB_CLIP_MAX, ELO_TO_SPREAD, SPREAD_TO_PROB_SCALE,
     MC_MARGIN_STD, MC_EPA_SCALE, MC_EPA_RUSH_WEIGHT,
+    PRESEASON_ELO_BOOST_MAX, PRESEASON_ELO_WEIGHTS,
 )
 
 from services.nn_feature_engine import (
@@ -652,38 +653,25 @@ class NNProjectionEngine:
 
     def get_team_projected_wins(self, schedule_df: pd.DataFrame, n_sims: int = 5000) -> Dict[str, float]:
         """Produce season win totals via Monte Carlo simulation for Draft logic.
-        
-        Args:
-            schedule_df: The full season schedule to simulate.
-            n_sims: Number of Monte Carlo trials.
-            
+
+        Delegates to simulate_season() so that preseason player profiles
+        (_preseason_profiles) are applied to the initial state, ensuring
+        trades and roster moves are reflected.
+
         Returns:
-            Dict mapping team abbreviation to projected wins (float).
+            Dict mapping team abbreviation to projected wins (float, median).
         """
-        # Filter schedule for regular season
-        reg = schedule_df[schedule_df["game_type"] == "REG"] if "game_type" in schedule_df.columns else schedule_df
-        
-        if reg.empty:
-            # Fallback: return equal projections when no schedule is available
-            all_teams = ["ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE","DAL","DEN","DET","GB","HOU","IND","JAX","KC","LV","LAC","LA","MIA","MIN","NE","NO","NYG","NYJ","PHI","PIT","SF","SEA","TB","TEN","WAS"]
+        if schedule_df.empty:
+            all_teams = ["ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE","DAL","DEN",
+                         "DET","GB","HOU","IND","JAX","KC","LV","LAC","LA","MIA","MIN",
+                         "NE","NO","NYG","NYJ","PHI","PIT","SF","SEA","TB","TEN","WAS"]
             return {t: 8.5 for t in all_teams}
 
-        game_probs = []
-        for _, game in reg.iterrows():
-            ht = game["home_team"]
-            at = game["away_team"]
-            prob_dict = self.game_win_probability(ht, at)
-            game_probs.append((ht, at, prob_dict["home_win_prob"]))
-
-        all_teams = sorted(list(set([g[0] for g in game_probs] + [g[1] for g in game_probs])))
-        team_idx, win_matrix = self._run_monte_carlo(game_probs, all_teams, n_sims)
-
-        results = {}
-        for team in all_teams:
-            median_wins = float(np.median(win_matrix[:, team_idx[team]]))
-            results[team] = round(median_wins, 1)
-
-        return results
+        result = self.simulate_season(schedule_df, n_sims=n_sims)
+        return {
+            team: round(float(stats["median_wins"]), 1)
+            for team, stats in result.get("team_stats", {}).items()
+        }
 
     def project_portfolio_wins(
         self, team_ids: List[str], schedule_df: pd.DataFrame, n_sims: int = 500

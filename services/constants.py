@@ -50,3 +50,22 @@ TIEBREAKER_SORT_COLS = [
     "Tiebreaker5_2ndWorstTeamPtDiff",
     "Tiebreaker6_BestTeamPtDiff",
 ]
+
+# Preseason simulation spread tuning.
+# PRESEASON_ELO_BOOST_MAX: maximum Elo points added/subtracted based on profile quality.
+# ±150 gives top-profiled teams ~13 projected wins and bottom-profiled ~4.
+# Increase to widen the win band, decrease to narrow it.
+PRESEASON_ELO_BOOST_MAX = 150
+
+# Weights for the profile composite that drives the Elo adjustment.
+# Defensive dimensions (def_pass_epa, def_rush_epa) are sign-flipped before
+# weighting so a better defense contributes positively to the composite.
+PRESEASON_ELO_WEIGHTS = {
+    "qb_tier":      0.30,
+    "off_pass_epa": 0.20,
+    "def_pass_epa": 0.20,
+    "dl_perf":      0.15,
+    "ol_av":        0.10,
+    "off_rush_epa": 0.03,
+    "def_rush_epa": 0.02,
+}
