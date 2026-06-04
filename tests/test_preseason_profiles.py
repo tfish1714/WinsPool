@@ -514,8 +514,8 @@ class TestPreseasonProfilesWiredIntoSimulation:
         assert state[kc, 1] == pytest.approx(0.25, abs=0.01)
         assert state[ten, 1] == pytest.approx(-0.20, abs=0.01)
 
-    def test_elo_not_overridden_by_profiles(self):
-        """Elo (dim 0) should come from team_profiles elo_pre, not preseason_profiles."""
+    def test_elo_starts_from_team_profiles_elo_pre(self):
+        """Elo (dim 0) should be seeded from team_profiles elo_pre before the profile boost."""
         profiles = {
             "KC":  {"off_pass_epa": 0.1, "off_rush_epa": 0.0,
                     "def_pass_epa": 0.0, "def_rush_epa": 0.0,
@@ -527,8 +527,15 @@ class TestPreseasonProfilesWiredIntoSimulation:
         engine = self._make_engine_with_profiles(profiles)
         state, _, team_idx = engine._build_initial_state()
 
-        assert state[team_idx["KC"],  0] == pytest.approx(1580.0)
-        assert state[team_idx["TEN"], 0] == pytest.approx(1420.0)
+        # After profile-composite boost, KC (better profile) should have higher Elo
+        # than TEN, and both should be reasonably close to their prior-season Elo base.
+        # The boost is bounded by PRESEASON_ELO_BOOST_MAX (150 pts).
+        from services.constants import PRESEASON_ELO_BOOST_MAX
+        assert state[team_idx["KC"],  0] >= 1580.0 - PRESEASON_ELO_BOOST_MAX
+        assert state[team_idx["KC"],  0] <= 1580.0 + PRESEASON_ELO_BOOST_MAX
+        assert state[team_idx["TEN"], 0] >= 1420.0 - PRESEASON_ELO_BOOST_MAX
+        assert state[team_idx["TEN"], 0] <= 1420.0 + PRESEASON_ELO_BOOST_MAX
+        assert state[team_idx["KC"],  0] > state[team_idx["TEN"], 0]
 
     def test_trench_metric_uses_profiles_ol_dl(self):
         """_precompute_static_features() uses ol_av/dl_perf from _preseason_profiles."""
@@ -550,3 +557,73 @@ class TestPreseasonProfilesWiredIntoSimulation:
         trench = feats["W01_KC_TEN"][col_idx["trench_dominance_metric"]]
         # KC has much better OL+DL than TEN → positive trench for KC as home team
         assert trench > 0
+
+
+class TestPreseasonEloBoost:
+    def _make_engine(self, profiles):
+        from unittest.mock import patch
+        with patch("services.nn_projection_engine.NNPredictionService"), \
+             patch("services.nn_projection_engine.XGBPredictionService"), \
+             patch("services.nn_projection_engine.LRPredictionService"):
+            from services.nn_projection_engine import NNProjectionEngine
+            from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+            engine = NNProjectionEngine()
+        engine._team_profiles = pd.DataFrame([
+            {"team": "GOOD", "elo_pre": 1500.0, "off_pass_epa_roll": 0.0,
+             "off_rush_epa_roll": 0.0, "def_pass_epa_roll": 0.0,
+             "def_rush_epa_roll": 0.0, "margin_roll": 0.0, **{c: 0.0 for c in NN_FC}},
+            {"team": "BAD",  "elo_pre": 1500.0, "off_pass_epa_roll": 0.0,
+             "off_rush_epa_roll": 0.0, "def_pass_epa_roll": 0.0,
+             "def_rush_epa_roll": 0.0, "margin_roll": 0.0, **{c: 0.0 for c in NN_FC}},
+        ])
+        engine._preseason_profiles = profiles
+        engine._preseason_norm = None
+        return engine
+
+    def test_strong_profile_boosts_elo_above_base(self):
+        profiles = {
+            "GOOD": {"qb_tier": 0.25, "off_pass_epa": 0.3, "def_pass_epa": -0.3,
+                     "dl_perf": 50000.0, "ol_av": 400000.0,
+                     "off_rush_epa": 0.05, "def_rush_epa": -0.05},
+            "BAD":  {"qb_tier": -0.25, "off_pass_epa": -0.3, "def_pass_epa": 0.3,
+                     "dl_perf": 5000.0, "ol_av": 50000.0,
+                     "off_rush_epa": -0.05, "def_rush_epa": 0.05},
+        }
+        engine = self._make_engine(profiles)
+        state, _, team_idx = engine._build_initial_state()
+        assert state[team_idx["GOOD"], 0] > 1500.0
+        assert state[team_idx["BAD"],  0] < 1500.0
+
+    def test_good_team_elo_strictly_higher_than_bad_team(self):
+        profiles = {
+            "GOOD": {"qb_tier": 0.2, "off_pass_epa": 0.2, "def_pass_epa": -0.2,
+                     "dl_perf": 30000.0, "ol_av": 300000.0,
+                     "off_rush_epa": 0.03, "def_rush_epa": -0.02},
+            "BAD":  {"qb_tier": -0.1, "off_pass_epa": -0.1, "def_pass_epa": 0.1,
+                     "dl_perf": 8000.0, "ol_av": 80000.0,
+                     "off_rush_epa": -0.03, "def_rush_epa": 0.02},
+        }
+        engine = self._make_engine(profiles)
+        state, _, team_idx = engine._build_initial_state()
+        assert state[team_idx["GOOD"], 0] > state[team_idx["BAD"], 0]
+
+    def test_elo_boost_bounded_by_boost_max(self):
+        from services.constants import PRESEASON_ELO_BOOST_MAX
+        profiles = {
+            "GOOD": {"qb_tier": 999.0, "off_pass_epa": 999.0, "def_pass_epa": -999.0,
+                     "dl_perf": 9999999.0, "ol_av": 9999999.0,
+                     "off_rush_epa": 999.0, "def_rush_epa": -999.0},
+            "BAD":  {"qb_tier": -999.0, "off_pass_epa": -999.0, "def_pass_epa": 999.0,
+                     "dl_perf": 0.001, "ol_av": 0.001,
+                     "off_rush_epa": -999.0, "def_rush_epa": 999.0},
+        }
+        engine = self._make_engine(profiles)
+        state, _, team_idx = engine._build_initial_state()
+        assert state[team_idx["GOOD"], 0] <= 1500.0 + PRESEASON_ELO_BOOST_MAX + 0.01
+        assert state[team_idx["BAD"],  0] >= 1500.0 - PRESEASON_ELO_BOOST_MAX - 0.01
+
+    def test_no_boost_when_profiles_empty(self):
+        engine = self._make_engine({})
+        state, _, team_idx = engine._build_initial_state()
+        assert state[team_idx["GOOD"], 0] == pytest.approx(1500.0)
+        assert state[team_idx["BAD"],  0] == pytest.approx(1500.0)

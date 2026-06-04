@@ -165,6 +165,30 @@ class NNProjectionEngine:
                     state_template[idx, 3] = float(pp.get("def_pass_epa", state_template[idx, 3]))
                     state_template[idx, 4] = float(pp.get("def_rush_epa", state_template[idx, 4]))
 
+            # Profile composite → Elo boost: widen preseason spread to match SB odds.
+            # Algorithm: z-score each profile dim across all teams, flip sign for
+            # defensive dims (lower EPA allowed = better), compute weighted composite,
+            # clip to ±2σ and scale to ±PRESEASON_ELO_BOOST_MAX.
+            _dims  = list(PRESEASON_ELO_WEIGHTS.keys())
+            _def_d = {"def_pass_epa", "def_rush_epa"}
+            _vals  = {
+                d: [float(self._preseason_profiles.get(t, {}).get(d, 0.0)) for t in team_list]
+                for d in _dims
+            }
+            _mu  = {d: float(np.mean(v)) for d, v in _vals.items()}
+            _sig = {d: max(float(np.std(v)), 1e-6) for d, v in _vals.items()}
+
+            for team, idx in team_idx.items():
+                pp = self._preseason_profiles.get(team, {})
+                composite = 0.0
+                for d, w in PRESEASON_ELO_WEIGHTS.items():
+                    z = (float(pp.get(d, _mu[d])) - _mu[d]) / _sig[d]
+                    if d in _def_d:
+                        z = -z
+                    composite += w * z
+                elo_adj = float(np.clip(composite, -2.0, 2.0) / 2.0 * PRESEASON_ELO_BOOST_MAX)
+                state_template[idx, 0] += elo_adj
+
         return state_template, team_list, team_idx
 
     def _precompute_static_features(self, schedule_df: pd.DataFrame) -> dict:
