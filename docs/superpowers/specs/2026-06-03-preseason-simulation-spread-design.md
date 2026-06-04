@@ -102,13 +102,15 @@ When `_preseason_profiles` is set, five feature groups are replaced with profile
 
 ### 3c. `off_roster_value_delta`
 - **Old:** 2025 `off_roster_value_delta` from `_team_profiles`
-- **New:** `0.7 * qb_tier_z + 0.3 * ol_av_z` (home team only, signed)
+- **New:** `0.7 * qb_tier_z + 0.3 * ol_av_z` (home team only)
 - QB quality dominates offensive roster value; OL quality contributes secondarily
+- **Known debt:** This feature is home-team only in the training data (the name "delta" is misleading — it was week-over-week change, not home vs. away). The correct design is a `hp - ap` differential, but fixing it requires retraining the model. Tracked for the model retraining spec.
 
 ### 3d. `def_roster_value_delta`
 - **Old:** 2025 `def_roster_value_delta` from `_team_profiles`
-- **New:** `0.6 * dl_perf_z + 0.4 * (-def_pass_epa_z)` (home team only, signed)
+- **New:** `0.6 * dl_perf_z + 0.4 * (-def_pass_epa_z)` (home team only)
 - DL pass rush quality + overall defensive efficiency
+- **Known debt:** Same home-only limitation as 3c — to be fixed when retraining the model.
 
 ### 3e. `roster_talent_delta`
 - **Old:** 2025 `roster_talent_delta` from `_team_profiles`
