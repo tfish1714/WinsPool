@@ -274,28 +274,29 @@ def sync(
 
         print(f"\n[{tag}]")
 
-        # Check release timestamp
+        # Fetch the release-level timestamp once (nflverse publishes one per tag)
         remote_ts = _fetch_release_timestamp(tag)
-        cached_ts = cache.get(tag)
-
-        if remote_ts and remote_ts == cached_ts and not force:
-            print(f"  Up to date (last synced: {cached_ts})")
-            summary[tag] = {"downloaded": 0, "skipped": "up-to-date", "failed": 0}
-            total_skipped += 1
-            continue
-
         if remote_ts:
-            print(f"  New data available: {remote_ts}")
+            print(f"  Remote timestamp: {remote_ts}")
         else:
             print(f"  Could not check timestamp — attempting download")
 
         downloaded = 0
         failed = 0
+        skipped = 0
         year_list = seasons if cfg.get("year_specific") else [None]
         min_year = cfg.get("min_year", 0)
 
         for year in year_list:
             if year is not None and year < min_year:
+                continue
+
+            # Per-(tag, year) cache key so downloading 2024 doesn't block 2026
+            cache_key = f"{tag}_{year}" if year is not None else tag
+            cached_ts = cache.get(cache_key)
+
+            if remote_ts and remote_ts == cached_ts and not force:
+                skipped += 1
                 continue
 
             for remote_tpl, local_tpl in cfg["files"]:
@@ -312,12 +313,15 @@ def sync(
                 )
                 if ok:
                     downloaded += 1
+                    if not dry_run and remote_ts:
+                        cache[cache_key] = remote_ts
+                        _save_timestamp_cache(cache)
                 else:
                     failed += 1
 
-        if downloaded > 0 and not dry_run and remote_ts:
-            cache[tag] = remote_ts
-            _save_timestamp_cache(cache)
+        if skipped > 0 and downloaded == 0 and failed == 0:
+            print(f"  Up to date (last synced: {remote_ts})")
+            total_skipped += 1
 
         summary[tag] = {"downloaded": downloaded, "failed": failed}
         total_downloaded += downloaded

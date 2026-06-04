@@ -808,6 +808,16 @@ def compute_preseason_player_profiles(target_season: int, rawdata_dir) -> dict:
 
     roster      = pd.read_csv(roster_path, low_memory=False)
     depth_chart = pd.read_csv(dc_path,     low_memory=False)
+
+    # Keep only the latest depth-chart snapshot per player (dt = daily timestamp).
+    # This ensures traded players appear on their current team, not their old one.
+    if "dt" in depth_chart.columns and "gsis_id" in depth_chart.columns:
+        depth_chart = (
+            depth_chart
+            .sort_values("dt")
+            .drop_duplicates(subset=["gsis_id"], keep="last")
+        )
+
     depth_chart["team"] = depth_chart["team"].apply(_normalize_team)
     if "team" in roster.columns:
         roster["team"] = roster["team"].apply(_normalize_team)
