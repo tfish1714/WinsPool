@@ -53,9 +53,9 @@ TIEBREAKER_SORT_COLS = [
 
 # Preseason simulation spread tuning.
 # PRESEASON_ELO_BOOST_MAX: maximum Elo points added/subtracted based on profile quality.
-# ±150 gives top-profiled teams ~13 projected wins and bottom-profiled ~4.
+# ±200 gives top-profiled teams ~14 projected wins and bottom-profiled ~3.
 # Increase to widen the win band, decrease to narrow it.
-PRESEASON_ELO_BOOST_MAX = 150
+PRESEASON_ELO_BOOST_MAX = 200
 
 # Weights for the profile composite that drives the Elo adjustment.
 # Defensive dimensions (def_pass_epa, def_rush_epa) are sign-flipped before
