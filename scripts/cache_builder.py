@@ -266,6 +266,10 @@ def build_year(standings, games, players, draft_order, draft_results,
             engine.initialize(year)
             
             yr_games = full_games[full_games['season'] == year].copy() if not full_games.empty else pd.DataFrame()
+            # Deduplicate by (week, home_team, away_team) — the same matchup can appear with
+            # different game_ids if daily_nfl_sync uploaded the schedule multiple times
+            if not yr_games.empty:
+                yr_games = yr_games.drop_duplicates(subset=['week', 'home_team', 'away_team'])
             team_projections = engine.get_team_projected_wins(yr_games, n_sims=5000)
 
             # Build per-player portfolio projections
