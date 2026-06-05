@@ -862,6 +862,35 @@ def compute_preseason_player_profiles(target_season: int, rawdata_dir) -> dict:
     return raw
 
 
+def _build_profile_z_table(seasons: list, rawdata_dir) -> dict:
+    """Compute cross-team z-scores for 5 profile dimensions for each season.
+
+    Returns {(season, team): {dl_perf, qb_tier, ol_av, off_pass_epa, def_pass_epa}}
+    where each value is that team's z-score within the season's 32-team distribution.
+    Seasons where compute_preseason_player_profiles returns {} are skipped silently.
+    """
+    _DIMS = ["dl_perf", "qb_tier", "ol_av", "off_pass_epa", "def_pass_epa"]
+    table: dict = {}
+    for season in seasons:
+        try:
+            profiles = compute_preseason_player_profiles(season, rawdata_dir)
+        except Exception:
+            continue
+        if not profiles:
+            continue
+        teams = list(profiles.keys())
+        vals = {d: np.array([profiles[t].get(d, 0.0) for t in teams], dtype=float)
+                for d in _DIMS}
+        mu  = {d: float(np.mean(v)) for d, v in vals.items()}
+        sig = {d: max(float(np.std(v)), 1e-6) for d, v in vals.items()}
+        for team in teams:
+            table[(season, team)] = {
+                d: float((profiles[team].get(d, mu[d]) - mu[d]) / sig[d])
+                for d in _DIMS
+            }
+    return table
+
+
 # ---------------------------------------------------------------------------
 # Snap-Count QB Starter Flag
 # ---------------------------------------------------------------------------

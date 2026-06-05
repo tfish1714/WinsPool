@@ -627,3 +627,67 @@ class TestPreseasonEloBoost:
         state, _, team_idx = engine._build_initial_state()
         assert state[team_idx["GOOD"], 0] == pytest.approx(1500.0)
         assert state[team_idx["BAD"],  0] == pytest.approx(1500.0)
+
+
+class TestBuildProfileZTable:
+    def _make_raw_profiles(self):
+        """Minimal two-team profile dict as returned by compute_preseason_player_profiles."""
+        return {
+            "AAA": {"off_pass_epa": 0.10, "off_rush_epa": 0.02,
+                    "def_pass_epa": -0.05, "def_rush_epa": -0.02,
+                    "qb_tier": 0.18, "ol_av": 350000.0, "dl_perf": 500.0},
+            "BBB": {"off_pass_epa": -0.10, "off_rush_epa": -0.02,
+                    "def_pass_epa":  0.05, "def_rush_epa":  0.02,
+                    "qb_tier": -0.05, "ol_av": 150000.0, "dl_perf": 200.0},
+        }
+
+    def test_returns_z_scores_for_each_team(self):
+        from services.nn_feature_engine import _build_profile_z_table
+        from unittest.mock import patch
+        profiles = self._make_raw_profiles()
+        with patch("services.nn_feature_engine.compute_preseason_player_profiles",
+                   return_value=profiles):
+            table = _build_profile_z_table([2024], rawdata_dir=".")
+        assert (2024, "AAA") in table
+        assert (2024, "BBB") in table
+
+    def test_z_scores_sum_to_zero_across_teams(self):
+        from services.nn_feature_engine import _build_profile_z_table
+        from unittest.mock import patch
+        profiles = self._make_raw_profiles()
+        with patch("services.nn_feature_engine.compute_preseason_player_profiles",
+                   return_value=profiles):
+            table = _build_profile_z_table([2024], rawdata_dir=".")
+        dims = ["dl_perf", "qb_tier", "ol_av", "off_pass_epa", "def_pass_epa"]
+        for d in dims:
+            total = table[(2024, "AAA")][d] + table[(2024, "BBB")][d]
+            assert abs(total) < 1e-6, f"{d} z-scores don't sum to 0: {total}"
+
+    def test_stronger_team_has_positive_dl_z(self):
+        from services.nn_feature_engine import _build_profile_z_table
+        from unittest.mock import patch
+        profiles = self._make_raw_profiles()
+        with patch("services.nn_feature_engine.compute_preseason_player_profiles",
+                   return_value=profiles):
+            table = _build_profile_z_table([2024], rawdata_dir=".")
+        # AAA has higher dl_perf (500 vs 200) so should have positive z
+        assert table[(2024, "AAA")]["dl_perf"] > 0
+        assert table[(2024, "BBB")]["dl_perf"] < 0
+
+    def test_empty_profiles_returns_no_entry_for_season(self):
+        from services.nn_feature_engine import _build_profile_z_table
+        from unittest.mock import patch
+        with patch("services.nn_feature_engine.compute_preseason_player_profiles",
+                   return_value={}):
+            table = _build_profile_z_table([2024], rawdata_dir=".")
+        assert not any(k[0] == 2024 for k in table)
+
+    def test_multiple_seasons_both_populated(self):
+        from services.nn_feature_engine import _build_profile_z_table
+        from unittest.mock import patch
+        profiles = self._make_raw_profiles()
+        with patch("services.nn_feature_engine.compute_preseason_player_profiles",
+                   return_value=profiles):
+            table = _build_profile_z_table([2023, 2024], rawdata_dir=".")
+        assert any(k[0] == 2023 for k in table)
+        assert any(k[0] == 2024 for k in table)
