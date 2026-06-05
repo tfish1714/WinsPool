@@ -208,6 +208,23 @@ class NNProjectionEngine:
         col_idx = {c: i for i, c in enumerate(NN_FC)}
         static_feats = {}
 
+        # Precompute profile z-scores once — used inside the per-game loop to override
+        # 5 quality features. Models are now trained on these z-scores so the scale is correct.
+        _pp_z: dict = {}
+        if self._preseason_profiles:
+            _pp_dims = ["dl_perf", "qb_tier", "ol_av", "off_pass_epa", "def_pass_epa"]
+            _pp_vals = {
+                d: [float(v.get(d, 0.0)) for v in self._preseason_profiles.values()]
+                for d in _pp_dims
+            }
+            _pp_mu  = {d: float(np.mean(vs)) for d, vs in _pp_vals.items()}
+            _pp_sig = {d: max(float(np.std(vs)), 1e-6) for d, vs in _pp_vals.items()}
+            for team, pp in self._preseason_profiles.items():
+                _pp_z[team] = {
+                    d: (float(pp.get(d, _pp_mu[d])) - _pp_mu[d]) / _pp_sig[d]
+                    for d in _pp_dims
+                }
+
         for _, game in schedule_df.iterrows():
             ht = _normalize_team(str(game.get("home_team", "") or ""))
             at = _normalize_team(str(game.get("away_team", "") or ""))
@@ -298,13 +315,24 @@ class NNProjectionEngine:
             feat[col_idx["st_value_delta"]]          = float(hp.get("st_value_delta", 0.0))
             feat[col_idx["qb_resilience_delta"]]     = float(hp.get("qb_resilience_delta", 0.0))
 
-            # RETRAIN SPEC: Override these 5 features with preseason profile z-scores
-            # (def_pressure_diff, qb_pressure_advantage, off/def_roster_value_delta,
-            # roster_talent_delta) once models are retrained on profile-derived z-scores
-            # as feature values for historical seasons (2020–2025). Raw cross-team z-scores
-            # from _preseason_profiles can reach ±3 for outlier teams (e.g. elite DL),
-            # which pushes current models out of distribution and inverts predictions.
-            # The Elo boost in _build_initial_state() already widens the spread correctly.
+            # Override 5 features with profile z-scores — formulas match build_master_feature_table()
+            if _pp_z and ht in _pp_z and at in _pp_z:
+                hz, az = _pp_z[ht], _pp_z[at]
+                feat[col_idx["def_pressure_diff"]]      = float(hz["dl_perf"] - az["dl_perf"])
+                feat[col_idx["qb_pressure_advantage"]]  = float(az["dl_perf"] - hz["dl_perf"])
+                feat[col_idx["off_roster_value_delta"]] = float(
+                    (0.7 * hz["qb_tier"] + 0.3 * hz["ol_av"])
+                    - (0.7 * az["qb_tier"] + 0.3 * az["ol_av"])
+                )
+                feat[col_idx["def_roster_value_delta"]] = float(
+                    (0.6 * hz["dl_perf"] + 0.4 * (-hz["def_pass_epa"]))
+                    - (0.6 * az["dl_perf"] + 0.4 * (-az["def_pass_epa"]))
+                )
+                h_q = (hz["qb_tier"] + hz["off_pass_epa"] + (-hz["def_pass_epa"])
+                       + hz["dl_perf"] + hz["ol_av"]) / 5.0
+                a_q = (az["qb_tier"] + az["off_pass_epa"] + (-az["def_pass_epa"])
+                       + az["dl_perf"] + az["ol_av"]) / 5.0
+                feat[col_idx["roster_talent_delta"]] = float(h_q - a_q)
 
             static_feats[key] = feat
 

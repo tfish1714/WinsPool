@@ -794,3 +794,83 @@ class TestProfileZTableOverrideInFeatureTable:
         # a_q = 0
         # roster_talent_delta = 1.0 - 0.0 = 1.0
         assert abs(row["roster_talent_delta"] - 1.0) < 0.01
+
+
+class TestPreseasonFeatureOverridesPostRetrain:
+    """Verify _precompute_static_features() correctly applies profile z-score overrides."""
+
+    def _make_engine(self, profiles):
+        from unittest.mock import patch
+        with patch("services.nn_projection_engine.NNPredictionService"), \
+             patch("services.nn_projection_engine.XGBPredictionService"), \
+             patch("services.nn_projection_engine.LRPredictionService"):
+            from services.nn_projection_engine import NNProjectionEngine
+            from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+            engine = NNProjectionEngine()
+        base = {"elo_pre": 1500.0, "off_pass_epa_roll": 0.0, "off_rush_epa_roll": 0.0,
+                "def_pass_epa_roll": 0.0, "def_rush_epa_roll": 0.0, "margin_roll": 0.0,
+                "off_early_roll": 0.0, "def_early_roll": 0.0,
+                "turnover_margin_rolling": 0.0, "net_success_rate": 0.0,
+                "qb_pressure_roll": 0.0, "def_pressures_roll": 0.0,
+                "roster_talent_delta": 0.0, "off_roster_value_delta": 0.0,
+                "def_roster_value_delta": 0.0, "st_value_delta": 0.0,
+                "qb_resilience_delta": 0.0, "trench_score": 0.0,
+                "market_implied_team_total": 22.0, "passing_difficulty_index": 0.0,
+                **{c: 0.0 for c in NN_FC}}
+        engine._team_profiles = pd.DataFrame([
+            {"team": "HOME", **base},
+            {"team": "AWAY", **base},
+        ])
+        engine._preseason_profiles = profiles
+        engine._preseason_norm = None
+        return engine
+
+    def _get_feat(self, engine, feat_name):
+        from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+        sched = pd.DataFrame([{
+            "home_team": "HOME", "away_team": "AWAY", "week": 1, "game_type": "REG"
+        }])
+        feats = engine._precompute_static_features(sched)
+        col_idx = {c: i for i, c in enumerate(NN_FC)}
+        return float(feats["W01_HOME_AWAY"][col_idx[feat_name]])
+
+    def _strong_weak_profiles(self):
+        return {
+            "HOME": {"dl_perf": 40000.0, "qb_tier": 0.20, "ol_av": 350000.0,
+                     "off_pass_epa": 0.25, "def_pass_epa": -0.25,
+                     "off_rush_epa": 0.04, "def_rush_epa": -0.03},
+            "AWAY": {"dl_perf": 8000.0,  "qb_tier": -0.05, "ol_av": 80000.0,
+                     "off_pass_epa": -0.15, "def_pass_epa": 0.15,
+                     "off_rush_epa": -0.03, "def_rush_epa": 0.03},
+        }
+
+    def test_def_pressure_diff_home_better_dl_is_positive(self):
+        engine = self._make_engine(self._strong_weak_profiles())
+        assert self._get_feat(engine, "def_pressure_diff") > 0
+
+    def test_qb_pressure_advantage_away_better_dl_is_positive(self):
+        profiles = {
+            "HOME": {"dl_perf": 8000.0,  "qb_tier": 0.1, "ol_av": 150000.0,
+                     "off_pass_epa": 0.0, "def_pass_epa": 0.0,
+                     "off_rush_epa": 0.0, "def_rush_epa": 0.0},
+            "AWAY": {"dl_perf": 40000.0, "qb_tier": 0.1, "ol_av": 150000.0,
+                     "off_pass_epa": 0.0, "def_pass_epa": 0.0,
+                     "off_rush_epa": 0.0, "def_rush_epa": 0.0},
+        }
+        engine = self._make_engine(profiles)
+        assert self._get_feat(engine, "qb_pressure_advantage") > 0
+
+    def test_off_roster_value_delta_is_h_minus_a_differential(self):
+        engine = self._make_engine(self._strong_weak_profiles())
+        val = self._get_feat(engine, "off_roster_value_delta")
+        assert val > 0
+
+    def test_roster_talent_delta_uses_all_5_dims(self):
+        engine = self._make_engine(self._strong_weak_profiles())
+        assert self._get_feat(engine, "roster_talent_delta") > 0
+
+    def test_fallback_to_zero_when_profiles_empty(self):
+        engine = self._make_engine({})
+        assert self._get_feat(engine, "def_pressure_diff")     == pytest.approx(0.0, abs=0.01)
+        assert self._get_feat(engine, "qb_pressure_advantage") == pytest.approx(0.0, abs=0.01)
+        assert self._get_feat(engine, "roster_talent_delta")   == pytest.approx(0.0, abs=0.01)
