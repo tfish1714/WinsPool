@@ -423,5 +423,86 @@
       "train_samples": 4927
     },
     "trained_at": "2026-05-28T02:20:40.820687+00:00"
+  },
+  "v6": {
+    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v6.pkl",
+    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v6_scaler.pkl",
+    "feature_columns": [
+      "elo_diff",
+      "elo_confidence",
+      "pass_epa_matchup",
+      "rush_epa_matchup",
+      "early_down_matchup",
+      "turnover_margin_rolling",
+      "net_success_rate",
+      "point_diff_advantage",
+      "market_implied_team_total",
+      "passing_difficulty_index",
+      "rest_advantage",
+      "net_travel_disadvantage",
+      "trench_dominance_metric",
+      "qb_pressure_advantage",
+      "def_pressure_diff",
+      "home_qb_injury_flag",
+      "away_qb_injury_flag",
+      "roster_talent_delta",
+      "off_roster_value_delta",
+      "def_roster_value_delta",
+      "st_value_delta",
+      "qb_resilience_delta",
+      "home_field_advantage",
+      "div_game_flag",
+      "surface_type",
+      "playoff_flag",
+      "week"
+    ],
+    "n_features": 27,
+    "metrics": {
+      "train_accuracy": 0.6467236467236467,
+      "train_logloss": 0.6214080644562974,
+      "train_brier": 0.21631585188211075,
+      "train_r2": 0.12343387750533752,
+      "test_accuracy": 0.5208333333333334,
+      "test_logloss": 0.7212872676960224,
+      "test_brier": 0.26226074868294696,
+      "test_r2": -0.04904299473178786,
+      "test_auc": 0.5607638888888891,
+      "season_r2": 0.6159810408300554,
+      "season_mae": 1.6334979838261332,
+      "season_n": 160,
+      "best_C": 0.05,
+      "best_l1_ratio": 0.9
+    },
+    "params": {
+      "Cs": [
+        0.001,
+        0.01,
+        0.05,
+        0.1,
+        0.5,
+        1.0,
+        5.0
+      ],
+      "cv": 5,
+      "penalty": "elasticnet",
+      "solver": "saga",
+      "l1_ratios": [
+        0.1,
+        0.3,
+        0.5,
+        0.7,
+        0.9
+      ],
+      "max_iter": 2000,
+      "random_state": 42,
+      "n_jobs": -1,
+      "scoring": "neg_log_loss"
+    },
+    "training_params": {
+      "min_season": 2006,
+      "max_season": 2025,
+      "train_samples": 4927
+    },
+    "trained_at": "2026-06-05T03:11:18.919250+00:00"
   }
 }
