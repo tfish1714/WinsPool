@@ -181,6 +181,10 @@ export const UiRenderer = {
             });
         }
 
+        if (selectedTeam && sorted.includes(selectedTeam)) {
+            sorted = [selectedTeam, ...sorted.filter(t => t !== selectedTeam)];
+        }
+
         grid.innerHTML = sorted.map(team => {
             const isSelected = team === selectedTeam;
             const pred = (role === 'admin' && predictions) ? predictions[team] : null;
