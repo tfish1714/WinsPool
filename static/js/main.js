@@ -246,12 +246,16 @@ class App {
         const cards = document.querySelectorAll('.team-card');
         cards.forEach(card => {
             card.onclick = () => {
-                this.selectedTeam = card.dataset.team;
-                this.updateSelectionPreview();
-                // Re-render grid to show selection
-                // Note: Optimization would be to just toggle classes
-                cards.forEach(c => c.classList.remove('selected'));
-                card.classList.add('selected');
+                if (this.selectedTeam === card.dataset.team) {
+                    this.selectedTeam = null;
+                    card.classList.remove('selected');
+                    document.getElementById('selection-preview')?.classList.add('hidden');
+                } else {
+                    this.selectedTeam = card.dataset.team;
+                    this.updateSelectionPreview();
+                    cards.forEach(c => c.classList.remove('selected'));
+                    card.classList.add('selected');
+                }
             };
         });
     }
