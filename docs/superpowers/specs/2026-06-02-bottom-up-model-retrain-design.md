@@ -62,6 +62,19 @@ Candidates (to be finalized in brainstorm):
 
 ## Known Feature Engineering Debt (fix during retrain)
 
+### 5 static features not yet driven by preseason profiles — scale mismatch
+
+The preseason simulation spread plan (2026-06-03) intended to override 5 per-game static features (`def_pressure_diff`, `qb_pressure_advantage`, `off_roster_value_delta`, `def_roster_value_delta`, `roster_talent_delta`) with cross-team z-scores computed from `_preseason_profiles`. This was reverted because raw cross-team z-scores can reach ±3 for outlier teams (e.g. elite DL like LA's Parsons), pushing the trained models far out of distribution and **inverting predictions** (a better DL caused fewer projected wins).
+
+The correct fix is to retrain the models with these z-scores as the actual feature values for historical seasons, so the model learns the monotonic relationship between profile quality and win probability. Until then, these 5 features fall back to 2025 rolling averages, and team quality differences are captured solely via the Elo boost in `_build_initial_state()`.
+
+**What to do during retrain:**
+- Compute `_preseason_profiles` z-scores for each historical season (2020–2025) using the same `_preseason_offense()` / `_preseason_defense()` pipeline
+- Substitute those z-scores as the feature values for these 5 columns in the historical training rows
+- Retrain NN/XGB/LR on the expanded signal
+
+**Reference:** `services/nn_projection_engine.py` — `_precompute_static_features()` RETRAIN SPEC comment
+
 ### `off_roster_value_delta` and `def_roster_value_delta` — home-only bug
 
 Both features are currently computed using only the **home team's** value with no away-team subtraction, despite their "delta" naming:

@@ -428,8 +428,16 @@ def _load_player_epa(prior_season: int, rawdata_dir) -> pd.DataFrame:
     per-play rate columns (pass_epa_rate, recv_epa_rate, rush_epa_rate).
     Returns empty DataFrame if file not found.
     """
-    path = Path(rawdata_dir) / "stats_player" / f"stats_player_regpost_{prior_season}.csv"
-    if not path.exists():
+    # Prefer the reg-only file (season_type is always "REG").
+    # Fall back to regpost and filter to "REG" rows; "REG+POST" aggregate rows
+    # in that file would inflate attempts and skew per-play rates.
+    reg_path     = Path(rawdata_dir) / "stats_player" / f"stats_player_reg_{prior_season}.csv"
+    regpost_path = Path(rawdata_dir) / "stats_player" / f"stats_player_regpost_{prior_season}.csv"
+    if reg_path.exists():
+        path = reg_path
+    elif regpost_path.exists():
+        path = regpost_path
+    else:
         return pd.DataFrame()
 
     df = pd.read_csv(path, low_memory=False)
