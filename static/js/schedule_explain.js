@@ -59,12 +59,14 @@ function _row(label, valueHtml, subHtml = '') {
 
 function renderExplanation(data) {
     const { home_team, away_team, pred_winner, pred_su_conf, pred_prob,
-            pred_ats_pick, model_spread, edge_vs_vegas, explanation: ex } = data;
+            pred_ats_pick, model_spread, edge_vs_vegas, explanation: ex,
+            currentWeek = 0 } = data;
 
-    const isProfileOnly = ex?.source === 'profile';
-    const homeFavored   = pred_winner === home_team;
-    const predColor     = homeFavored ? 'var(--accent-green)' : 'var(--accent-gold)';
-    const confBar       = _bar(pred_su_conf, predColor);
+    const isProfileOnly   = ex?.source === 'profile';
+    const isMcSimulation  = !isProfileOnly && data.week > currentWeek;
+    const homeFavored     = pred_winner === home_team;
+    const predColor       = homeFavored ? 'var(--accent-green)' : 'var(--accent-gold)';
+    const confBar         = _bar(pred_su_conf, predColor);
 
     const ms = model_spread ?? ex?.model_spread;
     const ev = edge_vs_vegas ?? ex?.edge_vs_vegas;
@@ -76,7 +78,7 @@ function renderExplanation(data) {
         <div style="flex:1; min-width:130px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
             <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">ML Pick</div>
             <div style="font-size:1.3rem; font-weight:800; color:${predColor};">${pred_winner}</div>
-            <div style="font-size:0.75rem;">${pred_su_conf}% confidence</div>
+            <div style="font-size:0.75rem;">${isMcSimulation ? `wins ${pred_su_conf}% of simulations` : `${pred_su_conf}% confidence`}</div>
             ${confBar}
         </div>`;
 
@@ -217,6 +219,10 @@ function renderExplanation(data) {
     const sourceNote = isProfileOnly
         ? `<div style="margin-top:0.75rem; padding:6px 10px; border-radius:6px; background:rgba(255,255,255,0.04); font-size:0.72rem; color:var(--text-secondary);">
             ℹ Pre-season projection — factors reflect prior-season averages. Values update as ${data.season} game data becomes available.
+           </div>`
+        : isMcSimulation
+        ? `<div style="margin-top:0.75rem; padding:6px 10px; border-radius:6px; background:rgba(255,255,255,0.04); font-size:0.72rem; color:var(--text-secondary);">
+            ℹ ${ex?.source || 'MC simulation (10,000 trials)'} — projected using week-by-week simulation. Later-season games carry higher uncertainty as each simulated week compounds variance from prior simulated outcomes.
            </div>`
         : '';
 
@@ -366,7 +372,8 @@ async function handleExplainClick(btn) {
         } catch (_) { /* no feature data — silently skip */ }
 
         const auditHtml = renderFeatureAuditSection(featureData, home, away);
-        content.innerHTML = auditHtml + renderExplanation(data);
+        const currentWeek = parseInt(btn.dataset.currentWeek ?? '0', 10);
+        content.innerHTML = auditHtml + renderExplanation({ ...data, currentWeek });
         // Re-init lucide icons inside modal
         if (window.lucide) window.lucide.createIcons();
     } catch (e) {
