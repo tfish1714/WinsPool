@@ -108,12 +108,23 @@
                         {% endif %}
 
                         {% if row['pred_winner'] %}
+                        {% set is_future = row['result'] is not number or row['result'] == -1000 %}
+                        {% set weeks_out = [row['week']|int - current_week|int, 0]|max %}
                         <div class="game-prediction"
                             style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1); color: var(--accent-gold); font-weight: 600; display: flex; justify-content: space-between; align-items: flex-start;">
                             <div>
                                 <span><i data-lucide="sparkles"></i> Predictor:</span>
                                 <div style="font-size: 0.75rem; color: #fff;">
+                                    {% if is_future %}
+                                    <span style="opacity:{{ '0.6' if weeks_out >= 5 else ('0.8' if weeks_out >= 2 else '1.0') }};">
+                                        {{ row['pred_winner'] }} wins {{ row['pred_su_conf'] }}% of simulations
+                                    </span>
+                                    {% if weeks_out >= 5 %}
+                                    <span style="font-size:0.65rem; color:var(--text-secondary); margin-left:3px; font-weight:normal;">(long-range)</span>
+                                    {% endif %}
+                                    {% else %}
                                     Win: {{ row['pred_winner'] }} ({{ row['pred_su_conf'] }}%)
+                                    {% endif %}
                                 </div>
                                 <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: normal;">
                                     ATS: {{ row['pred_ats_pick'] }}
@@ -129,6 +140,7 @@
                                 data-week="{{ row['week'] }}"
                                 data-home="{{ row['home_team'] }}"
                                 data-away="{{ row['away_team'] }}"
+                                data-current-week="{{ current_week }}"
                                 title="Why this prediction?"
                                 style="display:none; background:none; border:1px solid rgba(251,191,36,0.3); border-radius:50%; width:22px; height:22px; cursor:pointer; color:var(--accent-gold); font-size:12px; padding:0; line-height:22px; text-align:center; flex-shrink:0; margin-top:2px;">?</button>
                         </div>
