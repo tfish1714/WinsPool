@@ -691,3 +691,106 @@ class TestBuildProfileZTable:
             table = _build_profile_z_table([2023, 2024], rawdata_dir=".")
         assert any(k[0] == 2023 for k in table)
         assert any(k[0] == 2024 for k in table)
+
+
+class TestProfileZTableOverrideInFeatureTable:
+    """Verify that build_master_feature_table() applies profile z-score overrides for 2020+."""
+
+    def _make_schedule(self):
+        return pd.DataFrame([{
+            "season": 2024, "week": 1, "home_team": "KC", "away_team": "BAL",
+            "game_type": "REG", "home_win": 1,
+            "result": 7.0, "spread_line": -3.0,
+        }])
+
+    def test_override_applied_when_profiles_available(self, tmp_path, monkeypatch):
+        """def_pressure_diff should reflect profile dl_perf z-scores, not rolling stats."""
+        import services.nn_feature_engine as fe
+        from unittest.mock import patch
+
+        sched = self._make_schedule()
+
+        kc_z  = {"dl_perf": 1.5, "qb_tier": 1.0, "ol_av": 0.5,
+                  "off_pass_epa": 0.8, "def_pass_epa": -0.3}
+        bal_z = {"dl_perf": -0.5, "qb_tier": 0.2, "ol_av": -0.3,
+                  "off_pass_epa": 0.3, "def_pass_epa": 0.1}
+        profile_table = {(2024, "KC"): kc_z, (2024, "BAL"): bal_z}
+
+        with patch.object(fe, "_load_schedule", return_value=sched), \
+             patch.object(fe, "_load_elo", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_box_stats_from_weekly", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_pressure_stats", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_rolling_epa", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_trench_rolling_stats", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_multi_season", return_value=pd.DataFrame()), \
+             patch.object(fe, "compute_starter_qb_flags", return_value={}), \
+             patch.object(fe, "compute_roster_features", return_value={}), \
+             patch.object(fe, "compute_roster_performance", return_value={}), \
+             patch.object(fe, "_build_profile_z_table", return_value=profile_table):
+            result = fe.build_master_feature_table(min_season=2024, max_season=2024)
+
+        assert not result.empty
+        row = result.iloc[0]
+        # def_pressure_diff = kc_dl_z - bal_dl_z = 1.5 - (-0.5) = 2.0
+        assert abs(row["def_pressure_diff"] - 2.0) < 0.01
+        # qb_pressure_advantage = bal_dl_z - kc_dl_z = -0.5 - 1.5 = -2.0
+        assert abs(row["qb_pressure_advantage"] - (-2.0)) < 0.01
+
+    def test_off_roster_value_delta_is_differential_not_home_only(self, tmp_path, monkeypatch):
+        import services.nn_feature_engine as fe
+        from unittest.mock import patch
+
+        sched = self._make_schedule()
+        kc_z  = {"dl_perf": 0.0, "qb_tier": 1.0, "ol_av": 1.0,
+                  "off_pass_epa": 0.0, "def_pass_epa": 0.0}
+        bal_z = {"dl_perf": 0.0, "qb_tier": -1.0, "ol_av": -1.0,
+                  "off_pass_epa": 0.0, "def_pass_epa": 0.0}
+        profile_table = {(2024, "KC"): kc_z, (2024, "BAL"): bal_z}
+
+        with patch.object(fe, "_load_schedule", return_value=sched), \
+             patch.object(fe, "_load_elo", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_box_stats_from_weekly", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_pressure_stats", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_rolling_epa", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_trench_rolling_stats", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_multi_season", return_value=pd.DataFrame()), \
+             patch.object(fe, "compute_starter_qb_flags", return_value={}), \
+             patch.object(fe, "compute_roster_features", return_value={}), \
+             patch.object(fe, "compute_roster_performance", return_value={}), \
+             patch.object(fe, "_build_profile_z_table", return_value=profile_table):
+            result = fe.build_master_feature_table(min_season=2024, max_season=2024)
+
+        row = result.iloc[0]
+        # off_roster_value_delta = (0.7*1 + 0.3*1) - (0.7*(-1) + 0.3*(-1)) = 1.0 - (-1.0) = 2.0
+        assert abs(row["off_roster_value_delta"] - 2.0) < 0.01
+
+    def test_roster_talent_delta_uses_all_5_dims(self, tmp_path, monkeypatch):
+        import services.nn_feature_engine as fe
+        from unittest.mock import patch
+
+        sched = self._make_schedule()
+        # KC better on all dims, BAL zero on all
+        kc_z  = {"dl_perf": 1.0, "qb_tier": 1.0, "ol_av": 1.0,
+                  "off_pass_epa": 1.0, "def_pass_epa": -1.0}
+        bal_z = {"dl_perf": 0.0, "qb_tier": 0.0, "ol_av": 0.0,
+                  "off_pass_epa": 0.0, "def_pass_epa": 0.0}
+        profile_table = {(2024, "KC"): kc_z, (2024, "BAL"): bal_z}
+
+        with patch.object(fe, "_load_schedule", return_value=sched), \
+             patch.object(fe, "_load_elo", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_box_stats_from_weekly", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_pressure_stats", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_rolling_epa", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_trench_rolling_stats", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_multi_season", return_value=pd.DataFrame()), \
+             patch.object(fe, "compute_starter_qb_flags", return_value={}), \
+             patch.object(fe, "compute_roster_features", return_value={}), \
+             patch.object(fe, "compute_roster_performance", return_value={}), \
+             patch.object(fe, "_build_profile_z_table", return_value=profile_table):
+            result = fe.build_master_feature_table(min_season=2024, max_season=2024)
+
+        row = result.iloc[0]
+        # h_q = (1+1+1+1+1)/5 = 1.0 (note: def_pass_epa flipped: -(-1)=1)
+        # a_q = 0
+        # roster_talent_delta = 1.0 - 0.0 = 1.0
+        assert abs(row["roster_talent_delta"] - 1.0) < 0.01

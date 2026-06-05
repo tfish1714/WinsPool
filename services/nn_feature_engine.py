@@ -1787,6 +1787,40 @@ def build_master_feature_table(
                      "st_value_delta", "qb_resilience_delta"]:
             sched[_col] = 0.0
 
+    # --- Profile z-score overrides for 5 features (seasons 2020+) ---
+    # Replaces rolling-average values with cross-team z-scores derived from
+    # preseason player profiles. This matches what _precompute_static_features()
+    # feeds the models at inference time, fixing the scale mismatch that was
+    # inverting predictions for outlier teams (e.g. elite DL).
+    _profile_seasons = [s for s in sched["season"].unique() if s >= 2020]
+    if _profile_seasons:
+        _pz = _build_profile_z_table(sorted(_profile_seasons), rd)
+        if _pz:
+            def _apply_profile_overrides(row):
+                hz = _pz.get((int(row["season"]), row["home_team"]))
+                az = _pz.get((int(row["season"]), row["away_team"]))
+                if hz is None or az is None:
+                    return row
+                row["def_pressure_diff"]      = hz["dl_perf"] - az["dl_perf"]
+                row["qb_pressure_advantage"]  = az["dl_perf"] - hz["dl_perf"]
+                row["off_roster_value_delta"] = (
+                    (0.7 * hz["qb_tier"] + 0.3 * hz["ol_av"])
+                    - (0.7 * az["qb_tier"] + 0.3 * az["ol_av"])
+                )
+                row["def_roster_value_delta"] = (
+                    (0.6 * hz["dl_perf"] + 0.4 * (-hz["def_pass_epa"]))
+                    - (0.6 * az["dl_perf"] + 0.4 * (-az["def_pass_epa"]))
+                )
+                h_q = (hz["qb_tier"] + hz["off_pass_epa"] + (-hz["def_pass_epa"])
+                       + hz["dl_perf"] + hz["ol_av"]) / 5.0
+                a_q = (az["qb_tier"] + az["off_pass_epa"] + (-az["def_pass_epa"])
+                       + az["dl_perf"] + az["ol_av"]) / 5.0
+                row["roster_talent_delta"] = h_q - a_q
+                return row
+
+            mask = sched["season"] >= 2020
+            sched.loc[mask] = sched.loc[mask].apply(_apply_profile_overrides, axis=1)
+
     # --- Ensure all required columns exist and are numeric ---
     for col in FEATURE_COLUMNS:
         if col not in sched.columns:
