@@ -85,41 +85,39 @@
             </div>
         </main>
 
-        <!-- Unified Global Navigation (Hidden until Authenticated) -->
-        <div class="app-nav" id="app-nav">
-            <div class="nav-brand-container">
-                <div class="brand-box">
-                    <img src="/static/fishbone.png" alt="Logo" class="nav-logo">
-                    <h1>NFL Wins Pool</h1>
+        <!-- Desktop Nav Rail (hidden until authenticated, hidden on mobile) -->
+        <div class="nav-rail" id="app-nav">
+            <div class="nav-brand">
+                <img src="/static/fishbone.png" alt="Logo" class="nav-logo">
+                <h1>NFL Wins Pool</h1>
+            </div>
+            <nav class="nav-rail__links" id="nav-primary-links"></nav>
+            <div class="nav-more">
+                <button class="nav-more-btn" id="nav-more-btn">More <span class="nav-more-arrow">▾</span></button>
+                <div class="nav-more-dropdown hidden" id="nav-more-dropdown"></div>
+            </div>
+            <div class="nav-avatar-wrap">
+                <button class="nav-avatar" id="nav-avatar-btn" aria-label="Account menu">
+                    <span id="nav-avatar-initials"></span>
+                </button>
+                <div class="nav-avatar-popover hidden" id="nav-avatar-popover">
+                    <div class="nav-ap-name" id="nav-ap-name"></div>
+                    <div class="nav-ap-role" id="nav-ap-role"></div>
+                    <div class="nav-drop-divider"></div>
+                    <button class="nav-ap-logout" id="nav-ap-logout-btn">Logout</button>
                 </div>
             </div>
-
-            <nav class="nav-links" id="nav-links">
-                <a href="/draft" class="tab-btn"><i data-lucide="hourglass"></i>Live Draft</a>
-                <a href="/wins-pool" class="tab-btn"><i data-lucide="trophy"></i> Wins Pool</a>
-                <a href="/schedule" class="tab-btn"><i data-lucide="calendar"></i> Schedule</a>
-                <a href="/wins-pool/{{ current_year|default(2024) }}/weekbyweek" class="tab-btn"><i
-                        data-lucide="bar-chart-3"></i> Weekly Progress</a>
-                <a href="/playoff-race" class="tab-btn"><i data-lucide="flag"></i> Playoff Race</a>
-                <a href="/draft-results" class="tab-btn"><i data-lucide="clipboard-list"></i> Draft Results</a>
-                <a href="/draft/history" class="tab-btn"><i data-lucide="book-open"></i> Draft History</a>
-                <a href="/headtohead" class="tab-btn"><i data-lucide="users"></i> H2H</a>
-                <a href="/history" class="tab-btn"><i data-lucide="crown"></i> All-Time History</a>
-                <a href="/profile" class="tab-btn"><i data-lucide="user"></i> Profile</a>
-                <a href="/admin" id="admin-nav-link" class="tab-btn admin-link admin-hidden"><i
-                        data-lucide="settings"></i> Admin Portal</a>
-            </nav>
-
-            <div id="user-identity" class="user-identity hidden">
-                <i data-lucide="user"></i> <span id="user-nickname-display"></span>
-                <button id="logout-btn" class="logout-btn">Logout</button>
-            </div>
-
-            <button class="hamburger-btn" id="drawer-toggle" aria-label="Open navigation menu"><i
-                    data-lucide="menu"></i></button>
         </div>
 
-        <!-- Mobile Navigation Drawer -->
+        <!-- Mobile Header (brand only, hidden on desktop) -->
+        <div class="nav-mobile-header" id="app-nav-mobile">
+            <div class="nav-brand">
+                <img src="/static/fishbone.png" alt="Logo" class="nav-logo">
+                <h1>NFL Wins Pool</h1>
+            </div>
+        </div>
+
+        <!-- Mobile Navigation Drawer (triggered by bottom tab More) -->
         <div class="nav-drawer-overlay" id="nav-drawer-overlay"></div>
         <aside class="nav-drawer" id="nav-drawer">
             <div class="nav-drawer__header">
@@ -129,15 +127,14 @@
                         data-lucide="x"></i></button>
             </div>
             <nav class="nav-drawer__links">
-                <a href="/draft"><i data-lucide="hourglass"></i> Live Draft</a>
-                <a href="/wins-pool"><i data-lucide="trophy"></i> Wins Pool</a>
+                <a href="/draft" id="drawer-live-draft-link" class="hidden"><i data-lucide="radio"></i> Live Draft</a>
+                <a href="/wins-pool"><i data-lucide="trophy"></i> Standings</a>
                 <a href="/schedule"><i data-lucide="calendar"></i> Schedule</a>
-                <a href="/wins-pool/{{ current_year|default(2024) }}/weekbyweek"><i data-lucide="bar-chart-3"></i>
-                    Weekly Progress</a>
-                <a href="/playoff-race"><i data-lucide="flag"></i> Playoff Race</a>
                 <a href="/draft-results"><i data-lucide="clipboard-list"></i> Draft Results</a>
+                <a href="/playoff-race"><i data-lucide="flag"></i> Playoff Race</a>
+                <a href="/wins-pool/{{ current_year|default(2024) }}/weekbyweek"><i data-lucide="bar-chart-3"></i> Weekly Progress</a>
+                <a href="/headtohead"><i data-lucide="users"></i> Head to Head</a>
                 <a href="/draft/history"><i data-lucide="book-open"></i> Draft History</a>
-                <a href="/headtohead"><i data-lucide="users"></i> H2H</a>
                 <a href="/history"><i data-lucide="crown"></i> All-Time History</a>
                 <a href="/profile"><i data-lucide="user"></i> Profile</a>
                 <a href="/admin" id="admin-nav-link-drawer" class="admin-link admin-hidden"><i
@@ -145,6 +142,25 @@
             </nav>
             <div class="nav-drawer__footer" id="drawer-user-identity"></div>
         </aside>
+
+        <!-- Bottom Tab Bar (mobile only, hidden on desktop) -->
+        <nav class="bottom-tab-bar" id="bottom-tab-bar">
+            <a href="/wins-pool/{{ current_year|default(2024) }}" class="btb-item" data-path="/wins-pool">
+                <i data-lucide="trophy"></i><span>Standings</span>
+            </a>
+            <a href="/schedule" class="btb-item" data-path="/schedule">
+                <i data-lucide="calendar"></i><span>Schedule</span>
+            </a>
+            <a href="/draft-results" class="btb-item" id="btb-draft-tab" data-path="/draft-results">
+                <i data-lucide="clipboard-list" id="btb-draft-icon"></i><span id="btb-draft-label">Drafts</span>
+            </a>
+            <a href="/playoff-race" class="btb-item" data-path="/playoff-race">
+                <i data-lucide="flag"></i><span>Playoff</span>
+            </a>
+            <button class="btb-item" id="btb-more-tab">
+                <i data-lucide="menu"></i><span>More</span>
+            </button>
+        </nav>
 
 
         <!-- Dynamic Page Content -->
