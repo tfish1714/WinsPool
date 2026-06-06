@@ -185,12 +185,13 @@ def test_accuracy_response_includes_model_version(auth_token):
 
 
 def test_base_html_admin_link_uses_visibility_not_display():
-    """admin-nav-link must not use inline display:none (causes layout shift)."""
+    """admin-nav-link-drawer must not use inline display:none (causes layout shift)."""
     import pathlib
     src = pathlib.Path("templates/base.html").read_text()
-    assert 'id="admin-nav-link"' in src
+    # Desktop admin link is now JS-rendered; drawer link is the static HTML element
+    assert 'id="admin-nav-link-drawer"' in src
     assert 'admin-hidden' in src
-    # The admin-nav-link line must not have display: none
+    # The drawer admin link must not use inline display:none
     for line in src.splitlines():
-        if 'admin-nav-link' in line:
-            assert 'display: none' not in line, "admin-nav-link must not use display:none"
+        if 'admin-nav-link-drawer' in line:
+            assert 'display: none' not in line, "admin-nav-link-drawer must not use display:none"
