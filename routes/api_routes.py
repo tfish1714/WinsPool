@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from services.data_service import load_data, get_latest_season_and_week
 from services.response_helpers import error_response, server_error, not_found, unauthorized
 from services.draft_service import sanitize_state
-from services.session_service import require_auth
+from services.session_service import require_auth, require_admin
 import services.analysis_service as analysis
 from services.analysis_service import get_season_progress
 from services.cache_service import get_prediction_features
@@ -380,4 +380,29 @@ async def push_subscribe(request: Request, _auth: dict = Depends(require_auth)):
         return server_error()
     except Exception:
         logger.exception("push_subscribe error")
+        return server_error()
+
+
+@router.get("/config/settings")
+def get_config():
+    """Returns app config. Public — all users need draft_active on page load."""
+    from services.db_service import get_config_settings
+    try:
+        return JSONResponse(content=get_config_settings())
+    except Exception:
+        logger.exception("get_config error")
+        return JSONResponse(content={"draft_active": False})
+
+
+@router.post("/admin/config/settings")
+async def set_config(request: Request, _auth: dict = Depends(require_admin)):
+    """Updates app config. Admin only."""
+    from services.db_service import set_config_settings
+    try:
+        body = await request.json()
+        allowed = {k: v for k, v in body.items() if k in {"draft_active"}}
+        set_config_settings(allowed)
+        return JSONResponse(content={"ok": True, **allowed})
+    except Exception:
+        logger.exception("set_config error")
         return server_error()
