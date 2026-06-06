@@ -15,7 +15,7 @@ class App {
         this.selectedTeam = null;
         this.draftSummary = null;
         this.shameTimerInterval = null;
-        this.draftActive = false;
+        this.draftActive = localStorage.getItem('nfl_wins_draft_active') === 'true';
 
         this.ws = new WebSocketService({
             onMessage: (msg) => this.handleWsMessage(msg),
@@ -28,31 +28,58 @@ class App {
     async init() {
         console.log('[App] Initializing modular WinsPool...');
 
-        // 1. Sync Role/Profile if logged in
-        if (this.user.playerId) {
-            const profile = await AuthService.syncProfile(this.user.playerId);
-            if (profile) this.user.role = profile.role;
-        }
-
-        // Fetch draft_active config
-        try {
-            const cfg = await fetch('/api/config/settings').then(r => r.json());
-            this.draftActive = cfg.draft_active === true;
-        } catch (e) {
-            console.warn('[App] Could not load config/settings', e);
-        }
-
-        // 2. Setup Navigation & Global UI
+        // Render nav immediately from localStorage cache — no HTTP round trips on critical path
         this.initGlobalUI();
         if (typeof lucide !== 'undefined') lucide.createIcons();
 
-        // 2. Auth Logic
+        // Auth handlers
         this.setupAuthHandlers();
 
-        // 3. Page Routing
+        // Page routing
         const path = window.location.pathname;
         if (path === '/draft') {
             await this.initDraftPage();
+        }
+
+        // Background sync: refresh profile + config in parallel, re-render nav only if something changed
+        if (this.user.playerId) {
+            this._backgroundSync();
+        }
+    }
+
+    async _backgroundSync() {
+        try {
+            const [, cfg] = await Promise.all([
+                AuthService.syncProfile(this.user.playerId),
+                fetch('/api/config/settings').then(r => r.json()).catch(() => null),
+            ]);
+
+            // Re-read credentials — syncProfile may have updated name/role in localStorage
+            const fresh = AuthService.getCredentials();
+            let needsNavUpdate = false;
+
+            if (fresh.role !== this.user.role ||
+                fresh.nickName !== this.user.nickName ||
+                fresh.playerName !== this.user.playerName) {
+                this.user = fresh;
+                needsNavUpdate = true;
+            }
+
+            if (cfg) {
+                const freshDraftActive = cfg.draft_active === true;
+                localStorage.setItem('nfl_wins_draft_active', freshDraftActive);
+                if (freshDraftActive !== this.draftActive) {
+                    this.draftActive = freshDraftActive;
+                    needsNavUpdate = true;
+                }
+            }
+
+            if (needsNavUpdate) {
+                this.updateNav();
+                if (typeof lucide !== 'undefined') lucide.createIcons();
+            }
+        } catch (e) {
+            console.warn('[App] Background sync failed', e);
         }
     }
 

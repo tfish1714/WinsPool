@@ -1666,6 +1666,23 @@ tr:hover {
         white-space: nowrap;
         scroll-snap-align: start;
     }
+
+    /* Admin portal sub-tab bar: horizontal scroll, compact */
+    .admin-tab-bar {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 4px;
+    }
+
+    .admin-tab-btn {
+        flex-shrink: 0;
+        scroll-snap-align: start;
+        padding: 5px 10px;
+        font-size: 0.78rem;
+        white-space: nowrap;
+    }
 }
 
 /* =============================================================
@@ -2848,6 +2865,12 @@ table.wp-data-table tbody td:last-child {
 
     .recap-content {
         font-size: 0.95rem;
+    }
+
+    /* Week carousel: compact pills on mobile */
+    .week-item {
+        padding: 0.4rem 0.7rem;
+        font-size: 0.78rem;
     }
 }
 
