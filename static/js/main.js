@@ -228,12 +228,25 @@ class App {
             if (adminPanel) adminPanel.style.display = 'none';
         }
 
+        // Floating admin bar + body padding
+        const adminBar = document.getElementById('admin-bar');
+        const mainEl   = document.getElementById('dashboard-main');
+        if (this.user.role === 'admin') {
+            if (adminBar) adminBar.style.display = 'flex';
+            if (mainEl)   mainEl.style.paddingBottom = '64px';
+        } else {
+            if (adminBar) adminBar.style.display = 'none';
+            if (mainEl)   mainEl.style.paddingBottom = '';
+        }
 
         // Render Teams
-        UiRenderer.renderTeamGrid(available_teams, this.selectedTeam, this.user.role, preseason_predictions, team_schedules);
+        UiRenderer.renderTeamGrid(available_teams, this.selectedTeam, this.user.role, preseason_predictions, team_schedules, draft_board);
 
         // Setup individual card clicks
         this.attachTeamCardClickHandlers();
+
+        // Wire board toggle (idempotent)
+        this.initBoardToggle();
 
         // Refresh icons for dynamic content
         if (typeof lucide !== 'undefined') lucide.createIcons();
@@ -335,8 +348,22 @@ class App {
         this.shameTimerInterval = setInterval(render, 1000);
     }
 
+    initBoardToggle() {
+        const btn     = document.getElementById('board-toggle-btn');
+        const section = document.getElementById('draft-board-section');
+        if (!btn || !section) return;
+        if (btn._wired) return;
+        btn._wired = true;
+
+        btn.addEventListener('click', () => {
+            const open = section.style.display !== 'none';
+            section.style.display = open ? 'none' : 'block';
+            btn.textContent = open ? 'Show full board ▾' : 'Hide full board ▴';
+        });
+    }
+
     attachTeamCardClickHandlers() {
-        const cards = document.querySelectorAll('.team-card');
+        const cards = document.querySelectorAll('.team-btn');
         cards.forEach(card => {
             card.onclick = () => {
                 if (this.selectedTeam === card.dataset.team) {

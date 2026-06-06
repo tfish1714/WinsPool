@@ -168,49 +168,66 @@ export const UiRenderer = {
         container.innerHTML = html;
     },
 
-    renderTeamGrid(teams, selectedTeam, role, predictions, schedules) {
+    renderTeamGrid(availableTeams, selectedTeam, role, predictions, schedules, draftBoard) {
         const grid = document.getElementById('teams-grid');
         if (!grid) return;
 
-        let sorted = [...teams];
+        const _esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+        // Build drafted map: team abbr → ownerName
+        const draftedMap = {};
+        if (draftBoard) {
+            draftBoard.forEach(entry => {
+                if (entry.team) draftedMap[entry.team] = entry.playerName;
+            });
+        }
+
+        // Available teams: sort by predictions for admin, alpha order otherwise (already sorted server-side)
+        let available = [...availableTeams];
         if (role === 'admin' && predictions) {
-            sorted.sort((a, b) => {
-                const pA = (predictions[a] && typeof predictions[a] === 'object') ? predictions[a].projected_wins : (predictions[a] || 0);
-                const pB = (predictions[b] && typeof predictions[b] === 'object') ? predictions[b].projected_wins : (predictions[b] || 0);
+            available.sort((a, b) => {
+                const pA = predictions[a] && typeof predictions[a] === 'object' ? predictions[a].projected_wins : (predictions[a] || 0);
+                const pB = predictions[b] && typeof predictions[b] === 'object' ? predictions[b].projected_wins : (predictions[b] || 0);
                 return pB - pA;
             });
         }
 
-        grid.innerHTML = sorted.map(team => {
-            const isSelected = team === selectedTeam;
-            const pred = (role === 'admin' && predictions) ? predictions[team] : null;
-            const schedule = schedules && schedules[team] ? schedules[team].join('\n') : '';
+        // Drafted teams sorted alpha
+        const drafted = Object.keys(draftedMap).sort();
+        const allTeams = [...available, ...drafted];
 
-            let predHtml = '';
-            if (pred) {
+        grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;';
+        grid.innerHTML = allTeams.map(team => {
+            const isDrafted  = team in draftedMap;
+            const isSelected = team === selectedTeam && !isDrafted;
+            const pred       = (role === 'admin' && predictions && !isDrafted) ? predictions[team] : null;
+            const schedule   = schedules && schedules[team] ? schedules[team].join('\n') : '';
+
+            let subHtml;
+            if (isDrafted) {
+                subHtml = `<div class="team-btn-sub">&rarr; ${_esc(draftedMap[team])}</div>`;
+            } else if (pred) {
                 if (typeof pred === 'object') {
-                    predHtml = `
-                        <div class="pred-details">
-                            <span class="preseason-wins">${pred.projected_wins}W</span>
-                            <span class="std-dev" title="Standard Deviation">±${pred.std_dev}</span>
-                        </div>
-                    `;
+                    subHtml = `<div class="team-btn-sub">${pred.projected_wins}W &plusmn;${pred.std_dev}</div>`;
                 } else {
-                    predHtml = `<span class="preseason-wins">${pred}W</span>`;
+                    subHtml = `<div class="team-btn-sub">${pred}W</div>`;
                 }
+            } else {
+                subHtml = '';
             }
 
             return `
-                <div class="team-card ${isSelected ? 'selected' : ''}"
-                     title="${schedule}"
-                     data-team="${team}">
-                    <img src="${this.getTeamLogo(team)}" class="team-card-logo" alt="${team}">
-                    <div class="team-card-info">
-                        <span class="team-name">${team}</span>
-                        ${predHtml}
+                <button class="team-btn${isSelected ? ' selected' : ''}"
+                    data-team="${_esc(team)}"
+                    title="${_esc(schedule)}"
+                    ${isDrafted ? 'disabled' : ''}>
+                    <img src="${this.getTeamLogo(team)}" alt="${_esc(team)}"
+                        style="width:32px;height:32px;object-fit:contain;flex-shrink:0;">
+                    <div style="flex:1;min-width:0">
+                        <div class="team-btn-city" style="${isDrafted ? 'text-decoration:line-through;text-decoration-color:var(--ink-3)' : ''}">${_esc(team)}</div>
+                        ${subHtml}
                     </div>
-                </div>
-            `;
+                </button>`;
         }).join('');
     },
 
