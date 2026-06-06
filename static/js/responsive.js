@@ -22,12 +22,12 @@
        ------------------------------------------------------------------ */
 
     function initDrawer() {
-        var toggle = document.getElementById('drawer-toggle');
+        var moreTab = document.getElementById('btb-more-tab');
         var drawer = document.getElementById('nav-drawer');
         var overlay = document.getElementById('nav-drawer-overlay');
         var closeBtn = document.getElementById('drawer-close');
 
-        if (!toggle || !drawer || !overlay) return;
+        if (!moreTab || !drawer || !overlay) return;
 
         function openDrawer() {
             drawer.classList.add('open');
@@ -45,47 +45,11 @@
             document.body.style.overflow = '';
         }
 
-        toggle.addEventListener('click', openDrawer);
+        moreTab.addEventListener('click', openDrawer);
         overlay.addEventListener('click', closeDrawer);
         if (closeBtn) {
             closeBtn.addEventListener('click', closeDrawer);
         }
-
-        // Sync admin link visibility from desktop nav to drawer
-        var desktopAdmin = document.getElementById('admin-nav-link');
-        var drawerAdmin = document.getElementById('admin-nav-link-drawer');
-        if (desktopAdmin && drawerAdmin) {
-            var observer = new MutationObserver(function () {
-                drawerAdmin.style.display = desktopAdmin.style.display;
-            });
-            observer.observe(desktopAdmin, { attributes: true, attributeFilter: ['style'] });
-        }
-
-        // Sync user identity to drawer footer
-        syncDrawerUser();
-    }
-
-    function syncDrawerUser() {
-        var desktopNickname = document.getElementById('user-nickname-display');
-        var drawerFooter = document.getElementById('drawer-user-identity');
-        if (!desktopNickname || !drawerFooter) return;
-
-        var observer = new MutationObserver(function () {
-            var name = desktopNickname.textContent.trim();
-            if (name) {
-                drawerFooter.innerHTML =
-                    '<div class="drawer-user-name">' + name + '</div>' +
-                    '<button class="drawer-logout-btn" id="drawer-logout-btn">Logout</button>';
-                var btn = document.getElementById('drawer-logout-btn');
-                if (btn) {
-                    btn.addEventListener('click', function () {
-                        var mainLogout = document.getElementById('logout-btn');
-                        if (mainLogout) mainLogout.click();
-                    });
-                }
-            }
-        });
-        observer.observe(desktopNickname, { childList: true, characterData: true, subtree: true });
     }
 
     /* ------------------------------------------------------------------

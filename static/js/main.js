@@ -15,6 +15,7 @@ class App {
         this.selectedTeam = null;
         this.draftSummary = null;
         this.shameTimerInterval = null;
+        this.draftActive = false;
 
         this.ws = new WebSocketService({
             onMessage: (msg) => this.handleWsMessage(msg),
@@ -33,6 +34,14 @@ class App {
             if (profile) this.user.role = profile.role;
         }
 
+        // Fetch draft_active config
+        try {
+            const cfg = await fetch('/api/config/settings').then(r => r.json());
+            this.draftActive = cfg.draft_active === true;
+        } catch (e) {
+            console.warn('[App] Could not load config/settings', e);
+        }
+
         // 2. Setup Navigation & Global UI
         this.initGlobalUI();
         if (typeof lucide !== 'undefined') lucide.createIcons();
@@ -48,38 +57,13 @@ class App {
     }
 
     initGlobalUI() {
-        const { playerId, playerName, nickName, role } = this.user;
+        const { playerId, role } = this.user;
         const root = document.documentElement;
 
         if (playerId) {
             root.classList.remove('show-signin');
-
-            // Show the user identity box in the top right
-            const identityBox = document.getElementById('user-identity');
-            const nicknameEl = document.getElementById('user-nickname-display');
-            if (identityBox) {
-                identityBox.style.display = 'flex';
-                identityBox.classList.remove('hidden');
-                if (nicknameEl) nicknameEl.textContent = nickName || playerName;
-            }
-
-            const adminLink = document.getElementById('admin-nav-link');
-            if (adminLink) {
-                if (role === 'admin') {
-                    adminLink.classList.remove('admin-hidden');
-                } else {
-                    adminLink.classList.add('admin-hidden');
-                }
-            }
-
-            const adminLinkDrawer = document.getElementById('admin-nav-link-drawer');
-            if (adminLinkDrawer) {
-                if (role === 'admin') {
-                    adminLinkDrawer.classList.remove('admin-hidden');
-                } else {
-                    adminLinkDrawer.classList.add('admin-hidden');
-                }
-            }
+            this.updateNav();
+            this.initNavInteractions();
 
             // Show admin elements on draft page if admin
             if (role === 'admin') {
@@ -100,13 +84,176 @@ class App {
         } else {
             root.classList.add('show-signin');
         }
+    }
 
-        const logoutBtn = document.getElementById('logout-btn');
-        if (logoutBtn) logoutBtn.onclick = async () => {
-            await fetch('/api/logout', { method: 'POST' }).catch(() => {});
-            AuthService.clearCredentials();
-            window.location.reload();
-        };
+    updateNav() {
+        const { playerId, nickName, playerName, role } = this.user;
+        if (!playerId) return;
+
+        const initials = (nickName || playerName || '?').slice(0, 2).toUpperCase();
+        const path = window.location.pathname;
+
+        // ── Primary links ──
+        const primaryLinks = [
+            { href: `/wins-pool/${new Date().getFullYear()}`, label: 'Standings', paths: ['/wins-pool'] },
+            { href: '/schedule',      label: 'Schedule',     paths: ['/schedule'] },
+            this.draftActive
+                ? { href: '/draft',   label: 'Live Draft',   paths: ['/draft'], live: true }
+                : { href: '/draft-results', label: 'Draft Results', paths: ['/draft-results'] },
+            { href: '/playoff-race',  label: 'Playoff Race', paths: ['/playoff-race'] },
+        ];
+        if (role === 'admin') {
+            primaryLinks.push({ href: '/admin', label: 'Admin', paths: ['/admin'], admin: true });
+        }
+
+        const primaryContainer = document.getElementById('nav-primary-links');
+        if (primaryContainer) {
+            primaryContainer.innerHTML = primaryLinks.map(link => {
+                const isActive = link.paths.some(p => path.startsWith(p));
+                let cls = 'nav-rail-link';
+                if (isActive) cls += ' active';
+                if (link.live) cls += ' nav-rail-link--live';
+                if (link.admin) cls += ' nav-rail-link--admin';
+                const dot = link.live ? '<span class="nav-live-dot"></span>' : '';
+                return `<a href="${link.href}" class="${cls}">${dot}${link.label}</a>`;
+            }).join('');
+        }
+
+        // ── More dropdown ──
+        const moreLinks = [
+            { href: `/wins-pool/${new Date().getFullYear()}/weekbyweek`, label: 'Weekly Progress' },
+            { href: '/headtohead', label: 'Head to Head' },
+            null, // divider
+        ];
+        if (this.draftActive) {
+            moreLinks.push({ href: '/draft-results', label: 'Draft Results' });
+        }
+        moreLinks.push(
+            { href: '/draft/history', label: 'Draft History' },
+            { href: '/history',       label: 'All-Time History' },
+            null,
+            { href: '/profile',       label: 'Profile' },
+        );
+        if (role === 'admin') {
+            moreLinks.push({ href: '/admin', label: 'Admin Portal' });
+        }
+
+        const moreDropdown = document.getElementById('nav-more-dropdown');
+        if (moreDropdown) {
+            moreDropdown.innerHTML = moreLinks.map(link =>
+                link === null
+                    ? '<div class="nav-drop-divider"></div>'
+                    : `<a href="${link.href}" class="nav-drop-item">${link.label}</a>`
+            ).join('');
+        }
+
+        // ── Avatar ──
+        const avatarInitials = document.getElementById('nav-avatar-initials');
+        const apName = document.getElementById('nav-ap-name');
+        const apRole = document.getElementById('nav-ap-role');
+        if (avatarInitials) avatarInitials.textContent = initials;
+        if (apName) apName.textContent = nickName || playerName || '';
+        if (apRole) apRole.textContent = role === 'admin' ? 'Admin' : 'Player';
+
+        // ── Drawer admin link ──
+        const drawerAdmin = document.getElementById('admin-nav-link-drawer');
+        if (drawerAdmin) {
+            if (role === 'admin') drawerAdmin.classList.remove('admin-hidden');
+            else drawerAdmin.classList.add('admin-hidden');
+        }
+
+        // ── Drawer Live Draft link ──
+        const drawerLiveDraft = document.getElementById('drawer-live-draft-link');
+        if (drawerLiveDraft) {
+            drawerLiveDraft.classList.toggle('hidden', !this.draftActive);
+        }
+
+        // ── Drawer footer ──
+        const drawerFooter = document.getElementById('drawer-user-identity');
+        if (drawerFooter) {
+            drawerFooter.innerHTML = '<div class="drawer-user-name"></div><button class="drawer-logout-btn" id="drawer-logout-btn">Logout</button>';
+            drawerFooter.querySelector('.drawer-user-name').textContent = nickName || playerName || '';
+            const drawerLogoutBtn = document.getElementById('drawer-logout-btn');
+            if (drawerLogoutBtn) {
+                drawerLogoutBtn.addEventListener('click', async () => {
+                    await fetch('/api/logout', { method: 'POST' }).catch(() => {});
+                    AuthService.clearCredentials();
+                    window.location.reload();
+                });
+            }
+        }
+
+        // ── Bottom tab active state ──
+        document.querySelectorAll('.btb-item').forEach(item => {
+            const tabPath = item.dataset.path;
+            if (tabPath && path.startsWith(tabPath)) {
+                item.classList.add('active');
+            } else {
+                item.classList.remove('active');
+            }
+        });
+
+        // ── Bottom tab: swap Drafts ↔ Live Draft ──
+        const btbDraftTab = document.getElementById('btb-draft-tab');
+        const btbDraftLabel = document.getElementById('btb-draft-label');
+        if (btbDraftTab && btbDraftLabel) {
+            if (this.draftActive) {
+                btbDraftTab.href = '/draft';
+                btbDraftTab.dataset.path = '/draft';
+                btbDraftTab.classList.add('live');
+                btbDraftLabel.textContent = 'Live Draft';
+            } else {
+                btbDraftTab.href = '/draft-results';
+                btbDraftTab.dataset.path = '/draft-results';
+                btbDraftTab.classList.remove('live');
+                btbDraftLabel.textContent = 'Drafts';
+            }
+        }
+    }
+
+    initNavInteractions() {
+        if (this._navInteractionsWired) return;
+        this._navInteractionsWired = true;
+        const moreBtn = document.getElementById('nav-more-btn');
+        const moreDropdown = document.getElementById('nav-more-dropdown');
+        const avatarBtn = document.getElementById('nav-avatar-btn');
+        const avatarPopover = document.getElementById('nav-avatar-popover');
+
+        if (moreBtn && moreDropdown) {
+            moreBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                moreDropdown.classList.toggle('hidden');
+                avatarPopover?.classList.add('hidden');
+            });
+        }
+
+        if (avatarBtn && avatarPopover) {
+            avatarBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                avatarPopover.classList.toggle('hidden');
+                moreDropdown?.classList.add('hidden');
+            });
+        }
+
+        document.addEventListener('click', () => {
+            moreDropdown?.classList.add('hidden');
+            avatarPopover?.classList.add('hidden');
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                moreDropdown?.classList.add('hidden');
+                avatarPopover?.classList.add('hidden');
+            }
+        });
+
+        const apLogout = document.getElementById('nav-ap-logout-btn');
+        if (apLogout) {
+            apLogout.onclick = async () => {
+                await fetch('/api/logout', { method: 'POST' }).catch(() => {});
+                AuthService.clearCredentials();
+                window.location.reload();
+            };
+        }
     }
 
     async initDraftPage() {
