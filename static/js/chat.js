@@ -45,11 +45,11 @@ function _appendMessage(msgType, playerName, text, timestamp, animate) {
            <span style="color:var(--text-secondary);"> ${ts}</span><br>${_esc(text)}`;
     box.appendChild(el);
 
-    const atBottom = box.scrollHeight - box.clientHeight - box.scrollTop < 60;
-    if (atBottom || !animate) {
-        _scrollBottom();
-    } else if (animate && _collapsed) {
+    if (_collapsed && animate) {
         _bumpUnread();
+    } else {
+        const atBottom = box.scrollHeight - box.clientHeight - box.scrollTop < 60;
+        if (atBottom || !animate) _scrollBottom();
     }
 }
 
