@@ -14,6 +14,7 @@ from services.data_service import (
 )
 from services.draft_service import load_draft_state, save_pick, undo_pick, reset_pick
 from services.db_service import get_collection_df, add_draft_order, add_draft_rule
+from services.chat_service import post_system_message, post_chat_message, get_recent_messages
 import services.analysis_service as analysis
 from services.constants import DRAFT_ROUNDS
 
@@ -433,13 +434,61 @@ import os
 ROOM_CODE = os.environ.get("ROOM_CODE", "test").strip().lower()
 
 
+async def _broadcast_pick_messages(manager, old_state: dict, new_state: dict, team: str) -> None:
+    """Post pick + on-the-clock system messages to chat and broadcast them."""
+    season = old_state["season"]
+    active_pick = old_state["active_pick"]
+    picker_pid = next(
+        (x["playerId"] for x in old_state["draft_board"] if x["pick"] == active_pick), None
+    )
+    picker = next(
+        (p for p in old_state.get("all_players", []) if p["playerId"] == picker_pid),
+        None,
+    )
+    picker_name = picker["playerName"] if picker else "Unknown"
+    pick_msg = post_system_message(season, f"🏈 {picker_name} picks {team} — Pick #{active_pick}")
+    if pick_msg:
+        await manager.broadcast({
+            "type": "chat_message",
+            "msgType": "system",
+            "playerName": "System",
+            "text": pick_msg["text"],
+            "timestamp": pick_msg["timestamp"],
+        })
+    new_active = new_state.get("active_pick", active_pick + 1)
+    if new_active <= 30:
+        next_entry = next(
+            (x for x in new_state["draft_board"] if x["pick"] == new_active), None
+        )
+        next_pid = next_entry["playerId"] if next_entry else None
+        next_player = next(
+            (p for p in new_state.get("all_players", []) if p["playerId"] == next_pid),
+            None,
+        )
+        if next_player:
+            clock_msg = post_system_message(
+                season, f"⏰ {next_player['playerName']}, you're on the clock! Pick #{new_active}"
+            )
+            if clock_msg:
+                await manager.broadcast({
+                    "type": "chat_message",
+                    "msgType": "system",
+                    "playerName": "System",
+                    "text": clock_msg["text"],
+                    "timestamp": clock_msg["timestamp"],
+                })
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     current_view_year = None # Default to latest
     socket_player_id: int | None = None  # track which player authenticated on this socket
     try:
-        await websocket.send_json({"type": "state", "payload": load_draft_state(connected_players)})
+        initial_state = load_draft_state(connected_players)
+        await websocket.send_json({"type": "state", "payload": initial_state})
+        history = get_recent_messages(initial_state.get("season", 2026))
+        await websocket.send_json({"type": "chat_history", "messages": history})
         while True:
             data = await websocket.receive_text()
             msg = json.loads(data)
@@ -554,7 +603,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 target_pid = next((x["playerId"] for x in state["draft_board"] if x["pick"] == active_pick), None)
                 if target_pid is not None:
                     save_pick(state["season"], active_pick, target_pid, team, executed_by=player.get("playerName", "Admin"))
-                    await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
+                    new_state = load_draft_state(connected_players, year=target_year)
+                    await manager.broadcast({"type": "state", "payload": new_state})
+                    await _broadcast_pick_messages(manager, state, new_state, team)
 
             elif action == "pick":
                 team = msg.get("team")
@@ -590,7 +641,53 @@ async def websocket_endpoint(websocket: WebSocket):
                 if target_pid is not None:
                     executed_by = admin_player.get("playerName") if is_admin and socket_player_id != target_pid_int else None
                     save_pick(state["season"], active_pick, target_pid, team, executed_by=executed_by)
-                    await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
+                    new_state = load_draft_state(connected_players, year=target_year)
+                    await manager.broadcast({"type": "state", "payload": new_state})
+                    await _broadcast_pick_messages(manager, state, new_state, team)
+
+            elif action == "chat":
+                if socket_player_id is None:
+                    await websocket.send_json({"type": "error", "message": "Sign in before chatting."})
+                    continue
+                state = load_draft_state(connected_players, year=target_year)
+                text = str(msg.get("text", "")).strip()
+                if not text:
+                    continue
+                if text.lower().startswith("/teams"):
+                    teams_str = ", ".join(sorted(state.get("available_teams", [])))
+                    msg_doc = post_system_message(
+                        state["season"], f"📋 Available teams: {teams_str}"
+                    )
+                else:
+                    player_info = next(
+                        (p for p in state.get("all_players", []) if p["playerId"] == socket_player_id),
+                        None,
+                    )
+                    player_name = player_info["playerName"] if player_info else f"Player {socket_player_id}"
+                    msg_doc = post_chat_message(state["season"], player_name, text)
+                if msg_doc:
+                    await manager.broadcast({
+                        "type": "chat_message",
+                        "msgType": msg_doc["type"],
+                        "playerName": msg_doc["playerName"],
+                        "text": msg_doc["text"],
+                        "timestamp": msg_doc["timestamp"],
+                    })
+
+            elif action == "teams_list":
+                state = load_draft_state(connected_players, year=target_year)
+                teams_str = ", ".join(sorted(state.get("available_teams", [])))
+                msg_doc = post_system_message(
+                    state["season"], f"📋 Available teams: {teams_str}"
+                )
+                if msg_doc:
+                    await manager.broadcast({
+                        "type": "chat_message",
+                        "msgType": "system",
+                        "playerName": "System",
+                        "text": msg_doc["text"],
+                        "timestamp": msg_doc["timestamp"],
+                    })
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)

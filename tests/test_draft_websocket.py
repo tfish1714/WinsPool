@@ -117,6 +117,7 @@ class TestWebSocketVerifyCode:
         client, _, _, _ = ws_client
         with client.websocket_connect("/ws") as ws:
             ws.receive_json()  # consume initial state
+            ws.receive_json()  # consume chat_history
             ws.send_json({"action": "verify_code", "playerId": 1, "code": "wrongcode"})
             msg = ws.receive_json()
             assert msg["type"] == "error"
@@ -138,6 +139,7 @@ class TestWebSocketAdminActions:
         client, _, _, _ = ws_client
         with client.websocket_connect("/ws") as ws:
             ws.receive_json()  # consume initial state
+            ws.receive_json()  # consume chat_history
             ws.send_json({"action": "undo_pick"})
             msg = ws.receive_json()
             assert msg["type"] == "error"
