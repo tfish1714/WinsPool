@@ -15,6 +15,7 @@ class App {
         this.selectedTeam = null;
         this.draftSummary = null;
         this.timerInterval = null;
+        this.shameTimerInterval = null;
 
         this.ws = new WebSocketService({
             onMessage: (msg) => this.handleWsMessage(msg),
@@ -209,8 +210,8 @@ class App {
             }
         }
 
-        // Update Banner
-        this.processDraftBanners(state);
+        // Shame timer + LIVE pill + round label
+        this.updateShameTimer(state);
 
         // Render Board
         UiRenderer.renderDraftBoard(draft_board, active_pick, this.user.playerId, this.draftSummary, state.all_players ? state.all_players.length : 10, this.user.role, preseason_predictions);
@@ -229,14 +230,6 @@ class App {
         // Render Teams
         UiRenderer.renderTeamGrid(available_teams, this.selectedTeam, this.user.role, preseason_predictions, team_schedules);
 
-        // Setup Admin Overrides (Cleanup old select if it exists)
-        if (this.user.role === 'admin') {
-            const undoBtn = document.getElementById('undo-pick-btn');
-            const resetBtn = document.getElementById('reset-pick-btn');
-            if (undoBtn) undoBtn.style.display = 'flex';
-            if (resetBtn) resetBtn.style.display = 'flex';
-        }
-
         // Setup individual card clicks
         this.attachTeamCardClickHandlers();
 
@@ -244,41 +237,88 @@ class App {
         if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 
-    processDraftBanners(state) {
-        const banner = document.getElementById('current-pick-status');
-        if (!banner) return;
+    updateShameTimer(state) {
+        const card = document.getElementById('shame-timer-card');
+        if (!card) return;
 
-        if (!state.draft_ready && state.active_pick <= 30) {
-            banner.innerHTML = "Waiting for players to join...";
+        if (this.shameTimerInterval) {
+            clearInterval(this.shameTimerInterval);
+            this.shameTimerInterval = null;
+        }
+
+        const { active_pick, draft_board, pick_start_time, all_players, connected_count } = state;
+
+        // Update LIVE pill
+        const livePill = document.getElementById('current-pick-status');
+        if (livePill && connected_count != null) {
+            livePill.innerHTML = `<span class="dot pulse"></span>LIVE &middot; ${connected_count} connected`;
+        }
+
+        // Update round label in h1
+        const roundLabel = document.getElementById('round-label');
+        if (roundLabel && all_players) {
+            const totalPlayers = all_players.length || 10;
+            const round = active_pick <= (draft_board.length || 30)
+                ? Math.ceil(active_pick / totalPlayers)
+                : Math.ceil((draft_board.length || 30) / totalPlayers);
+            roundLabel.textContent = `/round ${round}`;
+        }
+
+        // Draft complete
+        if (!draft_board || active_pick > (draft_board.length || 30)) {
+            card.style.borderColor = 'var(--line-strong)';
+            card.innerHTML = `
+                <div style="grid-column:1/-1;text-align:center;padding:8px 0;color:var(--ink-2);font-size:15px;font-weight:600;">
+                    Draft complete 🎉
+                </div>`;
             return;
         }
 
-        if (state.active_pick > 30) {
-            banner.innerHTML = "Draft Complete!";
-        } else {
-            const item = state.draft_board.find(x => x.pick === state.active_pick);
-            if (item) {
-                const isMe = String(item.playerId) === String(this.user.playerId);
-                const txt = isMe ? `<strong>Your Pick!</strong> (Pick ${item.pick})` : `<strong>${item.playerName}</strong> is picking...`;
-                banner.innerHTML = `<span class="pulse-dot"></span>${txt} <span id="pick-timer"></span>`;
-                this.startTimer(state.pick_start_time);
-            }
-        }
-    }
+        const item = draft_board.find(x => x.pick === active_pick);
+        if (!item) return;
 
-    startTimer(startTime) {
-        if (this.timerInterval) clearInterval(this.timerInterval);
-        const timerEl = document.getElementById('pick-timer');
-        if (!timerEl || !startTime) return;
+        const totalPicks = draft_board.length;
+        const totalPlayers = (all_players || []).length || 10;
+        const round = Math.ceil(active_pick / totalPlayers);
 
-        this.timerInterval = setInterval(() => {
-            const elapsed = Math.floor(Date.now() / 1000) - startTime;
-            if (elapsed < 0) return;
-            const h = Math.floor(elapsed / 3600).toString().padStart(2, '0');
-            const m = Math.floor((elapsed % 3600) / 60).toString().padStart(2, '0');
-            const s = (elapsed % 60).toString().padStart(2, '0');
-            timerEl.textContent = `[${h}:${m}:${s}]`;
-        }, 1000);
+        const TIERS = [
+            { at: 0,   color: 'var(--ink)',   ring: 'var(--line-strong)',     dot: 'ok',   label: 'On the clock' },
+            { at: 30,  color: 'var(--ink-2)', ring: 'var(--line-strong)',     dot: 'ok',   label: 'Taking it in…' },
+            { at: 75,  color: 'var(--warn)',  ring: 'rgba(217,168,108,0.40)', dot: 'warn', label: 'The pool is getting restless' },
+            { at: 150, color: 'var(--neg)',   ring: 'rgba(217,112,112,0.45)', dot: 'bad',  label: 'You\'re holding up the entire draft' },
+        ];
+        const tierFor = (secs) => TIERS.reduce((t, x) => secs >= x.at ? x : t, TIERS[0]);
+        const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+        const render = () => {
+            const elapsed = Math.max(0, Math.floor(Date.now() / 1000) - pick_start_time);
+            const tier = tierFor(elapsed);
+            const hot = elapsed >= 150;
+
+            card.style.borderColor = tier.ring;
+            card.innerHTML = `
+                <div class="cc-left">
+                    <div class="eyebrow" style="color:var(--ink-3)">On the clock</div>
+                    <div class="cc-name">${item.playerName}</div>
+                    <div class="cc-sub">Round ${round} &middot; Pick ${active_pick} of ${totalPicks}</div>
+                </div>
+                <div class="cc-pick">
+                    <span class="numeral" style="font-size:26px;color:var(--ink-2)">${active_pick}</span>
+                    <span style="color:var(--ink-3);font-size:13px">/${totalPicks}</span>
+                </div>
+                <div class="cc-timer">
+                    <div class="eyebrow" style="color:${hot ? 'var(--neg)' : 'var(--ink-3)'}">Time on the clock</div>
+                    <div class="shame-num mono${hot ? ' pulse-shame' : ''}" style="color:${tier.color}">${mmss(elapsed)}</div>
+                    <div style="display:flex;justify-content:flex-end;margin-top:6px">
+                        <span class="mono-pill">
+                            <span class="dot ${tier.dot}${hot ? ' pulse' : ''}"></span>${tier.label}
+                        </span>
+                    </div>
+                </div>`;
+        };
+
+        render();
+        this.shameTimerInterval = setInterval(render, 1000);
     }
 
     attachTeamCardClickHandlers() {
