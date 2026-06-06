@@ -11,66 +11,74 @@
     <header class="wp-top">
         <div>
             <div class="eyebrow">Live Draft · <span id="season-display"></span></div>
-            <h1 class="wp-h1">Draft Room</h1>
+            <h1 class="wp-h1">Draft Room<span class="room-year" id="round-label"></span></h1>
         </div>
         <div class="wp-top-right">
             <div id="admin-year-selector" class="hidden">
-                <select id="season-dropdown" class="season-select">
-                    <!-- Populated dynamically -->
-                </select>
+                <select id="season-dropdown" class="season-select"></select>
             </div>
-            <span id="status-banner" class="mono-pill">
+            <span id="live-pill" class="mono-pill">
                 <span id="current-pick-status">Connecting…</span>
             </span>
         </div>
     </header>
 
-    <!-- Tab 1: Draft Board -->
+    <!-- Draft Board -->
     <main class="dashboard" id="dashboard-main" style="display: none;">
 
-        <section class="available-teams-section card-glass">
-            <h2>Available Teams</h2>
-            <div class="draft-actions">
+        <!-- Shame Timer Card -->
+        <div class="clock-card" id="shame-timer-card"></div>
+
+        <!-- Two-column split -->
+        <div class="room-split">
+
+            <!-- Left: Pick Queue -->
+            <section id="pick-queue-section">
+                <div class="eyebrow" style="margin-bottom:14px; color:var(--ink-3)">Pick queue</div>
+                <div id="pick-queue"></div>
+                <div id="pick-queue-footer" class="q-foot mono"></div>
+            </section>
+
+            <!-- Right: Teams Grid -->
+            <section class="available-teams-section">
                 <div id="selection-preview" class="selection-preview hidden">
                     <p>Selected Team: <span id="selected-team-name">None</span></p>
                     <button id="confirm-pick-btn" class="btn-primary" disabled>Confirm Pick</button>
                 </div>
-            </div>
-            <div class="teams-grid" id="teams-grid">
-                <!-- Instantiated by JS -->
-            </div>
-        </section>
+                <div class="teams-grid" id="teams-grid"></div>
+            </section>
 
-        <section class="draft-board-section card-glass">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <h2 style="margin: 0;">Draft Board</h2>
-                <div class="admin-controls" style="display: flex; gap: 0.5rem;">
-                    <button id="undo-pick-btn" class="btn-primary"
-                        style="background: var(--accent-gold); border-color: var(--accent-gold); padding: 0.3rem 0.8rem; font-size: 0.8rem; display: none;">
-                        Undo Pick
-                    </button>
-                    <button id="reset-pick-btn" class="btn-primary"
-                        style="background: var(--accent-red); border-color: var(--accent-red); padding: 0.3rem 0.8rem; font-size: 0.8rem; display: none;">
-                        Reset Pick
-                    </button>
-                </div>
-            </div>
-            <div class="board-container">
-                <ul class="draft-list" id="draft-list">
-                    <!-- Instantiated by JS -->
-                </ul>
-            </div>
-        </section>
+        </div>
 
-        <!-- Admin Only: Running Portfolio -->
-        <section id="admin-portfolio-section" class="card-glass" style="display: none; margin-top: 1rem;">
-            <h2>Running Portfolio (Admin Only)</h2>
-            <div class="portfolio-container" id="admin-portfolio-content" style="overflow-x: auto;">
-                <!-- Instantiated by JS -->
-            </div>
+        <!-- Full board toggle -->
+        <div class="board-toggle-row">
+            <button id="board-toggle-btn" class="board-toggle">Show full board ▾</button>
+        </div>
+
+        <!-- Full Draft Board (collapsed by default) -->
+        <section id="draft-board-section" style="display:none;">
+            <ul class="draft-list" id="draft-list"></ul>
+
+            <!-- Admin Only: Running Portfolio -->
+            <section id="admin-portfolio-section" style="display:none; margin-top:1rem;">
+                <h2>Running Portfolio (Admin Only)</h2>
+                <div class="portfolio-container" id="admin-portfolio-content" style="overflow-x:auto;"></div>
+            </section>
         </section>
 
     </main>
+</div>
+
+<!-- Floating Admin Bar (admin only) -->
+<div id="admin-bar" class="admin-bar" style="display:none;">
+    <button id="undo-pick-btn" class="btn-primary"
+        style="background:var(--accent-gold);border-color:var(--accent-gold);padding:0.4rem 1rem;font-size:0.85rem;">
+        Undo Pick
+    </button>
+    <button id="reset-pick-btn" class="btn-primary"
+        style="background:var(--accent-red);border-color:var(--accent-red);padding:0.4rem 1rem;font-size:0.85rem;">
+        Reset Pick
+    </button>
 </div>
 
 <!-- Floating Chat Overlay -->
@@ -81,7 +89,6 @@
     border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.5);
     display:flex; flex-direction:column; overflow:hidden;">
 
-    <!-- Header — always visible, click anywhere to toggle -->
     <div id="chat-header" style="
         display:flex; align-items:center; justify-content:space-between;
         padding:0.6rem 0.9rem; cursor:pointer;
@@ -98,7 +105,6 @@
             aria-label="Toggle chat">−</button>
     </div>
 
-    <!-- Body — hidden when minimized -->
     <div id="chat-body" style="display:flex; flex-direction:column; padding:0.75rem;">
         <div id="chat-messages" style="
             height:260px; overflow-y:auto; display:flex; flex-direction:column;
