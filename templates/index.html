@@ -70,35 +70,50 @@
             </div>
         </section>
 
-        <!-- Chat Feed -->
-        <section class="card-glass" id="chat-section" style="margin-top: 1rem;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
-                <h2 style="margin:0;">
-                    Draft Chat
-                    <span id="chat-unread-badge" style="display:none; background:var(--accent-red); color:#fff;
-                        border-radius:99px; font-size:0.65rem; padding:2px 7px; vertical-align:middle;
-                        margin-left:6px;">0</span>
-                </h2>
-                <button id="chat-collapse-btn" style="background:none; border:none; color:var(--text-secondary);
-                    cursor:pointer; font-size:0.8rem;">Hide</button>
-            </div>
-            <div id="chat-body">
-                <div id="chat-messages" style="height:220px; overflow-y:auto; display:flex; flex-direction:column;
-                    gap:4px; margin-bottom:0.75rem; padding-right:4px;"></div>
-                <div style="display:flex; gap:0.5rem; align-items:center;">
-                    <input id="chat-input" type="text" maxlength="500" placeholder="Message…"
-                        style="flex:1; background:rgba(255,255,255,0.07); border:1px solid var(--glass-border);
-                        border-radius:6px; padding:0.4rem 0.75rem; color:var(--ink); font-size:0.85rem;"/>
-                    <button id="chat-send-btn" class="btn-primary"
-                        style="padding:0.4rem 0.9rem; font-size:0.82rem;">Send</button>
-                    <button id="chat-teams-btn" class="btn-primary"
-                        style="padding:0.4rem 0.75rem; font-size:0.82rem;
-                        background:rgba(255,255,255,0.08); border-color:var(--glass-border);">📋</button>
-                </div>
-            </div>
-        </section>
-
     </main>
+</div>
+
+<!-- Floating Chat Overlay -->
+<div id="chat-overlay" style="
+    position:fixed; bottom:1.5rem; right:1.5rem; z-index:9999;
+    width:320px;
+    background:var(--bg-elev); border:1px solid var(--line-strong);
+    border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.5);
+    display:flex; flex-direction:column; overflow:hidden;">
+
+    <!-- Header — always visible, click anywhere to toggle -->
+    <div id="chat-header" style="
+        display:flex; align-items:center; justify-content:space-between;
+        padding:0.6rem 0.9rem; cursor:pointer;
+        border-bottom:1px solid var(--line-strong);
+        background:var(--bg-elev-2); user-select:none;">
+        <span style="font-size:0.85rem; font-weight:600; color:var(--ink); display:flex; align-items:center; gap:6px;">
+            💬 Draft Chat
+            <span id="chat-unread-badge" style="display:none; background:var(--accent-red); color:#fff;
+                border-radius:99px; font-size:0.65rem; padding:1px 6px; line-height:1.4;">0</span>
+        </span>
+        <button id="chat-collapse-btn" style="
+            background:none; border:none; color:var(--ink-2);
+            cursor:pointer; font-size:1rem; line-height:1; padding:0 2px;"
+            aria-label="Toggle chat">−</button>
+    </div>
+
+    <!-- Body — hidden when minimized -->
+    <div id="chat-body" style="display:flex; flex-direction:column; padding:0.75rem;">
+        <div id="chat-messages" style="
+            height:260px; overflow-y:auto; display:flex; flex-direction:column;
+            gap:4px; margin-bottom:0.65rem; padding-right:2px;"></div>
+        <div style="display:flex; gap:0.4rem; align-items:center;">
+            <input id="chat-input" type="text" maxlength="500" placeholder="Message…"
+                style="flex:1; background:rgba(255,255,255,0.07); border:1px solid var(--glass-border);
+                border-radius:6px; padding:0.35rem 0.65rem; color:var(--ink); font-size:0.82rem;"/>
+            <button id="chat-send-btn" class="btn-primary"
+                style="padding:0.35rem 0.75rem; font-size:0.8rem; white-space:nowrap;">Send</button>
+            <button id="chat-teams-btn" class="btn-primary"
+                style="padding:0.35rem 0.6rem; font-size:0.8rem;
+                background:rgba(255,255,255,0.07); border-color:var(--glass-border);">📋</button>
+        </div>
+    </div>
 </div>
 {% endblock %}
 

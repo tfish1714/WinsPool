@@ -54,6 +54,7 @@ function _wireButtons() {
     const sendBtn = document.getElementById('chat-send-btn');
     const teamsBtn = document.getElementById('chat-teams-btn');
     const collapseBtn = document.getElementById('chat-collapse-btn');
+    const header = document.getElementById('chat-header');
 
     sendBtn?.addEventListener('click', _sendMessage);
     input?.addEventListener('keydown', e => { if (e.key === 'Enter') _sendMessage(); });
@@ -62,14 +63,17 @@ function _wireButtons() {
         _ws?.send({ action: 'teams_list' });
     });
 
-    collapseBtn?.addEventListener('click', () => {
+    const toggle = () => {
         const body = document.getElementById('chat-body');
         if (!body) return;
         _collapsed = !_collapsed;
-        body.style.display = _collapsed ? 'none' : '';
-        collapseBtn.textContent = _collapsed ? 'Show' : 'Hide';
+        body.style.display = _collapsed ? 'none' : 'flex';
+        if (collapseBtn) collapseBtn.textContent = _collapsed ? '+' : '−';
         if (!_collapsed) _clearUnread();
-    });
+    };
+
+    collapseBtn?.addEventListener('click', e => { e.stopPropagation(); toggle(); });
+    header?.addEventListener('click', toggle);
 }
 
 function _sendMessage() {
