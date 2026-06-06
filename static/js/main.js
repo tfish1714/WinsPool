@@ -146,6 +146,39 @@ class App {
         }
         this.updateStatusBanner('Connected. Waiting for state...');
         initChat(this.ws);
+        this.initPushNotifications();
+    }
+
+    async initPushNotifications() {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+        const vapidKey = document.querySelector('meta[name="vapid-public-key"]')?.content;
+        if (!vapidKey) return;
+
+        try {
+            const reg = await navigator.serviceWorker.register('/sw.js');
+            const permission = await Notification.requestPermission();
+            if (permission !== 'granted') return;
+
+            const sub = await reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: _urlBase64ToUint8Array(vapidKey),
+            });
+
+            const token = AuthService.getToken();
+            await fetch('/api/draft/push-subscribe', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify({
+                    playerId: this.user.playerId,
+                    subscription: sub.toJSON(),
+                }),
+            });
+        } catch (e) {
+            console.warn('[Push] Subscription failed:', e);
+        }
     }
 
     updateStatusBanner(text) {
@@ -494,3 +527,10 @@ document.querySelectorAll('table.wp-data-table').forEach(table => {
     });
 });
 window.App.init();
+
+function _urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}

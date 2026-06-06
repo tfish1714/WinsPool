@@ -3,6 +3,9 @@
 {% block title %}NFL Wins Pool Draft{% endblock %}
 
 {% block content %}
+{% if vapid_public_key %}
+<meta name="vapid-public-key" content="{{ vapid_public_key }}">
+{% endif %}
 <div class="container">
     <!-- Page Header -->
     <header class="wp-top">

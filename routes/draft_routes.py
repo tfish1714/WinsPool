@@ -79,7 +79,10 @@ connected_players: set = set()
 
 @router.get("/draft")
 async def serve_draft_board(request: Request):
-    return templates.TemplateResponse(request, "index.html")
+    import os
+    return templates.TemplateResponse(request, "index.html", {
+        "vapid_public_key": os.environ.get("VAPID_PUBLIC_KEY", ""),
+    })
 
 
 @router.get("/draft-results")
