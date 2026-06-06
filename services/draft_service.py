@@ -38,6 +38,7 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
         state = copy.deepcopy(_CACHED_DRAFT_STATE)
         state["draft_ready"] = True
         state["connected_players"] = list(connected_players)
+        state["connected_count"] = len(connected_players) if connected_players else 0
         for p in state["all_players"]:
             p["connected"] = p["playerId"] in connected_players
         return state
@@ -97,18 +98,30 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
     melted = pd.merge(melted, players_df, on='playerId', how='left')
     melted = pd.merge(melted, results_season[['draftPick', 'team']], on='draftPick', how='left')
     
+    # Build time_taken map: pick → seconds
+    time_taken_map: dict[int, float] = {}
+    if 'time_taken_seconds' in results_season.columns:
+        for _, r in results_season[['draftPick', 'time_taken_seconds']].dropna().iterrows():
+            time_taken_map[int(r['draftPick'])] = float(r['time_taken_seconds'])
+
     draft_board = []
     active_pick = None
     picked_teams = set()
     for _, row in melted.iterrows():
         pid = int(row['playerId']) if pd.notna(row['playerId']) else None
         if pid is None: continue
-        
+
         pname = row.get('nickName') or row.get('fullName', f"Player {pid}")
         team = row['team'] if pd.notna(row['team']) else None
         if team: picked_teams.add(team)
-            
-        draft_board.append({"pick": int(row['draftPick']), "playerId": pid, "playerName": pname, "team": team})
+
+        draft_board.append({
+            "pick": int(row['draftPick']),
+            "playerId": pid,
+            "playerName": pname,
+            "team": team,
+            "time_taken_seconds": time_taken_map.get(int(row['draftPick'])),
+        })
         if team is None and active_pick is None:
             active_pick = int(row['draftPick'])
             
@@ -168,6 +181,8 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
         "team_schedules": team_schedules,
     }
     
+    state["connected_count"] = len(connected_players) if connected_players else 0
+
     import copy
     state = sanitize_state(state)
     _CACHED_DRAFT_STATE = copy.deepcopy(state)
