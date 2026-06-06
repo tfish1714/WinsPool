@@ -114,6 +114,28 @@
         <p>Generate a new season with specific players or wipe existing seasonal data.</p>
 
         <div class="admin-form" style="display: flex; flex-direction: column; gap: 1.5rem; margin-top: 1rem;">
+            <!-- Draft Active Toggle -->
+            <div id="draft-active-row" style="
+                display: flex; align-items: center; justify-content: space-between;
+                padding: 14px 16px; border: 1px solid var(--line-strong); border-radius: 10px;
+                background: var(--bg-elev-2);">
+                <div>
+                    <div style="font-size: 14px; font-weight: 600; color: var(--ink);">Draft active</div>
+                    <div id="draft-active-sub" style="font-size: 12px; color: var(--ink-3); margin-top: 2px;">
+                        Shows Live Draft in nav for all users
+                    </div>
+                </div>
+                <button id="draft-active-toggle" aria-pressed="false" style="
+                    width: 42px; height: 24px; border-radius: 999px; border: none; cursor: pointer;
+                    background: rgba(255,255,255,0.12); position: relative; transition: background 200ms;"
+                    title="Toggle draft active">
+                    <span style="
+                        position: absolute; top: 3px; left: 3px;
+                        width: 18px; height: 18px; border-radius: 50%; background: #fff;
+                        transition: left 200ms; display: block;" id="draft-active-knob"></span>
+                </button>
+            </div>
+
             <div style="display: flex; gap: 1rem;">
                 <input type="number" id="season-input" class="admin-input" placeholder="Season Year (e.g. 2026)"
                     min="2024" max="2100" style="flex: 1;">

@@ -550,6 +550,51 @@ class AdminApp {
     }
 }
 
+// ── Draft Active Toggle ──────────────────────────────────
+async function initDraftActiveToggle() {
+    const toggle = document.getElementById('draft-active-toggle');
+    const knob = document.getElementById('draft-active-knob');
+    const sub = document.getElementById('draft-active-sub');
+    if (!toggle || !knob || !sub) return;
+
+    function applyState(active) {
+        toggle.setAttribute('aria-pressed', active ? 'true' : 'false');
+        toggle.style.background = active ? 'var(--pos)' : 'rgba(255,255,255,0.12)';
+        knob.style.left = active ? '21px' : '3px';
+        sub.textContent = active
+            ? 'Live Draft visible in nav · all users'
+            : 'Shows Live Draft in nav for all users';
+        sub.style.color = active ? 'var(--pos)' : 'var(--ink-3)';
+    }
+
+    // Load current state
+    try {
+        const cfg = await fetch('/api/config/settings').then(r => r.json());
+        applyState(cfg.draft_active === true);
+    } catch (e) {
+        console.warn('[Admin] Could not load config/settings', e);
+    }
+
+    // Toggle on click
+    toggle.addEventListener('click', async () => {
+        const current = toggle.getAttribute('aria-pressed') === 'true';
+        const next = !current;
+        applyState(next); // optimistic
+        try {
+            await fetch('/api/admin/config/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ draft_active: next }),
+            });
+        } catch (e) {
+            console.error('[Admin] Failed to save draft_active', e);
+            applyState(current); // revert on error
+        }
+    });
+}
+
+initDraftActiveToggle();
+
 // Start Admin App
 const admin = new AdminApp();
 admin.init();
