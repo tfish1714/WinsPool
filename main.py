@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, FileResponse
 
 from services.data_service import load_data, get_active_season, get_team_logo
 from routes.standings_routes import router as standings_router, templates as standings_templates
@@ -62,6 +62,12 @@ STATIC_PATH = os.environ.get("STATIC_PATH", "static")
 if not pathlib.Path(STATIC_PATH).exists():
     pathlib.Path(STATIC_PATH).mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_PATH), name="static")
+
+
+@app.get("/sw.js", include_in_schema=False)
+async def serve_service_worker():
+    return FileResponse("static/sw.js", media_type="application/javascript")
+
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(standings_router)
