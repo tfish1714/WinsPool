@@ -12,3 +12,4 @@ PyJWT>=2.8.0
 openpyxl>=3.1.5
 
 resend>=2.0.0
+pywebpush>=2.0.0
