@@ -2,6 +2,7 @@ import logging
 import os
 import sys
 import pathlib
+import json
 import pandas as pd
 import hashlib
 import time
@@ -512,7 +513,6 @@ def get_metadata(doc_id: str):
 
 def get_config_settings() -> dict:
     """Returns app config settings. Defaults to {"draft_active": False}."""
-    import json
     default = {"draft_active": False}
     use_local = os.environ.get("USE_LOCAL_DATA", "False").lower() == "true"
 
@@ -535,13 +535,13 @@ def get_config_settings() -> dict:
 
 def set_config_settings(data: dict):
     """Writes config settings to Firestore and local json cache."""
-    import json
     db = get_db()
     if db:
         db.collection("config").document("settings").set(data)
 
     local_path = pathlib.Path(".local_db") / "config_settings.json"
     try:
+        local_path.parent.mkdir(parents=True, exist_ok=True)
         with open(local_path, "w") as f:
             json.dump(data, f)
     except Exception as e:
