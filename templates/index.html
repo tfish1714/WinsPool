@@ -32,11 +32,17 @@
         <!-- Two-column split -->
         <div class="room-split">
 
-            <!-- Left: Pick Queue -->
+            <!-- Left: Pick Queue + Admin Portfolio -->
             <section id="pick-queue-section">
                 <div class="eyebrow" style="margin-bottom:14px; color:var(--ink-3)">Pick queue</div>
                 <div id="pick-queue"></div>
                 <div id="pick-queue-footer" class="q-foot mono"></div>
+
+                <!-- Admin Only: Running Portfolio -->
+                <section id="admin-portfolio-section" style="display:none; margin-top:1.5rem;">
+                    <div class="eyebrow" style="margin-bottom:10px; color:var(--ink-3)">Running portfolio</div>
+                    <div class="portfolio-container" id="admin-portfolio-content" style="overflow-x:auto;"></div>
+                </section>
             </section>
 
             <!-- Right: Teams Grid -->
@@ -58,12 +64,6 @@
         <!-- Full Draft Board (collapsed by default) -->
         <section id="draft-board-section" style="display:none;">
             <ul class="draft-list" id="draft-list"></ul>
-
-            <!-- Admin Only: Running Portfolio -->
-            <section id="admin-portfolio-section" style="display:none; margin-top:1rem;">
-                <h2>Running Portfolio (Admin Only)</h2>
-                <div class="portfolio-container" id="admin-portfolio-content" style="overflow-x:auto;"></div>
-            </section>
         </section>
 
     </main>
