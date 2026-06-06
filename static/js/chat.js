@@ -11,6 +11,14 @@ let _initialized = false;
 export function initChat(ws) {
     _ws = ws;
     if (!_initialized) {
+        // Auto-collapse on mobile so chat doesn't block the page
+        if (window.innerWidth <= 600) {
+            _collapsed = true;
+            const body = document.getElementById('chat-body');
+            const btn = document.getElementById('chat-collapse-btn');
+            if (body) body.style.display = 'none';
+            if (btn) btn.textContent = '+';
+        }
         _wireButtons();
         _initialized = true;
     }

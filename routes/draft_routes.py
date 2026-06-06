@@ -580,8 +580,21 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json({"type": "error", "message": "No picks to undo."})
                     continue
                 
+                undone_entry = next((x for x in state.get("draft_board", []) if x["pick"] == last_pick_num), None)
+                undone_team = undone_entry["team"] if undone_entry else "?"
+                undone_player = undone_entry["playerName"] if undone_entry else "?"
                 undo_pick(state["season"], last_pick_num)
-                await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
+                new_state = load_draft_state(connected_players, year=target_year)
+                await manager.broadcast({"type": "state", "payload": new_state})
+                undo_msg = post_system_message(
+                    state["season"],
+                    f"↩️ Pick #{last_pick_num} ({undone_player} → {undone_team}) has been undone by {player.get('playerName', 'Admin')}"
+                )
+                if undo_msg:
+                    await manager.broadcast({
+                        "type": "chat_message", "msgType": "system",
+                        "playerName": "System", "text": undo_msg["text"], "timestamp": undo_msg["timestamp"],
+                    })
 
             elif action == "reset_pick":
                 state = load_draft_state(connected_players, year=target_year)
@@ -601,7 +614,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
                 
                 reset_pick(state["season"], target_pick)
-                await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
+                new_state = load_draft_state(connected_players, year=target_year)
+                await manager.broadcast({"type": "state", "payload": new_state})
+                reset_msg = post_system_message(
+                    state["season"],
+                    f"⏱️ Pick #{target_pick} clock has been reset by {player.get('playerName', 'Admin')}"
+                )
+                if reset_msg:
+                    await manager.broadcast({
+                        "type": "chat_message", "msgType": "system",
+                        "playerName": "System", "text": reset_msg["text"], "timestamp": reset_msg["timestamp"],
+                    })
 
             elif action == "force_pick":
                 team = msg.get("team")

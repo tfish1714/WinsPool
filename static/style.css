@@ -3564,3 +3564,38 @@ table.wp-data-table tbody td:last-child {
     .room-split { grid-template-columns: 1fr; }
     .dashboard { padding-bottom: 80px; }
 }
+
+/* ── Draft Room Mobile (≤ 600px) ─────────────────────────── */
+@media (max-width: 600px) {
+    /* Shame timer: shrink the big number so it fits single column */
+    .shame-num { font-size: 40px; }
+    .cc-name { font-size: 22px; }
+    .clock-card { padding: 18px 20px; gap: 14px; }
+
+    /* h1 round label: smaller on narrow phones */
+    .room-year { font-size: 18px; }
+    .wp-h1 { font-size: 26px; }
+
+    /* Header: allow right-side to wrap below on very small screens */
+    .wp-top { flex-wrap: wrap; align-items: flex-start; gap: 12px; }
+    .wp-top-right { width: 100%; justify-content: flex-start; }
+
+    /* Chat overlay: full-width, anchored to bottom edge */
+    #chat-overlay {
+        right: 0 !important;
+        left: 0 !important;
+        bottom: 0 !important;
+        width: 100% !important;
+        border-radius: 12px 12px 0 0 !important;
+    }
+
+    /* Admin bar: full-width, larger tap targets */
+    .admin-bar { padding: 10px 16px; gap: 8px; }
+    .admin-bar .btn-primary { flex: 1; text-align: center; }
+
+    /* Pick queue rows: tighter on small screens */
+    .q-row { padding: 10px 10px; gap: 10px; }
+
+    /* Teams grid: single column on very small screens */
+    #teams-grid { grid-template-columns: 1fr !important; }
+}
