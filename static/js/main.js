@@ -14,7 +14,6 @@ class App {
         this.user = AuthService.getCredentials();
         this.selectedTeam = null;
         this.draftSummary = null;
-        this.timerInterval = null;
         this.shameTimerInterval = null;
 
         this.ws = new WebSocketService({
@@ -264,6 +263,16 @@ class App {
             roundLabel.textContent = `/round ${round}`;
         }
 
+        // Not yet ready
+        if (!state.draft_ready) {
+            card.style.borderColor = 'var(--line-strong)';
+            card.innerHTML = `
+                <div style="grid-column:1/-1;text-align:center;padding:8px 0;color:var(--ink-2);font-size:15px;">
+                    Waiting for players to join…
+                </div>`;
+            return;
+        }
+
         // Draft complete
         if (!draft_board || active_pick > (draft_board.length || 30)) {
             card.style.borderColor = 'var(--line-strong)';
@@ -290,6 +299,8 @@ class App {
         const tierFor = (secs) => TIERS.reduce((t, x) => secs >= x.at ? x : t, TIERS[0]);
         const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
+        const _esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
         const render = () => {
             const elapsed = Math.max(0, Math.floor(Date.now() / 1000) - pick_start_time);
             const tier = tierFor(elapsed);
@@ -299,7 +310,7 @@ class App {
             card.innerHTML = `
                 <div class="cc-left">
                     <div class="eyebrow" style="color:var(--ink-3)">On the clock</div>
-                    <div class="cc-name">${item.playerName}</div>
+                    <div class="cc-name">${_esc(item.playerName)}</div>
                     <div class="cc-sub">Round ${round} &middot; Pick ${active_pick} of ${totalPicks}</div>
                 </div>
                 <div class="cc-pick">
