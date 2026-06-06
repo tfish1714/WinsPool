@@ -527,11 +527,8 @@ body {
     display: flex !important;
 }
 
-/* Show app content if signed in */
-html:not(.show-signin) .app-nav,
-html:not(.show-signin) .nav-rail,
-html:not(.show-signin) .nav-mobile-header,
-html:not(.show-signin) .bottom-tab-bar {
+/* Show app content if signed in — desktop rail only; mobile elements shown by breakpoint below */
+html:not(.show-signin) .nav-rail {
     display: flex !important;
 }
 
@@ -3676,14 +3673,11 @@ table.wp-data-table tbody td:last-child {
 .btb-item.active { color: var(--accent-gold); }
 .btb-item.live { color: var(--pos); }
 
-/* Auth-gate new nav elements */
-html:not(.show-signin) .nav-rail { display: flex; }
-
-/* Breakpoint: switch between desktop rail and mobile layout */
+/* Breakpoint: on mobile, swap desktop rail for mobile header + bottom tab bar */
 @media (max-width: 860px) {
-    html:not(.show-signin) .nav-rail { display: none; }
-    html:not(.show-signin) .nav-mobile-header { display: flex; }
-    html:not(.show-signin) .bottom-tab-bar { display: flex; }
+    html:not(.show-signin) .nav-rail { display: none !important; }
+    html:not(.show-signin) .nav-mobile-header { display: flex !important; }
+    html:not(.show-signin) .bottom-tab-bar { display: flex !important; }
     /* Pad page content so bottom bar doesn't cover it */
     #content { padding-bottom: 72px; }
 }
