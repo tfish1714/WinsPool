@@ -5,7 +5,7 @@ import time
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Depends, Path, Request
 from fastapi.responses import JSONResponse
 
 from services.data_service import load_data, get_latest_season_and_week
@@ -361,4 +361,23 @@ def get_game_prediction_features(
         })
     except Exception:
         logger.exception("Unhandled error in get_game_prediction_features")
+        return server_error()
+
+
+@router.post("/draft/push-subscribe")
+async def push_subscribe(request: Request, _auth: dict = Depends(require_auth)):
+    """Store a browser push subscription on the player's Firestore document."""
+    try:
+        body = await request.json()
+        player_id = body.get("playerId")
+        subscription = body.get("subscription")
+        if not player_id or not subscription:
+            return error_response("playerId and subscription are required.")
+        from services.push_service import save_push_subscription
+        ok = save_push_subscription(int(player_id), subscription)
+        if ok:
+            return JSONResponse(content={"ok": True})
+        return server_error()
+    except Exception:
+        logger.exception("push_subscribe error")
         return server_error()
