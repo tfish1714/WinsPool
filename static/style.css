@@ -36,9 +36,8 @@
 
 /* Newsreader italic numerals */
 .numeral {
-    font-family: 'Newsreader', serif;
+    font-family: 'Newsreader', Georgia, serif;
     font-style: italic;
-    font-weight: 500;
 }
 
 /* Mono status pill */
@@ -583,8 +582,8 @@ header h1 {
 }
 
 .dashboard {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    flex-direction: column;
     gap: 2rem;
     animation: fadeIn 1s ease-out;
 }
@@ -3446,4 +3445,122 @@ table.wp-data-table tbody td:last-child {
 
 @media (max-width: 480px) {
     .health-chip { font-size: 0.72rem; padding: 3px 8px; }
+}
+/* ── Draft Room Redesign ─────────────────────────────────── */
+
+/* Shame timer card */
+.clock-card {
+    border: 1px solid var(--line-strong);
+    border-radius: 14px;
+    background: var(--bg-elev);
+    padding: 26px 34px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 34px;
+    transition: border-color 600ms ease;
+    min-height: 120px;
+}
+.cc-left { min-width: 0; }
+.cc-name { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; margin: 10px 0 5px; }
+.cc-sub { color: var(--ink-2); font-size: 13px; }
+.cc-pick {
+    display: flex; align-items: baseline; gap: 4px;
+    padding: 8px 16px; border: 1px solid var(--line);
+    border-radius: 999px; justify-self: center;
+}
+.cc-timer { text-align: right; justify-self: end; }
+.shame-num {
+    font-size: 58px; font-weight: 700; letter-spacing: -0.03em; line-height: 1;
+    font-variant-numeric: tabular-nums; margin: 8px 0 6px;
+    transition: color 500ms ease;
+}
+@keyframes shakepulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.62; }
+}
+.pulse-shame { animation: shakepulse 1.2s ease-in-out infinite; }
+.dot.warn { background: var(--warn); box-shadow: 0 0 0 3px rgba(217,168,108,0.18); }
+.dot.bad  { background: var(--neg);  box-shadow: 0 0 0 3px rgba(217,112,112,0.18); }
+
+/* Two-column split */
+.room-split {
+    display: grid;
+    grid-template-columns: 1fr 1.3fr;
+    gap: 36px;
+}
+
+/* Pick queue rows */
+.q-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    margin-bottom: 6px;
+    transition: background 120ms;
+}
+.q-foot {
+    margin-top: 12px;
+    font-size: 11px;
+    color: var(--ink-3);
+    letter-spacing: 0.03em;
+    padding: 0 4px;
+}
+.q-foot b { color: var(--ink-2); font-weight: 700; }
+
+/* Full-board toggle */
+.board-toggle-row { display: flex; justify-content: center; }
+.board-toggle {
+    background: none; border: none; color: var(--ink-3);
+    font-size: 0.8rem; cursor: pointer; padding: 0.25rem 0.75rem;
+    border-radius: 6px; transition: color 120ms;
+}
+.board-toggle:hover { color: var(--ink-2); }
+
+/* Floating admin bar */
+.admin-bar {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+    background: var(--bg-elev-2);
+    border-top: 1px solid var(--line-strong);
+    padding: 12px 24px;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+/* New team button style */
+.team-btn {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; border: 1px solid var(--line);
+    border-radius: 8px; background: transparent;
+    cursor: pointer; transition: border-color 120ms, background 120ms;
+    font-family: inherit; width: 100%; text-align: left;
+    color: var(--ink);
+}
+.team-btn:not(:disabled):hover {
+    border-color: var(--line-strong);
+    background: rgba(255,255,255,0.025);
+}
+.team-btn:disabled { cursor: default; opacity: 0.4; }
+.team-btn.selected {
+    border-color: var(--accent-gold);
+    background: rgba(201,162,74,0.08);
+}
+.team-btn-city { font-size: 13px; font-weight: 600; }
+.team-btn-sub  { font-size: 11px; color: var(--ink-3); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+
+/* Mobile */
+@media (max-width: 860px) {
+    .clock-card {
+        grid-template-columns: 1fr;
+        gap: 20px;
+        text-align: left;
+    }
+    .cc-pick, .cc-timer { justify-self: start; }
+    .cc-timer { text-align: left; }
+    .room-split { grid-template-columns: 1fr; }
+    .dashboard { padding-bottom: 80px; }
 }
