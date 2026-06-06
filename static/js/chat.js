@@ -6,10 +6,14 @@
 let _ws = null;
 let _unreadCount = 0;
 let _collapsed = false;
+let _initialized = false;
 
 export function initChat(ws) {
     _ws = ws;
-    _wireButtons();
+    if (!_initialized) {
+        _wireButtons();
+        _initialized = true;
+    }
 }
 
 export function loadHistory(messages) {
