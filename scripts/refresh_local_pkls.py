@@ -167,6 +167,21 @@ def dump_prediction_features():
         log.error(f"    ✗ Failed 'prediction_features': {e}")
 
 
+def dump_config_settings():
+    """Pull config/settings doc → .local_db/config_settings.json."""
+    log.info("  Fetching 'config/settings' from Firestore...")
+    try:
+        db = get_db()
+        doc = db.collection("config").document("settings").get()
+        data = doc.to_dict() if doc.exists else {"draft_active": False}
+        out_path = LOCAL_DB / "config_settings.json"
+        with open(out_path, "w") as f:
+            json.dump(data, f)
+        log.info(f"    ✓ → {out_path.name}")
+    except Exception as e:
+        log.error(f"    ✗ Failed 'config/settings': {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Rebuild local .pkl cache from Firestore")
     parser.add_argument("--skip-analytics", action="store_true",
@@ -186,6 +201,9 @@ def main():
 
     log.info("\n-- ML feature audit --")
     dump_prediction_features()
+
+    log.info("\n-- App config --")
+    dump_config_settings()
 
     if not args.skip_analytics:
         log.info("\n-- Analytics cache (NN projections, standings, etc.) --")

@@ -505,6 +505,44 @@ def get_metadata(doc_id: str):
             except Exception:
                 pass
         return None
-        
+
     doc = db.collection("metadata").document(doc_id).get()
     return doc.to_dict() if doc.exists else None
+
+
+def get_config_settings() -> dict:
+    """Returns app config settings. Defaults to {"draft_active": False}."""
+    import json
+    default = {"draft_active": False}
+    use_local = os.environ.get("USE_LOCAL_DATA", "False").lower() == "true"
+
+    if use_local:
+        local_path = pathlib.Path(".local_db") / "config_settings.json"
+        if local_path.exists():
+            try:
+                with open(local_path) as f:
+                    return {**default, **json.load(f)}
+            except Exception:
+                pass
+        return default
+
+    db = get_db()
+    if not db:
+        return default
+    doc = db.collection("config").document("settings").get()
+    return {**default, **(doc.to_dict() if doc.exists else {})}
+
+
+def set_config_settings(data: dict):
+    """Writes config settings to Firestore and local json cache."""
+    import json
+    db = get_db()
+    if db:
+        db.collection("config").document("settings").set(data)
+
+    local_path = pathlib.Path(".local_db") / "config_settings.json"
+    try:
+        with open(local_path, "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        logger.warning("Failed to persist config_settings locally: %s", e)
