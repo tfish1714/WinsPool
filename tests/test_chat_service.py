@@ -21,11 +21,13 @@ class TestPostSystemMessage:
         assert result["playerName"] == "System"
         assert result["text"] == "Test msg"
 
-    def test_returns_none_on_firestore_error(self):
+    def test_falls_back_to_memory_on_firestore_error(self):
         from services.chat_service import post_system_message
         with patch("services.chat_service.get_db", side_effect=Exception("db down")):
             result = post_system_message(2026, "Test msg")
-        assert result is None
+        assert result is not None
+        assert result["type"] == "system"
+        assert result["text"] == "Test msg"
 
 
 class TestPostChatMessage:
@@ -63,8 +65,8 @@ class TestGetRecentMessages:
         assert isinstance(result, list)
         assert result[0]["type"] == "system"
 
-    def test_returns_empty_list_on_error(self):
+    def test_falls_back_to_memory_on_firestore_error(self):
         from services.chat_service import get_recent_messages
         with patch("services.chat_service.get_db", side_effect=Exception("db down")):
             result = get_recent_messages(2026)
-        assert result == []
+        assert isinstance(result, list)
