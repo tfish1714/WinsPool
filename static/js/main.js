@@ -212,6 +212,9 @@ class App {
         // Shame timer + LIVE pill + round label
         this.updateShameTimer(state);
 
+        // Render Pick Queue
+        UiRenderer.renderPickQueue(draft_board, active_pick, state.all_players);
+
         // Render Board
         UiRenderer.renderDraftBoard(draft_board, active_pick, this.user.playerId, this.draftSummary, state.all_players ? state.all_players.length : 10, this.user.role, preseason_predictions);
 

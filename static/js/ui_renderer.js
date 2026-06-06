@@ -237,6 +237,75 @@ export const UiRenderer = {
             seasons.map(s => `<option value="${s}">Season ${s}</option>`).join('');
     },
 
+    renderPickQueue(board, activePick, allPlayers) {
+        const container = document.getElementById('pick-queue');
+        const footer    = document.getElementById('pick-queue-footer');
+        if (!container) return;
+
+        const totalPlayers = (allPlayers || []).length || 10;
+        const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}`;
+        const SLOW_SECS = 120;
+        const _esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+        // Windowed range: 3 past + active + 2 next
+        const start  = Math.max(1, activePick - 3);
+        const end    = Math.min(board.length, activePick + 2);
+        const window = board.filter(x => x.pick >= start && x.pick <= end);
+
+        container.innerHTML = window.map(item => {
+            const isPast   = item.pick < activePick;
+            const isActive = item.pick === activePick;
+            const round    = Math.ceil(item.pick / totalPlayers);
+            const took     = item.time_taken_seconds;
+            const isSlow   = took != null && took >= SLOW_SECS;
+
+            let rightHtml;
+            if (isPast && item.team) {
+                const tookFmt = took != null ? mmss(took) : '';
+                rightHtml = `
+                    <div style="display:flex;align-items:center;gap:10px">
+                        ${tookFmt ? `<span class="mono" style="font-size:11px;color:${isSlow ? 'var(--warn)' : 'var(--ink-3)'}">${tookFmt}</span>` : ''}
+                        <span style="background:#444;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace">${_esc(item.team)}</span>
+                    </div>`;
+            } else if (isActive) {
+                rightHtml = `<span class="mono-pill"><span class="dot pulse"></span>picking</span>`;
+            } else {
+                rightHtml = `<span class="mono" style="color:var(--ink-3);font-size:11px">—</span>`;
+            }
+
+            return `
+                <div class="q-row" style="
+                    opacity:${isPast ? 0.6 : 1};
+                    background:${isActive ? 'rgba(255,255,255,0.025)' : 'transparent'};
+                    border-color:${isActive ? 'var(--line-strong)' : 'var(--line)'}">
+                    <span class="numeral" style="font-size:22px;color:${isActive ? 'var(--ink)' : 'var(--ink-3)'};min-width:28px">${item.pick}</span>
+                    <div style="flex:1;min-width:0">
+                        <div style="font-size:14px;font-weight:600">${_esc(item.playerName)}</div>
+                        <div class="mono" style="font-size:11px;color:var(--ink-3)">R${round}&middot;P${item.pick}</div>
+                    </div>
+                    ${rightHtml}
+                </div>`;
+        }).join('');
+
+        if (!footer) return;
+
+        // Stats footer: avg + slowest for the current round
+        const currentRound    = Math.ceil(activePick / totalPlayers);
+        const roundPastPicks  = board.filter(x =>
+            x.pick < activePick &&
+            Math.ceil(x.pick / totalPlayers) === currentRound &&
+            x.time_taken_seconds != null
+        );
+
+        if (roundPastPicks.length === 0) { footer.innerHTML = ''; return; }
+
+        const avg     = roundPastPicks.reduce((s, x) => s + x.time_taken_seconds, 0) / roundPastPicks.length;
+        const slowest = roundPastPicks.reduce((a, b) => b.time_taken_seconds > a.time_taken_seconds ? b : a);
+        const slowColor = slowest.time_taken_seconds >= SLOW_SECS ? 'var(--warn)' : 'var(--ink-2)';
+
+        footer.innerHTML = `Avg pick this round &middot; <b>${mmss(avg)}</b> &nbsp;&middot;&nbsp; Slowest &middot; <b style="color:${slowColor}">${_esc(slowest.playerName)} ${mmss(slowest.time_taken_seconds)}</b>`;
+    },
+
     getTeamLogo(code) {
         if (!code) return '';
         const map = { 'LA': 'LAR', 'WAS': 'WSH' };
