@@ -577,18 +577,27 @@ async function initDraftActiveToggle() {
 
     // Toggle on click
     toggle.addEventListener('click', async () => {
+        if (toggle.disabled) return;
         const current = toggle.getAttribute('aria-pressed') === 'true';
         const next = !current;
         applyState(next); // optimistic
+        toggle.disabled = true;
         try {
-            await fetch('/api/admin/config/settings', {
+            const token = AuthService.getToken();
+            const res = await fetch('/api/admin/config/settings', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                },
                 body: JSON.stringify({ draft_active: next }),
             });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
         } catch (e) {
             console.error('[Admin] Failed to save draft_active', e);
             applyState(current); // revert on error
+        } finally {
+            toggle.disabled = false;
         }
     });
 }
