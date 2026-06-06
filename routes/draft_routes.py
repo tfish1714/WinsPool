@@ -1,4 +1,5 @@
 """routes/draft_routes.py — Draft history, draft results, draft board, and WebSocket routes."""
+import asyncio
 import json
 import logging
 import random
@@ -480,6 +481,24 @@ async def _broadcast_pick_messages(manager, old_state: dict, new_state: dict, te
                     "text": clock_msg["text"],
                     "timestamp": clock_msg["timestamp"],
                 })
+            # Fire-and-forget push notification — never block the WebSocket flow
+            if next_pid is not None:
+                asyncio.get_event_loop().run_in_executor(
+                    None,
+                    _send_push_sync,
+                    next_pid,
+                    "⏰ You're on the clock!",
+                    f"Pick #{new_active} — open WinsPool to make your pick.",
+                )
+
+
+def _send_push_sync(player_id: int, title: str, body: str) -> None:
+    """Synchronous wrapper for push send — runs in thread pool executor."""
+    try:
+        from services.push_service import send_push_notification
+        send_push_notification(player_id, title, body)
+    except Exception:
+        pass
 
 
 @router.websocket("/ws")
