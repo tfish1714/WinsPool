@@ -250,9 +250,9 @@ export const UiRenderer = {
         // Windowed range: 3 past + active + 2 next
         const start  = Math.max(1, activePick - 3);
         const end    = Math.min(board.length, activePick + 2);
-        const window = board.filter(x => x.pick >= start && x.pick <= end);
+        const queueSlice = board.filter(x => x.pick >= start && x.pick <= end);
 
-        container.innerHTML = window.map(item => {
+        container.innerHTML = queueSlice.map(item => {
             const isPast   = item.pick < activePick;
             const isActive = item.pick === activePick;
             const round    = Math.ceil(item.pick / totalPlayers);
