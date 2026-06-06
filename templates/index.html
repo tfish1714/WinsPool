@@ -67,6 +67,34 @@
             </div>
         </section>
 
+        <!-- Chat Feed -->
+        <section class="card-glass" id="chat-section" style="margin-top: 1rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+                <h2 style="margin:0;">
+                    Draft Chat
+                    <span id="chat-unread-badge" style="display:none; background:var(--accent-red); color:#fff;
+                        border-radius:99px; font-size:0.65rem; padding:2px 7px; vertical-align:middle;
+                        margin-left:6px;">0</span>
+                </h2>
+                <button id="chat-collapse-btn" style="background:none; border:none; color:var(--text-secondary);
+                    cursor:pointer; font-size:0.8rem;">Hide</button>
+            </div>
+            <div id="chat-body">
+                <div id="chat-messages" style="height:220px; overflow-y:auto; display:flex; flex-direction:column;
+                    gap:4px; margin-bottom:0.75rem; padding-right:4px;"></div>
+                <div style="display:flex; gap:0.5rem; align-items:center;">
+                    <input id="chat-input" type="text" maxlength="500" placeholder="Message…"
+                        style="flex:1; background:rgba(255,255,255,0.07); border:1px solid var(--glass-border);
+                        border-radius:6px; padding:0.4rem 0.75rem; color:var(--ink); font-size:0.85rem;"/>
+                    <button id="chat-send-btn" class="btn-primary"
+                        style="padding:0.4rem 0.9rem; font-size:0.82rem;">Send</button>
+                    <button id="chat-teams-btn" class="btn-primary"
+                        style="padding:0.4rem 0.75rem; font-size:0.82rem;
+                        background:rgba(255,255,255,0.08); border-color:var(--glass-border);">📋</button>
+                </div>
+            </div>
+        </section>
+
     </main>
 </div>
 {% endblock %}

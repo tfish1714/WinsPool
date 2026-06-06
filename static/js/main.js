@@ -2,6 +2,7 @@ import { ApiService } from './api.js';
 import { AuthService } from './auth_service.js';
 import { UiRenderer } from './ui_renderer.js?v=2';
 import { WebSocketService } from './websocket_service.js';
+import { initChat, loadHistory, appendMessage } from './chat.js';
 
 /**
  * WinsPool Main Application Module (Refactored)
@@ -132,6 +133,10 @@ class App {
             this.renderDraftState(msg.payload);
         } else if (msg.type === 'error') {
             alert(msg.message);
+        } else if (msg.type === 'chat_history') {
+            loadHistory(msg.messages);
+        } else if (msg.type === 'chat_message') {
+            appendMessage(msg.msgType, msg.playerName, msg.text, msg.timestamp);
         }
     }
 
@@ -140,6 +145,7 @@ class App {
             this.ws.send({ action: 'reauthenticate', playerId: this.user.playerId });
         }
         this.updateStatusBanner('Connected. Waiting for state...');
+        initChat(this.ws);
     }
 
     updateStatusBanner(text) {
