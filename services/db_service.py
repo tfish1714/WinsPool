@@ -7,7 +7,8 @@ import pandas as pd
 import hashlib
 import time
 import bcrypt
-from services.cache_service import clear_data_cache
+from services.cache_service import clear_data_cache, _cache_key
+import services.cache_service as _cache_svc
 
 logger = logging.getLogger(__name__)
 
@@ -176,9 +177,16 @@ def get_player_role(player_id: str) -> str:
         return player.get("role", "user")
     return "user"
 
+def _get_players_df():
+    """Return players DataFrame from warm in-memory cache or fall back to Firestore."""
+    bundle = _cache_svc._DATA_CACHE.get(_cache_key(None))
+    if bundle is not None:
+        return getattr(bundle, "players", pd.DataFrame())
+    return get_collection_df("players")
+
 def get_player_by_email(email: str):
     """Retrieve a single player directly by their standardized email address."""
-    players_df = get_collection_df("players")
+    players_df = _get_players_df()
     if not players_df.empty and "email" in players_df.columns:
         match = players_df[players_df["email"].astype(str).str.lower() == email.lower()]
         if not match.empty:
@@ -187,7 +195,7 @@ def get_player_by_email(email: str):
 
 def get_player_by_id(player_id: str):
     """Retrieve a single player directly by their ID."""
-    players_df = get_collection_df("players")
+    players_df = _get_players_df()
     if not players_df.empty and "playerId" in players_df.columns:
         match = players_df[players_df["playerId"].astype(str) == str(player_id)]
         if not match.empty:

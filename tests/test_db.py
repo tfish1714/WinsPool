@@ -11,6 +11,77 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from services.db_service import get_collection_df, add_player, get_player_by_email, delete_season_data
 
 
+def _make_players_df():
+    return pd.DataFrame([
+        {"playerId": 42, "fullName": "Cache Hit",  "email": "hit@example.com"},
+        {"playerId": 99, "fullName": "Other Player","email": "other@example.com"},
+    ])
+
+
+def test_get_player_by_id_uses_warm_cache(monkeypatch):
+    """get_player_by_id reads from _DATA_CACHE when it is warm — no Firestore call."""
+    from services import cache_service
+    from services.db_service import get_player_by_id
+
+    bundle = MagicMock()
+    bundle.players = _make_players_df()
+    monkeypatch.setitem(cache_service._DATA_CACHE, 'all', bundle)
+
+    with patch('services.db_service.get_collection_df') as mock_gcd:
+        result = get_player_by_id('42')
+        mock_gcd.assert_not_called()
+
+    assert result is not None
+    assert result['fullName'] == 'Cache Hit'
+
+
+def test_get_player_by_id_cold_cache_falls_back(monkeypatch):
+    """get_player_by_id calls get_collection_df when _DATA_CACHE is empty."""
+    from services import cache_service
+    from services.db_service import get_player_by_id
+
+    monkeypatch.setattr(cache_service, '_DATA_CACHE', {})
+
+    with patch('services.db_service.get_collection_df') as mock_gcd:
+        mock_gcd.return_value = _make_players_df()
+        result = get_player_by_id('99')
+        mock_gcd.assert_called_once_with('players')
+
+    assert result['fullName'] == 'Other Player'
+
+
+def test_get_player_by_email_uses_warm_cache(monkeypatch):
+    """get_player_by_email reads from _DATA_CACHE when it is warm — no Firestore call."""
+    from services import cache_service
+    from services.db_service import get_player_by_email
+
+    bundle = MagicMock()
+    bundle.players = _make_players_df()
+    monkeypatch.setitem(cache_service._DATA_CACHE, 'all', bundle)
+
+    with patch('services.db_service.get_collection_df') as mock_gcd:
+        result = get_player_by_email('hit@example.com')
+        mock_gcd.assert_not_called()
+
+    assert result is not None
+    assert result['playerId'] == 42
+
+
+def test_get_player_by_email_cold_cache_falls_back(monkeypatch):
+    """get_player_by_email calls get_collection_df when _DATA_CACHE is empty."""
+    from services import cache_service
+    from services.db_service import get_player_by_email
+
+    monkeypatch.setattr(cache_service, '_DATA_CACHE', {})
+
+    with patch('services.db_service.get_collection_df') as mock_gcd:
+        mock_gcd.return_value = _make_players_df()
+        result = get_player_by_email('HIT@EXAMPLE.COM')  # case-insensitive
+        mock_gcd.assert_called_once_with('players')
+
+    assert result['fullName'] == 'Cache Hit'
+
+
 def _test_email():
     """Generate a unique test email to prevent Firestore collision on re-runs."""
     return f"test_{uuid.uuid4().hex[:8]}@example.com"
@@ -33,12 +104,15 @@ def test_player_exists_helper():
         assert player is not None
         assert player["email"] == email
 
-def test_add_player_integrity():
+def test_add_player_integrity(monkeypatch):
     """Test that add_player creates a new player record with correct fields.
 
     All storage calls (Firestore, local pkl) are patched so this test never
     touches the real database or the .local_db/ pickle files.
     """
+    from services import cache_service
+    monkeypatch.setattr(cache_service, '_DATA_CACHE', {})
+
     test_email = _test_email()
     test_name = "Stability Test User"
     test_nick = "StableNick"
