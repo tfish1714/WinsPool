@@ -3542,8 +3542,9 @@ table.wp-data-table tbody td:last-child {
     border-color: var(--accent-gold);
     background: rgba(201,162,74,0.08);
 }
+.admin-draft-pred { font-size: 0.75rem; color: var(--ink-2); margin-top: 2px; }
 .team-btn-city { font-size: 13px; font-weight: 600; }
-.team-btn-sub  { font-size: 11px; color: var(--ink-3); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+.team-btn-sub  { font-size: 12px; color: var(--ink-2); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
 
 /* Mobile */
 @media (max-width: 860px) {

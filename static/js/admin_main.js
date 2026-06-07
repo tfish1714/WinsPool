@@ -593,12 +593,11 @@ async function initDraftActiveToggle() {
                 body: JSON.stringify({ draft_active: next }),
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            // Sync localStorage + live nav immediately
+            // Sync localStorage + live nav immediately (surgical — no nav flash)
             localStorage.setItem('nfl_wins_draft_active', String(next));
             if (window.App) {
                 window.App.draftActive = next;
-                window.App.updateNav();
-                if (typeof lucide !== 'undefined') lucide.createIcons();
+                window.App._patchDraftNav();
             }
         } catch (e) {
             console.error('[Admin] Failed to save draft_active', e);

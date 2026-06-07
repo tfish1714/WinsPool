@@ -86,7 +86,7 @@ export const UiRenderer = {
                             <span class="pick-team">${item.team}</span>
                             ${badges}
                             ${role === 'admin' ? `
-                                <div class="admin-draft-pred" style="font-size: 0.75rem; color: #aaa; margin-top: 2px;">
+                                <div class="admin-draft-pred">
                                     ${preseasonPredictions && preseasonPredictions[item.team] ? `<span style="margin-right:8px;">Base: ${typeof preseasonPredictions[item.team] === 'object' ? preseasonPredictions[item.team].projected_wins : preseasonPredictions[item.team]}W</span>` : ''}
                                 </div>
                             ` : ''}

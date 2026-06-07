@@ -142,7 +142,9 @@ class App {
                 if (link.live) cls += ' nav-rail-link--live';
                 if (link.admin) cls += ' nav-rail-link--admin';
                 const dot = link.live ? '<span class="nav-live-dot"></span>' : '';
-                return `<a href="${link.href}" class="${cls}">${dot}${link.label}</a>`;
+                const isDraftLink = link.paths.includes('/draft') || link.paths.includes('/draft-results');
+                const id = isDraftLink ? ' id="nav-draft-link"' : '';
+                return `<a href="${link.href}" class="${cls}"${id}>${dot}${link.label}</a>`;
             }).join('');
         }
 
@@ -299,6 +301,52 @@ class App {
     }
 
 
+    // Surgically updates only the draft-related nav elements without rebuilding the full nav.
+    // Used by config_changed WS messages and the admin toggle to avoid a visible nav flash.
+    _patchDraftNav() {
+        const active = this.draftActive;
+
+        // Desktop rail link
+        const draftLink = document.getElementById('nav-draft-link');
+        if (draftLink) {
+            draftLink.href = active ? '/draft' : '/draft-results';
+            draftLink.innerHTML = active ? '<span class="nav-live-dot"></span>Live Draft' : 'Draft Results';
+            draftLink.classList.toggle('nav-rail-link--live', active);
+        }
+
+        // Drawer live-draft link
+        document.getElementById('drawer-live-draft-link')?.classList.toggle('hidden', !active);
+
+        // Bottom tab bar
+        const btbTab = document.getElementById('btb-draft-tab');
+        const btbLabel = document.getElementById('btb-draft-label');
+        if (btbTab && btbLabel) {
+            btbTab.href = active ? '/draft' : '/draft-results';
+            btbTab.dataset.path = active ? '/draft' : '/draft-results';
+            btbTab.classList.toggle('live', active);
+            btbLabel.textContent = active ? 'Live Draft' : 'Drafts';
+        }
+
+        // More dropdown: add/remove Draft Results entry
+        const moreDropdown = document.getElementById('nav-more-dropdown');
+        if (moreDropdown) {
+            const existing = moreDropdown.querySelector('a[href="/draft-results"]');
+            if (active && !existing) {
+                const draftHistoryLink = moreDropdown.querySelector('a[href="/draft/history"]');
+                const el = document.createElement('a');
+                el.href = '/draft-results';
+                el.className = 'nav-drop-item';
+                el.textContent = 'Draft Results';
+                if (draftHistoryLink) moreDropdown.insertBefore(el, draftHistoryLink);
+                else moreDropdown.appendChild(el);
+            } else if (!active && existing) {
+                existing.remove();
+            }
+        }
+
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+
     // --- WebSocket Handlers ---
 
     handleWsMessage(msg) {
@@ -309,8 +357,7 @@ class App {
             if (typeof msg.draft_active === 'boolean' && msg.draft_active !== this.draftActive) {
                 this.draftActive = msg.draft_active;
                 localStorage.setItem('nfl_wins_draft_active', String(msg.draft_active));
-                this.updateNav();
-                if (typeof lucide !== 'undefined') lucide.createIcons();
+                this._patchDraftNav();
             }
         } else if (msg.type === 'error') {
             alert(msg.message);
