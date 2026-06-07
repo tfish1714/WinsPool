@@ -32,17 +32,11 @@
         <!-- Two-column split -->
         <div class="room-split">
 
-            <!-- Left: Pick Queue + Admin Portfolio -->
+            <!-- Left: Pick Queue -->
             <section id="pick-queue-section">
                 <div class="eyebrow" style="margin-bottom:14px; color:var(--ink-3)">Pick queue</div>
                 <div id="pick-queue"></div>
                 <div id="pick-queue-footer" class="q-foot mono"></div>
-
-                <!-- Admin Only: Running Portfolio -->
-                <section id="admin-portfolio-section" style="display:none; margin-top:1.5rem;">
-                    <div class="eyebrow" style="margin-bottom:10px; color:var(--ink-3)">Running portfolio</div>
-                    <div class="portfolio-container" id="admin-portfolio-content" style="overflow-x:auto;"></div>
-                </section>
             </section>
 
             <!-- Right: Teams Grid -->
@@ -55,6 +49,12 @@
             </section>
 
         </div>
+
+        <!-- Admin Only: Running Portfolio (below both columns so mobile order is Pick → Teams → Portfolio) -->
+        <section id="admin-portfolio-section" style="display:none; margin-top:1.5rem;">
+            <div class="eyebrow" style="margin-bottom:10px; color:var(--ink-3)">Running portfolio</div>
+            <div class="portfolio-container" id="admin-portfolio-content" style="overflow-x:auto;"></div>
+        </section>
 
         <!-- Full board toggle -->
         <div class="board-toggle-row">
@@ -111,13 +111,13 @@
             gap:4px; margin-bottom:0.65rem; padding-right:2px;"></div>
         <div style="display:flex; gap:0.4rem; align-items:center;">
             <input id="chat-input" type="text" maxlength="500" placeholder="Message…"
-                style="flex:1; background:rgba(255,255,255,0.07); border:1px solid var(--glass-border);
+                style="flex:1; min-width:0; background:rgba(255,255,255,0.07); border:1px solid var(--glass-border);
                 border-radius:6px; padding:0.35rem 0.65rem; color:var(--ink); font-size:0.82rem;"/>
             <button id="chat-send-btn" class="btn-primary"
-                style="padding:0.35rem 0.75rem; font-size:0.8rem; white-space:nowrap;">Send</button>
+                style="flex-shrink:0; padding:0.35rem 0.75rem; font-size:0.8rem; white-space:nowrap;">Send</button>
             <button id="chat-teams-btn" class="btn-primary"
                 title="List available teams"
-                style="padding:0.35rem 0.6rem; font-size:0.8rem;
+                style="flex-shrink:0; padding:0.35rem 0.6rem; font-size:0.8rem;
                 background:rgba(255,255,255,0.07); border-color:var(--glass-border);">🏈</button>
         </div>
     </div>
