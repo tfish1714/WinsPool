@@ -155,3 +155,116 @@ class TestWebSocketAdminActions:
             msg = ws.receive_json()
             assert msg["type"] == "state"
             mock_undo.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Issue #48: pick action validation
+# ---------------------------------------------------------------------------
+
+PICK_FAKE_STATE = {
+    "season": 2025,
+    "active_pick": 3,
+    "draft_ready": True,
+    "available_teams": ["KC", "BUF", "PHI"],
+    "all_players": [
+        {"playerId": 1, "fullName": "Admin User", "role": "admin"},
+        {"playerId": 2, "fullName": "Regular Player", "role": "user"},
+    ],
+    # pick 3 belongs to player 1; player 2 is out of turn
+    "draft_board": [
+        {"pick": 1, "playerId": 2, "playerName": "Regular Player"},
+        {"pick": 2, "playerId": 1, "playerName": "Admin User"},
+        {"pick": 3, "playerId": 1, "playerName": "Admin User"},
+    ],
+    "picks": [],
+    "draft_order": [],
+}
+
+
+@pytest.fixture
+def ws_pick_client():
+    """TestClient with a complete PICK_FAKE_STATE (includes draft_ready, available_teams, draft_board)."""
+    with patch("routes.draft_routes.load_draft_state", return_value=PICK_FAKE_STATE), \
+         patch("routes.draft_routes.save_pick") as mock_save, \
+         patch("routes.draft_routes.undo_pick"), \
+         patch("routes.draft_routes.reset_pick"):
+        from main import app
+        yield TestClient(app), mock_save
+
+
+class TestWebSocketPick:
+
+    def _verify_as(self, ws, player_id):
+        """Consume initial state, send verify_code, drain resulting messages."""
+        ws.receive_json()  # initial state
+        ws.send_json({"action": "verify_code", "playerId": player_id, "code": "test"})
+        ws.receive_json()  # chat_history (sent on connect, still in queue)
+        ws.receive_json()  # verified
+        ws.receive_json()  # state broadcast after verify
+
+    def test_pick_out_of_turn_returns_error(self, ws_pick_client):
+        """Non-admin picking out of turn receives an error."""
+        client, _ = ws_pick_client
+        with client.websocket_connect("/ws") as ws:
+            self._verify_as(ws, player_id=2)  # player 2; pick 3 belongs to player 1
+            ws.send_json({"action": "pick", "team": "KC"})
+            msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert "your turn" in msg["message"].lower()
+
+    def test_pick_unavailable_team_returns_error(self, ws_pick_client):
+        """Picking a team not in available_teams returns an error before the turn check."""
+        client, _ = ws_pick_client
+        with client.websocket_connect("/ws") as ws:
+            ws.receive_json()  # initial state
+            ws.receive_json()  # chat_history
+            ws.send_json({"action": "pick", "team": "INVALID"})
+            msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert "not available" in msg["message"].lower()
+
+    def test_pick_draft_complete_returns_error(self, ws_pick_client):
+        """active_pick > 30 triggers draft-complete guard before any other check."""
+        client, _ = ws_pick_client
+        complete_state = {**PICK_FAKE_STATE, "active_pick": 31}
+        with patch("routes.draft_routes.load_draft_state", return_value=complete_state):
+            with client.websocket_connect("/ws") as ws:
+                ws.receive_json()  # state (complete_state)
+                ws.receive_json()  # chat_history
+                ws.send_json({"action": "pick", "team": "KC"})
+                msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert "complete" in msg["message"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Issue #49: reauthenticate action
+# ---------------------------------------------------------------------------
+
+class TestWebSocketReauthenticate:
+
+    def test_reauthenticate_player_without_password_hash_returns_error(self, ws_client):
+        """Player whose password_hash is missing cannot reauthenticate."""
+        client, _, _, _ = ws_client
+        player_no_hash = {"playerId": 2, "email": "p2@test.com"}  # no password_hash
+        with patch("services.db_service.get_player_by_id", return_value=player_no_hash):
+            with client.websocket_connect("/ws") as ws:
+                ws.receive_json()  # initial state
+                ws.receive_json()  # chat_history
+                ws.send_json({"action": "reauthenticate", "playerId": 2})
+                msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert "session expired" in msg["message"].lower()
+
+    def test_reauthenticate_valid_player_returns_verified(self, ws_client):
+        """Player with password_hash set is verified and receives a verified message."""
+        client, _, _, _ = ws_client
+        valid_player = {"playerId": 2, "email": "p2@test.com", "password_hash": "hash"}
+        with patch("services.db_service.get_player_by_id", return_value=valid_player):
+            with client.websocket_connect("/ws") as ws:
+                ws.receive_json()  # initial state
+                ws.receive_json()  # chat_history
+                ws.send_json({"action": "reauthenticate", "playerId": 2})
+                msgs = [ws.receive_json(), ws.receive_json()]  # verified + state broadcast
+        types = {m["type"] for m in msgs}
+        assert "verified" in types

@@ -308,3 +308,21 @@ class TestSetMemberPaid:
 
         assert result is False
         mock_save.assert_not_called()
+
+
+# ── Issue #93: corrupted pickle falls back to empty DataFrame ───────────────
+
+def test_get_collection_df_corrupted_pickle_returns_empty(monkeypatch, tmp_path):
+    """A corrupt pkl file must not propagate an exception; returns empty DataFrame."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("USE_LOCAL_DATA", "true")
+
+    local_db = tmp_path / ".local_db"
+    local_db.mkdir()
+    (local_db / "players.pkl").write_bytes(b"not a valid pickle file")
+
+    with patch("services.db_service.get_db", return_value=None):
+        result = get_collection_df("players")
+
+    assert isinstance(result, pd.DataFrame)
+    assert result.empty

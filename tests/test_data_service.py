@@ -51,3 +51,82 @@ def test_load_data_with_debug_flag(monkeypatch):
     for df in res:
         assert isinstance(df, pd.DataFrame)
         assert not df.empty
+
+
+# ── Issue #50: year-slice pkl fallback ────────────────────────────────────
+
+def test_load_data_year_slice_falls_back_to_base_pkl(monkeypatch, tmp_path):
+    """When the year-specific pkl is absent, fetch_or_load filters the base pkl."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("USE_LOCAL_DATA", "true")
+
+    import services.cache_service as cs
+    cs._DATA_CACHE.clear()
+    cs._CACHE_TIMESTAMPS.clear()
+
+    local_db = tmp_path / ".local_db"
+    local_db.mkdir()
+
+    # Base pkl with two seasons — no year-specific pkl written
+    games_all = pd.DataFrame({
+        "season": [2024, 2024, 2025],
+        "week": [1, 2, 1],
+        "team": ["BUF", "KC", "SF"],
+    })
+    games_all.to_pickle(local_db / "nfl_games.pkl")
+
+    empty = pd.DataFrame()
+    for name in ["nfl_standings", "nfl_teams", "players", "draft_order", "draft_results", "draft_order_rules"]:
+        empty.to_pickle(local_db / f"{name}.pkl")
+
+    try:
+        result = load_data(year=2024)
+        games = result.games
+        assert not games.empty
+        assert set(games["season"].unique()) == {2024}
+        assert len(games) == 2
+        # Side-effect: year-slice pkl must be created for future fast reads
+        assert (local_db / "nfl_games_2024.pkl").exists()
+    finally:
+        cs._DATA_CACHE.clear()
+        cs._CACHE_TIMESTAMPS.clear()
+
+
+# ── Issue #91: in-memory cache TTL expiry ────────────────────────────────
+
+def test_load_data_cache_ttl_expiry_triggers_refetch(monkeypatch, tmp_path):
+    """After TTL expiry load_data() re-reads from disk rather than serving stale cache."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("USE_LOCAL_DATA", "true")
+
+    import services.cache_service as cs
+    cs._DATA_CACHE.clear()
+    cs._CACHE_TIMESTAMPS.clear()
+
+    local_db = tmp_path / ".local_db"
+    local_db.mkdir()
+
+    # v1 pkls — sentinel value 1 in nfl_games
+    games_v1 = pd.DataFrame({"season": [2024], "team": ["BUF"], "_sentinel": [1]})
+    games_v1.to_pickle(local_db / "nfl_games.pkl")
+    empty = pd.DataFrame()
+    for name in ["nfl_standings", "nfl_teams", "players", "draft_order", "draft_results", "draft_order_rules"]:
+        empty.to_pickle(local_db / f"{name}.pkl")
+
+    try:
+        result1 = load_data()
+        assert result1.games["_sentinel"].iloc[0] == 1
+
+        # Force TTL expiry by clearing timestamps in-place
+        cs._CACHE_TIMESTAMPS.clear()
+
+        # Replace pkl with v2 data before second call
+        games_v2 = pd.DataFrame({"season": [2024], "team": ["KC"], "_sentinel": [2]})
+        games_v2.to_pickle(local_db / "nfl_games.pkl")
+
+        result2 = load_data()
+        # Must have re-fetched from disk — not served the old cached v1 data
+        assert result2.games["_sentinel"].iloc[0] == 2
+    finally:
+        cs._DATA_CACHE.clear()
+        cs._CACHE_TIMESTAMPS.clear()
