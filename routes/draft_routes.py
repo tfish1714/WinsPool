@@ -483,7 +483,7 @@ async def _broadcast_pick_messages(manager, old_state: dict, new_state: dict, te
                 })
             # Fire-and-forget push notification — never block the WebSocket flow
             if next_pid is not None:
-                asyncio.get_event_loop().run_in_executor(
+                asyncio.get_running_loop().run_in_executor(
                     None,
                     _send_push_sync,
                     next_pid,

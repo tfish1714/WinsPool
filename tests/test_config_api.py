@@ -47,3 +47,9 @@ def test_set_config_settings_ignores_unknown_keys(admin_token, mock_firestore):
     assert response.status_code == 200
     data = response.json()
     assert "secret_flag" not in data
+
+
+def test_set_config_settings_no_auth_returns_401():
+    """POST /api/admin/config/settings with no auth token returns 401."""
+    response = client.post("/api/admin/config/settings", json={"draft_active": True})
+    assert response.status_code == 401

@@ -9,6 +9,25 @@ from services.prediction_service import (
 )
 
 
+# ── Issue #69: ML ensemble blend weights ─────────────────────────────────────
+
+def test_ensemble_weights_sum_to_one():
+    """NN_WEIGHT + XGB_WEIGHT + LR_WEIGHT must sum exactly to 1.0."""
+    from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
+    total = NN_WEIGHT + XGB_WEIGHT + LR_WEIGHT
+    assert abs(total - 1.0) < 1e-9, f"Ensemble weights sum to {total}, expected 1.0"
+
+
+def test_ensemble_blend_math():
+    """Blended probability matches expected value for the documented weights (0.45/0.20/0.35)."""
+    from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
+    nn_prob, xgb_prob, lr_prob = 0.60, 0.70, 0.80
+    # Expected: 0.45*0.6 + 0.20*0.7 + 0.35*0.8 = 0.27 + 0.14 + 0.28 = 0.69
+    expected = 0.45 * 0.60 + 0.20 * 0.70 + 0.35 * 0.80
+    blended = NN_WEIGHT * nn_prob + XGB_WEIGHT * xgb_prob + LR_WEIGHT * lr_prob
+    assert abs(blended - expected) < 1e-9
+
+
 # ---------------------------------------------------------------------------
 # Pythagorean Expectation
 # ---------------------------------------------------------------------------

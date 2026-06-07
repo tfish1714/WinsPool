@@ -1,7 +1,9 @@
+import math
 import os
+import time
 import pandas as pd
-from unittest.mock import patch, mock_open
-from services.draft_service import load_draft_state
+from unittest.mock import patch, MagicMock
+from services.draft_service import load_draft_state, sanitize_state
 
 @patch("services.draft_service.pd.read_csv")
 def test_load_draft_state(mock_read_csv):
@@ -39,3 +41,90 @@ def test_state_includes_connected_count():
 
     state2 = load_draft_state(set())
     assert state2['connected_count'] == 0
+
+
+# ── Issue #90: sanitize_state NaN/Inf handling ───────────────────────────────
+
+class TestSanitizeState:
+
+    def test_nan_float_replaced_with_none(self):
+        result = sanitize_state({"val": float("nan")})
+        assert result["val"] is None
+
+    def test_pos_inf_replaced_with_none(self):
+        result = sanitize_state({"val": float("inf")})
+        assert result["val"] is None
+
+    def test_neg_inf_replaced_with_none(self):
+        result = sanitize_state({"val": float("-inf")})
+        assert result["val"] is None
+
+    def test_nan_in_nested_list(self):
+        result = sanitize_state({"picks": [float("nan"), 1.0, float("inf")]})
+        assert result["picks"] == [None, 1.0, None]
+
+    def test_normal_values_pass_through(self):
+        obj = {"name": "KC", "wins": 12, "pct": 0.75, "items": [1, 2, 3]}
+        assert sanitize_state(obj) == obj
+
+    def test_string_nan_not_replaced(self):
+        result = sanitize_state({"label": "nan"})
+        assert result["label"] == "nan"
+
+
+# ── Issue #94: singleton cache hit + save_pick time_taken ────────────────────
+
+class TestLoadDraftStateSingleton:
+
+    def test_singleton_cache_hit_returns_deepcopy_with_connected_players(self):
+        """When _CACHED_DRAFT_STATE is set and year=None, returns deepcopy without DB calls."""
+        import services.draft_service as ds
+
+        cached = {
+            "season": 2025,
+            "active_pick": 5,
+            "draft_board": [],
+            "available_teams": ["KC"],
+            "all_players": [{"playerId": 1, "fullName": "A"}, {"playerId": 2, "fullName": "B"}],
+            "picks": [],
+            "pick_start_time": int(time.time()),
+            "draft_ready": True,
+            "connected_count": 0,
+            "connected_players": [],
+        }
+        ds._CACHED_DRAFT_STATE = cached
+        try:
+            state = ds.load_draft_state({1, 2})
+        finally:
+            ds._CACHED_DRAFT_STATE = None
+
+        assert state["connected_count"] == 2
+        assert set(state["connected_players"]) == {1, 2}
+        assert state is not cached  # deepcopy, not the same object
+
+
+class TestSavePickTimeTaken:
+
+    def test_cold_cache_produces_none_time_taken(self):
+        """With no cached state, time_taken passed to add_draft_result is None."""
+        import services.draft_service as ds
+        ds._CACHED_DRAFT_STATE = None
+
+        with patch("services.draft_service.add_draft_result") as mock_add:
+            ds.save_pick(2025, 1, 99, "KC")
+
+        _, _, _, _, _, time_taken = mock_add.call_args[0]
+        assert time_taken is None
+
+    def test_warm_cache_produces_elapsed_time_taken(self):
+        """With pick_start_time set, time_taken is approximately the elapsed seconds."""
+        import services.draft_service as ds
+        start = time.time() - 10
+        ds._CACHED_DRAFT_STATE = {"pick_start_time": start}
+
+        with patch("services.draft_service.add_draft_result") as mock_add:
+            ds.save_pick(2025, 1, 99, "KC")
+
+        _, _, _, _, _, time_taken = mock_add.call_args[0]
+        assert time_taken is not None
+        assert 9 < time_taken < 15  # rough check: ~10 seconds elapsed

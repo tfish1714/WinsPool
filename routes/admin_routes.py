@@ -4,8 +4,6 @@ import logging
 import os
 import random
 import re
-import subprocess
-import sys
 import time
 
 from typing import Annotated
@@ -266,13 +264,12 @@ async def reset_draft(body: SeasonRequest, _: dict = Depends(require_admin)):
 
 @router.post("/admin/scrape_predictions")
 async def scrape_predictions(_: dict = Depends(require_admin)):
-    """Execute the Vegas odds scraper and push results to the database."""
+    """Execute the predictions aggregator and push results to the database."""
     try:
-        script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts", "upload_predictions.py"))
-        result = subprocess.run([sys.executable, script_path], capture_output=True, text=True)
-        if result.returncode != 0:
-            return JSONResponse(status_code=500, content={"error": result.stderr or "Script failed silently."})
-        return JSONResponse(content={"message": "Vegas Odds successfully scraped and injected into Firestore!"})
+        from services.aggregate_scraper import aggregate_predictions_pipeline
+        season = get_active_season()
+        await aggregate_predictions_pipeline(season)
+        return JSONResponse(content={"message": "Predictions successfully scraped and injected into Firestore!"})
     except Exception as e:
         logger.exception("Unhandled error in admin endpoint")
         return server_error()

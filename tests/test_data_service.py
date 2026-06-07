@@ -1,4 +1,6 @@
+import time
 import pandas as pd
+from unittest.mock import patch, MagicMock
 from services.data_service import load_data, get_latest_season_and_week
 from services.analysis_service import process_games_data, get_season_progress
 
@@ -130,3 +132,41 @@ def test_load_data_cache_ttl_expiry_triggers_refetch(monkeypatch, tmp_path):
     finally:
         cs._DATA_CACHE.clear()
         cs._CACHE_TIMESTAMPS.clear()
+
+
+# ── Issue #92: remote Firestore cache invalidation signal ────────────────────
+
+def test_remote_cache_invalidation_calls_clear_when_remote_is_newer(monkeypatch):
+    """When Firestore reports a newer last_update, clear_data_cache() is called."""
+    monkeypatch.setenv("USE_LOCAL_DATA", "false")
+
+    import services.cache_service as cs
+
+    now = time.time()
+    local_ts = now - 120          # local cache timestamp is 2 minutes old
+    remote_ts = now + 1           # remote says there is a newer update
+
+    cs._DATA_CACHE.clear()
+    cs._CACHE_TIMESTAMPS.clear()
+    cs._DATA_CACHE['all'] = MagicMock()   # warm the in-memory cache
+    cs._CACHE_TIMESTAMPS['all'] = local_ts
+    cs._LAST_REMOTE_CHECK = 0             # force the remote check to run
+
+    mock_ctrl = MagicMock()
+    mock_ctrl.exists = True
+    mock_ctrl.to_dict.return_value = {"last_update": remote_ts}
+
+    mock_db = MagicMock()
+    mock_db.collection.return_value.document.return_value.get.return_value = mock_ctrl
+
+    try:
+        with patch("services.db_service.get_db", return_value=mock_db), \
+             patch("services.data_service.clear_data_cache") as mock_clear, \
+             patch("services.data_service.get_collection_df", return_value=pd.DataFrame()):
+            load_data()
+
+        mock_clear.assert_called_once()
+    finally:
+        cs._DATA_CACHE.clear()
+        cs._CACHE_TIMESTAMPS.clear()
+        cs._LAST_REMOTE_CHECK = 0
