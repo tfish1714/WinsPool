@@ -101,14 +101,16 @@ services/
   live_score_service.py  # Live game score updates
 templates/               # Jinja2 HTML (server-rendered)
 static/
-  style.css
+  style.css              # Bump ?v=N on the <link> in base.html whenever changing CSS to bust browser cache
   js/
-    main.js              # Page init, event handling
+    main.js              # Page init, nav rendering (updateNav), event handling; uses stale-while-revalidate via localStorage
     ui_renderer.js       # Dynamic DOM rendering
     api.js               # Fetch wrapper
     websocket_service.js # WebSocket client for live draft
     admin_main.js        # Admin dashboard
     auth_service.js      # Client-side auth
+    responsive.js        # Mobile drawer controller (non-module IIFE, loaded after main.js)
+    chat.js              # Draft room chat overlay
 scripts/                 # CLI tools for data sync, ML training, cache building
 models/                  # nn_v{N}.keras + scaler, xgb_v{N}.json + scaler, lr_v{N}.pkl + scaler; *_registry.json per model type
 rawdata/                 # NFL raw data (NOT committed)
@@ -139,6 +141,7 @@ Firestore collections and their local equivalents:
 | `preseason_predictions` | `.local_db/preseason_predictions.pkl` + `_{year}.pkl` | |
 | `game_predictions` | `.local_db/game_predictions_{year}.json` | JSON, not pkl; one doc per season |
 | `analytics_cache` | `.local_db/analytics/{analytic}_{year}_{week}.json` | JSON |
+| `config` | *(no local pkl — always reads Firestore)* | Single doc `config/settings`; stores `draft_active` flag and app-level settings |
 
 **Rules for any new Firestore collection or data store:**
 1. Write to Firestore first (or with `--firestore` flag in scripts).
@@ -233,5 +236,7 @@ See `DEPLOY.md` for full instructions. Three options:
 1. **Google Cloud Run** (recommended) — Docker-based, scales to zero
 2. **Fly.io** — `flyctl deploy`
 3. **PythonAnywhere** — WSGI adapter required
+
+Use the `/deploy` Claude slash command (`.claude/commands/deploy.md`) to run the full pre-flight + deploy flow: git commit → tests → push → confirm → `.\deploy\deploy.ps1`.
 
 Cloud Scheduler is used to run `scripts/daily_nfl_sync.py` on a schedule in production.

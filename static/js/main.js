@@ -67,7 +67,7 @@ class App {
 
             if (cfg) {
                 const freshDraftActive = cfg.draft_active === true;
-                localStorage.setItem('nfl_wins_draft_active', freshDraftActive);
+                localStorage.setItem('nfl_wins_draft_active', String(freshDraftActive));
                 if (freshDraftActive !== this.draftActive) {
                     this.draftActive = freshDraftActive;
                     needsNavUpdate = true;
@@ -305,6 +305,13 @@ class App {
         if (msg.type === 'state') {
             this.lastDraftState = msg.payload; // Store for preview checks
             this.renderDraftState(msg.payload);
+        } else if (msg.type === 'config_changed') {
+            if (typeof msg.draft_active === 'boolean' && msg.draft_active !== this.draftActive) {
+                this.draftActive = msg.draft_active;
+                localStorage.setItem('nfl_wins_draft_active', String(msg.draft_active));
+                this.updateNav();
+                if (typeof lucide !== 'undefined') lucide.createIcons();
+            }
         } else if (msg.type === 'error') {
             alert(msg.message);
         } else if (msg.type === 'chat_history') {

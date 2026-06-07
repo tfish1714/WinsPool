@@ -402,6 +402,12 @@ async def set_config(request: Request, _auth: dict = Depends(require_admin)):
         body = await request.json()
         allowed = {k: v for k, v in body.items() if k in {"draft_active"}}
         set_config_settings(allowed)
+        try:
+            from routes.draft_routes import manager as ws_manager
+            import asyncio
+            asyncio.create_task(ws_manager.broadcast({"type": "config_changed", **allowed}))
+        except Exception:
+            pass  # non-fatal — clients pick it up on next background sync
         return JSONResponse(content={"ok": True, **allowed})
     except Exception:
         logger.exception("set_config error")
