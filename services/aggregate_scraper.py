@@ -1,8 +1,6 @@
 import asyncio
 import logging
 import httpx
-from bs4 import BeautifulSoup
-import pandas as pd
 from typing import Dict, List
 import statistics
 import time
@@ -44,61 +42,25 @@ async def fetch_espn_fpi(client: httpx.AsyncClient) -> Dict[str, float]:
         logger.error("ESPN FPI scrape failed: %s", e)
         return {}
 
-async def fetch_pff_projections(client: httpx.AsyncClient) -> Dict[str, float]:
-    """
-    Mock implementation for scraping PFF or another HTML-based source.
-    In a real scenario, this would use BeautifulSoup to parse a specific 
-    PFF article or API endpoint.
-    """
-    # For demonstration of the concurrent pipeline, we return empty/mock data 
-    # as HTML scraping requires an active, stable target URL.
-    logger.debug("PFF scraper stub executed.")
-    return {}
-
-async def fetch_vegas_odds(client: httpx.AsyncClient) -> Dict[str, float]:
-    """
-    Mock implementation for hitting a sports betting odds API 
-    (e.g., DraftKings, FanDuel, or an odds aggregator) for Over/Under Win Totals.
-    """
-    logger.debug("Vegas scraper stub executed.")
-    return {}
-
 async def aggregate_predictions_pipeline(season: int):
-    """
-    1. Concurrently fetches win total projections from multiple sources.
-    2. Normalizes the data by team.
-    3. Calculates the Consensus Mean and Standard Deviation.
-    4. Writes the results directly into the Firestore `preseason_predictions` array.
-    """
+    """Fetch ESPN FPI win projections and write them to Firestore preseason_predictions."""
     logger.info("Starting Prediction Aggregation Pipeline for %s season...", season)
     start_time = time.time()
-    
+
     async with httpx.AsyncClient(headers={'User-Agent': 'WinsPool/1.0'}) as client:
-        # Run scrappers concurrently
-        results = await asyncio.gather(
-            fetch_espn_fpi(client),
-            fetch_pff_projections(client),
-            fetch_vegas_odds(client),
-            return_exceptions=True # Don't crash if one scraper fails
-        )
-        
-    espn_res = results[0] if isinstance(results[0], dict) else {}
-    pff_res = results[1] if isinstance(results[1], dict) else {}
-    vegas_res = results[2] if isinstance(results[2], dict) else {}
-    
-    # Invert the dictionary structure: source -> team  ==>  team -> list(sources)
-    team_data : Dict[str, List[float]] = {}
-    
+        espn_res = await fetch_espn_fpi(client)
+
+    team_data: Dict[str, List[float]] = {}
+
     def add_to_team_data(source_dict: Dict[str, float]):
         for team, wins in source_dict.items():
-            if wins <= 0: continue
+            if wins <= 0:
+                continue
             if team not in team_data:
                 team_data[team] = []
             team_data[team].append(wins)
 
     add_to_team_data(espn_res)
-    add_to_team_data(pff_res)
-    add_to_team_data(vegas_res)
     
     if not team_data:
         logger.error("Pipeline failed: no data retrieved from any source.")

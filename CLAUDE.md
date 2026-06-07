@@ -75,6 +75,9 @@ FIREBASE_CREDENTIALS=...    # Base64-encoded service account JSON
 ROOM_CODE=...               # Draft room passcode
 GEMINI_API_KEY=...          # For recap generation
 SMTP_SERVER/PORT/USER/...   # Email delivery (optional)
+VAPID_PUBLIC_KEY=...        # Web Push VAPID public key (base64url)
+VAPID_PRIVATE_KEY=...       # Web Push VAPID private key (base64url)
+VAPID_CLAIMS_EMAIL=...      # Contact email included in VAPID JWT claims
 PORT=8000
 ```
 
@@ -84,9 +87,11 @@ PORT=8000
 main.py                  # App entry, router registration, Jinja2 globals
 routes/
   api_routes.py          # 40+ JSON API endpoints (/api/*)
+  auth_routes.py         # Login, logout, profile, password setup (/api/auth/*, /api/profile)
   standings_routes.py    # Standings & leaderboard pages
   draft_routes.py        # Live draft room
   history_routes.py      # Historical data views
+  prediction_routes.py   # ML prediction endpoints (/api/predictions/*)
 services/
   data_service.py        # 3-tier cache: memory → pickle → Firestore
   db_service.py          # Firestore/pickle persistence + auth (bcrypt)
@@ -99,6 +104,8 @@ services/
   cache_service.py       # In-memory cache with TTL
   email_service.py       # SMTP recap distribution
   live_score_service.py  # Live game score updates
+  push_service.py        # Web Push notifications (VAPID)
+  chat_service.py        # Draft room chat message persistence
 templates/               # Jinja2 HTML (server-rendered)
 static/
   style.css              # Bump ?v=N on the <link> in base.html whenever changing CSS to bust browser cache

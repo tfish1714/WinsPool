@@ -698,6 +698,9 @@ def get_season_progress(season: int, week: int) -> Dict[str, Any]:
     games_player_added['TotalPlayerWinsBySeason'] = games_player_added.groupby('playerId')['rec'].cumsum()
     games_player_added = pd.merge(games_player_added, players, on='playerId', how='inner')
 
+    # Take the running max per (season, week, player), pivot so each player is a column,
+    # then forward-fill weeks where a player had no win (bye or loss) before zeroing NaN
+    # (player had no picks yet that season).
     wins_by_week_player = games_player_added.groupby(['season', 'week', 'nickName'])['TotalPlayerWinsBySeason'].max().reset_index()
     wins_by_week_player = wins_by_week_player.pivot_table(index=['season', 'week'], columns='nickName', values='TotalPlayerWinsBySeason').ffill().fillna(0).reset_index()
 

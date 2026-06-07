@@ -44,24 +44,17 @@ def test_fetch_espn_fpi_failure():
     asyncio.run(run_test())
 
 def test_aggregate_pipeline_success():
-    """
-    Verify that the orchestrator concurrently executes all configured
-    scraping tasks, aggregates the predictions natively.
-    """
+    """Verify the pipeline fetches ESPN FPI and writes results to Firestore."""
     async def run_test():
         with patch('services.aggregate_scraper.fetch_espn_fpi', new_callable=AsyncMock) as mock_fpi, \
-             patch('services.aggregate_scraper.fetch_pff_projections', new_callable=AsyncMock) as mock_pff, \
-             patch('services.aggregate_scraper.fetch_vegas_odds', new_callable=AsyncMock) as mock_br, \
              patch("services.aggregate_scraper.get_db") as mock_get_db:
-             
-            mock_fpi.return_value = {"BUF": 11.5}
-            mock_pff.return_value = {"BUF": 10.5, "MIA": 9.0}
-            mock_br.return_value = {"BUF": 12.0, "MIA": 8.5}
-            
+
+            mock_fpi.return_value = {"BUF": 11.5, "MIA": 9.0}
+
             mock_db = mock_get_db.return_value
             mock_doc = mock_db.collection.return_value.document.return_value
-            
+
             await aggregate_predictions_pipeline(2024)
-            
+
             mock_doc.set.assert_called_once()
     asyncio.run(run_test())

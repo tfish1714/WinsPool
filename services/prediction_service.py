@@ -1,16 +1,14 @@
 """services/prediction_service.py -- Advanced NFL Prediction Engine.
 
-
-Blends two peer-reviewed methodologies to produce game-level win probabilities,
+Blends two methodologies to produce game-level win probabilities,
 season-level portfolio projections, and draft-room confidence scores:
 
-    1. FiveThirtyEight Elo (538)
-       - Dynamic power ratings updated after every game (K=20).
+    1. Elo power ratings
+       - Dynamic ratings updated after every game (K=20).
        - Logistic win probability with home-field, travel, bye-week, and
          margin-of-victory adjustments.
-       - Source: fivethirtyeight.com/methodology/how-our-nfl-predictions-work/
 
-    2. Frontiers Pythagorean Expectation
+    2. Pythagorean Expectation
        - Season-level win-percentage model using points scored/allowed
          with the NFL-optimal exponent of 2.37.
        - Source: doi.org/10.3389/fspor.2025.1638446

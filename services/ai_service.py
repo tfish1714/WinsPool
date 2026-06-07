@@ -1,3 +1,4 @@
+"""services/ai_service.py -- Thin wrapper around the Google Gemini API for generating weekly recap text."""
 import os
 from dotenv import load_dotenv
 

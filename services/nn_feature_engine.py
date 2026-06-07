@@ -1406,6 +1406,20 @@ def build_master_feature_table(
     min_season: int = 2006,
     max_season: int = 2025,
 ) -> pd.DataFrame:
+    """Assemble the full 26-feature ML training dataset from rawdata CSVs.
+
+    Joins schedule, Elo, team stats, advanced stats, roster/snap-count data,
+    and situational features into one row-per-game DataFrame. Used by the NN,
+    XGB, and LR train scripts and by backfill_schedule_predictions.py.
+
+    Args:
+        rawdata_dir: Path to rawdata/ directory; defaults to the repo-relative RAWDATA_DIR.
+        min_season: Earliest season to include (default 2006; Elo needs history before 2020).
+        max_season: Latest season to include (default current season).
+
+    Returns:
+        DataFrame with one row per game, columns matching FEATURE_COLUMNS + target 'home_team_win'.
+    """
     rd = Path(rawdata_dir) if rawdata_dir else RAWDATA_DIR
     logger.info("Building Master Feature Table V2 (26 Features)...")
 

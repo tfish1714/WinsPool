@@ -168,15 +168,6 @@ def update_player_cell(player_id: int, cell: str):
     """Update the phone number (cell) field on a player's document."""
     update_player_profile(str(player_id), {"cell": cell})
 
-def get_player_role(player_id: str) -> str:
-    """Helper to check player role (admin vs user) for secure operations."""
-    if not player_id:
-        return "user"
-    player = get_player_by_id(player_id)
-    if player:
-        return player.get("role", "user")
-    return "user"
-
 def _get_players_df():
     """Return players DataFrame from warm in-memory cache or fall back to Firestore."""
     bundle = _cache_svc._DATA_CACHE.get(_cache_key(None))
@@ -211,7 +202,7 @@ def update_player_credentials(player_id: str, password_hash: str):
     })
 
 def increment_failed_setup_attempts(player_id: str, new_count: int, lockout_until: float = None):
-    """Applies the 5-Attempt rate limiter lockouts physically onto the Database."""
+    """Write updated failed_setup_attempts count (and optional lockout_until timestamp) to the player document."""
     update_data = {"failed_setup_attempts": new_count}
     if lockout_until:
         update_data["lockout_until"] = lockout_until

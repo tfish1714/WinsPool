@@ -1,3 +1,4 @@
+"""services/live_score_service.py -- Fetches live NFL game scores from the ESPN scoreboard API."""
 import logging
 import requests
 import pandas as pd
