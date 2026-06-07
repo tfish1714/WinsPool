@@ -60,10 +60,13 @@ export const AuthService = {
         return await resp.json();
     },
 
-    async syncProfile(playerId) {
-        if (!playerId) return null;
+    async syncProfile() {
+        const token = this.getToken();
+        if (!token) return null;
         try {
-            const resp = await fetch(`/api/profile?playerId=${playerId}`);
+            const resp = await fetch('/api/profile', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             if (resp.ok) {
                 const data = await resp.json();
                 this.setCredentials({

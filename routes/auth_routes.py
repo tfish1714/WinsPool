@@ -6,7 +6,7 @@ import re
 import secrets
 import time
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
 
 from routes.models import (
@@ -17,7 +17,7 @@ from services.db_service import (
     update_player_credentials, increment_failed_setup_attempts, update_player_profile,
 )
 from services.constants import PASSWORD_COMPLEXITY_RE
-from services.session_service import create_token, _TOKEN_EXPIRY_SECONDS
+from services.session_service import create_token, _TOKEN_EXPIRY_SECONDS, require_auth
 import services.email_service as email_service
 
 logger = logging.getLogger(__name__)
@@ -210,15 +210,15 @@ async def logout():
 
 
 @router.get("/profile")
-async def get_profile(playerId: str):
+async def get_profile(_auth: dict = Depends(require_auth)):
     """Fetch current player profile data for pre-filling the form."""
     from services.db_service import get_player_by_id
-    player = get_player_by_id(playerId)
+    player = get_player_by_id(_auth["sub"])
     if not player:
         return JSONResponse(status_code=404, content={"error": "Player not found."})
 
     return {
-        "playerId": str(playerId),
+        "playerId": str(_auth["sub"]),
         "fullName": player.get("fullName"),
         "nickName": player.get("nickName"),
         "email": player.get("email"),

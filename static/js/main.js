@@ -50,7 +50,7 @@ class App {
     async _backgroundSync() {
         try {
             const [, cfg] = await Promise.all([
-                AuthService.syncProfile(this.user.playerId),
+                AuthService.syncProfile(),
                 fetch('/api/config/settings').then(r => r.json()).catch(() => null),
             ]);
 
