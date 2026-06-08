@@ -233,7 +233,7 @@ export const UiRenderer = {
             seasons.map(s => `<option value="${s}">Season ${s}</option>`).join('');
     },
 
-    renderPickQueue(board, activePick, allPlayers) {
+    renderPickQueue(board, activePick, allPlayers, role) {
         const container = document.getElementById('pick-queue');
         const footer    = document.getElementById('pick-queue-footer');
         if (!container) return;
@@ -267,6 +267,49 @@ export const UiRenderer = {
                 rightHtml = `<span class="mono-pill"><span class="dot pulse"></span>picking</span>`;
             } else {
                 rightHtml = `<span class="mono" style="color:var(--ink-3);font-size:11px">—</span>`;
+            }
+
+            // Admin action rows: last completed pick (undo/reset) and active pick (timer reset)
+            const isAdminUndoRow  = role === 'admin' && isPast && item.team && item.pick === activePick - 1;
+            const isAdminTimerRow = role === 'admin' && isActive;
+
+            if (isAdminUndoRow) {
+                return `
+                <div class="q-row q-row-admin" data-pick-num="${item.pick}" style="
+                    opacity:0.6; background:transparent; border-color:var(--line);
+                    flex-direction:column; align-items:stretch; cursor:pointer; padding:0;">
+                    <div class="q-row-main" style="display:flex;align-items:center;gap:14px;padding:12px 14px;">
+                        <span class="numeral" style="font-size:22px;color:var(--ink-3);min-width:28px">${item.pick}</span>
+                        <div style="flex:1;min-width:0">
+                            <div style="font-size:14px;font-weight:600">${_esc(item.playerName)}</div>
+                            <div class="mono" style="font-size:11px;color:var(--ink-3)">R${round}&middot;P${item.pick}</div>
+                        </div>
+                        ${rightHtml}
+                    </div>
+                    <div class="q-row-actions">
+                        <button class="q-action-btn q-undo-btn">Undo Pick</button>
+                        <button class="q-action-btn q-reset-btn">Undo + Reset Timer</button>
+                    </div>
+                </div>`;
+            }
+
+            if (isAdminTimerRow) {
+                return `
+                <div class="q-row q-row-admin" data-pick-num="${item.pick}" style="
+                    opacity:1; background:rgba(255,255,255,0.025); border-color:var(--line-strong);
+                    flex-direction:column; align-items:stretch; cursor:pointer; padding:0;">
+                    <div class="q-row-main" style="display:flex;align-items:center;gap:14px;padding:12px 14px;">
+                        <span class="numeral" style="font-size:22px;color:var(--ink);min-width:28px">${item.pick}</span>
+                        <div style="flex:1;min-width:0">
+                            <div style="font-size:14px;font-weight:600">${_esc(item.playerName)}</div>
+                            <div class="mono" style="font-size:11px;color:var(--ink-3)">R${round}&middot;P${item.pick}</div>
+                        </div>
+                        ${rightHtml}
+                    </div>
+                    <div class="q-row-actions">
+                        <button class="q-action-btn q-timer-btn">Reset Timer</button>
+                    </div>
+                </div>`;
             }
 
             return `

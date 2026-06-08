@@ -3512,16 +3512,31 @@ table.wp-data-table tbody td:last-child {
 }
 .board-toggle:hover { color: var(--ink-2); }
 
-/* Floating admin bar */
-.admin-bar {
-    position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
-    background: var(--bg-elev-2);
-    border-top: 1px solid var(--line-strong);
-    padding: 12px 24px;
-    display: flex;
+/* Inline admin pick actions (revealed on row tap) */
+.q-row-actions {
+    display: none;
     gap: 0.5rem;
-    align-items: center;
-    justify-content: flex-end;
+    padding: 0 14px 10px;
+    border-top: 1px solid var(--line);
+    margin-top: 2px;
+}
+.q-row-admin.expanded .q-row-actions { display: flex; }
+.q-action-btn {
+    flex: 1; padding: 0.35rem 0.75rem; font-size: 0.8rem;
+    border-radius: 6px; border: 1px solid; cursor: pointer;
+    font-family: inherit; font-weight: 600; text-align: center;
+}
+.q-undo-btn {
+    background: rgba(201,162,74,0.15); border-color: var(--accent-gold);
+    color: var(--accent-gold);
+}
+.q-reset-btn {
+    background: rgba(220,60,60,0.15); border-color: var(--accent-red);
+    color: var(--accent-red);
+}
+.q-timer-btn {
+    background: rgba(100,160,255,0.12); border-color: #5a9cf5;
+    color: #5a9cf5;
 }
 
 /* New team button style */
@@ -3580,10 +3595,6 @@ table.wp-data-table tbody td:last-child {
         right: 0.75rem !important;
         width: 300px !important;
     }
-
-    /* Admin bar: full-width, larger tap targets */
-    .admin-bar { padding: 10px 16px; gap: 8px; }
-    .admin-bar .btn-primary { flex: 1; text-align: center; }
 
     /* Pick queue rows: tighter on small screens */
     .q-row { padding: 10px 10px; gap: 10px; }

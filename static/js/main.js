@@ -95,16 +95,20 @@ class App {
             // Show admin elements on draft page if admin
             if (role === 'admin') {
                 const yearSelector = document.getElementById('admin-year-selector');
-                const undoBtn = document.getElementById('undo-pick-btn');
-                const resetBtn = document.getElementById('reset-pick-btn');
                 if (yearSelector) yearSelector.classList.remove('hidden');
-                if (undoBtn) {
-                    undoBtn.style.display = 'flex';
-                    undoBtn.onclick = () => this.undoPick();
-                }
-                if (resetBtn) {
-                    resetBtn.style.display = 'flex';
-                    resetBtn.onclick = () => this.resetPick();
+
+                const pickQueue = document.getElementById('pick-queue');
+                if (pickQueue) {
+                    pickQueue.addEventListener('click', (e) => {
+                        if (e.target.classList.contains('q-undo-btn')) { e.stopPropagation(); this.undoPick(); return; }
+                        if (e.target.classList.contains('q-reset-btn')) { e.stopPropagation(); this.resetPick(); return; }
+                        if (e.target.classList.contains('q-timer-btn')) { e.stopPropagation(); this.resetTimer(); return; }
+                        const row = e.target.closest('.q-row-admin');
+                        if (!row) return;
+                        const wasExpanded = row.classList.contains('expanded');
+                        pickQueue.querySelectorAll('.q-row-admin.expanded').forEach(r => r.classList.remove('expanded'));
+                        if (!wasExpanded) row.classList.add('expanded');
+                    });
                 }
                 console.log('[App] Admin UI enabled.');
             }
@@ -441,7 +445,7 @@ class App {
         this.updateShameTimer(state);
 
         // Render Pick Queue
-        UiRenderer.renderPickQueue(draft_board, active_pick, state.all_players);
+        UiRenderer.renderPickQueue(draft_board, active_pick, state.all_players, this.user.role);
 
         // Render Board
         UiRenderer.renderDraftBoard(draft_board, active_pick, this.user.playerId, this.draftSummary, state.all_players ? state.all_players.length : 10, this.user.role, preseason_predictions);
@@ -454,17 +458,6 @@ class App {
         } else {
             const adminPanel = document.getElementById('admin-portfolio-section');
             if (adminPanel) adminPanel.style.display = 'none';
-        }
-
-        // Floating admin bar + body padding
-        const adminBar = document.getElementById('admin-bar');
-        const mainEl   = document.getElementById('dashboard-main');
-        if (this.user.role === 'admin') {
-            if (adminBar) adminBar.style.display = 'flex';
-            if (mainEl)   mainEl.style.paddingBottom = '64px';
-        } else {
-            if (adminBar) adminBar.style.display = 'none';
-            if (mainEl)   mainEl.style.paddingBottom = '';
         }
 
         // Render Teams
@@ -656,6 +649,19 @@ class App {
         if (!pick || pick <= 1) return;
         if (pick > 30) pick = 30;
         else pick = pick - 1;
+
+        this.ws.send({
+            action: 'reset_pick',
+            playerId: this.user.playerId,
+            pick: pick
+        });
+    }
+
+    resetTimer() {
+        if (!confirm('Reset the timer for the current picker? (Pick is NOT undone)')) return;
+
+        const pick = this.lastDraftState?.active_pick;
+        if (!pick) return;
 
         this.ws.send({
             action: 'reset_pick',
