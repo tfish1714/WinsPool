@@ -28,9 +28,9 @@ from services.constants import UNDRAFTED_SENTINEL, ELO_TO_SPREAD
 # ---------------------------------------------------------------------------
 
 ELO_MEAN = 1505
-ELO_K = 20
-ELO_HOME_ADVANTAGE = 48
-ELO_TRAVEL_PER_1000MI = 4
+ELO_K = 20.6
+ELO_HOME_ADVANTAGE = 41.5
+ELO_TRAVEL_PER_1000MI = 0.0
 ELO_BYE_BONUS = 25
 ELO_PLAYOFF_MULTIPLIER = 1.2
 ELO_REVERSION_FACTOR = 1 / 3

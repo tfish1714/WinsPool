@@ -368,16 +368,19 @@ def test_epa_matchup_formula(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_elo_diff_and_confidence(tmp_path):
-    """elo_diff = home_elo_pre - away_elo_pre; elo_confidence = |elo_diff|/25."""
+    """elo_diff = home_elo_pre - away_elo_pre; elo_confidence = |elo_diff|/ELO_TO_SPREAD."""
     from services.nn_feature_engine import build_master_feature_table
+    from services.constants import ELO_TO_SPREAD
     rd = _make_minimal_feature_table_inputs(tmp_path)
     df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
     assert "elo_diff" in df.columns
     assert "elo_confidence" in df.columns
-    # Elo fixture: home=1550, away=1480 -> diff=70, confidence=70/25=2.8
     row = df[df["home_team"] == "KC"].iloc[0]
+    expected_confidence = 70.0 / ELO_TO_SPREAD
     assert abs(float(row["elo_diff"]) - 70.0) < 1.0, f"elo_diff expected ~70, got {row['elo_diff']}"
-    assert abs(float(row["elo_confidence"]) - 2.8) < 0.1, f"elo_confidence expected ~2.8, got {row['elo_confidence']}"
+    assert abs(float(row["elo_confidence"]) - expected_confidence) < 0.1, (
+        f"elo_confidence expected ~{expected_confidence:.2f}, got {row['elo_confidence']}"
+    )
 
 
 def test_point_diff_advantage(tmp_path):

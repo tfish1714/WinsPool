@@ -19,8 +19,8 @@ PROB_CLIP_MIN = 0.02
 PROB_CLIP_MAX = 0.98
 
 # Elo/spread conversion — used identically across prediction services and scripts.
-ELO_TO_SPREAD = 25.0        # Elo point difference ÷ this = point spread equivalent
-SPREAD_TO_PROB_SCALE = 7.5  # logistic scale: spread ÷ this → win probability
+ELO_TO_SPREAD = 26.2        # Elo point difference / this = point spread equivalent
+SPREAD_TO_PROB_SCALE = 6.94  # logistic scale: spread / this -> win probability
 
 # Monte Carlo simulation — game margin sampling and state update tuning.
 # MC_MARGIN_STD: std dev of NFL game margin distribution (~13 points real-world).
