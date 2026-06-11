@@ -14,6 +14,18 @@
                 <div class="eyebrow">NFL Wins Pool</div>
                 <div class="wp-title-row">
                     <h1 class="wp-h1">Standings<span class="wp-year">/{{ year }}</span></h1>
+                    {% if pool_status and pool_status.paid_count > 0 %}
+                    <div class="pool-banner">
+                        <span class="pool-banner__icon">💰</span>
+                        <span class="pool-banner__text">{{ pool_status.paid_count }}/{{ pool_status.total_count }} paid — ${{ '{:,}'.format(pool_status.pool_total) }} in the pot</span>
+                        <span class="pool-banner__fee">${{ pool_status.entry_fee }}/member entry fee</span>
+                    </div>
+                    {% elif pool_status %}
+                    <div class="pool-banner pool-banner--empty">
+                        <span class="pool-banner__icon">🏆</span>
+                        <span class="pool-banner__text">0/{{ pool_status.total_count }} paid — no fees collected yet</span>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
             <div class="wp-top-right">

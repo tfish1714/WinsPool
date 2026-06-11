@@ -1,5 +1,6 @@
 """routes/standings_routes.py — Standings, week-by-week, and playoff race routes."""
 import logging
+import os
 
 import pandas as pd
 from fastapi import APIRouter, Request
@@ -75,6 +76,22 @@ async def wins_pool_by_year(request: Request, year: int):
             if not schedule_enriched.empty and "week" in schedule_enriched.columns else []
         )
 
+        # ── Pool fee tracker (Issue #87) ─────────────────────────────
+        draft_order_df = filter_season(draft_order, year)
+        if not draft_order_df.empty:
+            total_members = len(draft_order_df)
+            paid_members = int(draft_order_df['paid'].sum()) if 'paid' in draft_order_df.columns else 0
+            entry_fee = int(os.environ.get("ENTRY_FEE_PER_MEMBER", "100"))
+            pool_total = paid_members * entry_fee
+            pool_status = {
+                "paid_count": paid_members,
+                "total_count": total_members,
+                "pool_total": pool_total,
+                "entry_fee": entry_fee,
+            }
+        else:
+            pool_status = None
+
         h2h_df = analysis.player_winlossmatrix(schedule_enriched)
 
         recap = db.get_weekly_recap(year, latest_week)
@@ -85,6 +102,7 @@ async def wins_pool_by_year(request: Request, year: int):
             "current_year": current_year,
             "year": year,
             "available_years": available_years,
+        "pool_status": pool_status,
             "recap": recap["summary"] if recap else None,
             "h2h_html": (h2h_df.rename(columns=_first_name, index=_first_name)
                          .to_html(classes="wp-data-table", border=0)) if not h2h_df.empty else "",
@@ -199,5 +217,6 @@ async def schedule_by_year(request: Request, year: int):
         "current_week": latest_week,
         "year": year,
         "available_years": available_years,
+        "pool_status": pool_status,
         "current_year": get_active_season(all_games),
     })
