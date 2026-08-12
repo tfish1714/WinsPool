@@ -118,25 +118,41 @@ per season+team — the same shape `refresh_local_pkls.py` already produces for
 
 ### Source registry
 
-`data/consensus_sources.yaml` maps canonical source keys to display metadata.
+`data/consensus_sources.json` maps canonical source keys to display metadata.
 Stable across seasons; the only place a source is named.
 
-```yaml
-sources:
-  br:           { name: "Bleacher Report",       type: analyst }
-  fpi:          { name: "ESPN FPI",              type: model }
-  si:           { name: "Sports Illustrated",    type: analyst }
-  nfl_bhanpuri: { name: "NFL.com (Bhanpuri)",    type: analyst }
-  nfl_rank:     { name: "NFL.com (Adam Rank)",   type: analyst }
-  athletic:     { name: "The Athletic",          type: analyst }
-  pff:          { name: "PFF",                   type: analyst }
-  usa_today:    { name: "USA Today",             type: analyst }
-  vegas_ou:     { name: "Vegas O/U",             type: market }
-  clay:         { name: "Mike Clay",             type: analyst }
-  cbs:          { name: "CBS Sports",            type: analyst }
-  espn:         { name: "ESPN",                  type: analyst }
-  nfl:          { name: "NFL.com",               type: analyst }
+```json
+{
+  "sources": {
+    "br":           { "name": "Bleacher Report",    "type": "analyst" },
+    "fpi":          { "name": "ESPN FPI",           "type": "model"   },
+    "si":           { "name": "Sports Illustrated", "type": "analyst" },
+    "nfl_bhanpuri": { "name": "NFL.com (Bhanpuri)", "type": "analyst" },
+    "nfl_rank":     { "name": "NFL.com (Adam Rank)","type": "analyst" },
+    "athletic":     { "name": "The Athletic",       "type": "analyst" },
+    "pff":          { "name": "PFF",                "type": "analyst" },
+    "usa_today":    { "name": "USA Today",          "type": "analyst" },
+    "vegas_ou":     { "name": "Vegas O/U",          "type": "market"  },
+    "clay":         { "name": "Mike Clay",          "type": "analyst" },
+    "cbs":          { "name": "CBS Sports",         "type": "analyst" },
+    "espn":         { "name": "ESPN",               "type": "analyst" },
+    "nfl":          { "name": "NFL.com",            "type": "analyst" }
+  }
+}
 ```
+
+**Dependency constraint.** JSON rather than YAML because PyYAML is neither
+installed nor listed in `requirements.txt`, and a 13-entry config file does not
+justify a new dependency.
+
+The same constraint governs `consensus_service.py`: it is imported by
+`admin_routes.py`, so it may use only **pandas and numpy**. `requirements.txt`
+declares neither scipy, TensorFlow, scikit-learn nor XGBoost — the ML services
+import those behind `TF_AVAILABLE` / `SKLEARN_AVAILABLE` guards and degrade
+gracefully in the deployed app. Spearman correlation is therefore computed as
+Pearson over `pandas.Series.rank()` values rather than via `scipy.stats`, and the
+freshness preflight uses `urllib.request`, matching `sync_nflverse_data.py`,
+rather than `httpx`.
 
 `cbs`, `espn` and `nfl` exist only in the migrated 2017–2025 data.
 
@@ -163,7 +179,7 @@ team"; they are excluded from the derived statistics rather than treated as zero
 
 | File | Change |
 |---|---|
-| `data/consensus_sources.yaml` | **new** — canonical source registry |
+| `data/consensus_sources.json` | **new** — canonical source registry |
 | `data/consensus_2026.csv` | **new** — 32 rows, hand-maintained |
 | `scripts/seed_consensus.py` | **new** — CSV → validate → derive → write |
 | `scripts/migrate_consensus.py` | **new** — one-shot 2017–2025 migration |
@@ -388,7 +404,7 @@ This is the primary motivation for the `--skip-sync` flag.
 `build_comparison(season)`. Rendered as a new Consensus tab in `admin.html`
 alongside Elo Ratings and ML Accuracy: one row per team, sorted by
 `|outlier_z|` descending, with the summary block above the table and a source
-legend from `consensus_sources.yaml`.
+legend from `consensus_sources.json`.
 
 ### `scripts/refresh_preseason.py`
 
