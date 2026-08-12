@@ -51,8 +51,13 @@ Three secondary problems surfaced while investigating:
 2. Migrate the 2017–2025 consensus already stored in `sources` — no re-entry.
 3. Seed 2026 consensus from a hand-maintained CSV.
 4. Give the admin an at-a-glance model-vs-consensus comparison for a season.
-5. Make the full preseason refresh a single repeatable, diff-reporting command.
-6. Remove the dead scraper rather than leave a button that lies.
+5. Score every stored projection against actual wins for completed seasons,
+   establishing the analyst accuracy baseline the model must beat.
+6. Deprecate the overloaded `preseason_predictions` schema: repoint consumers,
+   then remove the historical consensus rows and the `sources` union field.
+7. Make the full preseason refresh a single repeatable, diff-reporting command,
+   with a data-freshness preflight.
+8. Remove the dead scraper rather than leave a button that lies.
 
 ## Non-Goals
 
@@ -65,7 +70,9 @@ Three secondary problems surfaced while investigating:
   wins, and the Monte Carlo simulation covers the regular season only — there is
   no playoff bracket, so no model championship probability exists to compare a
   futures price against.
-- Walk-forward validation and historical model projections — Spec B.
+- Walk-forward validation and historical **model** projections — Spec B. Spec A
+  scores consensus against actuals, which needs no retraining; scoring the model
+  against actuals requires out-of-sample model projections that do not yet exist.
 
 ---
 
@@ -161,13 +168,18 @@ team"; they are excluded from the derived statistics rather than treated as zero
 | `scripts/seed_consensus.py` | **new** — CSV → validate → derive → write |
 | `scripts/migrate_consensus.py` | **new** — one-shot 2017–2025 migration |
 | `services/consensus_service.py` | **new** — `build_comparison(season)` |
-| `services/data_service.py` | add `get_consensus_projections(season)` |
+| `services/data_service.py` | add `get_consensus_projections(season)` and `get_season_projection(season)` resolver |
+| `services/draft_service.py` | repoint line 136 to `get_season_projection()` |
+| `services/recap_service.py` | repoint line 128 to `get_season_projection()` |
+| `scripts/predict_season.py` | write `model_version` string; stop writing the `sources` dict |
+| `scripts/deprecate_preseason_consensus.py` | **new** — staged step 4: delete migrated 2017–2025 rows |
 | `scripts/refresh_local_pkls.py` | register `("consensus_projections", "season")` |
 | `routes/admin_routes.py` | add `GET /api/admin/consensus/{season}`; delete `scrape_predictions` |
 | `templates/admin.html` | new Consensus tab |
 | `static/js/admin_main.js` | tab render; delete `scrapePredictions()` |
 | `static/js/api.js` | delete `scrapePredictions()` |
 | `static/style.css` | comparison table styling; bump `?v=` on the `<link>` in `base.html` |
+| `services/nn_projection_engine.py` | replace hardcoded Elo constants in `_vectorized_elo_update` with the calibrated ones |
 | `scripts/refresh_preseason.py` | **new** — orchestrator |
 | `services/aggregate_scraper.py` | **delete** |
 | `tests/test_aggregate_scraper.py` | **delete** |
@@ -195,12 +207,19 @@ what `preseason_predictions` uses or the join silently drops teams.
 python scripts/migrate_consensus.py [--seasons 2017 2025] [--firestore] [--dry-run]
 ```
 
-One-shot. For each season, reads `preseason_predictions`, skips any row whose
-`sources` dict contains a `model` key, maps stored source names to canonical keys
+One-shot. For each season, reads `preseason_predictions`, keeps only `sources`
+entries whose **value is numeric**, maps stored source names to canonical keys
 (`'O/U'`→`vegas_ou`, `'BR'`→`br`, `'SI'`→`si`, `'FPI'`→`fpi`, `'PFF'`→`pff`,
 `'Clay'`→`clay`, `'NFL'`→`nfl`, `'CBS'`→`cbs`, `'ESPN'`→`espn`), computes derived
-statistics, and writes to `consensus_projections`. Unrecognized source names abort
-the migration rather than being dropped silently.
+statistics, and writes to `consensus_projections`. A row with zero numeric source
+entries is not consensus and is skipped. Unrecognized source *names* abort the
+migration rather than being dropped silently.
+
+The numeric-value rule is what excludes the 2026 model rows, whose `sources` is
+`{'model': 'nn_xgb_lr_ensemble'}` — a string, not a projection. Filtering on the
+literal key `model` would work today but encodes a magic string and would miss
+any future non-consensus marker; testing the value type states the actual
+intent, which is "a source is an analyst who published a number".
 
 The stored key set was enumerated across all of 2017–2025 and is exactly these
 nine, so the mapping above is complete:
@@ -224,13 +243,51 @@ one averaging ten, independent of how much analysts actually disagreed. Within a
 season it is comparable across teams, which is all `outlier_z` requires. Spec B
 must account for this when scoring historical seasons against each other.
 
-**Migration copies; it does not move.** The 2017–2025 rows stay in
-`preseason_predictions`, because `draft_service` and `recap_service` read that
-collection to show historical projections and would otherwise lose them.
-`consensus_projections` becomes the canonical analyst record; `preseason_predictions`
-keeps meaning "the projection the app displays for this season". Spec B may later
-replace the historical rows with model output — that is a deliberate separate
-decision, not a side effect of this migration.
+### Deprecating the overloaded schema
+
+The migration **moves**, in staged steps, and the old dual-meaning schema is
+retired rather than left in place. End state:
+
+| Collection | Sole meaning |
+|---|---|
+| `consensus_projections` | analyst consensus, any season |
+| `preseason_predictions` | model output, any season |
+
+`preseason_predictions` also loses its `sources` union field. Model rows carry a
+plain `model_version` string (`"nn_v14+xgb_v8+lr_v6"`) instead of
+`{'model': 'nn_xgb_lr_ensemble'}`, so the field has one type and one meaning.
+
+**Consumers.** Two services read the collection for its "whatever projection we
+have for this season" meaning:
+
+| Site | Current call |
+|---|---|
+| `services/draft_service.py:136` | `get_preseason_predictions(int(season))` |
+| `services/recap_service.py:128` | `get_preseason_predictions(year)` |
+
+Both are repointed at a new resolver in `data_service`:
+
+```python
+get_season_projection(season) -> {team: {wins, source_type, detail}}
+#   source_type: "model" | "consensus" | None
+```
+
+It returns model projections when they exist for the season, otherwise consensus,
+and labels which. That keeps the two stores single-meaning while preserving the
+historical numbers those views display — 2017–2025 resolve to consensus today,
+and flip to model output automatically once Spec B backfills them, with the
+`source_type` label making the switch visible rather than silent.
+
+**Staging.** Ordered so nothing breaks mid-flight:
+
+1. Write `consensus_projections` (migration, additive — nothing reads it yet).
+2. Add `get_season_projection()`; repoint `draft_service` and `recap_service`.
+3. Verify historical draft rooms and recaps render unchanged.
+4. Only then delete the 2017–2025 rows from `preseason_predictions` and drop the
+   `sources` field from the write path in `predict_season.py`.
+
+Step 4 is the irreversible one and gets its own verification gate. Until it runs,
+the two collections overlap harmlessly.
 
 ### `services/consensus_service.py`
 
@@ -257,8 +314,73 @@ cluster, the same `delta` is a genuine outlier.
 Summary block: `mae` (model vs `consensus_median`), `bias` (mean signed delta),
 `spearman` (rank correlation), `n_outside_range`, `n_delta_over_2`.
 
-For 2026 there are no actual results, so the comparison measures **agreement
-only**, never accuracy. Scoring against outcomes is Spec B.
+### Accuracy against actual results
+
+For any **completed** season, `build_comparison` additionally scores every stored
+projection against actual wins from `nfl_standings`. This needs no model backfill
+— consensus and actuals both already exist for 2017–2025 — so the analyst
+accuracy baseline lands in Spec A. Spec B adds only the model's side of it.
+
+Per team, when actuals exist: `actual_wins`, plus `consensus_error` and
+`model_error` (signed). Per season, a per-source scoreboard of MAE and Pearson r,
+including the consensus average as its own row.
+
+Measured baseline over 2017–2025 (mean absolute error in wins):
+
+| Source | MAE | n |
+|---|---|---|
+| CBS | 2.18 | 285 |
+| **consensus average** | **2.18** | 285 |
+| Vegas O/U | 2.24 | 160 |
+| FPI | 2.24 | 285 |
+| NFL.com | 2.30 | 191 |
+| Bleacher Report | 2.37 | 285 |
+| ESPN | 2.38 | 253 |
+| PFF | 2.49 | 191 |
+| SI | 2.49 | 285 |
+| Clay | 2.85 | 64 |
+
+**MAE ≈ 2.18 is the bar.** Note the `n` column: sources with few observations
+move around a lot between seasons — on 2024 alone Vegas O/U led at MAE 1.84,
+which does not survive the full sample. Per-season figures must be read with the
+sample size beside them, and the tab displays `n` next to every MAE for that
+reason.
+
+For 2026 there are no actuals yet, so that season shows **agreement only** —
+model vs consensus, no accuracy columns. The tab must not imply otherwise.
+
+### Elo constants in the season simulation
+
+The June 2026 calibration updated `prediction_service.py` but never reached the
+Monte Carlo simulation. `nn_projection_engine._vectorized_elo_update` hardcodes
+its own values:
+
+| Constant | Calibrated (`prediction_service.py`) | Hardcoded (`nn_projection_engine.py`) |
+|---|---|---|
+| Home advantage | `ELO_HOME_ADVANTAGE = 41.5` | `48.0` |
+| K factor | `ELO_K = 20.6` | `20.0` |
+
+Home advantage is 15% too high, applied to every simulated game across every
+trial — 272 games × N trials per projection run. K is within noise of the
+calibrated value, but should be sourced from the same constant rather than left
+as a second literal.
+
+Both are replaced with imports of the calibrated constants. This is in scope for
+Spec A because it changes 2026 projections and must land **before** the refresh
+run, otherwise the before/after diff mixes a constants fix in with the roster
+refresh and neither effect is attributable.
+
+Sequencing — two runs, two attributable diffs:
+
+```bash
+# 1. constants-only delta (no new data)
+python scripts/refresh_preseason.py --season 2026 --skip-sync
+
+# 2. roster delta (fresh depth charts on top)
+python scripts/refresh_preseason.py --season 2026
+```
+
+This is the primary motivation for the `--skip-sync` flag.
 
 ### Admin surface
 
@@ -325,6 +447,10 @@ that window.
 - team in one collection only → rendered, excluded from summary
 - season with no consensus → `available: false`
 
+- accuracy columns present for a completed season, absent for 2026
+- per-source MAE and Pearson r against a fixture with known values
+- each MAE is reported with its `n`
+
 `tests/test_seed_consensus.py`
 - rejects missing team, unknown team, unknown source key, out-of-range value,
   fully-blank row
@@ -332,11 +458,31 @@ that window.
 - team abbreviations normalized before write
 - migration maps a known 2025 row (ARI: `BR` 10, `FPI` 8.3, `SI` 6, `O/U` 8.5,
   `Clay` 7.5) to canonical keys with correct derived statistics
-- migration skips rows whose `sources` contains `model`
+- migration keeps only numeric-valued source entries, so a row whose `sources` is
+  `{'model': 'nn_xgb_lr_ensemble'}` yields zero sources and is skipped
+- a row mixing numeric and non-numeric entries keeps the numeric ones
+
+`tests/test_data_service.py` (extend) — the resolver
+- `get_season_projection()` returns `source_type: "model"` when model rows exist
+- falls back to `source_type: "consensus"` when they do not
+- returns `source_type: None` for a season with neither
+- `draft_service` and `recap_service` render unchanged for a historical season
+  before and after the repoint (the regression that step 4 risks)
+
+`tests/test_refresh_preseason.py`
+- freshness preflight against **mocked** GitHub API responses: asset newer than
+  local, asset absent (the real 2026 snap-counts case), API unreachable
+- stale local depth-chart `dt` triggers the warning
+- a failing required step aborts the chain; a failing optional step does not
+- no test hits the live network
 
 `tests/test_admin_routes.py` (extend)
 - `GET /api/admin/consensus/{season}` returns 401 without auth
 - populated and empty-state response shapes
+
+`tests/test_nn_projection_engine.py` (extend)
+- `_vectorized_elo_update` uses `ELO_HOME_ADVANTAGE` and `ELO_K`, with no
+  remaining numeric literals for either
 
 Removal: delete `tests/test_aggregate_scraper.py` with the service.
 
@@ -351,22 +497,67 @@ satisfy:
 
 1. `consensus_projections` holds 32 teams for 2026 and for every migrated season
    2017–2025.
-2. `preseason_predictions` for 2026 still contains model rows only — the
-   migration did not write to it.
-3. The Consensus tab renders 32 rows with a summary block.
-4. The refresh diff prints a non-empty before/after table, confirming the
-   recalibrated Elo constants and refreshed depth charts moved the projections.
-5. `pytest tests/` passes.
+2. `preseason_predictions` for 2026 contains model rows only — the migration did
+   not write to it.
+3. The Consensus tab renders 32 rows with a summary block for 2026, and accuracy
+   columns for a completed season.
+4. Per-source MAE reproduces the measured baseline: consensus average **2.18**
+   over 285 team-seasons. A material deviation means the migration lost or
+   altered data — treat it as a failed migration, not a new finding.
+5. Historical draft rooms and recaps render the same projections before and after
+   the resolver repoint.
+6. The constants-only refresh (`--skip-sync`) produces a non-empty diff,
+   attributable solely to the Elo home-advantage fix.
+7. The full refresh produces a second non-empty diff, attributable to the roster
+   and depth-chart sync.
+8. `pytest tests/` passes.
+
+Item 4 is the load-bearing check on the migration — it re-derives a number
+computed from the pre-migration data, so it fails loudly if anything was dropped.
 
 A large `outlier_z` on a specific team is a finding to investigate, not a
 failure — the tab exists precisely to surface those.
 
 ---
 
-## Open Risk
+## Data Freshness Preflight
 
-The refresh depends on nflverse having published meaningful 2026 depth charts. If
-step 1 pulls data that still ends in early June, the profile features will not
-move and the diff will be near-empty. That outcome is informative rather than a
-bug — it means the roster signal is genuinely unavailable — but it should be
-checked before concluding the model is unresponsive to trades.
+The refresh is only meaningful if nflverse has published post-camp 2026 roster
+data. That is directly checkable, so it becomes a preflight step rather than an
+accepted risk.
+
+`scripts/refresh_preseason.py --check-freshness` (also run automatically as step
+0 of a full refresh) queries the nflverse-data releases API:
+
+```
+GET https://api.github.com/repos/nflverse/nflverse-data/releases/tags/{tag}
+```
+
+and reports, per required asset: remote `updated_at`, local file mtime, and — for
+depth charts specifically — the maximum `dt` value *inside* the local CSV. That
+last one matters most: the profile builder keys off the latest per-player
+snapshot, so a file downloaded recently can still contain only stale snapshots.
+
+Outcomes:
+
+| Condition | Behavior |
+|---|---|
+| Remote asset newer than local file | proceed, report how much newer |
+| Remote asset absent for the season | warn, name the asset, continue |
+| Local depth-chart max `dt` older than 30 days after sync | warn loudly — profile features will barely move |
+| Releases API unreachable | warn and continue; never block the refresh on GitHub availability |
+
+Measured 2026-08-11, establishing that fresh data does exist:
+
+| Asset | Remote `updated_at` | Local state |
+|---|---|---|
+| `depth_charts_2026.csv` | 2026-08-11, 40.4 MB | June 3, max `dt` 2026-06-03 |
+| `roster_2026.csv` | 2026-08-11 | June 3 |
+| `roster_weekly_2026.csv` | 2026-08-11 | absent locally |
+| `snap_counts` 2026 | no asset published | absent — expected, no games played |
+| `injuries` 2026 | no asset published | absent — expected this early |
+
+Depth charts are roughly ten weeks newer than the local copy, so the sync should
+produce a substantial projection diff. Missing 2026 snap counts and injuries are
+normal preseason conditions, not failures: `compute_preseason_player_profiles()`
+already treats both as optional, falling back to prior-season files.

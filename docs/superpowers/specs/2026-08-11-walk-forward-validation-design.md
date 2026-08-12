@@ -63,14 +63,45 @@ Analyst consensus accuracy, measured from the data Spec A migrates:
 | 2024 | 2.68 | 0.48 |
 | 2025 | 2.35 | 0.51 |
 
-Preseason boards typically land MAE ≈ 2.0–2.5. The model has to beat that on
-seasons it never trained toward to be worth trusting over the sites.
+Measured over the full 2017–2025 migrated data (Spec A), per source:
+
+| Source | MAE | n |
+|---|---|---|
+| CBS | 2.18 | 285 |
+| **consensus average** | **2.18** | 285 |
+| Vegas O/U | 2.24 | 160 |
+| FPI | 2.24 | 285 |
+| Bleacher Report | 2.37 | 285 |
+| PFF / SI | 2.49 | 191 / 285 |
+
+**MAE ≈ 2.18 is the bar.** The model has to beat it on seasons it never trained
+toward to be worth trusting over the sites.
+
+Single seasons are not a substitute for the pooled figure: on 2024 alone Vegas
+O/U led at MAE 1.84, which does not survive the full sample. Any per-season
+comparison must carry its `n`.
 
 One caution established while investigating: preseason projections correlate
 around **0.8 with the prior season's** results and only around **0.5 with the
 season they forecast**, because analysts anchor on last year's record. A high
 correlation against season `S−1` is expected anchoring, not evidence of a
 labeling bug or of leakage.
+
+### Methodological guardrail: do not retrain first
+
+Retraining the production model on all data through 2025 and *then* testing on
+2021–2025 makes every test season in-sample and measures memorization. Each fold
+must train on `≤ S−1` only — retraining happens **inside** the harness, once per
+fold, not once beforehand.
+
+This is not hypothetical. `reports/nn_weekly_accuracy.csv` records v14 scoring
+62–81% weekly on 2024, a season v14 trained on. Those figures are in-sample and
+should not be read as accuracy.
+
+Retraining the production model becomes justified only *after* walk-forward
+reports a result — if the architecture loses to the consensus baseline, that is
+the signal to change it. Doing it first destroys the measurement that would say
+so.
 
 ### Reporting
 
@@ -99,6 +130,12 @@ season selector.
    separate store? Spec A explicitly defers this decision here.
 7. Ensemble weights (45% NN + 20% XGB + 35% LR) were set before any reliable
    out-of-sample estimate existed. Should walk-forward refit them?
+8. Season projections come from `NNProjectionEngine.simulate_season()`, whose
+   in-simulation Elo update is a second implementation of the Elo math (Spec A
+   repoints its hardcoded constants at the calibrated ones). Should the folds
+   also re-calibrate Elo constants per fold, or hold them fixed at the values
+   fitted on the full history? Holding them fixed leaks a small amount of
+   future information into every fold.
 
 ---
 
