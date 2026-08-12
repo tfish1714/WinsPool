@@ -12,8 +12,8 @@
 
 ## Global Constraints
 
-- **`services/consensus_service.py` may import only pandas and numpy.** It is imported by `routes/admin_routes.py`, and `requirements.txt` declares neither scipy, TensorFlow, scikit-learn nor XGBoost. Compute Spearman as Pearson over `pandas.Series.rank()`.
-- **No new dependencies.** Config files are JSON, not YAML (PyYAML is not installed). HTTP uses `urllib.request`, matching `scripts/sync_nflverse_data.py`.
+- **`services/consensus_service.py` may import only pandas and numpy.** It is imported by `routes/admin_routes.py`, so its dependencies land in the Cloud Run image and the request path. The Dockerfile installs `requirements.txt` only — the ML stack lives in `requirements-ml.txt` and is deliberately absent from production, which is why the prediction services guard their imports. Compute Spearman as Pearson over `pandas.Series.rank()`; its default `method='average'` matches `scipy.stats.spearmanr` tie handling exactly, so this is equivalent, not a workaround.
+- **No new runtime dependencies.** Config files are JSON, not YAML (PyYAML is not installed). HTTP uses `urllib.request`, matching `scripts/sync_nflverse_data.py`. Scripts under `scripts/` are not deployed and may use the ML stack freely.
 - **Firestore is the source of truth.** All writes go to Firestore first; `.local_db/*.pkl` is a read-only mirror rebuilt by `scripts/refresh_local_pkls.py`. Any new collection must be registered there.
 - **Services and routes must never read `rawdata/` CSVs.** Scripts may.
 - **Canonical team abbreviations** come from `services.utils.normalize_team_abbr`. Store only normalized values (`LA`, not `LAR`; `WAS`, not `WSH`).
@@ -2652,7 +2652,19 @@ python scripts/refresh_preseason.py --season 2026             # Full preseason r
 python scripts/refresh_preseason.py --season 2026 --check-freshness   # Preflight only
 ```
 
-- [ ] **Step 3: Verify no stale references**
+- [ ] **Step 3: Document the split dependency files**
+
+`requirements-ml.txt` was added alongside this plan; record why it exists so
+nobody folds it back into `requirements.txt`. Add to the "Stack" section of
+`CLAUDE.md`, after the ML bullet:
+
+```markdown
+### Dependencies
+- `requirements.txt` — web app only; this is what the Dockerfile installs.
+- `requirements-ml.txt` — TensorFlow, scikit-learn, XGBoost, scipy. Install where you train or run batch predictions: `pip install -r requirements.txt -r requirements-ml.txt`. **Deliberately excluded from the deployed image** — Cloud Run reads stored predictions from Firestore and never loads a model, which is why the prediction services guard their imports behind `TF_AVAILABLE` / `SKLEARN_AVAILABLE`. TensorFlow is pinned because the `.keras` artifact format has changed across minor versions and `models/nn_v*.keras` were trained under 2.21.0.
+```
+
+- [ ] **Step 4: Verify no stale references**
 
 ```bash
 grep -n "aggregate_scraper\|scrape_predictions" CLAUDE.md docs/*.md
@@ -2660,11 +2672,20 @@ grep -n "aggregate_scraper\|scrape_predictions" CLAUDE.md docs/*.md
 
 Expected: no output. Remove any hits.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Verify the deployed image is unchanged**
+
+```bash
+grep -n "requirements" Dockerfile
+```
+
+Expected: only `requirements.txt` — `requirements-ml.txt` must **not** appear,
+or the image gains ~700MB in the request path.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add CLAUDE.md
-git commit -m "docs: document consensus_projections collection and new scripts"
+git commit -m "docs: document consensus_projections collection, new scripts, and dependency split"
 ```
 
 ---

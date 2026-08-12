@@ -1,0 +1,24 @@
+# Offline ML stack — model training, batch prediction, and evaluation.
+#
+# NOT installed by the Dockerfile. The deployed Cloud Run app reads stored
+# predictions from Firestore (game_predictions, preseason_predictions) and never
+# loads a model, which is why nn_prediction_service.py and its siblings guard
+# their imports behind TF_AVAILABLE / SKLEARN_AVAILABLE and degrade gracefully.
+# Adding these to requirements.txt would put ~700MB into the request path for no
+# benefit.
+#
+# Install only where you train or run batch predictions:
+#     pip install -r requirements.txt -r requirements-ml.txt
+#
+# Used by: scripts/train_nn_model.py, scripts/predict_season.py,
+# scripts/backfill_schedule_predictions.py, scripts/weekly_model_eval.py,
+# services/{nn,xgb,lr}_prediction_service.py, services/nn_projection_engine.py
+
+# Pinned: the .keras artifact format has changed across TensorFlow minor
+# versions. The models currently in models/ were trained under 2.21.0, so a
+# floor rather than a pin risks a future version failing to load nn_v*.keras.
+tensorflow==2.21.0
+
+scikit-learn>=1.8.0
+xgboost>=3.2.0
+scipy>=1.17.1
