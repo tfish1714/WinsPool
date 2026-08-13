@@ -50,6 +50,12 @@ python scripts/train_nn_model.py       # Train ML model (auto-increments version
 python scripts/train_nn_model.py --version v3   # Train and save as specific version
 python scripts/weekly_model_eval.py --season 2025 --week 14    # Evaluate ensemble accuracy for one week
 python scripts/weekly_model_eval.py --season 2025 --week 1 18  # Evaluate full season range (NN+XGB+LR ensemble)
+
+# Consensus benchmark
+python scripts/seed_consensus.py --season 2026 --firestore    # Seed analyst consensus from data/consensus_2026.csv
+python scripts/migrate_consensus.py --firestore               # One-shot: move 2017-2025 consensus out of preseason_predictions
+python scripts/refresh_preseason.py --season 2026             # Full preseason refresh + freshness preflight + projection diff
+python scripts/refresh_preseason.py --season 2026 --check-freshness   # Preflight only
 ```
 
 ### Tests
@@ -67,6 +73,10 @@ pytest tests/ --cov=services --cov=routes
 - **Real-time**: WebSockets (live draft room)
 - **ML**: TensorFlow/Keras (NN), XGBoost, scikit-learn (LR) — blended ensemble (45% NN + 20% XGB + 35% LR)
 - **AI**: Google Gemini (weekly recaps)
+
+### Dependencies
+- `requirements.txt` — web app only; this is what the Dockerfile installs.
+- `requirements-ml.txt` — TensorFlow, scikit-learn, XGBoost, scipy. Install where you train or run batch predictions: `pip install -r requirements.txt -r requirements-ml.txt`. **Deliberately excluded from the deployed image** — Cloud Run reads stored predictions from Firestore and never loads a model, which is why the prediction services guard their imports behind `TF_AVAILABLE` / `SKLEARN_AVAILABLE`. TensorFlow is pinned because the `.keras` artifact format has changed across minor versions and `models/nn_v*.keras` were trained under 2.21.0.
 
 ### Key Environment Variables
 ```
@@ -145,7 +155,8 @@ Firestore collections and their local equivalents:
 | `draft_order` | `.local_db/draft_order.pkl` | |
 | `draft_order_rules` | `.local_db/draft_order_rules.pkl` | |
 | `nfl_teams` | `.local_db/nfl_teams.pkl` | |
-| `preseason_predictions` | `.local_db/preseason_predictions.pkl` + `_{year}.pkl` | |
+| `preseason_predictions` | `.local_db/preseason_predictions.pkl` + `_{year}.pkl` | Model output only |
+| `consensus_projections` | `.local_db/consensus_projections.pkl` + `_{year}.pkl` | Analyst win projections; `preseason_predictions` is model output only |
 | `game_predictions` | `.local_db/game_predictions_{year}.json` | JSON, not pkl; one doc per season |
 | `analytics_cache` | `.local_db/analytics/{analytic}_{year}_{week}.json` | JSON |
 | `config` | *(no local pkl — always reads Firestore)* | Single doc `config/settings`; stores `draft_active` flag and app-level settings |
