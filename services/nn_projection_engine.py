@@ -14,6 +14,7 @@ from services.constants import (
     MC_MARGIN_STD, MC_EPA_SCALE, MC_EPA_RUSH_WEIGHT,
     PRESEASON_ELO_BOOST_MAX, PRESEASON_ELO_WEIGHTS,
 )
+from services.prediction_service import ELO_HOME_ADVANTAGE, ELO_K
 
 from services.nn_feature_engine import (
     build_master_feature_table,
@@ -471,11 +472,11 @@ class NNProjectionEngine:
         h_elo = state[:, h_idx, 0]
         a_elo = state[:, a_idx, 0]
 
-        # Elo diff from winner's perspective (home advantage = 48 pts)
+        # Elo diff from winner's perspective, using the calibrated home advantage
         winner_elo_diff = np.where(
             home_wins,
-            h_elo - a_elo + 48.0,   # home won: home advantage helps them
-            a_elo - h_elo - 48.0,   # away won: home advantage hurt them
+            h_elo - a_elo + ELO_HOME_ADVANTAGE,  # home won: advantage helps them
+            a_elo - h_elo - ELO_HOME_ADVANTAGE,  # away won: advantage hurt them
         )
 
         # Expected win probability for the actual winner
@@ -486,7 +487,7 @@ class NNProjectionEngine:
         autocorr = winner_elo_diff * 0.001 + 2.2
         mov_mult = log_comp * (2.2 / np.maximum(autocorr, 0.01))
 
-        shift = 20.0 * (1.0 - expected) * mov_mult  # K = 20
+        shift = ELO_K * (1.0 - expected) * mov_mult
 
         state[:, h_idx, 0] = np.where(home_wins, h_elo + shift, h_elo - shift)
         state[:, a_idx, 0] = np.where(home_wins, a_elo - shift, a_elo + shift)
