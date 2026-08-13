@@ -66,6 +66,17 @@ def test_set_consensus_projections_writes_derived_stats(monkeypatch):
     assert payload["as_of"] == "2026-08-12"
 
 
+def test_set_consensus_projections_no_db_returns_zero(monkeypatch):
+    import services.db_service as db_service
+    monkeypatch.setattr(db_service, "get_db", lambda: None)
+
+    count = db_service.set_consensus_projections(2026, [
+        {"team": "BUF", "sources": {"br": 12, "vegas_ou": 11.5}, "as_of": "2026-08-12"},
+    ])
+
+    assert count == 0
+
+
 def test_refresh_local_pkls_registers_consensus_collection():
     from scripts.refresh_local_pkls import COLLECTIONS
     assert ("consensus_projections", "season") in COLLECTIONS
