@@ -585,14 +585,22 @@ class AdminApp {
 
         const s = data.summary;
         const f = (v, d = 2) => (v === null || v === undefined) ? '—' : Number(v).toFixed(d);
-        summaryEl.innerHTML = `
-            <div style="display: flex; gap: 1.5rem; flex-wrap: wrap;">
-                <div><strong>${s.n_compared}</strong> teams compared</div>
-                <div>MAE vs consensus <strong>${f(s.mae)}</strong></div>
-                <div>Bias <strong>${f(s.bias)}</strong></div>
-                <div>Rank corr <strong>${f(s.spearman)}</strong></div>
-                <div><strong>${s.n_outside_range}</strong> outside analyst range</div>
-            </div>`;
+        if (s.n_compared === 0) {
+            summaryEl.innerHTML = `<p style="color: var(--ink-3);">
+                No model projections available for ${season} to compare against
+                consensus (preseason_predictions holds current-season model output
+                only). Per-source accuracy below is still valid.
+            </p>`;
+        } else {
+            summaryEl.innerHTML = `
+                <div style="display: flex; gap: 1.5rem; flex-wrap: wrap;">
+                    <div><strong>${s.n_compared}</strong> teams compared</div>
+                    <div>MAE vs consensus <strong>${f(s.mae)}</strong></div>
+                    <div>Bias <strong>${f(s.bias)}</strong></div>
+                    <div>Rank corr <strong>${f(s.spearman)}</strong></div>
+                    <div><strong>${s.n_outside_range}</strong> outside analyst range</div>
+                </div>`;
+        }
 
         if (data.source_scores.length) {
             sourcesEl.innerHTML = `

@@ -73,6 +73,13 @@ def test_both_validation_phases_report_together():
     assert any("BUF" in e and "21" in e for e in errors)
 
 
+def test_non_numeric_value_is_rejected():
+    df = _full_frame(BUF={"vegas_ou": "n/a"})
+    rows, errors = validate_and_build(df, 2026)
+    assert rows == []
+    assert any("BUF" in e and "non-numeric" in e for e in errors)
+
+
 def test_team_abbreviations_are_normalized():
     df = _full_frame()
     df.loc[df["team"] == "LA", "team"] = "LAR"

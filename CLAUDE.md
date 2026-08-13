@@ -161,6 +161,11 @@ Firestore collections and their local equivalents:
 | `analytics_cache` | `.local_db/analytics/{analytic}_{year}_{week}.json` | JSON |
 | `config` | *(no local pkl — always reads Firestore)* | Single doc `config/settings`; stores `draft_active` flag and app-level settings |
 
+`.local_db/backup_preseason_consensus_*.json` holds the pre-migration backup of
+the 2017–2025 consensus rows deleted from `preseason_predictions` on
+2026-08-12 (see `scripts/migrate_consensus.py`) — it is the only copy of that
+data and should not be deleted.
+
 **Rules for any new Firestore collection or data store:**
 1. Write to Firestore first (or with `--firestore` flag in scripts).
 2. Add the collection to `refresh_local_pkls.py` so local dev stays in sync.

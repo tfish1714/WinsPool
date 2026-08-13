@@ -136,6 +136,28 @@ def test_team_missing_from_consensus_is_excluded_from_summary():
     assert out["summary"]["n_compared"] == 1
 
 
+def test_team_missing_from_model_is_excluded_from_summary_but_still_listed():
+    """The mirror image of test_team_missing_from_consensus_is_excluded_from_summary.
+
+    Every season 2017-2025 now hits exactly this direction -- preseason_predictions
+    holds current-season model output only, so historical consensus teams have no
+    matching model row. A consensus-only team must still appear in `teams` with
+    model_wins/delta as None rather than being dropped, and must be excluded from
+    n_compared.
+    """
+    model = _model(BUF=12.0)  # KC has no model row at all
+    consensus = _consensus(
+        BUF={"br": 10.0, "vegas_ou": 10.0},
+        KC={"br": 9.0, "vegas_ou": 9.0},
+    )
+    out = cs.build_comparison(model, consensus)
+    teams = {t["team"]: t for t in out["teams"]}
+    assert teams["KC"]["model_wins"] is None
+    assert teams["KC"]["delta"] is None
+    assert teams["KC"]["consensus_median"] == pytest.approx(9.0)
+    assert out["summary"]["n_compared"] == 1  # only BUF has both sides
+
+
 def test_no_consensus_returns_unavailable():
     out = cs.build_comparison(_model(BUF=12.0), {})
     assert out["available"] is False

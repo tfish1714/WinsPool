@@ -136,6 +136,31 @@ class TestPreseasonPredictionsShape:
 
         assert state["preseason_predictions"]["ARI"]["projected_wins"] == 7.0
 
+    @patch("services.data_service.get_season_projection")
+    def test_preseason_predictions_rounds_consensus_std_dev(self, mock_get_season_projection):
+        """Consensus-sourced std_dev (consensus_std) is `float(np.std(vals))` from
+        consensus_service.compute_derived -- unrounded, e.g. 1.1367210272875008.
+        static/js/ui_renderer.js renders std_dev straight into the draft room with no
+        .toFixed(), so the adapter must round it to 2 decimals the same way
+        projected_wins already is, or historical (2017-2025) draft rooms show long
+        float tails like "8.5W ±1.1367210272875008" for undrafted teams.
+        """
+        mock_get_season_projection.return_value = {
+            "BUF": {
+                "wins": 10.4,
+                "source_type": "consensus",
+                "detail": {
+                    "consensus_mean": 10.4,
+                    "consensus_std": 1.1367210272875008,
+                    "sources": {"br": 10.0, "vegas_ou": 10.8},
+                },
+            }
+        }
+
+        state = load_draft_state(set(), year=2023)
+
+        assert state["preseason_predictions"]["BUF"]["std_dev"] == 1.14
+
 
 class TestSavePickTimeTaken:
 

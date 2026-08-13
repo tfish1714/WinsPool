@@ -121,7 +121,17 @@ def _model_version_string() -> str:
     different types depending on the season.
     """
     import json
+    import re
     from pathlib import Path
+
+    def _resolve_version(reg: dict, key: str):
+        ver = reg.get(key)
+        if ver:
+            return ver
+        version_keys = [k for k in reg if re.fullmatch(r"v\d+", k)]
+        if not version_keys:
+            return None
+        return max(version_keys, key=lambda k: int(k[1:]))
 
     root = Path(__file__).parent.parent / "models"
     parts = []
@@ -133,7 +143,7 @@ def _model_version_string() -> str:
         try:
             with open(root / fname) as f:
                 reg = json.load(f)
-            ver = reg.get(key)
+            ver = _resolve_version(reg, key)
             if ver:
                 parts.append(f"{prefix}_{ver}")
         except Exception:

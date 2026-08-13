@@ -455,10 +455,11 @@ def get_season_projection_legacy_shape(season: int) -> Dict[str, dict]:
     for team, proj in get_season_projection(int(season)).items():
         detail = proj.get("detail") or {}
         wins = proj.get("wins")
+        raw_std = detail.get("std_dev", detail.get("consensus_std", 0))
         out[team] = {
             "projected_wins": detail.get("projected_wins", wins),
             "mean_wins": detail.get("mean_wins", detail.get("consensus_mean", wins)),
-            "std_dev": detail.get("std_dev", detail.get("consensus_std", 0)),
+            "std_dev": round(raw_std, 2) if raw_std is not None else 0,
             "sources": detail.get("sources", {}),
         }
     return out

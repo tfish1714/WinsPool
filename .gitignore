@@ -17,6 +17,9 @@ firebase_credentials.json
 # Debug / scratch files
 debug/
 
+# Log output
+logs/
+
 # Build artifacts
 *.db
 dist/
