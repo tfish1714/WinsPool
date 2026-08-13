@@ -163,14 +163,15 @@ def _mock_load_data():
 
 
 @patch("routes.history_routes.load_data", return_value=_mock_load_data())
-@patch("routes.history_routes.get_preseason_predictions", return_value={"KC": {"projected_wins": 12.0}})
+@patch("routes.history_routes.get_season_projection_legacy_shape",
+       return_value={"KC": {"projected_wins": 12.0}})
 def test_player_profile_page_returns_200(mock_preds, mock_load):
     resp = client.get("/history/player/1")
     assert resp.status_code == 200
 
 
 @patch("routes.history_routes.load_data", return_value=_mock_load_data())
-@patch("routes.history_routes.get_preseason_predictions", return_value={})
+@patch("routes.history_routes.get_season_projection_legacy_shape", return_value={})
 def test_player_profile_page_returns_404_for_unknown_player(mock_preds, mock_load):
     resp = client.get("/history/player/999")
     assert resp.status_code == 404

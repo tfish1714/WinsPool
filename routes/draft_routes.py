@@ -358,8 +358,10 @@ async def route_draft_results_by_year(request: Request, year: int):
             }
 
     # Draft Value Calculus
-    from services.data_service import get_preseason_predictions
-    preds = get_preseason_predictions(year)
+    # Resolver, not get_preseason_predictions: this page is mostly historical
+    # seasons, whose projections live in consensus_projections now.
+    from services.data_service import get_season_projection_legacy_shape
+    preds = get_season_projection_legacy_shape(year)
     def calculate_draft_value(row):
         team = row.get("team")
         actual = float(row.get("TotalWinsBySeason", 0))

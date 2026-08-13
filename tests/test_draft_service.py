@@ -107,13 +107,17 @@ class TestLoadDraftStateSingleton:
 
 class TestPreseasonPredictionsShape:
 
-    @patch("services.draft_service.get_season_projection")
+    @patch("services.data_service.get_season_projection")
     def test_preseason_predictions_preserves_true_projected_wins(self, mock_get_season_projection):
         """ui_renderer.js:195 renders `${pred.projected_wins}W` straight from this
         payload. The resolver's "wins" field prefers the unrounded mean_wins (e.g.
         6.7), but the payload must still surface the original rounded projected_wins
         (e.g. 7.0) that `detail` carries -- substituting mean_wins here would silently
         change what the live 2026 draft room displays.
+
+        Patched at the resolver rather than at draft_service's import so this still
+        exercises the shared adapter (get_season_projection_legacy_shape) that the
+        draft room, player profile and draft recap all now go through.
         """
         mock_get_season_projection.return_value = {
             "ARI": {

@@ -435,6 +435,34 @@ def get_season_projection(season: int) -> Dict[str, dict]:
             }
     return out
 
+def get_season_projection_legacy_shape(season: int) -> Dict[str, dict]:
+    """get_season_projection() flattened to the shape the UI has always read.
+
+    Callers that render projections -- the draft room payload (consumed verbatim
+    by static/js/*.js), the player profile, the draft recap -- read
+    `.projected_wins` / `.std_dev` off a flat per-team dict. This adapts the
+    resolver's {"wins", "source_type", "detail"} back to that shape so those
+    callers keep working across both collections without each one re-deriving it.
+
+    `projected_wins` prefers the stored value and falls back to `wins`: model
+    rows carry their own rounded projected_wins (which is NOT mean_wins), while
+    consensus detail has no such key and must use the resolved median. The two
+    source types put their central value and spread under different key names,
+    so each is tried in turn -- a model detail never holds consensus_* keys, and
+    vice versa, which is what lets one lookup chain serve both.
+    """
+    out = {}
+    for team, proj in get_season_projection(int(season)).items():
+        detail = proj.get("detail") or {}
+        wins = proj.get("wins")
+        out[team] = {
+            "projected_wins": detail.get("projected_wins", wins),
+            "mean_wins": detail.get("mean_wins", detail.get("consensus_mean", wins)),
+            "std_dev": detail.get("std_dev", detail.get("consensus_std", 0)),
+            "sources": detail.get("sources", {}),
+        }
+    return out
+
 def get_team_schedule(team: str, games_df: pd.DataFrame, season: int) -> List[str]:
     """Extracts a team's sequential 17-game schedule from the NFL Games dataframe."""
     schedule = []
