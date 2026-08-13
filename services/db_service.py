@@ -545,3 +545,45 @@ def set_config_settings(data: dict):
             json.dump(data, f)
     except Exception as e:
         logger.warning("Failed to persist config_settings locally: %s", e)
+
+
+def set_consensus_projections(season: int, rows: list) -> int:
+    """Write analyst consensus to Firestore, doc id {season}_{team}.
+
+    rows: [{"team": str, "sources": {source_key: wins}, "as_of": "YYYY-MM-DD"}]
+    Derived statistics are computed here so the read path is a plain load,
+    matching how preseason_predictions stores floor/ceiling/p25/p75.
+
+    Returns the number of documents written.
+    """
+    from services.consensus_service import compute_derived
+
+    db = get_db()
+    if db is None:
+        logger.warning("No database connection; consensus not written.")
+        return 0
+
+    batch = db.batch()
+    count = 0
+    for row in rows:
+        team = row["team"]
+        sources = row["sources"]
+        payload = {
+            "season": int(season),
+            "team": team,
+            "as_of": row.get("as_of"),
+            "sources": sources,
+            **compute_derived(sources),
+        }
+        ref = db.collection("consensus_projections").document(f"{season}_{team}")
+        batch.set(ref, payload)
+        count += 1
+        if count % 400 == 0:
+            batch.commit()
+            batch = db.batch()
+
+    if count % 400 != 0:
+        batch.commit()
+
+    logger.info("Wrote %d consensus rows for %s.", count, season)
+    return count

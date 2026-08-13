@@ -377,6 +377,25 @@ def get_preseason_predictions(season: int) -> Dict[str, dict]:
         }
     return res
 
+def get_consensus_projections(season: int) -> Dict[str, dict]:
+    """Retrieve analyst consensus projections for a season, keyed by team."""
+    df = get_collection_df("consensus_projections", filters=[("season", "==", season)])
+    if df.empty:
+        return {}
+
+    res = {}
+    for _, row in df.iterrows():
+        res[row["team"]] = {
+            "sources":          row.get("sources", {}),
+            "n_sources":        int(row.get("n_sources", 0) or 0),
+            "consensus_mean":   row.get("consensus_mean"),
+            "consensus_median": row.get("consensus_median"),
+            "consensus_min":    row.get("consensus_min"),
+            "consensus_max":    row.get("consensus_max"),
+            "consensus_std":    row.get("consensus_std"),
+        }
+    return res
+
 def get_team_schedule(team: str, games_df: pd.DataFrame, season: int) -> List[str]:
     """Extracts a team's sequential 17-game schedule from the NFL Games dataframe."""
     schedule = []
