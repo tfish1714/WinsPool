@@ -586,4 +586,5 @@ def set_consensus_projections(season: int, rows: list) -> int:
         batch.commit()
 
     logger.info("Wrote %d consensus rows for %s.", count, season)
+    signal_data_update()
     return count

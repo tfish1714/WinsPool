@@ -53,6 +53,12 @@ def test_set_consensus_projections_writes_derived_stats(monkeypatch):
     import services.db_service as db_service
     monkeypatch.setattr(db_service, "get_db", lambda: FakeDB())
 
+    # signal_data_update() itself short-circuits under USE_LOCAL_DATA=true
+    # (set globally for the test session in conftest.py), so it can't be
+    # observed via the FakeDB write path -- spy on the call directly instead.
+    signaled = []
+    monkeypatch.setattr(db_service, "signal_data_update", lambda: signaled.append(True))
+
     count = db_service.set_consensus_projections(2026, [
         {"team": "BUF", "sources": {"br": 12, "vegas_ou": 11.5}, "as_of": "2026-08-12"},
     ])
@@ -64,6 +70,12 @@ def test_set_consensus_projections_writes_derived_stats(monkeypatch):
     assert payload["n_sources"] == 2
     assert payload["consensus_mean"] == pytest.approx(11.75)
     assert payload["as_of"] == "2026-08-12"
+
+    # Regression guard: the deployed app's in-memory cache has a 1-hour TTL,
+    # so writes here must signal remote cache invalidation the same way
+    # cache_builder.py and predict_season.py already do, or fresh consensus
+    # data silently doesn't appear on the live site for up to an hour.
+    assert signaled == [True]
 
 
 def test_set_consensus_projections_no_db_returns_zero(monkeypatch):
