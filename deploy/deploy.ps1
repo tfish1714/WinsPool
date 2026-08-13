@@ -37,13 +37,6 @@ gcloud run deploy winspool `
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "[SUCCESS] Cloud Run Deployment Complete!" -ForegroundColor Green
-    
-    # Optional Functions Deployment
-    $deployFuncs = Read-Host "Do you want to deploy Cloud Functions? (y/n)"
-    if ($deployFuncs -eq "y") {
-        .\deploy\deploy_functions.ps1
-    }
-    
     Write-Host "[FINISH] Deployment process finished." -ForegroundColor Green
 }
 else {

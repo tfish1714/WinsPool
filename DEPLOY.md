@@ -13,16 +13,8 @@ This script will:
 1. Check / prompt for `gcloud` authentication
 2. Build the Docker image via Cloud Build and push to `gcr.io/fishbone-wins-pool/winspool`
 3. Deploy to Cloud Run (`winspool` service, `us-east1`, project `fishbone-wins-pool`)
-4. Optionally deploy Firebase Cloud Functions (prompts y/n)
 
 **Service URL:** `https://winspool-1045965963135.us-east1.run.app`
-
-### Deploy Cloud Functions only
-```powershell
-.\deploy\deploy_functions.ps1
-```
-
-Requires the Firebase CLI (`npm install -g firebase-tools`).
 
 ---
 
