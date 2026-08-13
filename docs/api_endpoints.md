@@ -354,19 +354,6 @@ Deletes only the draft results for a season (preserving order and rules). Used f
 
 ---
 
-### `POST /api/admin/scrape_predictions`
-
-Triggers the aggregate scraper pipeline to fetch win total projections from external sources.
-
-**Request Body**:
-```json
-{ "playerId": "string" }
-```
-
-**Response**: `{ success, message }`
-
----
-
 ## AI Recap Endpoints
 
 ### `POST /api/admin/recap/preview_prompt`
