@@ -69,12 +69,24 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
     """Inject ML predictions into every row of schedule_df.
 
     For games found in pred_lookup (feature-table predictions), uses those.
-    For unplayed games not in pred_lookup, falls back to the team-profile engine.
-    Completed games with no feature data get None.
+    For unplayed games not in pred_lookup, falls back to the team-profile engine,
+    batched into one model call rather than one call per game -- looping
+    game_win_probability() per row was the dominant cost of this script's
+    Analytics Cache Build step (unbatched single-row Keras predict() calls, each
+    carrying meaningful fixed overhead). Completed games with no feature data
+    get None. If the batched fallback call itself fails, every pending row gets
+    None rather than being retried individually -- a systemic model/scaler
+    failure isn't going to resolve itself on the next row.
     """
-    pred_winners, pred_confs, pred_ats, pred_probs = [], [], [], []
+    n = len(schedule_df)
+    pred_winners: list = [None] * n
+    pred_confs: list = [None] * n
+    pred_ats: list = [None] * n
+    pred_probs: list = [None] * n
 
-    for _, row in schedule_df.iterrows():
+    fallback_idx, fallback_pairs, fallback_spreads = [], [], []
+
+    for i, (_, row) in enumerate(schedule_df.iterrows()):
         ht = _normalize_team(str(row.get('home_team', '') or ''))
         at = _normalize_team(str(row.get('away_team', '') or ''))
         wk = row.get('week')
@@ -82,22 +94,32 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
         pred = pred_lookup.get((year, int(wk), ht, at)) if (ht and at and wk is not None) else None
 
         if pred:
-            pred_winners.append(pred['pred_winner'])
-            pred_confs.append(pred['pred_su_conf'])
-            pred_ats.append(pred['pred_ats_pick'])
-            pred_probs.append(pred['pred_prob'])
+            pred_winners[i] = pred['pred_winner']
+            pred_confs[i]   = pred['pred_su_conf']
+            pred_ats[i]     = pred['pred_ats_pick']
+            pred_probs[i]   = pred['pred_prob']
             continue
 
-        # Not in feature table — unplayed future game, use team-profile fallback
+        # Not in feature table — unplayed future game, queue for the team-profile fallback
         result = row.get('result')
         is_unplayed = pd.isna(result) or result == UNDRAFTED_SENTINEL
         if is_unplayed and ht and at and fallback_engine:
-            try:
-                d = fallback_engine.game_win_probability(ht, at)
-                hp = d['home_win_prob']
+            fallback_idx.append(i)
+            fallback_pairs.append((ht, at))
+            fallback_spreads.append(row.get('spread_line'))
+
+    if fallback_pairs:
+        try:
+            batch = fallback_engine.game_win_probabilities_batch(fallback_pairs)
+        except Exception:
+            batch = None
+        if batch is not None:
+            for pos, i in enumerate(fallback_idx):
+                ht, at = fallback_pairs[pos]
+                spread = fallback_spreads[pos]
+                hp = batch[pos]['home_win_prob']
                 winner = ht if hp >= 0.5 else at
                 conf   = round(min(99.0, max(50.0, (hp if hp >= 0.5 else 1 - hp) * 100)), 1)
-                spread = row.get('spread_line')
                 ats = winner
                 if pd.notna(spread):
                     try:
@@ -105,18 +127,10 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
                         ats = at if sv < -3 else (ht if sv > 3 else (at if sv < 0 else ht))
                     except (ValueError, TypeError):
                         pass
-                pred_winners.append(winner)
-                pred_confs.append(conf)
-                pred_ats.append(ats)
-                pred_probs.append(round(hp, 4))
-                continue
-            except Exception:
-                pass
-
-        pred_winners.append(None)
-        pred_confs.append(None)
-        pred_ats.append(None)
-        pred_probs.append(None)
+                pred_winners[i] = winner
+                pred_confs[i]   = conf
+                pred_ats[i]     = ats
+                pred_probs[i]   = round(hp, 4)
 
     out = schedule_df.copy()
     out['pred_winner']  = pred_winners
@@ -145,6 +159,19 @@ def build_year(standings, games, players, draft_order, draft_results,
     # Determine latest week for this year
     latest_week = get_latest_week_for_year(games, year)
     is_past_season = (year < current_year)
+
+    # schedule_enriched (fallback engine) and prediction_snapshot both need an
+    # NNProjectionEngine for this year; share one instance so initialize() --
+    # which rebuilds a multi-season feature table plus preseason player
+    # profiles -- runs at most once per year instead of twice.
+    _engine_cache = {}
+
+    def _get_engine() -> "NNProjectionEngine":
+        if "engine" not in _engine_cache:
+            eng = NNProjectionEngine()
+            eng.initialize(year)
+            _engine_cache["engine"] = eng
+        return _engine_cache["engine"]
 
     # If it's the current year, sync live scores from ESPN
     if year == current_year:
@@ -178,10 +205,7 @@ def build_year(standings, games, players, draft_order, draft_results,
             # Apply ML ensemble predictions.
             # Feature-table lookup covers all completed games. For unplayed future
             # games (current season only), fall back to team-profile predictions.
-            fallback_engine = None
-            if year >= current_year:
-                fallback_engine = NNProjectionEngine()
-                fallback_engine.initialize(year)
+            fallback_engine = _get_engine() if year >= current_year else None
 
             schedule_df = _apply_predictions(
                 schedule_df, year,
@@ -262,9 +286,8 @@ def build_year(standings, games, players, draft_order, draft_results,
         print(f"  [skip] {analytic} year={year} already final")
     else:
         try:
-            engine = NNProjectionEngine()
-            engine.initialize(year)
-            
+            engine = _get_engine()
+
             yr_games = full_games[full_games['season'] == year].copy() if not full_games.empty else pd.DataFrame()
             # Deduplicate by (week, home_team, away_team) — the same matchup can appear with
             # different game_ids if daily_nfl_sync uploaded the schedule multiple times

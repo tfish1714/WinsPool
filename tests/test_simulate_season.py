@@ -331,3 +331,129 @@ class TestSimulateSeason:
         # All wins should be 1 each (1 game each, all completed deterministically)
         assert result["team_stats"]["STRONG"]["mean_wins"] == pytest.approx(1.0, abs=0.01)
         assert result["team_stats"]["WEAK"]["mean_wins"]   == pytest.approx(1.0, abs=0.01)
+
+
+# ── game_win_probability / game_win_probabilities_batch tests ─────────────────
+#
+# Perf fix context: cache_builder.py's schedule fallback and
+# NNProjectionEngine.project_portfolio_wins both used to call
+# game_win_probability() once per game in a Python loop, each call issuing 3
+# single-row model.predict() calls. game_win_probabilities_batch() collapses
+# that to exactly 3 calls total regardless of how many pairs are requested;
+# the call-count assertions below are the regression guard for that.
+
+def _mock_models(engine, nn_val: float, xgb_val: float, lr_val: float, n: int):
+    """Wire up mocked scaler+model objects returning constant probabilities."""
+    engine.svc.scaler = MagicMock()
+    engine.svc.scaler.transform = lambda x: x
+    engine.svc.model = MagicMock()
+    engine.svc.model.predict = MagicMock(return_value=np.full((n, 1), nn_val, dtype=np.float32))
+    engine.xgb_svc.scaler = MagicMock()
+    engine.xgb_svc.scaler.transform = lambda x: x
+    engine.xgb_svc.model = MagicMock()
+    engine.xgb_svc.model.predict_proba = MagicMock(
+        return_value=np.column_stack([np.full(n, 1 - xgb_val), np.full(n, xgb_val)])
+    )
+    engine.lr_svc.scaler = MagicMock()
+    engine.lr_svc.scaler.transform = lambda x: x
+    engine.lr_svc.model = MagicMock()
+    engine.lr_svc.model.predict_proba = MagicMock(
+        return_value=np.column_stack([np.full(n, 1 - lr_val), np.full(n, lr_val)])
+    )
+
+
+class TestGameWinProbabilityBatch:
+    def test_single_call_returns_expected_keys(self, mock_engine):
+        _mock_models(mock_engine, nn_val=0.7, xgb_val=0.6, lr_val=0.5, n=1)
+        result = mock_engine.game_win_probability("STRONG", "WEAK")
+        assert set(result) == {
+            "home_team", "away_team", "home_win_prob", "away_win_prob",
+            "nn_home_prob", "xgb_home_prob", "lr_home_prob",
+        }
+        assert result["home_team"] == "STRONG"
+        assert result["away_team"] == "WEAK"
+
+    def test_probabilities_sum_to_one(self, mock_engine):
+        _mock_models(mock_engine, nn_val=0.7, xgb_val=0.6, lr_val=0.5, n=1)
+        result = mock_engine.game_win_probability("STRONG", "WEAK")
+        assert result["home_win_prob"] + result["away_win_prob"] == pytest.approx(1.0)
+
+    def test_blend_matches_weighted_average(self, mock_engine):
+        from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
+        _mock_models(mock_engine, nn_val=0.8, xgb_val=0.6, lr_val=0.5, n=1)
+        result = mock_engine.game_win_probability("STRONG", "WEAK")
+        expected = NN_WEIGHT * 0.8 + XGB_WEIGHT * 0.6 + LR_WEIGHT * 0.5
+        assert result["home_win_prob"] == pytest.approx(expected, abs=1e-4)
+        assert result["nn_home_prob"]  == pytest.approx(0.8, abs=1e-4)
+        assert result["xgb_home_prob"] == pytest.approx(0.6, abs=1e-4)
+        assert result["lr_home_prob"]  == pytest.approx(0.5, abs=1e-4)
+
+    def test_batch_makes_exactly_one_model_call_for_many_pairs(self, mock_engine):
+        """Regression guard: N pairs must cost 1 predict() call each, not N."""
+        n = 5
+        _mock_models(mock_engine, nn_val=0.6, xgb_val=0.55, lr_val=0.5, n=n)
+        pairs = [("STRONG", "WEAK")] * n
+        results = mock_engine.game_win_probabilities_batch(pairs)
+        assert len(results) == n
+        assert mock_engine.svc.model.predict.call_count == 1
+        assert mock_engine.xgb_svc.model.predict_proba.call_count == 1
+        assert mock_engine.lr_svc.model.predict_proba.call_count == 1
+
+    def test_batch_result_matches_single_call(self, mock_engine):
+        """Batching must not change the math -- same inputs, same output as one at a time."""
+        _mock_models(mock_engine, nn_val=0.65, xgb_val=0.55, lr_val=0.45, n=2)
+        batch = mock_engine.game_win_probabilities_batch(
+            [("STRONG", "WEAK"), ("WEAK", "STRONG")]
+        )
+        _mock_models(mock_engine, nn_val=0.65, xgb_val=0.55, lr_val=0.45, n=1)
+        single = mock_engine.game_win_probability("STRONG", "WEAK")
+        assert batch[0]["home_win_prob"] == single["home_win_prob"]
+        assert batch[0]["home_team"] == "STRONG" and batch[0]["away_team"] == "WEAK"
+        assert batch[1]["home_team"] == "WEAK" and batch[1]["away_team"] == "STRONG"
+
+    def test_empty_pairs_returns_empty_without_calling_models(self, mock_engine):
+        _mock_models(mock_engine, nn_val=0.5, xgb_val=0.5, lr_val=0.5, n=1)
+        assert mock_engine.game_win_probabilities_batch([]) == []
+        mock_engine.svc.model.predict.assert_not_called()
+
+
+class TestProjectPortfolioWinsBatching:
+    """NNProjectionEngine.project_portfolio_wins runs once per drafted player;
+    unbatched per-game model calls there multiply across the whole draft pool."""
+
+    def _make_schedule(self, n_games: int, first_game_result: float = None):
+        rows = []
+        for wk in range(1, n_games + 1):
+            row = {
+                "home_team": "STRONG" if wk % 2 else "WEAK",
+                "away_team": "WEAK" if wk % 2 else "STRONG",
+                "week": wk, "game_type": "REG",
+            }
+            if first_game_result is not None and wk == 1:
+                row["result"] = first_game_result
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    def test_unplayed_games_batched_into_one_model_call(self, mock_engine):
+        n = 6
+        _mock_models(mock_engine, nn_val=0.6, xgb_val=0.55, lr_val=0.5, n=n)
+        sched = self._make_schedule(n)
+        mock_engine.project_portfolio_wins(["STRONG"], sched, n_sims=50)
+        assert mock_engine.svc.model.predict.call_count == 1
+
+    def test_completed_game_skips_the_model_entirely(self, mock_engine):
+        """A fully-completed schedule needs no fallback prediction at all."""
+        sched = self._make_schedule(1, first_game_result=7.0)  # home team won
+        mock_engine.project_portfolio_wins(["STRONG"], sched, n_sims=50)
+        mock_engine.svc.model.predict.assert_not_called()
+
+    def test_mixed_completed_and_pending_batches_only_the_pending(self, mock_engine):
+        n = 4
+        _mock_models(mock_engine, nn_val=0.6, xgb_val=0.55, lr_val=0.5, n=n - 1)
+        sched = self._make_schedule(n, first_game_result=7.0)  # week 1 completed, 2-4 pending
+        mock_engine.project_portfolio_wins(["STRONG"], sched, n_sims=50)
+        # 3 pending games batched into exactly 1 call
+        assert mock_engine.svc.model.predict.call_count == 1
+        call_args = mock_engine.svc.model.predict.call_args
+        X_passed = call_args[0][0]
+        assert X_passed.shape[0] == n - 1

@@ -340,14 +340,53 @@ class NNProjectionEngine:
         return static_feats
 
     def game_win_probability(self, home_team: str, away_team: str) -> dict:
-        """Compute the blended NN+XGB+LR ensemble probability.
+        """Compute the blended NN+XGB+LR ensemble probability for a single matchup.
 
         Returns:
             Dict containing 'home_win_prob' and model-level probabilities.
         """
-        profile_dict = {row["team"]: row.to_dict()
-                        for _, row in self._team_profiles.iterrows()}
+        return self.game_win_probabilities_batch([(home_team, away_team)])[0]
 
+    def game_win_probabilities_batch(self, pairs: list) -> list:
+        """Same as game_win_probability, batched across many matchups in one model call.
+
+        pairs: list of (home_team, away_team) tuples.
+
+        Building each pair's raw feature row is pure arithmetic (cheap); the payoff
+        is collapsing what would otherwise be 3*N single-row model.predict() calls --
+        each carrying meaningful fixed graph/session overhead -- into exactly 3
+        batched calls via _batch_predict_components. Callers that previously looped
+        game_win_probability() per game (cache_builder.py's schedule fallback,
+        project_portfolio_wins' per-player game loop) should collect their pairs and
+        call this once instead.
+        """
+        if not pairs:
+            return []
+
+        profile_dict = self._team_profile_dict()
+        rows = [self._build_feature_row(h, a, profile_dict) for h, a in pairs]
+        X = np.array([[row[col] for col in NN_FEATURE_COLUMNS] for row in rows], dtype=np.float32)
+        nn_p, xgb_p, lr_p, blended = self._batch_predict_components(X)
+
+        out = []
+        for i, (home_team, away_team) in enumerate(pairs):
+            b = float(blended[i])
+            out.append({
+                "home_team": home_team,
+                "away_team": away_team,
+                "home_win_prob": round(b, 4),
+                "away_win_prob": round(1.0 - b, 4),
+                "nn_home_prob":  round(float(nn_p[i]),  4),
+                "xgb_home_prob": round(float(xgb_p[i]), 4),
+                "lr_home_prob":  round(float(lr_p[i]),  4),
+            })
+        return out
+
+    def _team_profile_dict(self) -> dict:
+        return {row["team"]: row.to_dict() for _, row in self._team_profiles.iterrows()}
+
+    def _build_feature_row(self, home_team: str, away_team: str, profile_dict: dict) -> dict:
+        """Raw (unscaled) NN_FEATURE_COLUMNS values for one matchup. Pure arithmetic, no model calls."""
         hp = profile_dict.get(home_team, {})
         ap = profile_dict.get(away_team, {})
 
@@ -423,24 +462,25 @@ class NNProjectionEngine:
                 # (these average to ~0 across home+away appearances, which is correct)
                 features[col] = hp.get(col, 0.0)
 
-        nn_prob  = self.svc.predict_game(features)
-        xgb_prob = self.xgb_svc.predict_game(features)
-        lr_prob  = self.lr_svc.predict_game(features)
+        return features
 
-        blended = float(np.clip(
-            NN_WEIGHT * nn_prob + XGB_WEIGHT * xgb_prob + LR_WEIGHT * lr_prob,
-            PROB_CLIP_MIN, PROB_CLIP_MAX,
-        ))
+    def _batch_predict_components(self, X: np.ndarray):
+        """Run the ensemble on a feature batch, returning each model's probability too.
 
-        return {
-            "home_team": home_team,
-            "away_team": away_team,
-            "home_win_prob": round(blended, 4),
-            "away_win_prob": round(1.0 - blended, 4),
-            "nn_home_prob":  round(float(nn_prob),  4),
-            "xgb_home_prob": round(float(xgb_prob), 4),
-            "lr_home_prob":  round(float(lr_prob),  4),
-        }
+        Args:
+            X: Raw (unscaled) feature matrix of shape (N, n_features).
+
+        Returns:
+            (nn_p, xgb_p, lr_p, blended) each of shape (N,). blended is clipped to
+            [PROB_CLIP_MIN, PROB_CLIP_MAX]; the individual model arrays are not.
+        """
+        X_f = X.astype(np.float32)
+        nn_p  = self.svc.model.predict(self.svc.scaler.transform(X_f), verbose=0).flatten()
+        xgb_p = self.xgb_svc.model.predict_proba(self.xgb_svc.scaler.transform(X_f))[:, 1]
+        lr_p  = self.lr_svc.model.predict_proba(self.lr_svc.scaler.transform(X_f))[:, 1]
+        blended = NN_WEIGHT * nn_p + XGB_WEIGHT * xgb_p + LR_WEIGHT * lr_p
+        blended = np.clip(blended, PROB_CLIP_MIN, PROB_CLIP_MAX).astype(np.float64)
+        return nn_p, xgb_p, lr_p, blended
 
     def _batch_predict(self, X: np.ndarray) -> np.ndarray:
         """Run the NN+XGB+LR ensemble on a feature batch.
@@ -451,12 +491,8 @@ class NNProjectionEngine:
         Returns:
             Blended win probabilities of shape (N,), clipped to [PROB_CLIP_MIN, PROB_CLIP_MAX].
         """
-        X_f = X.astype(np.float32)
-        nn_p  = self.svc.model.predict(self.svc.scaler.transform(X_f), verbose=0).flatten()
-        xgb_p = self.xgb_svc.model.predict_proba(self.xgb_svc.scaler.transform(X_f))[:, 1]
-        lr_p  = self.lr_svc.model.predict_proba(self.lr_svc.scaler.transform(X_f))[:, 1]
-        blended = NN_WEIGHT * nn_p + XGB_WEIGHT * xgb_p + LR_WEIGHT * lr_p
-        return np.clip(blended, PROB_CLIP_MIN, PROB_CLIP_MAX).astype(np.float64)
+        _, _, _, blended = self._batch_predict_components(X)
+        return blended
 
     def _vectorized_elo_update(
         self,
@@ -739,22 +775,32 @@ class NNProjectionEngine:
     ) -> dict:
         """Simulate cumulative wins for a player's portfolio of teams."""
         reg = schedule_df[schedule_df["game_type"] == "REG"] if "game_type" in schedule_df.columns else schedule_df
-        
-        game_probs = []
-        for _, game in reg.iterrows():
+
+        # Games with a known result are deterministic; only unplayed games need the
+        # model, and those are batched into one call -- this method runs once per
+        # player, so per-row model calls here multiply across the whole draft pool.
+        rows = list(reg.iterrows())
+        game_probs: list = [None] * len(rows)
+        pending_idx, pending_pairs = [], []
+
+        for i, (_, game) in enumerate(rows):
             ht = game["home_team"]
             at = game["away_team"]
-            
+
             # If game is already played, probability is 1.0 or 0.0 based on result.
             # (Assuming missing 'result' column means unplayed for Monte Carlo)
             res = game.get("result", np.nan)
             if pd.notna(res) and res != UNDRAFTED_SENTINEL:
-                prob = 1.0 if res > 0 else 0.0
+                game_probs[i] = (ht, at, 1.0 if res > 0 else 0.0)
             else:
-                prob_dict = self.game_win_probability(ht, at)
-                prob = prob_dict["home_win_prob"]
-                
-            game_probs.append((ht, at, prob))
+                pending_idx.append(i)
+                pending_pairs.append((ht, at))
+
+        if pending_pairs:
+            predictions = self.game_win_probabilities_batch(pending_pairs)
+            for pos, i in enumerate(pending_idx):
+                ht, at = pending_pairs[pos]
+                game_probs[i] = (ht, at, predictions[pos]["home_win_prob"])
 
         all_teams = sorted(list(set([g[0] for g in game_probs] + [g[1] for g in game_probs])))
         team_idx, win_matrix = self._run_monte_carlo(game_probs, all_teams, n_sims)
