@@ -146,14 +146,14 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
         wins = proj.get("wins")
         if proj.get("source_type") == "model":
             preseason_predictions[team] = {
-                "projected_wins": wins,
+                "projected_wins": detail.get("projected_wins", wins),
                 "mean_wins": detail.get("mean_wins", wins),
                 "std_dev": detail.get("std_dev", 0),
                 "sources": detail.get("sources", {}),
             }
         else:
             preseason_predictions[team] = {
-                "projected_wins": wins,
+                "projected_wins": detail.get("projected_wins", wins),
                 "mean_wins": detail.get("consensus_mean", wins),
                 "std_dev": detail.get("consensus_std", 0),
                 "sources": detail.get("sources", {}),

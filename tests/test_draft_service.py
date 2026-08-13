@@ -103,6 +103,36 @@ class TestLoadDraftStateSingleton:
         assert state is not cached  # deepcopy, not the same object
 
 
+# ── Draft-room payload must preserve true projected_wins, not mean_wins ──────
+
+class TestPreseasonPredictionsShape:
+
+    @patch("services.draft_service.get_season_projection")
+    def test_preseason_predictions_preserves_true_projected_wins(self, mock_get_season_projection):
+        """ui_renderer.js:195 renders `${pred.projected_wins}W` straight from this
+        payload. The resolver's "wins" field prefers the unrounded mean_wins (e.g.
+        6.7), but the payload must still surface the original rounded projected_wins
+        (e.g. 7.0) that `detail` carries -- substituting mean_wins here would silently
+        change what the live 2026 draft room displays.
+        """
+        mock_get_season_projection.return_value = {
+            "ARI": {
+                "wins": 6.7,
+                "source_type": "model",
+                "detail": {
+                    "projected_wins": 7.0,
+                    "mean_wins": 6.7,
+                    "std_dev": 2.6,
+                    "sources": {"model": "nn_xgb_lr_ensemble"},
+                },
+            }
+        }
+
+        state = load_draft_state(set(), year=2023)
+
+        assert state["preseason_predictions"]["ARI"]["projected_wins"] == 7.0
+
+
 class TestSavePickTimeTaken:
 
     def test_cold_cache_produces_none_time_taken(self):
