@@ -501,3 +501,12 @@ class TestPredictionsGames:
         assert len(games) == 1
         assert games[0]["actual_winner"] is None
         assert games[0]["is_correct"] is None
+
+
+def test_scrape_predictions_endpoint_removed(admin_token):
+    """The ESPN FPI endpoint it called returns 404; the button reported false success."""
+    resp = client.post(
+        "/api/admin/scrape_predictions",
+        headers={"Authorization": admin_token},
+    )
+    assert resp.status_code == 404

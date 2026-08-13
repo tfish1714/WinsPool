@@ -101,12 +101,6 @@ export const ApiService = {
             body: JSON.stringify({ playerId, targetPlayerId, tempPassword })
         });
     },
-    async scrapePredictions(playerId) {
-        return fetchWithTimeout(`${API_BASE}/admin/scrape_predictions`, {
-            method: 'POST',
-            body: JSON.stringify({ playerId })
-        });
-    },
     async previewRecapPrompt(playerId, year, week) {
         return fetchWithTimeout(`${API_BASE}/admin/recap/preview_prompt`, {
             method: 'POST',

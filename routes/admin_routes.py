@@ -262,19 +262,6 @@ async def reset_draft(body: SeasonRequest, _: dict = Depends(require_admin)):
         return server_error()
 
 
-@router.post("/admin/scrape_predictions")
-async def scrape_predictions(_: dict = Depends(require_admin)):
-    """Execute the predictions aggregator and push results to the database."""
-    try:
-        from services.aggregate_scraper import aggregate_predictions_pipeline
-        season = get_active_season()
-        await aggregate_predictions_pipeline(season)
-        return JSONResponse(content={"message": "Predictions successfully scraped and injected into Firestore!"})
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
-
-
 @router.post("/admin/recap/preview_prompt")
 async def preview_recap_prompt(body: RecapWeekRequest, _: dict = Depends(require_admin)):
     """Admin: Generate the data prompt for an AI weekly recap."""

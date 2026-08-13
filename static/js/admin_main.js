@@ -210,7 +210,6 @@ class AdminApp {
         document.getElementById('delete-season-btn')?.addEventListener('click', () => this.deleteSeason());
         document.getElementById('preview-btn')?.addEventListener('click', () => this.previewDraft());
         document.getElementById('create-player-btn')?.addEventListener('click', () => this.createPlayer());
-        document.getElementById('scrape-predictions-btn')?.addEventListener('click', () => this.scrapePredictions());
 
         // Recap Handlers
         document.getElementById('draft-recap-preview-btn')?.addEventListener('click', () => this.previewDraftRecapPrompt());
@@ -447,16 +446,6 @@ class AdminApp {
             this.fetchInitialData();
         } catch (e) {
             alert(`Creation failed: ${e.message}`);
-        }
-    }
-
-    async scrapePredictions() {
-        if (!confirm('Run Preseason Predictor Scraper?')) return;
-        try {
-            const data = await ApiService.scrapePredictions(this.playerId);
-            alert(data.message);
-        } catch (e) {
-            alert(`Scraper failed: ${e.message}`);
         }
     }
 
