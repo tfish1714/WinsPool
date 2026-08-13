@@ -11,6 +11,9 @@
     "athletic":     { "name": "The Athletic",        "type": "analyst" },
     "pff":          { "name": "PFF",                 "type": "analyst" },
     "usa_today":    { "name": "USA Today",           "type": "analyst" },
+    "usa_today_nate_davis": { "name": "USA Today (Nate Davis)", "type": "analyst" },
+    "usa_today_ai": { "name": "USA Today (AI)",      "type": "model"   },
+    "neil_paine":   { "name": "Neil Paine",          "type": "analyst" },
     "clay":         { "name": "Mike Clay",           "type": "analyst" },
     "vegas_ou":     { "name": "Vegas O/U",           "type": "market"  }
   }
