@@ -1,6 +1,7 @@
 """Tests for consensus derived statistics and comparison math."""
 import math
 
+import numpy as np
 import pytest
 
 from services import consensus_service as cs
@@ -119,6 +120,10 @@ def test_outlier_z_scales_by_analyst_disagreement():
     z_tight = cs.build_comparison(_model(BUF=11.0), tight)["teams"][0]["outlier_z"]
     z_split = cs.build_comparison(_model(BUF=11.0), split)["teams"][0]["outlier_z"]
     assert z_tight > z_split
+    # Exact value, pinned to standard deviation (not variance) so a
+    # transcription slip in the divisor would fail here even though the
+    # ordering assertion above would still pass.
+    assert z_tight == pytest.approx((11 - 9) / np.std([8.8, 9.0, 9.2, 9.0]))
 
 
 def test_team_missing_from_consensus_is_excluded_from_summary():
