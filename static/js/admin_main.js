@@ -47,6 +47,9 @@ class AdminApp {
                 if (target === 'members-section') {
                     this.initMembersTab();
                 }
+                if (target === 'consensus-section') {
+                    this.initConsensusTab();
+                }
             };
         });
     }
@@ -536,6 +539,92 @@ class AdminApp {
                 btn.textContent = 'Step 3: Save & Broadcast to Players';
             }
         }
+    }
+
+    /* ------------------------------------------------------------------
+       Consensus Tab
+       ------------------------------------------------------------------ */
+    async initConsensusTab() {
+        const sel = document.getElementById('consensus-season');
+        if (sel && !sel.options.length) {
+            const now = new Date().getFullYear();
+            for (let y = now; y >= 2017; y--) {
+                const opt = document.createElement('option');
+                opt.value = y;
+                opt.textContent = y;
+                sel.appendChild(opt);
+            }
+            sel.onchange = () => this.loadConsensus(sel.value);
+        }
+        await this.loadConsensus(sel ? sel.value : new Date().getFullYear());
+    }
+
+    async loadConsensus(season) {
+        const wrap = document.getElementById('consensus-table-wrap');
+        const summaryEl = document.getElementById('consensus-summary');
+        const sourcesEl = document.getElementById('consensus-sources');
+        wrap.innerHTML = '<p style="color: var(--ink-3);">Loading…</p>';
+        sourcesEl.innerHTML = '';
+
+        let data;
+        try {
+            data = await ApiService.getConsensus(season);
+        } catch (e) {
+            wrap.innerHTML = `<p style="color: var(--neg);">Failed to load: ${e.message}</p>`;
+            return;
+        }
+
+        if (!data.available) {
+            summaryEl.innerHTML = '';
+            wrap.innerHTML = `<p style="color: var(--ink-3);">
+                No consensus seeded for ${season}. Fill <code>data/consensus_${season}.csv</code>
+                and run <code>python scripts/seed_consensus.py --season ${season} --firestore</code>.
+            </p>`;
+            return;
+        }
+
+        const s = data.summary;
+        const f = (v, d = 2) => (v === null || v === undefined) ? '—' : Number(v).toFixed(d);
+        summaryEl.innerHTML = `
+            <div style="display: flex; gap: 1.5rem; flex-wrap: wrap;">
+                <div><strong>${s.n_compared}</strong> teams compared</div>
+                <div>MAE vs consensus <strong>${f(s.mae)}</strong></div>
+                <div>Bias <strong>${f(s.bias)}</strong></div>
+                <div>Rank corr <strong>${f(s.spearman)}</strong></div>
+                <div><strong>${s.n_outside_range}</strong> outside analyst range</div>
+            </div>`;
+
+        if (data.source_scores.length) {
+            sourcesEl.innerHTML = `
+                <h3 style="margin-bottom: 0.5rem;">Accuracy vs actual wins</h3>
+                <table class="admin-table"><thead><tr>
+                    <th>Source</th><th>MAE</th><th>r</th><th>n</th>
+                </tr></thead><tbody>` +
+                data.source_scores.map(r => `<tr>
+                    <td>${r.name}</td><td>${f(r.mae)}</td><td>${f(r.r)}</td><td>${r.n}</td>
+                </tr>`).join('') + '</tbody></table>';
+        }
+
+        const hasActuals = s.has_actuals;
+        wrap.innerHTML = `
+            <table class="admin-table"><thead><tr>
+                <th>Team</th><th>Model</th><th>Consensus</th><th>Range</th>
+                <th>Δ</th><th>Outlier z</th><th>Rank Δ</th><th>n</th>
+                ${hasActuals ? '<th>Actual</th><th>Model err</th><th>Cons err</th>' : ''}
+            </tr></thead><tbody>` +
+            data.teams.map(t => `<tr>
+                <td><strong>${t.team}</strong></td>
+                <td>${f(t.model_wins, 1)}</td>
+                <td>${f(t.consensus_median, 1)}</td>
+                <td>${t.consensus_min === null ? '—' : `${f(t.consensus_min, 1)}–${f(t.consensus_max, 1)}`}</td>
+                <td class="${t.delta > 0 ? 'pos' : t.delta < 0 ? 'neg' : ''}">${f(t.delta, 1)}</td>
+                <td>${f(t.outlier_z)}</td>
+                <td>${t.rank_delta === null ? '—' : t.rank_delta}</td>
+                <td>${t.n_sources}</td>
+                ${hasActuals ? `<td>${t.actual_wins === null ? '—' : t.actual_wins}</td>
+                                <td>${f(t.model_error, 1)}</td>
+                                <td>${f(t.consensus_error, 1)}</td>` : ''}
+            </tr>`).join('') + '</tbody></table>';
     }
 }
 

@@ -510,3 +510,41 @@ def test_scrape_predictions_endpoint_removed(admin_token):
         headers={"Authorization": admin_token},
     )
     assert resp.status_code == 404
+
+
+def test_consensus_endpoint_requires_auth():
+    resp = client.get("/api/admin/consensus/2026")
+    assert resp.status_code == 401
+
+
+def test_consensus_endpoint_empty_state(admin_token, monkeypatch):
+    import routes.admin_routes as ar
+    monkeypatch.setattr(ar, "get_consensus_projections", lambda season: {})
+    monkeypatch.setattr(ar, "get_preseason_predictions", lambda season: {})
+
+    resp = client.get(
+        "/api/admin/consensus/2026",
+        headers={"Authorization": admin_token},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["available"] is False
+
+
+def test_consensus_endpoint_populated(admin_token, monkeypatch):
+    import routes.admin_routes as ar
+    from services.consensus_service import compute_derived
+
+    srcs = {"br": 10.0, "vegas_ou": 11.0}
+    monkeypatch.setattr(ar, "get_consensus_projections",
+                        lambda season: {"BUF": {"sources": srcs, **compute_derived(srcs)}})
+    monkeypatch.setattr(ar, "get_preseason_predictions",
+                        lambda season: {"BUF": {"mean_wins": 12.0}})
+
+    resp = client.get(
+        "/api/admin/consensus/2026",
+        headers={"Authorization": admin_token},
+    )
+    body = resp.json()
+    assert body["available"] is True
+    assert body["teams"][0]["team"] == "BUF"
+    assert body["summary"]["n_compared"] == 1

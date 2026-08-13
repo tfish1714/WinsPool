@@ -19,7 +19,10 @@ from routes.models import (
     RecapYearRequest, GenerateRecapRequest, SaveBroadcastRecapRequest,
 )
 from services.cache_service import get_game_predictions, get_prediction_features
-from services.data_service import load_data, get_active_season, get_preseason_predictions
+from services.data_service import (
+    load_data, get_active_season, get_preseason_predictions,
+    get_consensus_projections,
+)
 from services.response_helpers import server_error
 from services.db_service import (
     add_draft_order, add_draft_rule, add_player, delete_draft_results_for_season,
@@ -641,6 +644,37 @@ async def get_forecast(_: dict = Depends(require_admin)):
         })
     except Exception:
         logger.exception("forecast: unhandled error")
+        return server_error()
+
+
+@router.get("/admin/consensus/{season}")
+async def get_consensus_comparison(season: int, _: dict = Depends(require_admin)):
+    """Compare model projections against analyst consensus for a season.
+
+    Scores both against actual wins when the season is complete; otherwise
+    reports agreement only.
+    """
+    try:
+        from services.consensus_service import build_comparison
+
+        consensus = get_consensus_projections(season)
+        model = {t: v for t, v in get_preseason_predictions(season).items()}
+
+        actuals = None
+        standings_df = load_data().standings
+        if not standings_df.empty and "season" in standings_df.columns:
+            season_rows = standings_df[standings_df["season"].astype(int) == season]
+            if not season_rows.empty:
+                actuals = {
+                    str(r["team"]): int(r["wins"])
+                    for _, r in season_rows.iterrows()
+                }
+
+        return JSONResponse(content=sanitize_state(
+            build_comparison(model, consensus, actuals)
+        ))
+    except Exception:
+        logger.exception("Unhandled error building consensus comparison")
         return server_error()
 
 

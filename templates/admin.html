@@ -106,6 +106,7 @@
         <button class="admin-tab-btn tab-btn" data-tab="recap-section">AI Recaps</button>
         <button class="admin-tab-btn tab-btn" data-tab="elo-section">Elo Ratings</button>
         <button class="admin-tab-btn tab-btn" data-tab="accuracy-section">ML Accuracy</button>
+        <button class="admin-tab-btn tab-btn" data-tab="consensus-section">Consensus</button>
     </div>
 
     <!-- Season Management Card -->
@@ -398,6 +399,24 @@
             <h4 id="acc-week-title" style="color: var(--accent-gold); margin: 0 0 0.75rem;"></h4>
             <div id="acc-week-table" style="overflow-x: auto;"></div>
         </div>
+    </div>
+
+    <div id="consensus-section" class="tab-content card-glass hidden" style="height: auto;">
+        <h2>Model vs Consensus</h2>
+        <p>How the WinsPool projection compares with published analyst win totals.
+           Sorted by outlier score — how far the model sits from the analysts,
+           relative to how much they disagree with each other.</p>
+
+        <div style="display: flex; gap: 1rem; align-items: flex-end; margin-top: 1rem;">
+            <div style="flex: 0 0 160px;">
+                <label style="display: block; font-size: 0.8rem; color: var(--ink-2); margin-bottom: 4px;">Season</label>
+                <select id="consensus-season" class="admin-input"></select>
+            </div>
+        </div>
+
+        <div id="consensus-summary" style="margin-top: 1.25rem;"></div>
+        <div id="consensus-sources" style="margin-top: 1.25rem;"></div>
+        <div id="consensus-table-wrap" style="margin-top: 1.25rem; overflow-x: auto;"></div>
     </div>
 
     <p id="admin-message" style="margin-top: 1rem; text-align: center; font-weight: 600;"></p>

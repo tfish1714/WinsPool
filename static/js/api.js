@@ -143,4 +143,7 @@ export const ApiService = {
     async fetchPredictionsGames(season, week) {
         return fetchWithTimeout(`${API_BASE}/admin/predictions/games?season=${season}&week=${week}`);
     },
+    async getConsensus(season) {
+        return fetchWithTimeout(`${API_BASE}/admin/consensus/${season}`);
+    },
 };

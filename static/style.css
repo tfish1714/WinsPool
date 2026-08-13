@@ -212,6 +212,15 @@
     color: var(--neg) !important;
 }
 
+/* Generic dense admin data table (Consensus tab, etc.) */
+.admin-table {
+    font-size: 0.9rem;
+}
+
+.admin-table th {
+    white-space: nowrap;
+}
+
 /* ── Leader card (rank #1 hero, above the standings table) ─── */
 .wp-leader {
     background: linear-gradient(180deg, rgba(201,162,74,0.06), rgba(201,162,74,0.02));

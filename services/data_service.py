@@ -370,8 +370,14 @@ def get_preseason_predictions(season: int) -> Dict[str, dict]:
     # Return a map of team -> {projected_wins, std_dev, sources}
     res = {}
     for _, row in preds_df.iterrows():
+        # row.get("mean_wins", ...) only falls back when the key is absent, not
+        # when the column exists but is NaN for this row (e.g. a season mixed
+        # into a DataFrame with other seasons that do populate mean_wins) --
+        # so the NaN case must be checked explicitly with pd.notna.
+        mean_wins = row.get("mean_wins")
         res[row["team"]] = {
             "projected_wins": float(row.get("projected_wins", 0)),
+            "mean_wins": float(mean_wins) if pd.notna(mean_wins) else float(row.get("projected_wins", 0)),
             "std_dev": float(row.get("std_dev", 0)),
             "sources": row.get("sources", {})
         }
