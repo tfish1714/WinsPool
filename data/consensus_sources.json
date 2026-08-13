@@ -1,0 +1,17 @@
+{
+  "sources": {
+    "br":           { "name": "Bleacher Report",     "type": "analyst" },
+    "cbs":          { "name": "CBS Sports",          "type": "analyst" },
+    "espn":         { "name": "ESPN",                "type": "analyst" },
+    "fpi":          { "name": "ESPN FPI",            "type": "model"   },
+    "si":           { "name": "Sports Illustrated",  "type": "analyst" },
+    "nfl":          { "name": "NFL.com",             "type": "analyst" },
+    "nfl_bhanpuri": { "name": "NFL.com (Bhanpuri)",  "type": "analyst" },
+    "nfl_rank":     { "name": "NFL.com (Adam Rank)", "type": "analyst" },
+    "athletic":     { "name": "The Athletic",        "type": "analyst" },
+    "pff":          { "name": "PFF",                 "type": "analyst" },
+    "usa_today":    { "name": "USA Today",           "type": "analyst" },
+    "clay":         { "name": "Mike Clay",           "type": "analyst" },
+    "vegas_ou":     { "name": "Vegas O/U",           "type": "market"  }
+  }
+}
