@@ -56,9 +56,9 @@ REQUIRED_ASSETS = [
 
 STEPS = [
     {"name": "nflverse Raw Data Sync", "script": SCRIPTS_DIR / "sync_nflverse_data.py",
-     "args": [], "required": False},
+     "args": ["--season", "{season}"], "required": False},
     {"name": "Elo Recompute", "script": SCRIPTS_DIR / "compute_elo.py",
-     "args": [], "required": True},
+     "args": ["--max-season", "{season}"], "required": True},
     {"name": "Season Projection", "script": SCRIPTS_DIR / "predict_season.py",
      "args": ["--season", "{season}"], "required": True},
     {"name": "Game Prediction Backfill", "script": SCRIPTS_DIR / "backfill_schedule_predictions.py",
@@ -83,7 +83,9 @@ def _fetch_release(tag: str) -> dict:
 def check_asset_freshness(tag: str, filename: str, local_path: pathlib.Path, fetch=None) -> dict:
     """Compare one nflverse asset's remote timestamp against the local file.
 
-    Never raises: a GitHub outage must not block a refresh.
+    Never raises: neither a GitHub outage nor a malformed-but-successful response
+    (a missing 'updated_at', an unparseable timestamp, ...) may block a refresh --
+    both degrade to status "unknown".
     """
     fetch = fetch or _fetch_release
     out = {
@@ -102,16 +104,22 @@ def check_asset_freshness(tag: str, filename: str, local_path: pathlib.Path, fet
         log.warning("  %s: releases API unreachable (%s)", tag, e)
         return out
 
-    asset = next((a for a in release.get("assets", []) if a["name"] == filename), None)
-    if asset is None:
-        out["status"] = "absent"
+    try:
+        asset = next((a for a in release.get("assets", []) if a.get("name") == filename), None)
+        if asset is None:
+            out["status"] = "absent"
+            return out
+
+        updated_at = asset["updated_at"]
+        remote = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+    except Exception as e:
+        log.warning("  %s: malformed release metadata for %s (%s)", tag, filename, e)
         return out
 
-    out["remote_updated_at"] = asset["updated_at"]
+    out["remote_updated_at"] = updated_at
     if out["local_mtime"] is None:
         out["status"] = "stale"
     else:
-        remote = datetime.fromisoformat(asset["updated_at"].replace("Z", "+00:00"))
         local = datetime.fromisoformat(out["local_mtime"])
         out["status"] = "stale" if remote > local else "current"
     return out
@@ -223,6 +231,36 @@ def run_step(step: dict, season: int) -> bool:
     return True
 
 
+def run_all_steps(season: int, skip_sync: bool) -> dict:
+    """Run every STEPS entry in order, honoring --skip-sync.
+
+    Returns {step_name: success_bool} for steps that actually ran. Aborts the
+    process (sys.exit(1)) if a required step fails.
+    """
+    results = {}
+    for step in STEPS:
+        if skip_sync and step["name"] == "nflverse Raw Data Sync":
+            log.info("[%s] Skipped (--skip-sync)", step["name"])
+            continue
+        ok = run_step(step, season)
+        results[step["name"]] = ok
+        if not ok and step["required"]:
+            log.error("Required step '%s' failed. Aborting.", step["name"])
+            sys.exit(1)
+    return results
+
+
+def diff_is_trustworthy(step_results: dict) -> bool:
+    """False iff 'Local Mirror Refresh' ran and failed.
+
+    That step is the only one that updates the .local_db pkl snapshot_projections()
+    reads -- the other steps write to Firestore, not the pkl. If it failed, the
+    "after" snapshot silently re-reads the pre-run file and the diff looks like
+    zero movement even though the refresh may have changed everything.
+    """
+    return step_results.get("Local Mirror Refresh", True) is not False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--season", type=int, required=True)
@@ -243,13 +281,7 @@ def main():
     before = snapshot_projections(args.season)
     log.info("Snapshotted %d teams before refresh.", len(before))
 
-    for step in STEPS:
-        if args.skip_sync and step["name"] == "nflverse Raw Data Sync":
-            log.info("[%s] Skipped (--skip-sync)", step["name"])
-            continue
-        if not run_step(step, args.season) and step["required"]:
-            log.error("Required step '%s' failed. Aborting.", step["name"])
-            sys.exit(1)
+    step_results = run_all_steps(args.season, args.skip_sync)
 
     after = snapshot_projections(args.season)
     rows = diff_projections(before, after)
@@ -265,7 +297,11 @@ def main():
         log.info("%-6s %8s %8s %8s", r["team"], b, a, c)
     log.info("=" * 60)
 
-    if not moved:
+    if not diff_is_trustworthy(step_results):
+        log.warning("Local Mirror Refresh did not complete successfully -- the diff above "
+                    "re-reads the pre-run snapshot and cannot be trusted. Check that step's "
+                    "log output, not the freshness preflight, before concluding nothing moved.")
+    elif not moved:
         log.warning("No team moved. Check the preflight above -- if the depth-chart "
                     "snapshot is stale, the roster signal genuinely has not changed.")
 
