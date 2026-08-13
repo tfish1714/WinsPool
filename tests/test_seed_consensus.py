@@ -63,6 +63,16 @@ def test_blank_cells_excluded_from_derived_stats():
     assert buf["sources"] == {"vegas_ou": 8.5}
 
 
+def test_both_validation_phases_report_together():
+    """An unknown column AND an out-of-range value must both surface from one call."""
+    df = _full_frame(BUF={"vegas_ou": 21.0})
+    df["mystery_pundit"] = 9.0
+    rows, errors = validate_and_build(df, 2026)
+    assert rows == []
+    assert any("mystery_pundit" in e for e in errors)
+    assert any("BUF" in e and "21" in e for e in errors)
+
+
 def test_team_abbreviations_are_normalized():
     df = _full_frame()
     df.loc[df["team"] == "LA", "team"] = "LAR"

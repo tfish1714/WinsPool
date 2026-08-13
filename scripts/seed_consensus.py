@@ -44,6 +44,11 @@ MIN_WINS, MAX_WINS = 0.0, 17.0
 def validate_and_build(df: pd.DataFrame, season: int):
     """Validate the CSV frame and build consensus rows.
 
+    Both validation phases (structural: columns/teams, and per-cell: numeric
+    ranges/blanks) always run and their errors are unioned into a single
+    list, so a user sees every problem in one pass rather than fixing them
+    one at a time across repeated runs.
+
     Returns (rows, errors). A non-empty errors list means abort -- a partially
     seeded season is worse than an unseeded one.
     """
@@ -59,6 +64,9 @@ def validate_and_build(df: pd.DataFrame, season: int):
             f"unknown source column(s) {sorted(unknown_cols)} -- "
             f"add them to data/consensus_sources.json first"
         )
+    # Skip unknown columns in the per-cell phase below -- their values are
+    # meaningless until the column is registered in consensus_sources.json.
+    known_source_cols = [c for c in source_cols if c not in unknown_cols]
 
     df = df.copy()
     df["team"] = df["team"].apply(lambda t: normalize_team_abbr(str(t).strip()))
@@ -71,15 +79,12 @@ def validate_and_build(df: pd.DataFrame, season: int):
     if unknown_teams:
         errors.append(f"unknown team(s): {unknown_teams}")
 
-    if errors:
-        return [], errors
-
     today = date.today().isoformat()
     rows = []
     for _, row in df.iterrows():
         team = row["team"]
         sources = {}
-        for col in source_cols:
+        for col in known_source_cols:
             val = row.get(col)
             if pd.isna(val):
                 continue
