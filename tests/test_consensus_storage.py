@@ -80,3 +80,36 @@ def test_set_consensus_projections_no_db_returns_zero(monkeypatch):
 def test_refresh_local_pkls_registers_consensus_collection():
     from scripts.refresh_local_pkls import COLLECTIONS
     assert ("consensus_projections", "season") in COLLECTIONS
+
+
+def test_get_preseason_predictions_mean_wins_nan_falls_back_to_projected_wins(monkeypatch):
+    """mean_wins can be a present-but-NaN column, not merely an absent key.
+
+    This mirrors the real data shape: once any season's rows populate
+    mean_wins (e.g. 2026 model rows), pandas gives every other season's rows
+    that same column back as NaN rather than omitting it -- so a plain
+    `row.get("mean_wins", default)` never falls back, because the key exists.
+    Regression test for the IntCastingNaNError this caused in
+    consensus_service.build_comparison's ranking step.
+    """
+    df = pd.DataFrame([
+        {"season": 2025, "team": "BUF", "projected_wins": 11.5, "mean_wins": float("nan"),
+         "std_dev": 1.0, "sources": {}},
+        {"season": 2026, "team": "BUF", "projected_wins": 10.0, "mean_wins": 10.25,
+         "std_dev": 1.0, "sources": {}},
+    ])
+
+    def fake_get_collection_df(collection, filters=None, **kwargs):
+        assert collection == "preseason_predictions"
+        season = next((f[2] for f in (filters or []) if f[0] == "season"), None)
+        return df[df["season"] == season] if season is not None else df
+
+    monkeypatch.setattr(data_service, "get_collection_df", fake_get_collection_df)
+
+    nan_season = data_service.get_preseason_predictions(2025)
+    assert nan_season["BUF"]["mean_wins"] == 11.5  # falls back to projected_wins
+    assert isinstance(nan_season["BUF"]["mean_wins"], float)
+    assert not pd.isna(nan_season["BUF"]["mean_wins"])
+
+    populated_season = data_service.get_preseason_predictions(2026)
+    assert populated_season["BUF"]["mean_wins"] == 10.25  # real value, not the fallback
