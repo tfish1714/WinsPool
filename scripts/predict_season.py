@@ -114,6 +114,33 @@ def _init_firebase():
     return firestore.client()
 
 
+def _model_version_string() -> str:
+    """Concrete ensemble versions, e.g. 'nn_v14+xgb_v8+lr_v6'.
+
+    Replaces the old sources={'model': ...} marker, which gave the field two
+    different types depending on the season.
+    """
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).parent.parent / "models"
+    parts = []
+    for fname, prefix, key in (
+        ("model_registry.json", "nn", "latest"),
+        ("xgb_registry.json", "xgb", "latest"),
+        ("lr_registry.json", "lr", "latest"),
+    ):
+        try:
+            with open(root / fname) as f:
+                reg = json.load(f)
+            ver = reg.get(key)
+            if ver:
+                parts.append(f"{prefix}_{ver}")
+        except Exception:
+            continue
+    return "+".join(parts) if parts else "unknown"
+
+
 def _upload_predictions(season: int, projections: list):
     """Write projections to preseason_predictions collection (upsert by season+team)."""
     db = _init_firebase()
@@ -134,7 +161,7 @@ def _upload_predictions(season: int, projections: list):
             "p25": proj["p25"],
             "p75": proj["p75"],
             "ceiling": proj["ceiling"],
-            "sources": {"model": "nn_xgb_lr_ensemble"},
+            "model_version": _model_version_string(),
             "generated_at": time.time(),
         })
         count += 1
