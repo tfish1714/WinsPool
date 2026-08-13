@@ -402,6 +402,39 @@ def get_consensus_projections(season: int) -> Dict[str, dict]:
         }
     return res
 
+def get_season_projection(season: int) -> Dict[str, dict]:
+    """Resolve the best available win projection for a season, per team.
+
+    Model output wins when it exists; analyst consensus is the fallback. This
+    lets preseason_predictions mean "model output" and consensus_projections
+    mean "analyst consensus" without historical views losing their numbers.
+
+    Returns {team: {"wins": float, "source_type": "model"|"consensus", "detail": dict}}
+    """
+    model = get_preseason_predictions(season)
+    consensus = get_consensus_projections(season)
+
+    out = {}
+    for team in set(model) | set(consensus):
+        if team in model:
+            row = model[team]
+            wins = row.get("mean_wins")
+            if wins is None:
+                wins = row.get("projected_wins")
+            out[team] = {
+                "wins": float(wins) if wins is not None else None,
+                "source_type": "model",
+                "detail": row,
+            }
+        else:
+            row = consensus[team]
+            out[team] = {
+                "wins": row.get("consensus_median"),
+                "source_type": "consensus",
+                "detail": row,
+            }
+    return out
+
 def get_team_schedule(team: str, games_df: pd.DataFrame, season: int) -> List[str]:
     """Extracts a team's sequential 17-game schedule from the NFL Games dataframe."""
     schedule = []

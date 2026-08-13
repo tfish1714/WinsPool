@@ -3,7 +3,7 @@ import os
 import pandas as pd
 from typing import Dict, Any, List
 from services.db_service import get_collection_df, add_draft_result, update_player_cell, delete_draft_pick
-from services.data_service import get_preseason_predictions, get_team_schedule, load_data
+from services.data_service import get_season_projection, get_team_schedule, load_data
 import time
 
 logger = logging.getLogger(__name__)
@@ -133,7 +133,31 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
     available_teams = sorted(list(set(all_nfl_teams) - picked_teams))
     
     # 5. Analytics & Predictions (STATIC for Draft)
-    preseason_predictions = get_preseason_predictions(int(season))
+    # get_season_projection() resolves model output vs. analyst consensus per
+    # team; its {"wins", "source_type", "detail"} shape is adapted back to the
+    # legacy {"projected_wins", "mean_wins", "std_dev", "sources"} shape here
+    # because this dict is sent verbatim to the frontend (static/js/main.js,
+    # ui_renderer.js) and Jinja templates, which read `.projected_wins` /
+    # `.std_dev` directly — those aren't touched by this change.
+    season_projection = get_season_projection(int(season))
+    preseason_predictions = {}
+    for team, proj in season_projection.items():
+        detail = proj.get("detail") or {}
+        wins = proj.get("wins")
+        if proj.get("source_type") == "model":
+            preseason_predictions[team] = {
+                "projected_wins": wins,
+                "mean_wins": detail.get("mean_wins", wins),
+                "std_dev": detail.get("std_dev", 0),
+                "sources": detail.get("sources", {}),
+            }
+        else:
+            preseason_predictions[team] = {
+                "projected_wins": wins,
+                "mean_wins": detail.get("consensus_mean", wins),
+                "std_dev": detail.get("consensus_std", 0),
+                "sources": detail.get("sources", {}),
+            }
     team_schedules = {t: get_team_schedule(t, games_season, int(season)) for t in all_nfl_teams}
     
     # 6. Player Info Metadata
