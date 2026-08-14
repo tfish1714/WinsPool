@@ -37,13 +37,16 @@ logger = logging.getLogger(__name__)
 class NNProjectionEngine:
     """Wrapper that leverages the trained NN+XGB+LR ensemble and Monte Carlo engine for caching."""
 
-    def __init__(self):
-        self.svc = NNPredictionService()
-        self.svc.load_model()
-        self.xgb_svc = XGBPredictionService()
-        self.xgb_svc.load_model()
-        self.lr_svc = LRPredictionService()
-        self.lr_svc.load_model()
+    def __init__(self, nn_svc=None, xgb_svc=None, lr_svc=None):
+        self.svc = nn_svc if nn_svc is not None else NNPredictionService()
+        if nn_svc is None:
+            self.svc.load_model()
+        self.xgb_svc = xgb_svc if xgb_svc is not None else XGBPredictionService()
+        if xgb_svc is None:
+            self.xgb_svc.load_model()
+        self.lr_svc = lr_svc if lr_svc is not None else LRPredictionService()
+        if lr_svc is None:
+            self.lr_svc.load_model()
         self._team_profiles = pd.DataFrame()
         self._preseason_profiles: dict = {}  # {team: {off_pass_epa, off_rush_epa, ...}}
         # Legacy attributes kept as empty defaults so _precompute_static_features fallback
