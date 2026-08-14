@@ -108,7 +108,7 @@ if not use_local_env:
 
 
 def get_db():
-    if use_local_env:
+    if os.environ.get("USE_LOCAL_DATA", "False").lower() == "true":
         return None
     import firebase_admin
     if not firebase_admin._apps:
