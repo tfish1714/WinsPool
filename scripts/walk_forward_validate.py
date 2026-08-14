@@ -100,3 +100,64 @@ def _load_fold_artifacts(artifacts_dir, fold_year, load_nn=True, load_xgb=True, 
         lr_svc._is_trained = True
 
     return nn_svc, xgb_svc, lr_svc
+
+
+def _nn_permutation_importance(nn_svc, val_df):
+    """Permutation importance: shuffle one feature at a time, measure MAE
+    degradation on the fold's own held-out validation split. NN has no
+    built-in importance measure the way XGB/LR do, so this is its equivalent."""
+    import numpy as np
+    import pandas as pd
+    from sklearn.metrics import mean_absolute_error
+    from services.nn_feature_engine import FEATURE_COLUMNS
+    from services.nn_prediction_service import LABEL_COLUMN
+
+    X_val = val_df[FEATURE_COLUMNS].values.astype("float32")
+    y_val = val_df[LABEL_COLUMN].values.astype("float32")
+    X_scaled = nn_svc.scaler.transform(X_val)
+
+    baseline_pred = nn_svc.model.predict(X_scaled, verbose=0).flatten()
+    baseline_mae = mean_absolute_error(y_val, baseline_pred)
+
+    rng = np.random.default_rng(42)
+    rows = []
+    for i, feature in enumerate(FEATURE_COLUMNS):
+        X_shuffled = X_scaled.copy()
+        rng.shuffle(X_shuffled[:, i])
+        shuffled_pred = nn_svc.model.predict(X_shuffled, verbose=0).flatten()
+        shuffled_mae = mean_absolute_error(y_val, shuffled_pred)
+        rows.append({"feature": feature, "importance": shuffled_mae - baseline_mae})
+
+    result = pd.DataFrame(rows).sort_values("importance", ascending=False).reset_index(drop=True)
+    result["importance_rank"] = result.index + 1
+    return result
+
+
+def _collect_feature_importance(fold_year, nn_svc, xgb_svc, lr_svc, val_df):
+    """Combine all three models' feature importance into the report schema:
+    season, model, feature, importance_rank, importance_value."""
+    import pandas as pd
+    from services.nn_feature_engine import FEATURE_COLUMNS
+
+    rows = []
+
+    # top_n defaults to 15 and truncates -- pass the true feature count
+    # explicitly so this stays the full, untruncated list even as the
+    # feature set grows past 15.
+    xgb_imp = xgb_svc.feature_importance(top_n=len(FEATURE_COLUMNS))
+    for rank, (_, r) in enumerate(xgb_imp.iterrows(), start=1):
+        rows.append({"season": fold_year, "model": "xgb", "feature": r["feature"],
+                      "importance_rank": rank, "importance_value": float(r["importance"])})
+
+    lr_imp = lr_svc.feature_importance(top_n=len(FEATURE_COLUMNS))
+    for rank, (_, r) in enumerate(lr_imp.iterrows(), start=1):
+        rows.append({"season": fold_year, "model": "lr", "feature": r["feature"],
+                      "importance_rank": rank, "importance_value": float(r["abs_coef"])})
+
+    nn_imp = _nn_permutation_importance(nn_svc, val_df)
+    for _, r in nn_imp.iterrows():
+        rows.append({"season": fold_year, "model": "nn", "feature": r["feature"],
+                      "importance_rank": int(r["importance_rank"]),
+                      "importance_value": float(r["importance"])})
+
+    return pd.DataFrame(rows)

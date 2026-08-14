@@ -122,3 +122,48 @@ class TestNNArtifactRoundTrip:
         row = tiny_feature_table.iloc[[0]]
         features = {c: float(row[c].iloc[0]) for c in FEATURE_COLUMNS}
         assert loaded_2021.predict_game(features) == pytest.approx(svc_2021.predict_game(features), abs=1e-4)
+
+
+@pytest.mark.skipif(not TF_AVAILABLE or not SKLEARN_AVAILABLE, reason="tensorflow/sklearn not installed")
+class TestNNPermutationImportance:
+    def test_returns_one_row_per_feature_ranked(self, tiny_feature_table):
+        from services.nn_prediction_service import NNPredictionService
+        from services.nn_feature_engine import FEATURE_COLUMNS
+        from scripts.walk_forward_validate import _nn_permutation_importance
+
+        svc = NNPredictionService()
+        svc.train(tiny_feature_table)
+        _, val_df, _ = NNPredictionService._split_data(tiny_feature_table)
+
+        result = _nn_permutation_importance(svc, val_df)
+
+        assert set(result["feature"]) == set(FEATURE_COLUMNS)
+        assert len(result) == len(FEATURE_COLUMNS)
+        # Ranks are a contiguous 1..N sequence with no ties collapsed away
+        assert sorted(result["importance_rank"].tolist()) == list(range(1, len(FEATURE_COLUMNS) + 1))
+        # Sorted descending by importance
+        assert list(result["importance"]) == sorted(result["importance"], reverse=True)
+
+
+@pytest.mark.skipif(not XGB_AVAILABLE or not TF_AVAILABLE or not SKLEARN_AVAILABLE,
+                     reason="tensorflow/xgboost/sklearn not installed")
+class TestCollectFeatureImportance:
+    def test_combines_all_three_models_with_common_schema(self, tiny_feature_table, trained_lr_svc):
+        from services.nn_prediction_service import NNPredictionService
+        from services.xgb_prediction_service import XGBPredictionService
+        from scripts.walk_forward_validate import _collect_feature_importance
+
+        nn_svc = NNPredictionService()
+        nn_svc.train(tiny_feature_table)
+        xgb_svc = XGBPredictionService()
+        xgb_svc.train(tiny_feature_table)
+        _, val_df, _ = NNPredictionService._split_data(tiny_feature_table)
+
+        result = _collect_feature_importance(2021, nn_svc, xgb_svc, trained_lr_svc, val_df)
+
+        assert set(result.columns) == {"season", "model", "feature", "importance_rank", "importance_value"}
+        assert set(result["model"]) == {"nn", "xgb", "lr"}
+        assert (result["season"] == 2021).all()
+        # Every model contributes a rank-1 row (its top feature)
+        for model in ("nn", "xgb", "lr"):
+            assert 1 in result[result["model"] == model]["importance_rank"].values
