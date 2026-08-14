@@ -167,3 +167,50 @@ class TestCollectFeatureImportance:
         # Every model contributes a rank-1 row (its top feature)
         for model in ("nn", "xgb", "lr"):
             assert 1 in result[result["model"] == model]["importance_rank"].values
+
+
+class TestRunFold:
+    def test_assembles_rows_with_correct_errors(self, monkeypatch, tmp_path):
+        import scripts.walk_forward_validate as wfv
+        import pandas as pd
+
+        monkeypatch.setattr(wfv, "_get_or_train_fold_models",
+                             lambda *a, **k: ("fake_nn", "fake_xgb", "fake_lr"))
+        monkeypatch.setattr(wfv, "_project_fold_season",
+                             lambda *a, **k: {"BUF": 11.0, "KC": 9.5, "NE": 6.0})
+        monkeypatch.setattr(wfv, "_actual_wins",
+                             lambda *a, **k: {"BUF": 13.0, "KC": 11.0, "NE": 4.0})
+        monkeypatch.setattr(wfv, "_consensus_wins",
+                             lambda *a, **k: {"BUF": 12.0, "KC": 10.5})  # NE missing on purpose
+        monkeypatch.setattr(wfv, "build_master_feature_table", lambda **k: pd.DataFrame())
+        monkeypatch.setattr(wfv, "_collect_feature_importance",
+                             lambda *a, **k: pd.DataFrame([{"season": 2021, "model": "xgb",
+                                                             "feature": "elo_diff",
+                                                             "importance_rank": 1,
+                                                             "importance_value": 0.5}]))
+
+        result = wfv.run_fold(2021, tmp_path)
+        rows = {r["team"]: r for r in result["rows"]}
+
+        assert rows["BUF"]["model_abs_err"] == pytest.approx(2.0)
+        assert rows["BUF"]["consensus_abs_err"] == pytest.approx(1.0)
+        assert rows["KC"]["model_abs_err"] == pytest.approx(1.5)
+        assert rows["NE"]["consensus_wins"] is None
+        assert rows["NE"]["consensus_abs_err"] is None
+        assert rows["NE"]["model_abs_err"] == pytest.approx(2.0)
+        assert len(result["importance"]) == 1
+
+    def test_skips_teams_with_no_model_projection(self, monkeypatch, tmp_path):
+        import scripts.walk_forward_validate as wfv
+        import pandas as pd
+
+        monkeypatch.setattr(wfv, "_get_or_train_fold_models", lambda *a, **k: (None, None, None))
+        monkeypatch.setattr(wfv, "_project_fold_season", lambda *a, **k: {"BUF": 11.0})
+        monkeypatch.setattr(wfv, "_actual_wins", lambda *a, **k: {"BUF": 13.0, "KC": 11.0})
+        monkeypatch.setattr(wfv, "_consensus_wins", lambda *a, **k: {})
+        monkeypatch.setattr(wfv, "build_master_feature_table", lambda **k: pd.DataFrame())
+        monkeypatch.setattr(wfv, "_collect_feature_importance", lambda *a, **k: pd.DataFrame())
+
+        result = wfv.run_fold(2021, tmp_path)
+        teams = {r["team"] for r in result["rows"]}
+        assert teams == {"BUF"}

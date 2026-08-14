@@ -25,6 +25,9 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+from services.nn_feature_engine import build_master_feature_table, RAWDATA_DIR
+from services.nn_prediction_service import NNPredictionService
+
 MODEL_DIR = pathlib.Path(__file__).parent.parent / "models"
 ARTIFACTS_DIR = MODEL_DIR / "walkforward"
 REPORTS_DIR = pathlib.Path(__file__).parent.parent / "reports"
@@ -161,3 +164,93 @@ def _collect_feature_importance(fold_year, nn_svc, xgb_svc, lr_svc, val_df):
                       "importance_value": float(r["importance"])})
 
     return pd.DataFrame(rows)
+
+
+def _get_or_train_fold_models(fold_year, artifacts_dir, feature_table, force=False):
+    if not force and _fold_artifacts_exist(artifacts_dir, fold_year):
+        logger.info("[%d] Cached fold artifacts found, loading.", fold_year)
+        return _load_fold_artifacts(artifacts_dir, fold_year)
+
+    logger.info("[%d] Training fold models on seasons <= %d.", fold_year, fold_year - 1)
+    from services.xgb_prediction_service import XGBPredictionService
+    from services.lr_prediction_service import LRPredictionService
+
+    nn_svc = NNPredictionService()
+    nn_svc.train(feature_table)
+
+    xgb_svc = XGBPredictionService()
+    xgb_svc.train(feature_table)
+
+    lr_svc = LRPredictionService()
+    lr_svc.train(feature_table)
+
+    _save_fold_artifacts(artifacts_dir, fold_year, nn_svc, xgb_svc, lr_svc)
+    return nn_svc, xgb_svc, lr_svc
+
+
+def _project_fold_season(fold_year, nn_svc, xgb_svc, lr_svc):
+    from services.nn_projection_engine import NNProjectionEngine
+    from scripts.predict_season import _load_schedule
+
+    engine = NNProjectionEngine(nn_svc=nn_svc, xgb_svc=xgb_svc, lr_svc=lr_svc)
+    engine.initialize(fold_year)
+    schedule = _load_schedule(RAWDATA_DIR, fold_year, fold_year - 1)
+    results = engine.simulate_season(schedule, n_sims=10_000)
+    return {team: stats["mean_wins"] for team, stats in results["team_stats"].items()}
+
+
+def _actual_wins(fold_year):
+    from services.db_service import get_collection_df
+    df = get_collection_df("nfl_standings", filters=[("season", "==", fold_year)])
+    if df.empty:
+        return {}
+    return dict(zip(df["team"], df["wins"]))
+
+
+def _consensus_wins(fold_year):
+    from services.data_service import get_consensus_projections
+    consensus = get_consensus_projections(fold_year)
+    return {
+        team: v["consensus_mean"]
+        for team, v in consensus.items()
+        if v.get("consensus_mean") is not None
+    }
+
+
+def run_fold(fold_year, artifacts_dir, force=False):
+    feature_table = build_master_feature_table(min_season=2006, max_season=fold_year - 1)
+    nn_svc, xgb_svc, lr_svc = _get_or_train_fold_models(fold_year, artifacts_dir, feature_table, force)
+
+    model_wins = _project_fold_season(fold_year, nn_svc, xgb_svc, lr_svc)
+    actual = _actual_wins(fold_year)
+    consensus = _consensus_wins(fold_year)
+
+    # feature_table is empty when build_master_feature_table is monkeypatched
+    # (unit tests), so guard the split -- _split_data indexes df["season"],
+    # which raises KeyError on a columnless empty DataFrame.
+    if feature_table.empty:
+        val_df = feature_table
+    else:
+        _, val_df, _ = NNPredictionService._split_data(feature_table)
+    importance_df = _collect_feature_importance(fold_year, nn_svc, xgb_svc, lr_svc, val_df)
+
+    rows = []
+    for team, actual_w in actual.items():
+        if team not in model_wins:
+            continue
+        row = {
+            "season": fold_year,
+            "team": team,
+            "actual_wins": actual_w,
+            "model_wins": round(model_wins[team], 2),
+            "model_abs_err": round(abs(model_wins[team] - actual_w), 2),
+        }
+        if team in consensus:
+            row["consensus_wins"] = consensus[team]
+            row["consensus_abs_err"] = round(abs(consensus[team] - actual_w), 2)
+        else:
+            row["consensus_wins"] = None
+            row["consensus_abs_err"] = None
+        rows.append(row)
+
+    return {"rows": rows, "importance": importance_df}
