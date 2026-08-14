@@ -25,6 +25,8 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+import pandas as pd
+
 from services.nn_feature_engine import build_master_feature_table, RAWDATA_DIR
 from services.nn_prediction_service import NNPredictionService
 
@@ -77,7 +79,6 @@ def _load_fold_artifacts(artifacts_dir, fold_year, load_nn=True, load_xgb=True, 
     any skipped slot is None."""
     nn_svc = None
     if load_nn:
-        from services.nn_prediction_service import NNPredictionService
         nn_svc = NNPredictionService()
         nn_svc.load_model(path=str(artifacts_dir / f"nn_{fold_year}.keras"))
 
@@ -110,7 +111,6 @@ def _nn_permutation_importance(nn_svc, val_df):
     degradation on the fold's own held-out validation split. NN has no
     built-in importance measure the way XGB/LR do, so this is its equivalent."""
     import numpy as np
-    import pandas as pd
     from sklearn.metrics import mean_absolute_error
     from services.nn_feature_engine import FEATURE_COLUMNS
     from services.nn_prediction_service import LABEL_COLUMN
@@ -139,7 +139,6 @@ def _nn_permutation_importance(nn_svc, val_df):
 def _collect_feature_importance(fold_year, nn_svc, xgb_svc, lr_svc, val_df):
     """Combine all three models' feature importance into the report schema:
     season, model, feature, importance_rank, importance_value."""
-    import pandas as pd
     from services.nn_feature_engine import FEATURE_COLUMNS
 
     rows = []
@@ -189,14 +188,24 @@ def _get_or_train_fold_models(fold_year, artifacts_dir, feature_table, force=Fal
 
 
 def _project_fold_season(fold_year, nn_svc, xgb_svc, lr_svc):
+    """Run the fold's Monte Carlo season projection.
+
+    Returns (model_wins, used_preseason_profiles). NNProjectionEngine.initialize()
+    only populates self._preseason_profiles when snap-count data is missing for
+    the target season -- true for a future season (production), false for every
+    historical fold year here since that data already exists. Callers use the
+    flag to flag folds whose simulation path diverges from production.
+    """
     from services.nn_projection_engine import NNProjectionEngine
     from scripts.predict_season import _load_schedule
 
     engine = NNProjectionEngine(nn_svc=nn_svc, xgb_svc=xgb_svc, lr_svc=lr_svc)
     engine.initialize(fold_year)
+    used_preseason_profiles = bool(engine._preseason_profiles)
     schedule = _load_schedule(RAWDATA_DIR, fold_year, fold_year - 1)
     results = engine.simulate_season(schedule, n_sims=10_000)
-    return {team: stats["mean_wins"] for team, stats in results["team_stats"].items()}
+    model_wins = {team: stats["mean_wins"] for team, stats in results["team_stats"].items()}
+    return model_wins, used_preseason_profiles
 
 
 def _actual_wins(fold_year):
@@ -221,17 +230,11 @@ def run_fold(fold_year, artifacts_dir, force=False):
     feature_table = build_master_feature_table(min_season=2006, max_season=fold_year - 1)
     nn_svc, xgb_svc, lr_svc = _get_or_train_fold_models(fold_year, artifacts_dir, feature_table, force)
 
-    model_wins = _project_fold_season(fold_year, nn_svc, xgb_svc, lr_svc)
+    model_wins, used_preseason_profiles = _project_fold_season(fold_year, nn_svc, xgb_svc, lr_svc)
     actual = _actual_wins(fold_year)
     consensus = _consensus_wins(fold_year)
 
-    # feature_table is empty when build_master_feature_table is monkeypatched
-    # (unit tests), so guard the split -- _split_data indexes df["season"],
-    # which raises KeyError on a columnless empty DataFrame.
-    if feature_table.empty:
-        val_df = feature_table
-    else:
-        _, val_df, _ = NNPredictionService._split_data(feature_table)
+    _, val_df, _ = NNPredictionService._split_data(feature_table)
     importance_df = _collect_feature_importance(fold_year, nn_svc, xgb_svc, lr_svc, val_df)
 
     rows = []
@@ -244,6 +247,7 @@ def run_fold(fold_year, artifacts_dir, force=False):
             "actual_wins": actual_w,
             "model_wins": round(model_wins[team], 2),
             "model_abs_err": round(abs(model_wins[team] - actual_w), 2),
+            "used_preseason_profiles": used_preseason_profiles,
         }
         if team in consensus:
             row["consensus_wins"] = consensus[team]
@@ -276,10 +280,15 @@ def _print_summary(report_df):
     print(f"  {'ALL':<8}{report_df['model_abs_err'].mean():<12.2f}{overall_cons_mae:<15}{len(report_df):<5}")
     print("\n  Benchmark bar (2017-2025 pooled analyst consensus): 2.18")
 
+    non_preseason = (~report_df["used_preseason_profiles"]).sum()
+    total = len(report_df)
+    if non_preseason > 0:
+        print(f"\n  NOTE: {non_preseason} of {total} team-seasons did not use the preseason-profile "
+              "projection path (production behavior for a future season differs from what these "
+              "historical folds could exercise).")
+
 
 def main():
-    import pandas as pd
-
     parser = argparse.ArgumentParser(description="Walk-forward validation harness")
     parser.add_argument("--seasons", type=int, nargs=2, default=[FOLD_START_DEFAULT, FOLD_END_DEFAULT],
                          metavar=("START", "END"))
@@ -287,26 +296,40 @@ def main():
                          help="Retrain fold models even if cached artifacts exist")
     args = parser.parse_args()
 
+    # Preflight: a misconfigured environment (e.g. USE_LOCAL_DATA unset with no
+    # reachable Firestore credentials) makes every fold "succeed" with zero rows,
+    # and this would otherwise only surface after all folds finish training
+    # (hours of real model training) with a misleading "no folds completed"
+    # message. Fail fast against the first fold year instead.
+    if not _actual_wins(args.seasons[0]) or not _consensus_wins(args.seasons[0]):
+        print(f"ERROR: no nfl_standings or consensus_projections data found for season {args.seasons[0]}.")
+        print("Check USE_LOCAL_DATA / Firestore credentials before running the full fold loop.")
+        sys.exit(1)
+
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     all_rows = []
     all_importance = []
+    report_df = pd.DataFrame()
     for fold_year in range(args.seasons[0], args.seasons[1] + 1):
         print(f"\n{'=' * 60}\n  Fold {fold_year}\n{'=' * 60}")
         try:
             result = run_fold(fold_year, ARTIFACTS_DIR, force=args.force)
-        except Exception as exc:
-            logger.error("Fold %d failed: %s", fold_year, exc)
+        except Exception:
+            logger.exception("Fold %d failed", fold_year)
             continue
         all_rows.extend(result["rows"])
         all_importance.append(result["importance"])
 
-    report_df = pd.DataFrame(all_rows)
-    report_df.to_csv(REPORTS_DIR / "walk_forward_validation.csv", index=False)
+        # Write after every fold, not just at the end, so a crash or Ctrl-C
+        # partway through a multi-hour run doesn't lose progress from folds
+        # already scored.
+        report_df = pd.DataFrame(all_rows)
+        report_df.to_csv(REPORTS_DIR / "walk_forward_validation.csv", index=False)
 
-    importance_df = pd.concat(all_importance, ignore_index=True) if all_importance else pd.DataFrame()
-    importance_df.to_csv(REPORTS_DIR / "walk_forward_feature_importance.csv", index=False)
+        importance_df = pd.concat(all_importance, ignore_index=True) if all_importance else pd.DataFrame()
+        importance_df.to_csv(REPORTS_DIR / "walk_forward_feature_importance.csv", index=False)
 
     _print_summary(report_df)
 

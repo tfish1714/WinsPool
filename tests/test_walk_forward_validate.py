@@ -84,7 +84,7 @@ class TestFoldArtifactRoundTrip:
         from scripts.walk_forward_validate import _fold_artifacts_exist
         assert _fold_artifacts_exist(tmp_path, 2021) is False
 
-    def test_fold_artifacts_exist_true_after_save(self, tmp_path, tiny_feature_table, trained_lr_svc):
+    def test_fold_artifacts_exist_false_when_partially_saved(self, tmp_path, tiny_feature_table, trained_lr_svc):
         from scripts.walk_forward_validate import _save_fold_artifacts, _fold_artifacts_exist
         from services.xgb_prediction_service import XGBPredictionService
 
@@ -179,12 +179,13 @@ class TestRunFold:
         monkeypatch.setattr(wfv, "_get_or_train_fold_models",
                              lambda *a, **k: ("fake_nn", "fake_xgb", "fake_lr"))
         monkeypatch.setattr(wfv, "_project_fold_season",
-                             lambda *a, **k: {"BUF": 11.0, "KC": 9.5, "NE": 6.0})
+                             lambda *a, **k: ({"BUF": 11.0, "KC": 9.5, "NE": 6.0}, False))
         monkeypatch.setattr(wfv, "_actual_wins",
                              lambda *a, **k: {"BUF": 13.0, "KC": 11.0, "NE": 4.0})
         monkeypatch.setattr(wfv, "_consensus_wins",
                              lambda *a, **k: {"BUF": 12.0, "KC": 10.5})  # NE missing on purpose
-        monkeypatch.setattr(wfv, "build_master_feature_table", lambda **k: pd.DataFrame())
+        monkeypatch.setattr(wfv, "build_master_feature_table",
+                             lambda **k: pd.DataFrame({"season": [2020], "week": [1]}))
         monkeypatch.setattr(wfv, "_collect_feature_importance",
                              lambda *a, **k: pd.DataFrame([{"season": 2021, "model": "xgb",
                                                              "feature": "elo_diff",
@@ -200,6 +201,7 @@ class TestRunFold:
         assert rows["NE"]["consensus_wins"] is None
         assert rows["NE"]["consensus_abs_err"] is None
         assert rows["NE"]["model_abs_err"] == pytest.approx(2.0)
+        assert rows["BUF"]["used_preseason_profiles"] is False
         assert len(result["importance"]) == 1
 
     def test_skips_teams_with_no_model_projection(self, monkeypatch, tmp_path):
@@ -207,15 +209,18 @@ class TestRunFold:
         import pandas as pd
 
         monkeypatch.setattr(wfv, "_get_or_train_fold_models", lambda *a, **k: (None, None, None))
-        monkeypatch.setattr(wfv, "_project_fold_season", lambda *a, **k: {"BUF": 11.0})
+        monkeypatch.setattr(wfv, "_project_fold_season", lambda *a, **k: ({"BUF": 11.0}, True))
         monkeypatch.setattr(wfv, "_actual_wins", lambda *a, **k: {"BUF": 13.0, "KC": 11.0})
         monkeypatch.setattr(wfv, "_consensus_wins", lambda *a, **k: {})
-        monkeypatch.setattr(wfv, "build_master_feature_table", lambda **k: pd.DataFrame())
+        monkeypatch.setattr(wfv, "build_master_feature_table",
+                             lambda **k: pd.DataFrame({"season": [2020], "week": [1]}))
         monkeypatch.setattr(wfv, "_collect_feature_importance", lambda *a, **k: pd.DataFrame())
 
         result = wfv.run_fold(2021, tmp_path)
         teams = {r["team"] for r in result["rows"]}
         assert teams == {"BUF"}
+        rows = {r["team"]: r for r in result["rows"]}
+        assert rows["BUF"]["used_preseason_profiles"] is True
 
 
 class TestPrintSummary:
@@ -225,11 +230,14 @@ class TestPrintSummary:
 
         df = pd.DataFrame([
             {"season": 2021, "team": "BUF", "actual_wins": 13, "model_wins": 11,
-             "model_abs_err": 2.0, "consensus_wins": 12, "consensus_abs_err": 1.0},
+             "model_abs_err": 2.0, "consensus_wins": 12, "consensus_abs_err": 1.0,
+             "used_preseason_profiles": True},
             {"season": 2021, "team": "KC", "actual_wins": 11, "model_wins": 9.5,
-             "model_abs_err": 1.5, "consensus_wins": None, "consensus_abs_err": None},
+             "model_abs_err": 1.5, "consensus_wins": None, "consensus_abs_err": None,
+             "used_preseason_profiles": True},
             {"season": 2022, "team": "BUF", "actual_wins": 12, "model_wins": 10,
-             "model_abs_err": 2.0, "consensus_wins": 11, "consensus_abs_err": 1.0},
+             "model_abs_err": 2.0, "consensus_wins": 11, "consensus_abs_err": 1.0,
+             "used_preseason_profiles": True},
         ])
 
         _print_summary(df)
@@ -238,6 +246,7 @@ class TestPrintSummary:
         assert "2021" in out
         assert "2022" in out
         assert "ALL" in out
+        assert "NOTE" not in out  # all rows used the preseason path -- no caveat
 
     def test_handles_empty_report(self, capsys):
         import pandas as pd
@@ -246,6 +255,28 @@ class TestPrintSummary:
         _print_summary(pd.DataFrame())
         out = capsys.readouterr().out
         assert "No folds completed" in out
+
+    def test_prints_caveat_when_some_folds_skipped_preseason_path(self, capsys):
+        import pandas as pd
+        from scripts.walk_forward_validate import _print_summary
+
+        df = pd.DataFrame([
+            {"season": 2021, "team": "BUF", "actual_wins": 13, "model_wins": 11,
+             "model_abs_err": 2.0, "consensus_wins": 12, "consensus_abs_err": 1.0,
+             "used_preseason_profiles": False},
+            {"season": 2021, "team": "KC", "actual_wins": 11, "model_wins": 9.5,
+             "model_abs_err": 1.5, "consensus_wins": None, "consensus_abs_err": None,
+             "used_preseason_profiles": False},
+            {"season": 2022, "team": "BUF", "actual_wins": 12, "model_wins": 10,
+             "model_abs_err": 2.0, "consensus_wins": 11, "consensus_abs_err": 1.0,
+             "used_preseason_profiles": True},
+        ])
+
+        _print_summary(df)
+        out = capsys.readouterr().out
+
+        assert "NOTE" in out
+        assert "2 of 3" in out
 
 
 class TestMainLoop:
@@ -257,6 +288,10 @@ class TestMainLoop:
 
         monkeypatch.setattr(wfv, "ARTIFACTS_DIR", tmp_path / "walkforward")
         monkeypatch.setattr(wfv, "REPORTS_DIR", tmp_path / "reports")
+        # Preflight check runs before the fold loop -- give it something non-empty
+        # so it doesn't short-circuit before fake_run_fold gets exercised.
+        monkeypatch.setattr(wfv, "_actual_wins", lambda *a, **k: {"BUF": 12.0})
+        monkeypatch.setattr(wfv, "_consensus_wins", lambda *a, **k: {"BUF": 11.5})
 
         def fake_run_fold(fold_year, artifacts_dir, force=False):
             if fold_year == 2022:
@@ -264,7 +299,8 @@ class TestMainLoop:
             return {
                 "rows": [{"season": fold_year, "team": "BUF", "actual_wins": 12,
                           "model_wins": 11, "model_abs_err": 1.0,
-                          "consensus_wins": 11.5, "consensus_abs_err": 0.5}],
+                          "consensus_wins": 11.5, "consensus_abs_err": 0.5,
+                          "used_preseason_profiles": True}],
                 "importance": pd.DataFrame([{"season": fold_year, "model": "xgb",
                                               "feature": "elo_diff",
                                               "importance_rank": 1, "importance_value": 0.5}]),
@@ -280,3 +316,24 @@ class TestMainLoop:
 
         importance = pd.read_csv(wfv.REPORTS_DIR / "walk_forward_feature_importance.csv")
         assert set(importance["season"]) == {2021}
+
+    def test_preflight_aborts_before_fold_loop_when_no_data_found(self, monkeypatch, tmp_path):
+        """If _actual_wins/_consensus_wins both come back empty for the first fold
+        year -- e.g. USE_LOCAL_DATA misconfigured with no Firestore reachable --
+        main() must exit before doing any real fold work, not after hours of
+        training on every fold."""
+        import scripts.walk_forward_validate as wfv
+
+        monkeypatch.setattr(wfv, "ARTIFACTS_DIR", tmp_path / "walkforward")
+        monkeypatch.setattr(wfv, "REPORTS_DIR", tmp_path / "reports")
+        monkeypatch.setattr(wfv, "_actual_wins", lambda *a, **k: {})
+        monkeypatch.setattr(wfv, "_consensus_wins", lambda *a, **k: {})
+
+        def fail_if_called(*a, **k):
+            raise AssertionError("run_fold must not be called when preflight fails")
+
+        monkeypatch.setattr(wfv, "run_fold", fail_if_called)
+        monkeypatch.setattr(sys, "argv", ["walk_forward_validate.py", "--seasons", "2021", "2022"])
+
+        with pytest.raises(SystemExit):
+            wfv.main()
