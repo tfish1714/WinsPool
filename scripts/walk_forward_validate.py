@@ -254,3 +254,62 @@ def run_fold(fold_year, artifacts_dir, force=False):
         rows.append(row)
 
     return {"rows": rows, "importance": importance_df}
+
+
+def _print_summary(report_df):
+    print(f"\n{'=' * 60}")
+    print("  Walk-Forward Validation Summary")
+    print(f"{'=' * 60}")
+
+    if report_df.empty:
+        print("\nNo folds completed successfully.")
+        return
+
+    print(f"  {'Season':<8}{'Model MAE':<12}{'Consensus MAE':<15}{'n':<5}")
+    for season, grp in report_df.groupby("season"):
+        cons = grp.dropna(subset=["consensus_abs_err"])
+        cons_mae = f"{cons['consensus_abs_err'].mean():.2f}" if not cons.empty else "n/a"
+        print(f"  {season:<8}{grp['model_abs_err'].mean():<12.2f}{cons_mae:<15}{len(grp):<5}")
+
+    overall_cons = report_df.dropna(subset=["consensus_abs_err"])
+    overall_cons_mae = f"{overall_cons['consensus_abs_err'].mean():.2f}" if not overall_cons.empty else "n/a"
+    print(f"  {'ALL':<8}{report_df['model_abs_err'].mean():<12.2f}{overall_cons_mae:<15}{len(report_df):<5}")
+    print("\n  Benchmark bar (2017-2025 pooled analyst consensus): 2.18")
+
+
+def main():
+    import pandas as pd
+
+    parser = argparse.ArgumentParser(description="Walk-forward validation harness")
+    parser.add_argument("--seasons", type=int, nargs=2, default=[FOLD_START_DEFAULT, FOLD_END_DEFAULT],
+                         metavar=("START", "END"))
+    parser.add_argument("--force", action="store_true",
+                         help="Retrain fold models even if cached artifacts exist")
+    args = parser.parse_args()
+
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    all_rows = []
+    all_importance = []
+    for fold_year in range(args.seasons[0], args.seasons[1] + 1):
+        print(f"\n{'=' * 60}\n  Fold {fold_year}\n{'=' * 60}")
+        try:
+            result = run_fold(fold_year, ARTIFACTS_DIR, force=args.force)
+        except Exception as exc:
+            logger.error("Fold %d failed: %s", fold_year, exc)
+            continue
+        all_rows.extend(result["rows"])
+        all_importance.append(result["importance"])
+
+    report_df = pd.DataFrame(all_rows)
+    report_df.to_csv(REPORTS_DIR / "walk_forward_validation.csv", index=False)
+
+    importance_df = pd.concat(all_importance, ignore_index=True) if all_importance else pd.DataFrame()
+    importance_df.to_csv(REPORTS_DIR / "walk_forward_feature_importance.csv", index=False)
+
+    _print_summary(report_df)
+
+
+if __name__ == "__main__":
+    main()

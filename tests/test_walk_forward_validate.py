@@ -1,5 +1,7 @@
 """tests/test_walk_forward_validate.py -- Unit tests for scripts/walk_forward_validate.py."""
 
+import sys
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -214,3 +216,67 @@ class TestRunFold:
         result = wfv.run_fold(2021, tmp_path)
         teams = {r["team"] for r in result["rows"]}
         assert teams == {"BUF"}
+
+
+class TestPrintSummary:
+    def test_prints_per_season_and_overall_mae(self, capsys):
+        import pandas as pd
+        from scripts.walk_forward_validate import _print_summary
+
+        df = pd.DataFrame([
+            {"season": 2021, "team": "BUF", "actual_wins": 13, "model_wins": 11,
+             "model_abs_err": 2.0, "consensus_wins": 12, "consensus_abs_err": 1.0},
+            {"season": 2021, "team": "KC", "actual_wins": 11, "model_wins": 9.5,
+             "model_abs_err": 1.5, "consensus_wins": None, "consensus_abs_err": None},
+            {"season": 2022, "team": "BUF", "actual_wins": 12, "model_wins": 10,
+             "model_abs_err": 2.0, "consensus_wins": 11, "consensus_abs_err": 1.0},
+        ])
+
+        _print_summary(df)
+        out = capsys.readouterr().out
+
+        assert "2021" in out
+        assert "2022" in out
+        assert "ALL" in out
+
+    def test_handles_empty_report(self, capsys):
+        import pandas as pd
+        from scripts.walk_forward_validate import _print_summary
+
+        _print_summary(pd.DataFrame())
+        out = capsys.readouterr().out
+        assert "No folds completed" in out
+
+
+class TestMainLoop:
+    def test_one_bad_fold_does_not_abort_the_run(self, monkeypatch, tmp_path):
+        """A fold that raises during run_fold is logged and skipped; the
+        remaining folds still produce a report."""
+        import scripts.walk_forward_validate as wfv
+        import pandas as pd
+
+        monkeypatch.setattr(wfv, "ARTIFACTS_DIR", tmp_path / "walkforward")
+        monkeypatch.setattr(wfv, "REPORTS_DIR", tmp_path / "reports")
+
+        def fake_run_fold(fold_year, artifacts_dir, force=False):
+            if fold_year == 2022:
+                raise RuntimeError("simulated feature table build failure")
+            return {
+                "rows": [{"season": fold_year, "team": "BUF", "actual_wins": 12,
+                          "model_wins": 11, "model_abs_err": 1.0,
+                          "consensus_wins": 11.5, "consensus_abs_err": 0.5}],
+                "importance": pd.DataFrame([{"season": fold_year, "model": "xgb",
+                                              "feature": "elo_diff",
+                                              "importance_rank": 1, "importance_value": 0.5}]),
+            }
+
+        monkeypatch.setattr(wfv, "run_fold", fake_run_fold)
+        monkeypatch.setattr(sys, "argv", ["walk_forward_validate.py", "--seasons", "2021", "2022"])
+
+        wfv.main()
+
+        report = pd.read_csv(wfv.REPORTS_DIR / "walk_forward_validation.csv")
+        assert set(report["season"]) == {2021}  # 2022 skipped, no crash
+
+        importance = pd.read_csv(wfv.REPORTS_DIR / "walk_forward_feature_importance.csv")
+        assert set(importance["season"]) == {2021}
