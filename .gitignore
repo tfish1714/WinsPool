@@ -40,6 +40,7 @@ rawdata/
 # Trained model binaries (large — use model_registry.json to track versions)
 models/*.keras
 models/*.pkl
+models/walkforward/
 
 # ML reports (generated, not source)
 reports/
