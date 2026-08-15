@@ -22,6 +22,22 @@ PROB_CLIP_MAX = 0.98
 ELO_TO_SPREAD = 26.2        # Elo point difference / this = point spread equivalent
 SPREAD_TO_PROB_SCALE = 6.94  # logistic scale: spread / this -> win probability
 
+# Elo dynamics for the Monte Carlo season simulation (NNProjectionEngine).
+# Must match scripts/compute_elo.py's K/HFA/MoV exactly: that script produces
+# rawdata/elo_computed.csv, i.e. the tm_elo_pre/opp_elo_pre/elo_diff values the
+# NN/XGB/LR ensemble was actually trained on. services/prediction_service.py's
+# ELO_K=20.6 / ELO_HOME_ADVANTAGE=41.5 are a SEPARATE, independently-calibrated
+# Elo+Pythagorean engine (see calibrate_elo_constants.py) for a different
+# prediction path — do not reuse those here. Using them previously caused the
+# simulation to evolve elo_diff ~3-4x faster per game than the models were
+# trained to interpret, pushing multi-week simulated seasons out of the
+# ensemble's training distribution (verified empirically: replaying 2024's
+# real results under each rule set gives final-week Elo std of 38 vs 112).
+ELO_SIM_K = 12.0
+ELO_SIM_HFA = 15.0
+ELO_SIM_MOV_MIN = 0.5
+ELO_SIM_MOV_MAX = 2.0
+
 # Monte Carlo simulation — game margin sampling and state update tuning.
 # MC_MARGIN_STD: std dev of NFL game margin distribution (~13 points real-world).
 # MC_EPA_SCALE: EPA nudge per point of simulated margin (tune if spread is too narrow/wide).

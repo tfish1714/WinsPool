@@ -13,8 +13,8 @@ from services.constants import (
     PROB_CLIP_MIN, PROB_CLIP_MAX, ELO_TO_SPREAD, SPREAD_TO_PROB_SCALE,
     MC_MARGIN_STD, MC_EPA_SCALE, MC_EPA_RUSH_WEIGHT,
     PRESEASON_ELO_BOOST_MAX, PRESEASON_ELO_WEIGHTS,
+    ELO_SIM_K, ELO_SIM_HFA, ELO_SIM_MOV_MIN, ELO_SIM_MOV_MAX,
 )
-from services.prediction_service import ELO_HOME_ADVANTAGE, ELO_K
 
 from services.nn_feature_engine import (
     build_master_feature_table,
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 class NNProjectionEngine:
     """Wrapper that leverages the trained NN+XGB+LR ensemble and Monte Carlo engine for caching."""
 
-    def __init__(self, nn_svc=None, xgb_svc=None, lr_svc=None):
+    def __init__(self, nn_svc=None, xgb_svc=None, lr_svc=None, nn_calibrator=None):
         self.svc = nn_svc if nn_svc is not None else NNPredictionService()
         if nn_svc is None:
             self.svc.load_model()
@@ -47,6 +47,13 @@ class NNProjectionEngine:
         self.lr_svc = lr_svc if lr_svc is not None else LRPredictionService()
         if lr_svc is None:
             self.lr_svc.load_model()
+        # Optional post-hoc calibrator for the NN's raw output (e.g. an
+        # sklearn IsotonicRegression fit on held-out validation predictions).
+        # The NN is the only one of the three models that shows severe tail
+        # miscalibration (95-99% confidence calls correct only ~53% of the
+        # time in walk-forward testing) -- XGB/LR don't need this. None by
+        # default preserves prior behavior for every existing caller.
+        self.nn_calibrator = nn_calibrator
         self._team_profiles = pd.DataFrame()
         self._preseason_profiles: dict = {}  # {team: {off_pass_epa, off_rush_epa, ...}}
         # Legacy attributes kept as empty defaults so _precompute_static_features fallback
@@ -479,6 +486,8 @@ class NNProjectionEngine:
         """
         X_f = X.astype(np.float32)
         nn_p  = self.svc.model.predict(self.svc.scaler.transform(X_f), verbose=0).flatten()
+        if self.nn_calibrator is not None:
+            nn_p = self.nn_calibrator.predict(nn_p)
         xgb_p = self.xgb_svc.model.predict_proba(self.xgb_svc.scaler.transform(X_f))[:, 1]
         lr_p  = self.lr_svc.model.predict_proba(self.lr_svc.scaler.transform(X_f))[:, 1]
         blended = NN_WEIGHT * nn_p + XGB_WEIGHT * xgb_p + LR_WEIGHT * lr_p
@@ -504,32 +513,35 @@ class NNProjectionEngine:
         a_idx: int,
         margins: np.ndarray,  # (n_sims,) — positive = home wins
     ) -> None:
-        """Update Elo ratings in-place for all trials after a simulated game."""
+        """Update Elo ratings in-place for all trials after a simulated game.
+
+        Mirrors scripts/compute_elo.py's final-game-result update exactly
+        (K=12, HFA=15, MoV clamped [0.5, 2.0]) since that is the Elo dynamic
+        baked into tm_elo_pre/opp_elo_pre at training time. Do not swap in
+        prediction_service.py's ELO_K/ELO_HOME_ADVANTAGE — those belong to a
+        separately-calibrated Elo+Pythagorean engine and evolve ratings ~3-4x
+        faster per game, which drags simulated elo_diff outside the range the
+        ensemble was trained on as a season progresses.
+        """
         home_wins = margins > 0
         abs_margin = np.abs(margins)
 
         h_elo = state[:, h_idx, 0]
         a_elo = state[:, a_idx, 0]
 
-        # Elo diff from winner's perspective, using the calibrated home advantage
-        winner_elo_diff = np.where(
-            home_wins,
-            h_elo - a_elo + ELO_HOME_ADVANTAGE,  # home won: advantage helps them
-            a_elo - h_elo - ELO_HOME_ADVANTAGE,  # away won: advantage hurt them
+        expected_home = 1.0 / (1.0 + 10.0 ** (-(h_elo + ELO_SIM_HFA - a_elo) / 400.0))
+
+        # Margin-of-victory multiplier: log(margin+1)/2.5, clamped [0.5, 2.0]
+        # (scripts/compute_elo.py's _mov_mult).
+        mov_mult = np.clip(
+            np.log(abs_margin + 1.0) / 2.5, ELO_SIM_MOV_MIN, ELO_SIM_MOV_MAX
         )
 
-        # Expected win probability for the actual winner
-        expected = 1.0 / (10.0 ** (-winner_elo_diff / 400.0) + 1.0)
+        actual_home = home_wins.astype(np.float32)
+        delta = ELO_SIM_K * mov_mult * (actual_home - expected_home)
 
-        # Margin-of-victory multiplier (FiveThirtyEight formula)
-        log_comp = np.log(np.maximum(abs_margin, 1.0) + 1.0)
-        autocorr = winner_elo_diff * 0.001 + 2.2
-        mov_mult = log_comp * (2.2 / np.maximum(autocorr, 0.01))
-
-        shift = ELO_K * (1.0 - expected) * mov_mult
-
-        state[:, h_idx, 0] = np.where(home_wins, h_elo + shift, h_elo - shift)
-        state[:, a_idx, 0] = np.where(home_wins, a_elo - shift, a_elo + shift)
+        state[:, h_idx, 0] = h_elo + delta
+        state[:, a_idx, 0] = a_elo - delta
 
     def _vectorized_epa_update(
         self,
