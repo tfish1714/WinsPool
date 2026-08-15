@@ -67,6 +67,12 @@ DL_BLEND_RECENCY_WEIGHTS = [0.55, 0.30, 0.15]  # most-recent-season first
 # healthy regular contributor reaches the reliability cap without being
 # penalized for not playing literally every defensive snap.
 FULL_SEASON_SNAPS_DL = 500
+# Minimum snaps before a season's DL rate is trusted at all -- matches the
+# original single-season code's threshold. A season below this is excluded
+# from the blend entirely (not just down-weighted): a handful of snaps can
+# produce a wildly noisy sack/pressure rate, the same class of issue as the
+# offense-side minimum-sample gates (FULL_SEASON_ATTEMPTS_QB etc. callers).
+DL_MIN_SNAPS_TRUSTED = 50
 
 # Same recency+reliability+injury-discount blending, extended to every other
 # preseason position group (LB, CB/S on defense; QB/WR/TE/RB/OL on offense).
@@ -975,7 +981,7 @@ def _preseason_defense(
                 adv = a_by_name.get(name_key)
             if snps <= 0:
                 snps = s_by_name.get(name_key, 0)
-            if adv is None or snps <= 0:
+            if adv is None or snps < DL_MIN_SNAPS_TRUSTED:
                 continue
             raw = (adv.get("def_sacks", 0) * DL_SACK_WEIGHT
                    + adv.get("def_pressures", 0) * DL_PRESSURE_WEIGHT
