@@ -611,7 +611,19 @@ def _preseason_offense(
         epa_lookups = [(epa_by_id, epa_by_name)]
 
     def _blend_offense_value(gsis_id: str, name: str, value_col: str, volume_col: str,
-                              full_volume: float) -> tuple[float | None, float | None]:
+                              full_volume: float, min_volume: float) -> tuple[float | None, float | None]:
+        """min_volume excludes a season from the blend ENTIRELY (not just
+        down-weights it) when its sample is too small to trust the rate at
+        all -- e.g. a backup QB's 5-attempt cameo can show a wildly extreme
+        EPA/attempt purely from noise, and low-volume weighting alone still
+        lets that noisy value pull the blend when every available season is
+        similarly small (a permanent backup has no full-sample season to
+        dilute it against). Matches the original single-season code's
+        attempts>=100 / targets>=10 / carries>=30 gates -- lost when this
+        was first rewritten to blend multiple seasons, caught via MIA's
+        Malik Willis (35/54/5 attempts across 3 seasons producing a QB1-
+        caliber blended rate from single-digit-to-low-double-digit sample
+        production)."""
         name_key = str(name).lower()
         weighted_sum, weight_total, most_recent_share = 0.0, 0.0, None
         for i, (by_id, by_name) in enumerate(epa_lookups):
@@ -619,7 +631,7 @@ def _preseason_offense(
             if row is None:
                 continue
             volume = row.get(volume_col, 0)
-            if volume <= 0:
+            if volume < min_volume:
                 continue
             share = min(volume / full_volume, 1.0) if full_volume > 0 else 0.0
             if i == 0:
@@ -637,8 +649,8 @@ def _preseason_offense(
         return value
 
     def _blended_rate(gsis_id: str, name: str, value_col: str, volume_col: str,
-                       full_volume: float, league_default: float) -> float:
-        blended, share = _blend_offense_value(gsis_id, name, value_col, volume_col, full_volume)
+                       full_volume: float, league_default: float, min_volume: float) -> float:
+        blended, share = _blend_offense_value(gsis_id, name, value_col, volume_col, full_volume, min_volume)
         if blended is None:
             return league_default
         return _apply_injury_discount_off(blended, share, gsis_id)
@@ -705,7 +717,7 @@ def _preseason_offense(
         if not qb_rows.empty:
             r = qb_rows.iloc[0]
             rate = _blended_rate(r["gsis_id"], r["player_name"], "pass_epa_rate", "attempts",
-                                  FULL_SEASON_ATTEMPTS_QB, lg_pass_rate * ROOKIE_DISC)
+                                  FULL_SEASON_ATTEMPTS_QB, lg_pass_rate * ROOKIE_DISC, min_volume=100)
             qb_tier = rate
             off_pass_epa += 0.65 * rate
 
@@ -721,7 +733,7 @@ def _preseason_offense(
                 else:
                     r = slot_rows.iloc[0]
                     rate = _blended_rate(r["gsis_id"], r["player_name"], "recv_epa_rate", "targets",
-                                          FULL_SEASON_TARGETS_WR, lg_recv_rate * ROOKIE_DISC)
+                                          FULL_SEASON_TARGETS_WR, lg_recv_rate * ROOKIE_DISC, min_volume=10)
                 off_pass_epa += _WR_TE_WEIGHTS[weight_key] * rate
 
         # RB
@@ -732,7 +744,7 @@ def _preseason_offense(
             else:
                 r = rb_rows.iloc[0]
                 rate = _blended_rate(r["gsis_id"], r["player_name"], "rush_epa_rate", "carries",
-                                      FULL_SEASON_CARRIES_RB, lg_rush_rate * ROOKIE_DISC)
+                                      FULL_SEASON_CARRIES_RB, lg_rush_rate * ROOKIE_DISC, min_volume=30)
             off_rush_epa += weight * rate
 
         # OL snap × age quality (also stored as ol_av for trench metric)
