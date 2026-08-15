@@ -68,6 +68,18 @@ DL_BLEND_RECENCY_WEIGHTS = [0.55, 0.30, 0.15]  # most-recent-season first
 # penalized for not playing literally every defensive snap.
 FULL_SEASON_SNAPS_DL = 500
 
+# Same recency+reliability+injury-discount blending, extended to every other
+# preseason position group (LB, CB/S on defense; QB/WR/TE/RB/OL on offense).
+# "Full volume" per group is empirically anchored (2025 pfr_advstats /
+# stats_player, ~75th percentile among players with any meaningful activity
+# at that stat) rather than guessed -- first-cut estimates, not fitted.
+FULL_SEASON_SNAPS_LB    = 700   # def snaps; 75th pct among active tacklers ~1002, median ~818
+FULL_SEASON_TARGETS_CB  = 45    # targets faced in coverage; 75th pct ~38.5, true starters see more
+FULL_SEASON_ATTEMPTS_QB = 500   # pass attempts; 75th pct ~427, full-time starters ~500-600
+FULL_SEASON_TARGETS_WR  = 70    # WR/TE targets; 75th pct ~59, true WR1 workload higher
+FULL_SEASON_CARRIES_RB  = 150   # RB carries; 75th pct ~143.5
+FULL_SEASON_SNAPS_OL    = 700   # OL offense snaps; median ~496, 75th pct ~940 (OL-position-filtered)
+
 INJURY_SHORTFALL_SNAP_SHARE = 0.40  # below this share of a full season = "injury-shortened"
 INJURY_DISCOUNT_YOUNG = 0.05        # age < AGE_PRIME_UPPER
 INJURY_DISCOUNT_PRIME = 0.10        # AGE_PRIME_UPPER <= age <= AGE_MID_UPPER
@@ -531,10 +543,22 @@ def _preseason_offense(
     roster: pd.DataFrame,
     snap_counts: pd.DataFrame,
     season: int,
+    player_epa_by_season: dict | None = None,
+    snap_counts_by_season: dict | None = None,
 ) -> dict:
     """Build per-team offensive EPA estimates from depth chart + prior-season player stats.
 
     Returns {team: {off_pass_epa, off_rush_epa, qb_tier, ol_av}}.
+
+    player_epa/snap_counts remain the single most-recent prior season (used
+    for the league-average baselines below). QB/WR/TE/RB rates and OL snap
+    volume additionally blend up to DL_BLEND_SEASONS prior seasons (via
+    player_epa_by_season/snap_counts_by_season, most-recent first) with the
+    same recency x reliability x injury-discount logic as the defensive
+    side -- see the comment above DL_BLEND_SEASONS for why: a single
+    below-threshold season (attempts/targets/carries/snaps) otherwise gets
+    treated identically to a true rookie, discarding an established track
+    record.
     """
     epa_by_id:   dict = {}
     epa_by_name: dict = {}
@@ -567,26 +591,107 @@ def _preseason_offense(
     roster_cp = roster.copy()
     roster_cp["birth_date"] = pd.to_datetime(roster_cp["birth_date"], errors="coerce")
     roster_cp["age"] = ((sep1 - roster_cp["birth_date"]).dt.days / 365.25)
-    pfr_to_snaps = {}
-    if not snap_counts.empty:
-        sc = snap_counts.copy()
-        if "game_type" in sc.columns:
-            sc = sc[sc["game_type"] == "REG"]
-        sc["offense_snaps"] = pd.to_numeric(sc["offense_snaps"], errors="coerce").fillna(0)
-        pfr_to_snaps = sc.groupby("pfr_player_id")["offense_snaps"].sum().to_dict()
-        name_snaps = sc.groupby("player")["offense_snaps"].sum().to_dict()
-    else:
-        name_snaps = {}
-    ol_vets = pd.to_numeric(
-        pd.Series(list(pfr_to_snaps.values())), errors="coerce"
-    ).dropna()
-    ol_median = float(ol_vets.median()) if not ol_vets.empty else 300.0
+    age_by_gsis = {
+        str(r["gsis_id"]): float(r["age"])
+        for _, r in roster_cp.iterrows() if pd.notna(r.get("age"))
+    }
 
+    def _build_epa_lookup(df: pd.DataFrame) -> tuple[dict, dict]:
+        by_id, by_name = {}, {}
+        if not df.empty:
+            for _, row in df.iterrows():
+                by_id[str(row["player_id"])] = row.to_dict()
+                by_name[str(row["player_display_name"]).lower()] = row.to_dict()
+        return by_id, by_name
+
+    if player_epa_by_season:
+        season_keys = sorted(player_epa_by_season.keys(), reverse=True)[:DL_BLEND_SEASONS]
+        epa_lookups = [_build_epa_lookup(player_epa_by_season[s]) for s in season_keys]
+    else:
+        epa_lookups = [(epa_by_id, epa_by_name)]
+
+    def _blend_offense_value(gsis_id: str, name: str, value_col: str, volume_col: str,
+                              full_volume: float) -> tuple[float | None, float | None]:
+        name_key = str(name).lower()
+        weighted_sum, weight_total, most_recent_share = 0.0, 0.0, None
+        for i, (by_id, by_name) in enumerate(epa_lookups):
+            row = by_id.get(str(gsis_id)) or by_name.get(name_key)
+            if row is None:
+                continue
+            volume = row.get(volume_col, 0)
+            if volume <= 0:
+                continue
+            share = min(volume / full_volume, 1.0) if full_volume > 0 else 0.0
+            if i == 0:
+                most_recent_share = share
+            w = (DL_BLEND_RECENCY_WEIGHTS[i] if i < len(DL_BLEND_RECENCY_WEIGHTS) else 0.0) * share
+            weighted_sum += row.get(value_col, 0.0) * w
+            weight_total += w
+        if weight_total <= 0:
+            return None, most_recent_share
+        return weighted_sum / weight_total, most_recent_share
+
+    def _apply_injury_discount_off(value: float, most_recent_share: float | None, gsis_id: str) -> float:
+        if most_recent_share is not None and most_recent_share < INJURY_SHORTFALL_SNAP_SHARE:
+            return value * (1.0 - compute_injury_discount(age_by_gsis.get(str(gsis_id))))
+        return value
+
+    def _blended_rate(gsis_id: str, name: str, value_col: str, volume_col: str,
+                       full_volume: float, league_default: float) -> float:
+        blended, share = _blend_offense_value(gsis_id, name, value_col, volume_col, full_volume)
+        if blended is None:
+            return league_default
+        return _apply_injury_discount_off(blended, share, gsis_id)
+
+    # OL: blend offense-snap volume across seasons (recency x reliability,
+    # each season weighted partly by its own volume so a shortened season
+    # naturally contributes little), age-multiplier applied at CURRENT age.
+    # Reliability is measured against FULL_SEASON_SNAPS_OL (empirically
+    # anchored to OL-position players specifically) -- NOT a median/fallback
+    # computed across ALL positions in snap_counts, which includes mostly
+    # defensive players with 0 offense snaps and would collapse toward 0.
     gsis_to_pfr = {}
     if not roster_cp.empty and "gsis_id" in roster_cp.columns and "pfr_id" in roster_cp.columns:
         gsis_to_pfr = {str(r["gsis_id"]): str(r["pfr_id"])
                        for _, r in roster_cp.iterrows()
                        if pd.notna(r.get("pfr_id"))}
+
+    def _build_snap_lookup(df: pd.DataFrame) -> tuple[dict, dict]:
+        by_pfr, by_name = {}, {}
+        if not df.empty:
+            s = df.copy()
+            if "game_type" in s.columns:
+                s = s[s["game_type"] == "REG"]
+            s["offense_snaps"] = pd.to_numeric(s["offense_snaps"], errors="coerce").fillna(0)
+            by_pfr = s.groupby("pfr_player_id")["offense_snaps"].sum().to_dict()
+            if "player" in s.columns:
+                by_name = {str(k).lower(): v for k, v in s.groupby("player")["offense_snaps"].sum().to_dict().items()}
+        return by_pfr, by_name
+
+    if snap_counts_by_season:
+        snap_season_keys = sorted(snap_counts_by_season.keys(), reverse=True)[:DL_BLEND_SEASONS]
+        ol_snap_lookups = [_build_snap_lookup(snap_counts_by_season[s]) for s in snap_season_keys]
+    else:
+        ol_snap_lookups = [_build_snap_lookup(snap_counts)]
+
+    def _ol_snap_score(gsis_id: str, name: str) -> float:
+        pfr = gsis_to_pfr.get(str(gsis_id), "")
+        name_key = str(name).lower()
+        weighted_sum, weight_total, most_recent_share = 0.0, 0.0, None
+        for i, (by_pfr, by_name) in enumerate(ol_snap_lookups):
+            snps = (by_pfr.get(pfr, 0) if pfr else 0) or by_name.get(name_key, 0)
+            if snps <= 0:
+                continue
+            share = min(snps / FULL_SEASON_SNAPS_OL, 1.0)
+            if i == 0:
+                most_recent_share = share
+            w = (DL_BLEND_RECENCY_WEIGHTS[i] if i < len(DL_BLEND_RECENCY_WEIGHTS) else 0.0) * share
+            weighted_sum += snps * w
+            weight_total += w
+        if weight_total <= 0:
+            return FULL_SEASON_SNAPS_OL * 0.5  # unmatched/rookie fallback, same pattern as before
+        blended_snaps = weighted_sum / weight_total
+        return _apply_injury_discount_off(blended_snaps, most_recent_share, gsis_id)
 
     result = {}
     for team, grp in depth_charts.groupby("team"):
@@ -599,9 +704,8 @@ def _preseason_offense(
         qb_rows = grp[(grp["pos_abb"] == "QB") & (grp["pos_rank"] == 1)]
         if not qb_rows.empty:
             r = qb_rows.iloc[0]
-            data = _lookup(r["gsis_id"], r["player_name"])
-            rate = data["pass_epa_rate"] if data and data.get("attempts", 0) >= 100 \
-                else lg_pass_rate * ROOKIE_DISC
+            rate = _blended_rate(r["gsis_id"], r["player_name"], "pass_epa_rate", "attempts",
+                                  FULL_SEASON_ATTEMPTS_QB, lg_pass_rate * ROOKIE_DISC)
             qb_tier = rate
             off_pass_epa += 0.65 * rate
 
@@ -615,9 +719,9 @@ def _preseason_offense(
                 if slot_rows.empty:
                     rate = lg_recv_rate * ROOKIE_DISC
                 else:
-                    data = _lookup(slot_rows.iloc[0]["gsis_id"], slot_rows.iloc[0]["player_name"])
-                    rate = data["recv_epa_rate"] if data and data.get("targets", 0) >= 10 \
-                        else lg_recv_rate * ROOKIE_DISC
+                    r = slot_rows.iloc[0]
+                    rate = _blended_rate(r["gsis_id"], r["player_name"], "recv_epa_rate", "targets",
+                                          FULL_SEASON_TARGETS_WR, lg_recv_rate * ROOKIE_DISC)
                 off_pass_epa += _WR_TE_WEIGHTS[weight_key] * rate
 
         # RB
@@ -626,22 +730,18 @@ def _preseason_offense(
             if rb_rows.empty:
                 rate = lg_rush_rate * ROOKIE_DISC
             else:
-                data = _lookup(rb_rows.iloc[0]["gsis_id"], rb_rows.iloc[0]["player_name"])
-                rate = data["rush_epa_rate"] if data and data.get("carries", 0) >= 30 \
-                    else lg_rush_rate * ROOKIE_DISC
+                r = rb_rows.iloc[0]
+                rate = _blended_rate(r["gsis_id"], r["player_name"], "rush_epa_rate", "carries",
+                                      FULL_SEASON_CARRIES_RB, lg_rush_rate * ROOKIE_DISC)
             off_rush_epa += weight * rate
 
         # OL snap × age quality (also stored as ol_av for trench metric)
         ol_grp = grp[grp["pos_abb"].isin(_OFF_OL_POS)]
         for _, p in ol_grp.iterrows():
-            gid  = str(p["gsis_id"])
-            name = str(p["player_name"])
-            pfr  = gsis_to_pfr.get(gid, "")
-            roster_match = roster_cp[roster_cp["gsis_id"] == gid]
-            age = float(roster_match["age"].iloc[0]) if not roster_match.empty \
-                and pd.notna(roster_match["age"].iloc[0]) else 26.0
+            gid = str(p["gsis_id"])
+            age = age_by_gsis.get(gid, 26.0)
             mult = compute_age_multiplier(age, "T")
-            snaps = pfr_to_snaps.get(pfr) or name_snaps.get(name) or (ol_median * 0.5)
+            snaps = _ol_snap_score(p["gsis_id"], p["player_name"])
             ol_av += float(snaps) * mult
 
         # ol_av is stored for the trench metric but NOT added to off_rush_epa;
@@ -743,9 +843,15 @@ def _preseason_defense(
             except Exception:
                 continue
 
-    # Per-season (pfr_id -> {stat: value}) and (pfr_id -> snaps) lookups for
-    # DL blending, most-recent season first. Falls back to the single-season
-    # dicts above if the caller didn't pass multi-season data (e.g. tests).
+    # Per-season (pfr_id -> {stat: value}) and (pfr_id -> snaps) lookups,
+    # most-recent season first. Used by DL, LB, and CB/S blending alike --
+    # the full defensive stat set is aggregated here (not just DL's sack/
+    # pressure/hit columns) so every position group can share one lookup.
+    # Falls back to the single-season dicts above if the caller didn't pass
+    # multi-season data (e.g. tests).
+    _DEF_STAT_COLS = ["def_sacks", "def_pressures", "def_times_hitqb", "def_tackles_combined",
+                       "def_targets", "def_yards_allowed_per_tgt", "def_passer_rating_allowed"]
+
     def _build_season_lookups(adv_df: pd.DataFrame, snap_df: pd.DataFrame) -> tuple[dict, dict, dict, dict]:
         a_by_pfr: dict = {}
         a_by_name: dict = {}
@@ -753,13 +859,24 @@ def _preseason_defense(
             a = adv_df.copy()
             if "game_type" in a.columns:
                 a = a[a["game_type"] == "REG"]
-            for c in ["def_sacks", "def_pressures", "def_times_hitqb"]:
-                if c in a.columns:
-                    a[c] = pd.to_numeric(a[c], errors="coerce").fillna(0.0)
-            agg = a.groupby("pfr_player_id")[["def_sacks", "def_pressures", "def_times_hitqb"]].sum().reset_index()
+            cols = [c for c in _DEF_STAT_COLS if c in a.columns]
+            for c in cols:
+                a[c] = pd.to_numeric(a[c], errors="coerce").fillna(0.0)
+
+            def _finish(agg: pd.DataFrame) -> pd.DataFrame:
+                if "def_targets" in agg.columns:
+                    agg["def_yards_per_tgt_avg"] = (
+                        agg["def_yards_allowed_per_tgt"] / agg["def_targets"].clip(lower=1)
+                    )
+                    agg["def_passer_rtg_avg"] = (
+                        agg["def_passer_rating_allowed"] / agg["def_targets"].clip(lower=1)
+                    )
+                return agg
+
+            agg = _finish(a.groupby("pfr_player_id")[cols].sum().reset_index())
             a_by_pfr = {str(r["pfr_player_id"]): r.to_dict() for _, r in agg.iterrows()}
             if "pfr_player_name" in a.columns:
-                name_agg = a.groupby("pfr_player_name")[["def_sacks", "def_pressures", "def_times_hitqb"]].sum().reset_index()
+                name_agg = _finish(a.groupby("pfr_player_name")[cols].sum().reset_index())
                 a_by_name = {str(r["pfr_player_name"]).lower(): r.to_dict() for _, r in name_agg.iterrows()}
         s_by_pfr: dict = {}
         s_by_name: dict = {}
@@ -888,13 +1005,99 @@ def _preseason_defense(
                 best = max(best, adv.get("def_sacks", 0))
         return best
 
+    def _blend_season_values(
+        gsis_id: str, name: str,
+        value_fn,          # (adv_dict, snaps) -> float | None  per-season raw/rate value
+        volume_fn,         # (adv_dict, snaps) -> float          reliability volume for that season
+        full_volume: float,
+    ) -> tuple[float | None, float | None]:
+        """Generic recency x reliability blend across dl_season_lookups, shared
+        by LB and CB/S scoring (DL keeps its own _dl_score -- same idea,
+        different rescaling). Returns (blended_value, most_recent_volume_share);
+        both None if no season had usable data. Caller applies its own
+        fallback default and injury discount off the returned share."""
+        pfr = gsis_to_pfr.get(str(gsis_id), "")
+        name_key = str(name).lower()
+        weighted_sum, weight_total, most_recent_share = 0.0, 0.0, None
+        for i, (a_by_pfr, a_by_name, s_by_pfr, s_by_name) in enumerate(dl_season_lookups):
+            adv = (a_by_pfr.get(pfr) if pfr else None) or a_by_name.get(name_key)
+            snps = (s_by_pfr.get(pfr, 0) if pfr else 0) or s_by_name.get(name_key, 0)
+            if adv is None:
+                continue
+            value = value_fn(adv, snps)
+            if value is None:
+                continue
+            volume = volume_fn(adv, snps)
+            if volume <= 0:
+                continue
+            share = min(volume / full_volume, 1.0) if full_volume > 0 else 0.0
+            if i == 0:
+                most_recent_share = share
+            w = (DL_BLEND_RECENCY_WEIGHTS[i] if i < len(DL_BLEND_RECENCY_WEIGHTS) else 0.0) * share
+            weighted_sum += value * w
+            weight_total += w
+        if weight_total <= 0:
+            return None, most_recent_share
+        return weighted_sum / weight_total, most_recent_share
+
+    def _apply_injury_discount(value: float, most_recent_share: float | None, gsis_id: str) -> float:
+        if most_recent_share is not None and most_recent_share < INJURY_SHORTFALL_SNAP_SHARE:
+            pfr = gsis_to_pfr.get(str(gsis_id), "")
+            age = pfr_to_age.get(pfr)
+            return value * (1.0 - compute_injury_discount(age))
+        return value
+
+    def _lb_scores(gsis_id: str, name: str) -> tuple[float, float]:
+        """Returns (pass_contrib, rush_contrib), each blended across seasons
+        the same way as DL/CB-S scoring -- an off-ball linebacker's one
+        injury-shortened season shouldn't erase an established track record
+        any more than a lineman's or corner's should."""
+        def _rush_value(adv, snps):
+            return (adv.get("def_tackles_combined", 0) + adv.get("def_sacks", 0) * 2) / max(snps, 1)
+
+        def _pass_value(adv, snps):
+            return (adv.get("def_pressures", 0) + adv.get("def_sacks", 0) * 3) / max(snps, 1)
+
+        def _volume(_adv, snps):
+            return snps
+
+        rush_blend, rush_share = _blend_season_values(gsis_id, name, _rush_value, _volume, FULL_SEASON_SNAPS_LB)
+        pass_blend, pass_share = _blend_season_values(gsis_id, name, _pass_value, _volume, FULL_SEASON_SNAPS_LB)
+
+        if rush_blend is None:
+            fallback = lg_dl_score_per_snap * ROOKIE_DISC
+            return fallback, fallback
+
+        rush_contrib = _apply_injury_discount(rush_blend, rush_share, gsis_id)
+        pass_contrib = _apply_injury_discount(pass_blend, pass_share, gsis_id) \
+            if pass_blend is not None else lg_dl_score_per_snap * ROOKIE_DISC
+        return pass_contrib, rush_contrib
+
     def _cb_coverage_score(gsis_id: str, name: str) -> float:
-        """Inverted coverage quality: negative = better than average (less EPA allowed)."""
-        adv = _get_adv(gsis_id, name)
-        if adv is None or adv.get("def_targets", 0) < 10:
+        """Inverted coverage quality: negative = better than average (less EPA allowed).
+
+        Blends up to DL_BLEND_SEASONS seasons weighted by recency x
+        reliability (targets faced, relative to a full season's worth),
+        with an injury-return discount when the most recent season was
+        short -- same rationale as DL scoring, applied here since coverage
+        defenders are just as susceptible to one injury-shortened season
+        erasing an established track record.
+        """
+        def _value(adv, _snps):
+            if adv.get("def_targets", 0) < 10:
+                return None
+            ytgt = adv.get("def_yards_per_tgt_avg", adv.get("def_yards_allowed_per_tgt", lg_cb_ytgt))
+            return -(ytgt - lg_cb_ytgt) / max(lg_cb_ytgt, 1.0)
+
+        def _volume(adv, _snps):
+            return adv.get("def_targets", 0)
+
+        blended, most_recent_share = _blend_season_values(
+            gsis_id, name, _value, _volume, full_volume=FULL_SEASON_TARGETS_CB
+        )
+        if blended is None:
             return 0.0
-        ytgt = adv.get("def_yards_per_tgt_avg", adv.get("def_yards_allowed_per_tgt", lg_cb_ytgt))
-        return -(ytgt - lg_cb_ytgt) / max(lg_cb_ytgt, 1.0)
+        return _apply_injury_discount(blended, most_recent_share, gsis_id)
 
     result = {}
     for team, grp in depth_charts.groupby("team"):
@@ -930,16 +1133,7 @@ def _preseason_defense(
 
         lb_grp = grp[grp["pos_abb"].isin(_DEF_LB_POS) & (grp["pos_rank"] <= 2)]
         for _, p in lb_grp.iterrows():
-            adv = _get_adv(p["gsis_id"], p["player_name"])
-            pfr = gsis_to_pfr.get(str(p["gsis_id"]), "")
-            snps = snap_by_pfr.get(pfr, 500)
-            if adv:
-                rush_contrib = (adv.get("def_tackles_combined", 0)
-                                + adv.get("def_sacks", 0) * 2) / max(snps, 1)
-                pass_contrib = (adv.get("def_pressures", 0)
-                                + adv.get("def_sacks", 0) * 3) / max(snps, 1)
-            else:
-                rush_contrib = pass_contrib = lg_dl_score_per_snap * ROOKIE_DISC
+            pass_contrib, rush_contrib = _lb_scores(p["gsis_id"], p["player_name"])
             lb_pass_score += pass_contrib
             lb_rush_score += rush_contrib
 
@@ -1024,8 +1218,16 @@ def compute_preseason_player_profiles(target_season: int, rawdata_dir) -> dict:
             if s_snap_path.exists() else pd.DataFrame()
 
     player_epa = _load_player_epa(prior, rawdata_dir)
+    player_epa_by_season = {prior: player_epa}
+    for back in range(1, DL_BLEND_SEASONS):
+        s = prior - back
+        player_epa_by_season[s] = _load_player_epa(s, rawdata_dir)
 
-    off = _preseason_offense(depth_chart, player_epa, roster, snap_counts, target_season)
+    off = _preseason_offense(
+        depth_chart, player_epa, roster, snap_counts, target_season,
+        player_epa_by_season=player_epa_by_season,
+        snap_counts_by_season=snap_counts_by_season,
+    )
     dfe = _preseason_defense(
         depth_chart, def_advstats, roster, snap_counts, target_season,
         def_advstats_by_season=def_advstats_by_season,
