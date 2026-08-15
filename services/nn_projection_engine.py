@@ -179,6 +179,7 @@ class NNProjectionEngine:
             # Profile composite → Elo boost: widen preseason spread to match SB odds.
             # Algorithm: z-score each profile dim across all teams, flip sign for
             # defensive dims (lower EPA allowed = better), compute weighted composite,
+            # RE-normalize that composite to std=1 across the league (see below),
             # clip to ±2σ and scale to ±PRESEASON_ELO_BOOST_MAX.
             _dims  = list(PRESEASON_ELO_WEIGHTS.keys())
             _def_d = {"def_pass_epa", "def_rush_epa"}
@@ -189,14 +190,32 @@ class NNProjectionEngine:
             _mu  = {d: float(np.mean(v)) for d, v in _vals.items()}
             _sig = {d: max(float(np.std(v)), 1e-6) for d, v in _vals.items()}
 
-            for team, idx in team_idx.items():
+            def _raw_composite(team: str) -> float:
                 pp = self._preseason_profiles.get(team, {})
-                composite = 0.0
+                c = 0.0
                 for d, w in PRESEASON_ELO_WEIGHTS.items():
                     z = (float(pp.get(d, _mu[d])) - _mu[d]) / _sig[d]
                     if d in _def_d:
                         z = -z
-                    composite += w * z
+                    c += w * z
+                return c
+
+            # Each PRESEASON_ELO_WEIGHTS dim is individually z-scored (std=1 by
+            # construction), but averaging several only-partially-correlated
+            # z-scored dims produces a composite with LOWER variance than any one
+            # dim alone -- empirically std ~0.6 across a real league, not the ~1.0
+            # the ±2σ clip below assumes. That meant the clip almost never engaged:
+            # even the single best/worst team in the league only reached ~±1.2,
+            # so the "give a truly great team ~14 wins, a truly bad one ~3" design
+            # intent in the comment above PRESEASON_ELO_BOOST_MAX silently never
+            # fired, compressing the whole league's preseason spread. Re-z-scoring
+            # the composite itself (not just its inputs) restores that intent.
+            _raw = {team: _raw_composite(team) for team in team_list}
+            _raw_mu = float(np.mean(list(_raw.values())))
+            _raw_sig = max(float(np.std(list(_raw.values()))), 1e-6)
+
+            for team, idx in team_idx.items():
+                composite = (_raw[team] - _raw_mu) / _raw_sig
                 elo_adj = float(np.clip(composite, -2.0, 2.0) / 2.0 * PRESEASON_ELO_BOOST_MAX)
                 state_template[idx, 0] += elo_adj
 
