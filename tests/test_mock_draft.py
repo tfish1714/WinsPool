@@ -48,6 +48,14 @@ class TestMockDraftSetup:
             resp = client.get("/api/mock-draft/setup")
         assert resp.status_code == 400
 
+    def test_setup_includes_team_schedules_for_non_admin(self):
+        """teamSchedules is opponent/week text, not projection data -- sent to everyone."""
+        with patch("services.mock_draft_service.get_collection_df", side_effect=_mock_collection_df), \
+             patch("routes.mock_draft_routes.get_team_schedules", return_value={"KC": ["Wk1 vs DAL"]}):
+            resp = client.get("/api/mock-draft/setup")
+        assert resp.status_code == 200
+        assert resp.json()["teamSchedules"] == {"KC": ["Wk1 vs DAL"]}
+
 
 class TestMockDraftPick:
 

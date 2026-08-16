@@ -1,7 +1,7 @@
 """Tests for services/mock_draft_service.py — pick sequence, bot picks, rankings."""
 import pandas as pd
 import pytest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 class TestGetPickSequence:
@@ -179,3 +179,28 @@ class TestRankRosters:
             result = rank_rosters(2026, rosters)
         assert len(result) == 10
         assert {r["rank"] for r in result} == set(range(1, 11))
+
+
+class TestGetTeamSchedules:
+
+    def test_returns_schedule_list_per_team(self):
+        from services.mock_draft_service import get_team_schedules, NFL_TEAMS
+        games_df = pd.DataFrame([
+            {"season": 2026, "week": 1, "home_team": "KC", "away_team": "DAL"},
+            {"season": 2026, "week": 2, "home_team": "SF", "away_team": "KC"},
+        ])
+        fake_bundle = MagicMock(games=games_df)
+        with patch("services.mock_draft_service.load_data_season", return_value=fake_bundle):
+            result = get_team_schedules(2026)
+        assert set(result.keys()) == set(NFL_TEAMS)
+        assert result["KC"] == ["Wk1 vs DAL", "Wk2 @ SF"]
+        assert result["DAL"] == ["Wk1 @ KC"]
+        assert result["ARI"] == []  # team with no games in the fixture
+
+    def test_empty_games_returns_empty_schedules_for_every_team(self):
+        from services.mock_draft_service import get_team_schedules, NFL_TEAMS
+        fake_bundle = MagicMock(games=pd.DataFrame())
+        with patch("services.mock_draft_service.load_data_season", return_value=fake_bundle):
+            result = get_team_schedules(2026)
+        assert set(result.keys()) == set(NFL_TEAMS)
+        assert all(v == [] for v in result.values())

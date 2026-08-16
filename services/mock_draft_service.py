@@ -7,7 +7,7 @@ computation. Nothing here writes to the database.
 import random
 from typing import Dict, List, Tuple
 
-from services.data_service import get_season_projection_legacy_shape
+from services.data_service import get_season_projection_legacy_shape, get_team_schedule, load_data_season
 from services.db_service import get_collection_df
 
 NFL_TEAMS = [
@@ -45,6 +45,16 @@ def get_pick_sequence() -> List[Dict[str, int]]:
             entries.append({"pick": int(row[pick_col]), "slot": slot})
     entries.sort(key=lambda e: e["pick"])
     return entries
+
+
+def get_team_schedules(season: int) -> Dict[str, List[str]]:
+    """Each NFL team's schedule for the given season, as display strings
+    (e.g. "Wk1 vs KC"). Reuses the same resolver the live draft board's
+    tooltip uses. Not projection data — safe to return to every caller
+    regardless of admin status.
+    """
+    games = load_data_season(season).games
+    return {team: get_team_schedule(team, games, season) for team in NFL_TEAMS}
 
 
 def get_projection_season() -> int:

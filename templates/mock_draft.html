@@ -20,6 +20,18 @@
         .mock-rank-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.08); }
         .mock-rank-row.is-you { font-weight: 700; color: var(--leader, #7c9fff); }
         #mock-error { color: #ff8080; text-align: center; padding: 24px; }
+        .mock-panels { display: grid; grid-template-columns: 1fr; gap: 16px; margin-top: 20px; }
+        @media (min-width: 640px) { .mock-panels { grid-template-columns: 1fr 1fr; } }
+        .mock-panel {
+            background: rgba(255,255,255,0.04); border: 1px solid var(--glass-border, rgba(255,255,255,0.12));
+            border-radius: 10px; padding: 12px; max-height: 320px; overflow-y: auto;
+        }
+        .mock-roster-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+        .mock-roster-row.is-you { font-weight: 700; color: var(--leader, #7c9fff); }
+        .mock-roster-row .mock-roster-teams { display: flex; gap: 4px; }
+        .mock-history-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: 0.85rem; }
+        .mock-history-row.is-current { font-weight: 700; color: var(--leader, #7c9fff); }
+        .mock-history-row .mock-history-team { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
     </style>
 </head>
 
@@ -45,6 +57,17 @@
             <div class="eyebrow" id="mock-status"></div>
             <div id="mock-bot-turn" class="mock-bot-turn hidden"></div>
             <div class="mock-team-grid" id="mock-team-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"></div>
+
+            <div class="mock-panels">
+                <div class="mock-panel">
+                    <div class="eyebrow" style="margin-bottom:8px;">Rosters so far</div>
+                    <div id="mock-rosters"></div>
+                </div>
+                <div class="mock-panel">
+                    <div class="eyebrow" style="margin-bottom:8px;">Pick order</div>
+                    <div id="mock-pick-history"></div>
+                </div>
+            </div>
         </section>
 
         <section id="mock-results" class="hidden">
