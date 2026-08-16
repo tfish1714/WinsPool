@@ -159,3 +159,22 @@ def test_get_is_admin_reads_session_cookie_when_no_header(monkeypatch):
     from services import session_service
     token = session_service.create_token(player_id=1, role="admin")
     assert session_service.get_is_admin(authorization=None, session_token=token) is True
+
+
+def test_get_is_admin_prefers_bearer_header_over_cookie_when_both_present(monkeypatch):
+    """Verify Bearer header takes priority over session cookie when both are present."""
+    monkeypatch.setenv("JWT_SECRET", "test-secret-is-admin")
+    from services import session_service
+    admin_token = session_service.create_token(player_id=1, role="admin")
+    user_token = session_service.create_token(player_id=2, role="user")
+    # Bearer header carries the admin token, cookie carries a non-admin token — Bearer must win.
+    assert session_service.get_is_admin(authorization=f"Bearer {admin_token}", session_token=user_token) is True
+
+
+def test_get_is_admin_false_for_non_bearer_authorization_header(monkeypatch):
+    """Verify non-Bearer Authorization headers (e.g. 'Basic xyz') are ignored and fall through to cookie check."""
+    monkeypatch.setenv("JWT_SECRET", "test-secret-is-admin")
+    from services import session_service
+    admin_token = session_service.create_token(player_id=1, role="admin")
+    # Authorization header is 'Basic xyz' (not Bearer), so it's ignored; cookie has admin token.
+    assert session_service.get_is_admin(authorization="Basic xyz", session_token=admin_token) is True
