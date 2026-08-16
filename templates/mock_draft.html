@@ -6,55 +6,99 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mock Draft — WinsPool</title>
     <link rel="icon" href="/static/fishbone.png" type="image/png">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@500;700&family=Newsreader:ital,opsz,wght@1,12,500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css?v=23">
     <style>
-        .mock-shell { max-width: 720px; margin: 0 auto; padding: 24px 16px 80px; }
-        .mock-slot-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 20px 0; }
+        .mock-shell { max-width: 760px; margin: 0 auto; padding: 32px 16px 80px; }
+
+        /* Status pill — reuses the site's mono-pill/dot idiom: green pulse while a
+           bot is thinking, warm/gold pulse when it's your turn (never both at once). */
+        #mock-status.mono-pill { margin-bottom: 18px; font-size: 12px; padding: 7px 14px; }
+
+        /* Slot picker — small draft-card tiles rather than plain buttons */
+        .mock-slot-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 20px 0 24px; }
         .mock-slot-btn {
-            padding: 14px 0; border-radius: 10px; border: 1px solid var(--glass-border, rgba(255,255,255,0.15));
-            background: rgba(255,255,255,0.06); color: inherit; font-weight: 600; cursor: pointer;
+            display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+            padding: 14px 12px; border-radius: 10px; border: 1px solid var(--line-strong);
+            background: var(--bg-elev); color: var(--ink); cursor: pointer;
+            transition: border-color 120ms, background 120ms, transform 120ms;
         }
-        .mock-slot-btn.selected { background: var(--leader, #7c9fff); color: #10131c; }
-        .mock-bot-turn { text-align: center; padding: 32px 0; opacity: 0.8; }
-        .mock-rank-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.08); }
-        .mock-rank-row.is-you { font-weight: 700; color: var(--leader, #7c9fff); }
-        #mock-error { color: #ff8080; text-align: center; padding: 24px; }
+        .mock-slot-btn:hover { border-color: var(--link); background: rgba(122,162,255,0.06); transform: translateY(-1px); }
+        .mock-slot-label { font: 600 10px/1 'JetBrains Mono', monospace; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+        .mock-slot-num { font-family: 'Newsreader', Georgia, serif; font-style: italic; font-size: 26px; color: var(--ink); }
+
+        /* The "X is picking..." beat — the one moment worth a flourish */
+        .mock-bot-turn {
+            text-align: center; padding: 26px 16px; margin-bottom: 16px;
+            background: var(--bg-elev); border: 1px solid var(--line-strong); border-radius: 12px;
+            font-family: 'Newsreader', Georgia, serif; font-style: italic; font-size: 18px; color: var(--ink-2);
+        }
+
+        #mock-error { color: var(--neg); text-align: center; padding: 24px; }
+        #mock-error button { margin-top: 12px; }
+
+        /* Rosters + pick history panels */
         .mock-panels { display: grid; grid-template-columns: 1fr; gap: 16px; margin-top: 20px; }
         @media (min-width: 640px) { .mock-panels { grid-template-columns: 1fr 1fr; } }
         .mock-panel {
-            background: rgba(255,255,255,0.04); border: 1px solid var(--glass-border, rgba(255,255,255,0.12));
-            border-radius: 10px; padding: 12px; max-height: 320px; overflow-y: auto;
+            background: var(--bg-elev); border: 1px solid var(--line-strong);
+            border-radius: 14px; padding: 14px; max-height: 340px; overflow-y: auto;
         }
-        .mock-roster-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
-        .mock-roster-row.is-you { font-weight: 700; color: var(--leader, #7c9fff); }
-        .mock-roster-row .mock-roster-teams { display: flex; gap: 4px; }
-        .mock-history-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: 0.85rem; }
-        .mock-history-row.is-current { font-weight: 700; color: var(--leader, #7c9fff); }
-        .mock-history-row .mock-history-team { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+        .mock-roster-row { display: flex; align-items: center; gap: 8px; padding: 7px 4px; border-bottom: 1px solid var(--line); border-radius: 6px; }
+        .mock-roster-row.is-you { background: rgba(122,162,255,0.07); }
+        .mock-roster-row.is-you .mock-roster-label { color: var(--link); font-weight: 600; }
+        .mock-roster-row .mock-roster-label { flex: 1; min-width: 0; font-size: 13px; }
+        .mock-roster-row .mock-roster-teams { display: flex; gap: 4px; flex-shrink: 0; }
+
+        .mock-history-row {
+            display: flex; justify-content: space-between; align-items: center; gap: 8px;
+            padding: 6px 4px; border-radius: 6px; font-size: 12.5px;
+        }
+        .mock-history-row .mock-history-pick { font-family: 'JetBrains Mono', monospace; color: var(--ink-3); width: 26px; flex-shrink: 0; }
+        .mock-history-row .mock-history-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mock-history-row.is-you .mock-history-label { color: var(--link); font-weight: 600; }
+        .mock-history-row.is-current { background: rgba(217,168,108,0.10); }
+        .mock-history-row.is-current .mock-history-label { color: var(--warn); font-weight: 600; }
+        .mock-history-team { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+
+        /* Final rankings — team logos in line with each rank, gold reserved for #1
+           (matches the rest of the site's convention: gold = leader, nowhere else) */
+        .mock-rank-row {
+            display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin-bottom: 6px;
+            border-radius: 10px; border: 1px solid var(--line-strong); background: var(--bg-elev);
+        }
+        .mock-rank-row.is-rank-1 { border-color: var(--leader); background: var(--leader-soft); }
+        .mock-rank-row.is-you:not(.is-rank-1) { border-color: var(--link); }
+        .mock-rank-num { font-family: 'JetBrains Mono', monospace; font-weight: 700; width: 30px; flex-shrink: 0; color: var(--ink-2); }
+        .mock-rank-row.is-rank-1 .mock-rank-num { color: var(--leader); }
+        .mock-rank-label { flex: 0 1 auto; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mock-rank-row.is-you .mock-rank-label { color: var(--link); }
+        .mock-rank-row.is-rank-1.is-you .mock-rank-label { color: var(--leader); }
+        .mock-rank-teams { display: flex; gap: 4px; flex-shrink: 0; margin-left: auto; }
+        .mock-rank-total { font-family: 'JetBrains Mono', monospace; color: var(--ink-2); font-size: 12.5px; flex-shrink: 0; margin-left: 10px; }
     </style>
 </head>
 
 <body>
     <div class="glass-bg"></div>
     <div class="mock-shell">
-        <header class="wp-top">
+        <header class="wp-top" style="margin-bottom: 24px; padding-bottom: 20px;">
             <div>
-                <div class="eyebrow">WinsPool · Practice</div>
-                <h1 class="wp-h1">Mock Draft</h1>
+                <div class="eyebrow">WinsPool · Practice Draft</div>
+                <h1 class="wp-h1" style="font-size: 36px;">Mock Draft</h1>
             </div>
         </header>
 
         <div id="mock-error" class="hidden"></div>
 
         <section id="mock-slot-select">
-            <p>Pick which draft spot you want, or let it be random.</p>
+            <p style="color: var(--ink-2);">Pick which draft spot you want, or let it be random.</p>
             <div class="mock-slot-grid" id="mock-slot-grid"></div>
             <button id="mock-random-slot" class="btn-primary">Random Spot</button>
         </section>
 
         <section id="mock-draft-board" class="hidden">
-            <div class="eyebrow" id="mock-status"></div>
+            <span class="mono-pill" id="mock-status"></span>
             <div id="mock-bot-turn" class="mock-bot-turn hidden"></div>
             <div class="mock-team-grid" id="mock-team-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"></div>
 
@@ -71,10 +115,11 @@
         </section>
 
         <section id="mock-results" class="hidden">
-            <h2>Draft Complete!</h2>
-            <div id="mock-your-teams"></div>
+            <div class="eyebrow">Draft complete</div>
+            <h2 class="wp-h1" style="font-size: 28px; margin-bottom: 20px;">Final Results</h2>
+            <div id="mock-your-teams" style="margin-bottom: 20px;"></div>
             <div id="mock-rankings"></div>
-            <button id="mock-again" class="btn-primary">Draft Again</button>
+            <button id="mock-again" class="btn-primary" style="margin-top: 16px;">Draft Again</button>
         </section>
     </div>
 

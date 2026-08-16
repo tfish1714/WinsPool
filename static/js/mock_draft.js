@@ -88,8 +88,11 @@ class MockDraft {
 
     renderSlotGrid() {
         const slots = [...new Set(this.setup.pickSequence.map(e => e.slot))].sort((a, b) => a - b);
-        this.$slotGrid.innerHTML = slots.map(slot =>
-            `<button class="mock-slot-btn" data-slot="${slot}">Spot ${slot}</button>`
+        this.$slotGrid.innerHTML = slots.map(slot => `
+            <button class="mock-slot-btn" data-slot="${slot}">
+                <span class="mock-slot-label">Slot</span>
+                <span class="mock-slot-num">${slot}</span>
+            </button>`
         ).join('');
         this.$slotGrid.querySelectorAll('.mock-slot-btn').forEach(btn => {
             btn.addEventListener('click', () => this.chooseSlot(parseInt(btn.dataset.slot, 10)));
@@ -134,12 +137,19 @@ class MockDraft {
         return this.setup.teams.filter(t => !this.picked.has(t));
     }
 
+    renderStatus(isYourTurn) {
+        const total = this.setup.pickSequence.length;
+        const entry = this.setup.pickSequence[this.pickIndex];
+        const dotClass = isYourTurn ? 'dot warn pulse' : 'dot pulse';
+        this.$status.innerHTML = `<span class="${dotClass}"></span><span>PICK ${entry.pick} OF ${total}</span>`;
+    }
+
     async advance() {
         if (this.pickIndex >= this.setup.pickSequence.length) {
             return this.finish();
         }
         const entry = this.setup.pickSequence[this.pickIndex];
-        this.$status.textContent = `Pick ${entry.pick} of ${this.setup.pickSequence.length}`;
+        this.renderStatus(entry.slot === this.mySlot);
 
         if (entry.slot === this.mySlot) {
             this.renderHumanTurn();
@@ -219,10 +229,10 @@ class MockDraft {
             const isYou = slot === this.mySlot;
             const teams = (this.rosters[slot] || []).map(t =>
                 `<img src="${teamLogo(t)}" alt="${t}" title="${t}" style="width:18px;height:18px;object-fit:contain;">`
-            ).join('') || '<span style="opacity:0.5;">—</span>';
+            ).join('') || '<span style="opacity:0.4;">—</span>';
             return `
                 <div class="mock-roster-row${isYou ? ' is-you' : ''}">
-                    <div style="flex:1;min-width:0;">${esc(this.slotLabel(slot))}</div>
+                    <div class="mock-roster-label">${esc(this.slotLabel(slot))}</div>
                     <div class="mock-roster-teams">${teams}</div>
                 </div>`;
         }).join('');
@@ -232,6 +242,7 @@ class MockDraft {
         this.$pickHistory.innerHTML = this.setup.pickSequence.map((entry, idx) => {
             const done = this.pickHistory[idx];
             const isCurrent = !done && idx === this.pickIndex;
+            const isYou = entry.slot === this.mySlot;
             let right;
             if (done) {
                 right = `<span class="mock-history-team">
@@ -244,8 +255,9 @@ class MockDraft {
                 right = '<span style="opacity:0.4;">—</span>';
             }
             return `
-                <div class="mock-history-row${isCurrent ? ' is-current' : ''}">
-                    <span>#${entry.pick} ${esc(this.slotLabel(entry.slot))}</span>
+                <div class="mock-history-row${isCurrent ? ' is-current' : ''}${isYou ? ' is-you' : ''}">
+                    <span class="mock-history-pick">#${entry.pick}</span>
+                    <span class="mock-history-label">${esc(this.slotLabel(entry.slot))}</span>
                     ${right}
                 </div>`;
         }).join('');
@@ -255,11 +267,12 @@ class MockDraft {
         this.$board.classList.add('hidden');
         this.$results.classList.remove('hidden');
 
-        this.$yourTeams.innerHTML = `<h3>Your teams</h3>` + this.rosters[this.mySlot].map(team =>
-            `<span style="display:inline-flex;align-items:center;gap:6px;margin-right:10px;">
-                <img src="${teamLogo(team)}" style="width:20px;height:20px;">${team}
-            </span>`
-        ).join('');
+        this.$yourTeams.innerHTML = `<div class="eyebrow" style="margin-bottom:8px;">Your teams</div>` +
+            this.rosters[this.mySlot].map(team =>
+                `<span style="display:inline-flex;align-items:center;gap:6px;margin-right:10px;">
+                    <img src="${teamLogo(team)}" style="width:20px;height:20px;">${team}
+                </span>`
+            ).join('');
 
         try {
             const res = await fetch('/api/mock-draft/results', {
@@ -270,15 +283,25 @@ class MockDraft {
             if (!res.ok) throw new Error((await res.json()).error || 'Ranking failed.');
             const { rankings } = await res.json();
             const graded = rankings.length > 0 && rankings.every(r => r.graded);
+            const heading = `<div class="eyebrow" style="margin-bottom:8px;">Standings</div>`;
             if (!graded) {
-                this.$rankings.innerHTML = `<h3>Final Rankings</h3>
-                    <p>Rankings unavailable — no projection data for this season yet.</p>`;
+                this.$rankings.innerHTML = `${heading}<p style="color:var(--ink-2);">Rankings unavailable — no projection data for this season yet.</p>`;
             } else {
                 rankings.sort((a, b) => a.rank - b.rank);
-                this.$rankings.innerHTML = `<h3>Final Rankings</h3>` + rankings.map(r => {
+                this.$rankings.innerHTML = heading + rankings.map(r => {
                     const isYou = r.slot === this.mySlot;
-                    const totalText = 'totalProjectedWins' in r ? ` — ${r.totalProjectedWins}W` : '';
-                    return `<div class="mock-rank-row${isYou ? ' is-you' : ''}">#${r.rank} ${esc(this.slotLabel(r.slot))}${totalText}</div>`;
+                    const isFirst = r.rank === 1;
+                    const totalText = 'totalProjectedWins' in r ? `<span class="mock-rank-total">${r.totalProjectedWins}W</span>` : '';
+                    const teams = (this.rosters[r.slot] || []).map(t =>
+                        `<img src="${teamLogo(t)}" alt="${t}" title="${t}" style="width:22px;height:22px;object-fit:contain;">`
+                    ).join('');
+                    return `
+                        <div class="mock-rank-row${isFirst ? ' is-rank-1' : ''}${isYou ? ' is-you' : ''}">
+                            <span class="mock-rank-num">#${r.rank}</span>
+                            <span class="mock-rank-label">${esc(this.slotLabel(r.slot))}</span>
+                            <span class="mock-rank-teams">${teams}</span>
+                            ${totalText}
+                        </div>`;
                 }).join('');
             }
         } catch (err) {
