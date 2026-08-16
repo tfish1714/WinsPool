@@ -23,6 +23,16 @@ def sanitize_state(obj):
         return None
     return obj
 
+def strip_admin_only_fields(payload: dict) -> dict:
+    """Returns a copy of a draft-state payload with admin-only projection
+    data removed. A no-op (returns the same object) if the payload has no
+    preseason_predictions key, so callers never accidentally add a key that
+    wasn't there — see draft_routes.ConnectionManager.broadcast().
+    """
+    if "preseason_predictions" not in payload:
+        return payload
+    return {**payload, "preseason_predictions": {}}
+
 def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]:
     """
     Constructs the current draft board state, including analytics and Elo projections.

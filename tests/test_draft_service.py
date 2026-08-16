@@ -187,3 +187,25 @@ class TestSavePickTimeTaken:
         _, _, _, _, _, time_taken = mock_add.call_args[0]
         assert time_taken is not None
         assert 9 < time_taken < 15  # rough check: ~10 seconds elapsed
+
+
+class TestStripAdminOnlyFields:
+
+    def test_strips_preseason_predictions(self):
+        from services.draft_service import strip_admin_only_fields
+        payload = {"season": 2026, "preseason_predictions": {"KC": {"projected_wins": 11.2}}}
+        result = strip_admin_only_fields(payload)
+        assert result["preseason_predictions"] == {}
+        assert result["season"] == 2026
+
+    def test_leaves_payload_without_predictions_key_untouched(self):
+        from services.draft_service import strip_admin_only_fields
+        payload = {"season": 2026, "draft_board": []}
+        result = strip_admin_only_fields(payload)
+        assert result == payload
+
+    def test_does_not_mutate_original_payload(self):
+        from services.draft_service import strip_admin_only_fields
+        payload = {"preseason_predictions": {"KC": {"projected_wins": 11.2}}}
+        strip_admin_only_fields(payload)
+        assert payload["preseason_predictions"] == {"KC": {"projected_wins": 11.2}}
