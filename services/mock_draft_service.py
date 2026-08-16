@@ -7,6 +7,7 @@ computation. Nothing here writes to the database.
 import random
 from typing import Dict, List, Tuple
 
+from services.data_service import get_season_projection_legacy_shape
 from services.db_service import get_collection_df
 
 NFL_TEAMS = [
