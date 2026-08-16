@@ -52,7 +52,6 @@ The following are set directly in `deploy.ps1`:
 | `SMTP_PORT` | `587` |
 | `SMTP_USER` | configured in script |
 | `FROM_EMAIL` | configured in script |
-| `ROOM_CODE` | configured in script |
 
 Secrets (`FIREBASE_CREDENTIALS`, `GEMINI_API_KEY`, `SMTP_PASSWORD`) are injected via `--set-secrets`.
 
@@ -66,7 +65,7 @@ uvicorn main:app --reload
 
 # Docker local test
 docker build -t winspool .
-docker run -p 8000:8080 -e USE_LOCAL_DATA=True -e ROOM_CODE=test winspool
+docker run -p 8000:8080 -e USE_LOCAL_DATA=True winspool
 ```
 
 ---

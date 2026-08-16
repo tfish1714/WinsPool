@@ -32,8 +32,7 @@ gcloud run deploy winspool `
     --set-env-vars "SMTP_PORT=587" `
     --set-env-vars "SMTP_USER=your_email@gmail.com" `
     --set-env-vars "FROM_EMAIL=your_email@gmail.com" `
-    --set-secrets "FIREBASE_CREDENTIALS=FIREBASE_CREDENTIALS:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,SMTP_PASSWORD=SMTP_PASSWORD:latest,JWT_SECRET=JWT_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest" `
-    --set-env-vars "ROOM_CODE=your_room_code"
+    --set-secrets "FIREBASE_CREDENTIALS=FIREBASE_CREDENTIALS:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,SMTP_PASSWORD=SMTP_PASSWORD:latest,JWT_SECRET=JWT_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest"
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "[SUCCESS] Cloud Run Deployment Complete!" -ForegroundColor Green

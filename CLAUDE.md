@@ -21,7 +21,7 @@ python main.py  # Uses PORT env var (default 8000)
 ### Docker
 ```bash
 docker build -t winspool .
-docker run -p 8000:8080 -e USE_LOCAL_DATA=True -e ROOM_CODE=test winspool
+docker run -p 8000:8080 -e USE_LOCAL_DATA=True winspool
 ```
 
 ### Scripts (run individually as needed)
@@ -82,7 +82,6 @@ pytest tests/ --cov=services --cov=routes
 ```
 USE_LOCAL_DATA=True         # True → .local_db/ pickles, False → Firestore
 FIREBASE_CREDENTIALS=...    # Base64-encoded service account JSON
-ROOM_CODE=...               # Draft room passcode
 GEMINI_API_KEY=...          # For recap generation
 SMTP_SERVER/PORT/USER/...   # Email delivery (optional)
 VAPID_PUBLIC_KEY=...        # Web Push VAPID public key (base64url)

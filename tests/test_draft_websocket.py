@@ -2,17 +2,21 @@
 
 Covers:
   - ConnectionManager bookkeeping (connect/disconnect)
-  - WebSocket message flow: verify_code, pick, admin undo
+  - WebSocket message flow: reauthenticate, pick, admin undo
 """
 import asyncio
-import os
-os.environ.setdefault("ROOM_CODE", "test")  # must be set before app import
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from starlette.testclient import TestClient
 
 from routes.draft_routes import ConnectionManager
+
+# Default get_player_by_id stub for reauthenticate — any playerId resolves to
+# a player with a password_hash set, so the handshake succeeds; each test's
+# state fixture (FAKE_STATE/PICK_FAKE_STATE/PROJECTION_FAKE_STATE) is what
+# actually determines admin vs. non-admin via role.
+_REAUTH_OK = lambda pid: {"playerId": int(pid), "password_hash": "hash"}
 
 
 # ---------------------------------------------------------------------------
@@ -138,13 +142,14 @@ def ws_client():
     with patch("routes.draft_routes.load_draft_state", return_value=FAKE_STATE), \
          patch("routes.draft_routes.save_pick") as mock_save, \
          patch("routes.draft_routes.undo_pick") as mock_undo, \
-         patch("routes.draft_routes.reset_pick") as mock_reset:
+         patch("routes.draft_routes.reset_pick") as mock_reset, \
+         patch("services.db_service.get_player_by_id", side_effect=_REAUTH_OK):
         from main import app
         client = TestClient(app)
         yield client, mock_save, mock_undo, mock_reset
 
 
-class TestWebSocketVerifyCode:
+class TestWebSocketConnect:
 
     def test_initial_state_sent_on_connect(self, ws_client):
         """Server should send a 'state' message immediately on connect."""
@@ -154,41 +159,19 @@ class TestWebSocketVerifyCode:
             assert msg["type"] == "state"
             assert "payload" in msg
 
-    def test_verify_code_correct_sends_verified(self, ws_client):
-        """Correct room code → server responds with type='verified'."""
-        client, _, _, _ = ws_client
-        with client.websocket_connect("/ws") as ws:
-            ws.receive_json()  # consume initial state
-            ws.send_json({"action": "verify_code", "playerId": 1, "code": "test"})
-            # May receive a state broadcast first; find the verified message
-            msgs = [ws.receive_json() for _ in range(2)]
-            types = {m["type"] for m in msgs}
-            assert "verified" in types
-
-    def test_verify_code_wrong_sends_error(self, ws_client):
-        """Wrong room code → server responds with type='error'."""
-        client, _, _, _ = ws_client
-        with client.websocket_connect("/ws") as ws:
-            ws.receive_json()  # consume initial state
-            ws.receive_json()  # consume chat_history
-            ws.send_json({"action": "verify_code", "playerId": 1, "code": "wrongcode"})
-            msg = ws.receive_json()
-            assert msg["type"] == "error"
-            assert "Invalid Room Code" in msg["message"]
-
 
 class TestWebSocketAdminActions:
 
     def _verify_as_admin(self, ws):
-        """Helper: perform the verify_code handshake as player 1 (admin)."""
+        """Helper: perform the reauthenticate handshake as player 1 (admin)."""
         ws.receive_json()  # consume initial state
-        ws.send_json({"action": "verify_code", "playerId": 1, "code": "test"})
+        ws.send_json({"action": "reauthenticate", "playerId": 1})
         # Drain verified + state broadcast
         for _ in range(2):
             ws.receive_json()
 
     def test_undo_pick_without_auth_returns_error(self, ws_client):
-        """Unauthenticated socket (no verify_code) cannot undo a pick."""
+        """Unauthenticated socket (no reauthenticate) cannot undo a pick."""
         client, _, _, _ = ws_client
         with client.websocket_connect("/ws") as ws:
             ws.receive_json()  # consume initial state
@@ -199,7 +182,7 @@ class TestWebSocketAdminActions:
             assert "Unauthorized" in msg["message"]
 
     def test_admin_undo_pick_calls_undo(self, ws_client):
-        """Admin player after verify_code can trigger undo_pick."""
+        """Admin player after reauthenticate can trigger undo_pick."""
         client, _, mock_undo, _ = ws_client
         with client.websocket_connect("/ws") as ws:
             self._verify_as_admin(ws)
@@ -240,7 +223,8 @@ def ws_pick_client():
     with patch("routes.draft_routes.load_draft_state", return_value=PICK_FAKE_STATE), \
          patch("routes.draft_routes.save_pick") as mock_save, \
          patch("routes.draft_routes.undo_pick"), \
-         patch("routes.draft_routes.reset_pick"):
+         patch("routes.draft_routes.reset_pick"), \
+         patch("services.db_service.get_player_by_id", side_effect=_REAUTH_OK):
         from main import app
         yield TestClient(app), mock_save
 
@@ -248,9 +232,9 @@ def ws_pick_client():
 class TestWebSocketPick:
 
     def _verify_as(self, ws, player_id):
-        """Consume initial state, send verify_code, drain resulting messages."""
+        """Consume initial state, send reauthenticate, drain resulting messages."""
         ws.receive_json()  # initial state
-        ws.send_json({"action": "verify_code", "playerId": player_id, "code": "test"})
+        ws.send_json({"action": "reauthenticate", "playerId": player_id})
         ws.receive_json()  # chat_history (sent on connect, still in queue)
         ws.receive_json()  # verified
         ws.receive_json()  # state broadcast after verify
@@ -345,7 +329,8 @@ def ws_projection_client():
     with patch("routes.draft_routes.load_draft_state", return_value=PROJECTION_FAKE_STATE), \
          patch("routes.draft_routes.save_pick"), \
          patch("routes.draft_routes.undo_pick"), \
-         patch("routes.draft_routes.reset_pick"):
+         patch("routes.draft_routes.reset_pick"), \
+         patch("services.db_service.get_player_by_id", side_effect=_REAUTH_OK):
         from main import app
         yield TestClient(app)
 
@@ -358,22 +343,22 @@ class TestWebSocketProjectionGating:
             msg = ws.receive_json()
         assert msg["payload"]["preseason_predictions"] == {}
 
-    def test_admin_verify_code_receives_full_predictions(self, ws_projection_client):
-        """After verifying as an admin player, the resulting state broadcast is unstripped."""
+    def test_admin_reauthenticate_receives_full_predictions(self, ws_projection_client):
+        """After reauthenticating as an admin player, the resulting state broadcast is unstripped."""
         with ws_projection_client.websocket_connect("/ws") as ws:
             ws.receive_json()  # initial state (stripped)
             ws.receive_json()  # chat_history
-            ws.send_json({"action": "verify_code", "playerId": 1, "code": "test"})
+            ws.send_json({"action": "reauthenticate", "playerId": 1})
             msgs = [ws.receive_json(), ws.receive_json()]  # verified + state broadcast
         state_msg = next(m for m in msgs if m["type"] == "state")
         assert state_msg["payload"]["preseason_predictions"] == {"KC": {"projected_wins": 11.2}}
 
-    def test_player_verify_code_receives_stripped_predictions(self, ws_projection_client):
-        """A non-admin player's post-verify state broadcast is still stripped."""
+    def test_player_reauthenticate_receives_stripped_predictions(self, ws_projection_client):
+        """A non-admin player's post-reauthenticate state broadcast is still stripped."""
         with ws_projection_client.websocket_connect("/ws") as ws:
             ws.receive_json()  # initial state (stripped)
             ws.receive_json()  # chat_history
-            ws.send_json({"action": "verify_code", "playerId": 2, "code": "test"})
+            ws.send_json({"action": "reauthenticate", "playerId": 2})
             msgs = [ws.receive_json(), ws.receive_json()]  # verified + state broadcast
         state_msg = next(m for m in msgs if m["type"] == "state")
         assert state_msg["payload"]["preseason_predictions"] == {}
@@ -383,9 +368,9 @@ class TestWebSocketProjectionGating:
         with ws_projection_client.websocket_connect("/ws") as ws:
             ws.receive_json()  # initial state
             ws.receive_json()  # chat_history
-            ws.send_json({"action": "verify_code", "playerId": 2, "code": "test"})
+            ws.send_json({"action": "reauthenticate", "playerId": 2})
             ws.receive_json()  # verified
-            ws.receive_json()  # state broadcast after verify
+            ws.receive_json()  # state broadcast after reauthenticate
             ws.send_json({"action": "switch_season", "year": 2025})
             msg = ws.receive_json()
         assert msg["type"] == "state"

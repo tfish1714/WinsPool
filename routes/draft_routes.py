@@ -453,9 +453,6 @@ async def route_draft_results_by_year(request: Request, year: int):
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────
 
-import os
-ROOM_CODE = os.environ.get("ROOM_CODE", "test").strip().lower()
-
 
 async def _broadcast_pick_messages(manager, old_state: dict, new_state: dict, team: str) -> None:
     """Post pick + on-the-clock system messages to chat and broadcast them."""
@@ -547,30 +544,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     payload = switched_state if websocket in manager.admin_sockets else strip_admin_only_fields(switched_state)
                     await websocket.send_json({"type": "state", "payload": payload})
                 continue
-
-            elif action == "request_signin":
-                pid = msg.get("playerId")
-                if pid and str(pid).strip().lower() != "null":
-                    await websocket.send_json({
-                        "type": "verification_sent",
-                        "playerId": int(pid),
-                        "method": "room_code",
-                    })
-
-            elif action == "verify_code":
-                pid, code = msg.get("playerId"), msg.get("code")
-                if pid and code:
-                    pid = int(pid)
-                    if str(code).strip().lower() == ROOM_CODE:
-                        connected_players.add(pid)
-                        socket_player_id = pid
-                        new_state = load_draft_state(connected_players, year=target_year)
-                        is_admin = _get_authenticated_admin(socket_player_id, new_state["all_players"]) is not None
-                        manager.set_admin(websocket, is_admin)
-                        await websocket.send_json({"type": "verified", "playerId": pid})
-                        await manager.broadcast({"type": "state", "payload": new_state})
-                    else:
-                        await websocket.send_json({"type": "error", "message": "Invalid Room Code."})
 
             elif action == "reauthenticate":
                 pid = msg.get("playerId")
