@@ -22,6 +22,7 @@ from routes.api_routes import router as api_router
 from routes.auth_routes import router as auth_router
 from routes.admin_routes import router as admin_router, _page_router as admin_page_router
 from routes.prediction_routes import router as prediction_router
+from routes.mock_draft_routes import router as mock_draft_router
 
 app = FastAPI(title="WinsPool")
 
@@ -78,6 +79,7 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(admin_page_router)
 app.include_router(prediction_router)
+app.include_router(mock_draft_router)
 
 # ── Root redirect ─────────────────────────────────────────────────────────────
 @app.get("/")

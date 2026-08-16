@@ -97,3 +97,17 @@ class SaveBroadcastRecapRequest(BaseModel):
 class PredictionConfigRequest(BaseModel):
     elo_weight: float = 0.7
     simulations: int = 1000
+
+
+# --- Mock Draft ---
+
+class MockDraftPickRequest(BaseModel):
+    season: int
+    availableTeams: List[str]
+    wildcardsSoFar: int = 0
+    botPicksRemaining: int = 1
+
+
+class MockDraftResultsRequest(BaseModel):
+    season: int
+    rosters: Dict[str, List[str]]
