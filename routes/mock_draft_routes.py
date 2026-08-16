@@ -8,7 +8,8 @@ serialized, not merely hidden client-side.
 """
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from fastapi.templating import Jinja2Templates
 
 from routes.models import MockDraftPickRequest, MockDraftResultsRequest
 from services.data_service import get_season_projection_legacy_shape
@@ -21,6 +22,14 @@ from services.session_service import get_is_admin
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mock-draft")
+
+page_router = APIRouter()
+templates = Jinja2Templates(directory="templates")
+
+
+@page_router.get("/mock-draft", include_in_schema=False)
+async def serve_mock_draft(request: Request):
+    return templates.TemplateResponse(request, "mock_draft.html", {})
 
 
 @router.get("/setup")
