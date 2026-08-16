@@ -565,7 +565,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         connected_players.add(pid)
                         socket_player_id = pid
                         new_state = load_draft_state(connected_players, year=target_year)
-                        is_admin = _get_authenticated_admin(pid, new_state["all_players"]) is not None
+                        is_admin = _get_authenticated_admin(socket_player_id, new_state["all_players"]) is not None
                         manager.set_admin(websocket, is_admin)
                         await websocket.send_json({"type": "verified", "playerId": pid})
                         await manager.broadcast({"type": "state", "payload": new_state})
@@ -587,7 +587,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         connected_players.add(pid)
                         socket_player_id = pid
                         new_state = load_draft_state(connected_players, year=target_year)
-                        is_admin = _get_authenticated_admin(pid, new_state["all_players"]) is not None
+                        is_admin = _get_authenticated_admin(socket_player_id, new_state["all_players"]) is not None
                         manager.set_admin(websocket, is_admin)
                         await websocket.send_json({"type": "verified", "playerId": pid})
                         await manager.broadcast({"type": "state", "payload": new_state})
