@@ -106,3 +106,25 @@ def bot_pick(
         reverse=True,
     )
     return _weighted_rank_pick(ranked), False
+
+
+def rank_rosters(season: int, rosters: Dict[str, List[str]]) -> List[Dict]:
+    """Rank each mock draft slot's 3-team roster by total projected wins.
+
+    Returns one entry per slot: {"slot", "totalProjectedWins", "rank"},
+    sorted by rank ascending (1 = highest total). Teams with no projection
+    on record contribute 0.0, never an error.
+    """
+    projections = get_season_projection_legacy_shape(season)
+
+    def total_wins(teams: List[str]) -> float:
+        return sum((projections.get(t) or {}).get("projected_wins", 0) or 0 for t in teams)
+
+    totals = [
+        {"slot": int(slot), "totalProjectedWins": round(total_wins(teams), 1)}
+        for slot, teams in rosters.items()
+    ]
+    totals.sort(key=lambda r: r["totalProjectedWins"], reverse=True)
+    for idx, row in enumerate(totals):
+        row["rank"] = idx + 1
+    return totals

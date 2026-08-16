@@ -123,3 +123,36 @@ class TestBotPick:
                     if was_wildcard:
                         wildcards_so_far += 1
                 assert wildcards_so_far >= MIN_WILDCARDS_PER_DRAFT
+
+
+class TestRankRosters:
+
+    def test_ranks_highest_total_first(self):
+        from services.mock_draft_service import rank_rosters
+        projections = {
+            "KC": {"projected_wins": 11.0}, "DAL": {"projected_wins": 9.0},
+            "NE": {"projected_wins": 4.0}, "LV": {"projected_wins": 3.0},
+        }
+        rosters = {"1": ["KC", "DAL"], "2": ["NE", "LV"]}
+        with patch("services.mock_draft_service.get_season_projection_legacy_shape", return_value=projections):
+            result = rank_rosters(2026, rosters)
+        by_slot = {r["slot"]: r for r in result}
+        assert by_slot[1]["rank"] == 1
+        assert by_slot[1]["totalProjectedWins"] == 20.0
+        assert by_slot[2]["rank"] == 2
+        assert by_slot[2]["totalProjectedWins"] == 7.0
+
+    def test_missing_projection_counts_as_zero(self):
+        from services.mock_draft_service import rank_rosters
+        with patch("services.mock_draft_service.get_season_projection_legacy_shape", return_value={}):
+            result = rank_rosters(2026, {"1": ["KC", "DAL"]})
+        assert result[0]["totalProjectedWins"] == 0.0
+        assert result[0]["rank"] == 1
+
+    def test_result_length_matches_roster_count(self):
+        from services.mock_draft_service import rank_rosters
+        rosters = {str(i): ["KC"] for i in range(1, 11)}
+        with patch("services.mock_draft_service.get_season_projection_legacy_shape", return_value={"KC": {"projected_wins": 5.0}}):
+            result = rank_rosters(2026, rosters)
+        assert len(result) == 10
+        assert {r["rank"] for r in result} == set(range(1, 11))
