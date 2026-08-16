@@ -124,3 +124,38 @@ def test_require_auth_raises_401_for_expired_token(monkeypatch):
         require_auth(authorization=f"Bearer {expired_token}")
     assert exc_info.value.status_code == 401
     assert "expired" in exc_info.value.detail.lower()
+
+
+# ── get_is_admin() — non-raising admin check for anonymous-friendly endpoints ─
+
+def test_get_is_admin_true_for_valid_admin_token(monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "test-secret-is-admin")
+    from services import session_service
+    token = session_service.create_token(player_id=1, role="admin")
+    assert session_service.get_is_admin(authorization=f"Bearer {token}", session_token=None) is True
+
+
+def test_get_is_admin_false_for_valid_non_admin_token(monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "test-secret-is-admin")
+    from services import session_service
+    token = session_service.create_token(player_id=2, role="user")
+    assert session_service.get_is_admin(authorization=f"Bearer {token}", session_token=None) is False
+
+
+def test_get_is_admin_false_when_no_token_present(monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "test-secret-is-admin")
+    from services import session_service
+    assert session_service.get_is_admin(authorization=None, session_token=None) is False
+
+
+def test_get_is_admin_false_for_malformed_token(monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "test-secret-is-admin")
+    from services import session_service
+    assert session_service.get_is_admin(authorization="Bearer not-a-real-jwt", session_token=None) is False
+
+
+def test_get_is_admin_reads_session_cookie_when_no_header(monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "test-secret-is-admin")
+    from services import session_service
+    token = session_service.create_token(player_id=1, role="admin")
+    assert session_service.get_is_admin(authorization=None, session_token=token) is True

@@ -106,3 +106,26 @@ def require_admin(
     if payload.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin role required.")
     return payload
+
+
+def get_is_admin(
+    authorization: str = Header(default=None),
+    session_token: str = Cookie(default=None),
+) -> bool:
+    """FastAPI dependency: True if the request carries a valid, non-expired
+    admin JWT (Bearer header or session cookie). Never raises — for
+    endpoints that must work for anonymous callers and only conditionally
+    include admin-only data (e.g. the mock draft).
+    """
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.removeprefix("Bearer ")
+    elif session_token:
+        token = session_token
+    if not token:
+        return False
+    try:
+        payload = decode_token(token)
+    except Exception:
+        return False
+    return payload.get("role") == "admin"
