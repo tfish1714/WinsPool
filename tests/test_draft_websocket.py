@@ -321,3 +321,72 @@ class TestWebSocketReauthenticate:
                 msgs = [ws.receive_json(), ws.receive_json()]  # verified + state broadcast
         types = {m["type"] for m in msgs}
         assert "verified" in types
+
+
+# ---------------------------------------------------------------------------
+# Mock Draft & Projection Gating — Task 3: admin detection wired into lifecycle
+# ---------------------------------------------------------------------------
+
+PROJECTION_FAKE_STATE = {
+    "season": 2025,
+    "active_pick": 3,
+    "preseason_predictions": {"KC": {"projected_wins": 11.2}},
+    "all_players": [
+        {"playerId": 1, "fullName": "Admin User", "role": "admin"},
+        {"playerId": 2, "fullName": "Regular Player", "role": "user"},
+    ],
+    "picks": [],
+    "draft_order": [],
+}
+
+
+@pytest.fixture
+def ws_projection_client():
+    with patch("routes.draft_routes.load_draft_state", return_value=PROJECTION_FAKE_STATE), \
+         patch("routes.draft_routes.save_pick"), \
+         patch("routes.draft_routes.undo_pick"), \
+         patch("routes.draft_routes.reset_pick"):
+        from main import app
+        yield TestClient(app)
+
+
+class TestWebSocketProjectionGating:
+
+    def test_initial_state_before_auth_has_predictions_stripped(self, ws_projection_client):
+        """A brand-new connection (not yet verified) must never see raw predictions."""
+        with ws_projection_client.websocket_connect("/ws") as ws:
+            msg = ws.receive_json()
+        assert msg["payload"]["preseason_predictions"] == {}
+
+    def test_admin_verify_code_receives_full_predictions(self, ws_projection_client):
+        """After verifying as an admin player, the resulting state broadcast is unstripped."""
+        with ws_projection_client.websocket_connect("/ws") as ws:
+            ws.receive_json()  # initial state (stripped)
+            ws.receive_json()  # chat_history
+            ws.send_json({"action": "verify_code", "playerId": 1, "code": "test"})
+            msgs = [ws.receive_json(), ws.receive_json()]  # verified + state broadcast
+        state_msg = next(m for m in msgs if m["type"] == "state")
+        assert state_msg["payload"]["preseason_predictions"] == {"KC": {"projected_wins": 11.2}}
+
+    def test_player_verify_code_receives_stripped_predictions(self, ws_projection_client):
+        """A non-admin player's post-verify state broadcast is still stripped."""
+        with ws_projection_client.websocket_connect("/ws") as ws:
+            ws.receive_json()  # initial state (stripped)
+            ws.receive_json()  # chat_history
+            ws.send_json({"action": "verify_code", "playerId": 2, "code": "test"})
+            msgs = [ws.receive_json(), ws.receive_json()]  # verified + state broadcast
+        state_msg = next(m for m in msgs if m["type"] == "state")
+        assert state_msg["payload"]["preseason_predictions"] == {}
+
+    def test_switch_season_direct_send_respects_admin_status(self, ws_projection_client):
+        """switch_season bypasses broadcast() with a direct send — must also be gated."""
+        with ws_projection_client.websocket_connect("/ws") as ws:
+            ws.receive_json()  # initial state
+            ws.receive_json()  # chat_history
+            ws.send_json({"action": "verify_code", "playerId": 2, "code": "test"})
+            ws.receive_json()  # verified
+            ws.receive_json()  # state broadcast after verify
+            ws.send_json({"action": "switch_season", "year": 2025})
+            msg = ws.receive_json()
+        assert msg["type"] == "state"
+        assert msg["payload"]["preseason_predictions"] == {}

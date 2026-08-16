@@ -527,7 +527,7 @@ async def websocket_endpoint(websocket: WebSocket):
     socket_player_id: int | None = None  # track which player authenticated on this socket
     try:
         initial_state = load_draft_state(connected_players)
-        await websocket.send_json({"type": "state", "payload": initial_state})
+        await websocket.send_json({"type": "state", "payload": strip_admin_only_fields(initial_state)})
         history = get_recent_messages(initial_state.get("season", 2026))
         await websocket.send_json({"type": "chat_history", "messages": history})
         while True:
@@ -543,7 +543,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 yr = msg.get("year")
                 if yr:
                     current_view_year = int(yr)
-                    await websocket.send_json({"type": "state", "payload": load_draft_state(connected_players, year=current_view_year)})
+                    switched_state = load_draft_state(connected_players, year=current_view_year)
+                    payload = switched_state if websocket in manager.admin_sockets else strip_admin_only_fields(switched_state)
+                    await websocket.send_json({"type": "state", "payload": payload})
                 continue
 
             elif action == "request_signin":
@@ -562,8 +564,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     if str(code).strip().lower() == ROOM_CODE:
                         connected_players.add(pid)
                         socket_player_id = pid
+                        new_state = load_draft_state(connected_players, year=target_year)
+                        is_admin = _get_authenticated_admin(pid, new_state["all_players"]) is not None
+                        manager.set_admin(websocket, is_admin)
                         await websocket.send_json({"type": "verified", "playerId": pid})
-                        await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
+                        await manager.broadcast({"type": "state", "payload": new_state})
                     else:
                         await websocket.send_json({"type": "error", "message": "Invalid Room Code."})
 
@@ -581,8 +586,11 @@ async def websocket_endpoint(websocket: WebSocket):
                             continue
                         connected_players.add(pid)
                         socket_player_id = pid
+                        new_state = load_draft_state(connected_players, year=target_year)
+                        is_admin = _get_authenticated_admin(pid, new_state["all_players"]) is not None
+                        manager.set_admin(websocket, is_admin)
                         await websocket.send_json({"type": "verified", "playerId": pid})
-                        await manager.broadcast({"type": "state", "payload": load_draft_state(connected_players, year=target_year)})
+                        await manager.broadcast({"type": "state", "payload": new_state})
                     except ValueError:
                         pass
 
