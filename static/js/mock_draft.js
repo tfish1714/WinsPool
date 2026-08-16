@@ -196,6 +196,7 @@ class MockDraft {
     }
 
     restart() {
+        this.$board.classList.add('hidden');
         this.$results.classList.add('hidden');
         this.$error.classList.add('hidden');
         this.mySlot = null;
