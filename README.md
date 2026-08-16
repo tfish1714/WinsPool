@@ -18,6 +18,12 @@ A real-time, WebSocket-powered interface for the big day.
 - **Admin Overrides**: Force or undo picks to keep the draft moving.
 - **Analytics**: Integrated preseason projections and win-total confidence scores to help you make the best pick.
 
+### Mock Draft (Practice Mode)
+A shareable, no-login practice run of the draft — perfect for players trying the app for the first time.
+- **Zero Setup**: Just open the link and pick a draft slot; no account required.
+- **Realistic Bots**: The other 9 slots are filled by bots that draft using the same model + analyst projections as the real thing, with a guaranteed wildcard pick or two to keep it unpredictable.
+- **Same Room, Same Feel**: Pick queue, running portfolio, and full board — same layout as the live draft, minus the chat.
+
 ### Dynamic Standings & Analytics
 - **Live Leaderboards**: Track group rankings with automated win/loss updates.
 - **What-If Scenarios**: A matrix view to see how future outcomes affect the pool.

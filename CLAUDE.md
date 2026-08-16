@@ -64,6 +64,21 @@ pytest tests/
 pytest tests/ --cov=services --cov=routes
 ```
 
+### Frontend Testing
+
+`pytest` covers routes/services only — there is no automated JS test suite. Any
+UI-visible change (new page, new nav entry, CSS, layout) must be manually
+verified in-browser, and **that verification must include a mobile viewport**,
+not just desktop. This app has bitten itself on this before: `static/js/main.js`'s
+`updateNav()` renders the desktop nav (top rail + "More" dropdown) entirely
+client-side, but the mobile nav drawer (`templates/base.html`'s
+`.nav-drawer__links`) is separate, hardcoded, server-rendered markup —
+`responsive.js` only toggles the drawer open/closed, it doesn't populate its
+links. **A nav link added to one does not appear in the other.** When adding or
+changing a nav destination, update both `updateNav()`'s `moreLinks`/`primaryLinks`
+arrays *and* the matching `<a>` in `base.html`'s drawer, and check both a desktop
+width and a narrow (~390px) mobile width before calling it done.
+
 ## Architecture
 
 ### Stack
@@ -101,11 +116,13 @@ routes/
   draft_routes.py        # Live draft room
   history_routes.py      # Historical data views
   prediction_routes.py   # ML prediction endpoints (/api/predictions/*)
+  mock_draft_routes.py   # Solo mock draft: page route + /api/mock-draft/* (setup, pick, results)
 services/
   data_service.py        # 3-tier cache: memory → pickle → Firestore
   db_service.py          # Firestore/pickle persistence + auth (bcrypt)
   analysis_service.py    # Standings calc, win matrices, schedules
   draft_service.py       # Draft state, pick validation, WebSocket sync
+  mock_draft_service.py  # Mock draft: pick sequencing, bot picks, end-of-draft ranking (stateless, no DB writes)
   prediction_service.py  # Win projections (calls NN model)
   nn_prediction_service.py / nn_feature_engine.py / nn_projection_engine.py
   recap_service.py       # Gemini-powered weekly summaries
@@ -127,6 +144,7 @@ static/
     auth_service.js      # Client-side auth
     responsive.js        # Mobile drawer controller (non-module IIFE, loaded after main.js)
     chat.js              # Draft room chat overlay
+    mock_draft.js        # Standalone mock draft page logic — does NOT import main.js/websocket_service.js/auth_service.js
 scripts/                 # CLI tools for data sync, ML training, cache building
 models/                  # nn_v{N}.keras + scaler, xgb_v{N}.json + scaler, lr_v{N}.pkl + scaler; *_registry.json per model type
 rawdata/                 # NFL raw data (NOT committed)
@@ -184,11 +202,46 @@ python scripts/daily_nfl_sync.py && python scripts/refresh_local_pkls.py
 
 Handled in `db_service.py`: bcrypt (12 rounds) with legacy SHA-256 migration support. Role-based access (admin/player). No external auth library — session state stored in the DB.
 
+Password login (`POST /api/login`) issues a signed JWT (`session_service.create_token`) returned in the response body and set as an `httpOnly` `session_token` cookie. HTTP routes validate it via `require_auth`/`require_admin` (`Authorization: Bearer` header or the cookie); `services/session_service.py::get_is_admin` is a third, non-raising variant for endpoints that must also work for anonymous callers (used by the mock draft). There is no separate room-code/passcode mechanism — that (`ROOM_CODE`, WebSocket `verify_code`/`request_signin`) was removed as dead code, since the frontend never used it (see Real-Time Draft below for how the live draft's WebSocket authenticates instead — it does **not** yet reuse this JWT; known follow-up).
+
 ### Real-Time Draft
 
 - **Backend**: FastAPI WebSocket endpoint in `draft_routes.py`, state managed via `_CACHED_DRAFT_STATE` in `draft_service.py`
 - **Frontend**: `js/websocket_service.js` connects and handles state updates
 - Admin overrides (force/undo picks) are available via `/api/admin/*` endpoints
+- **Auth handshake**: the client sends `{action: "reauthenticate", playerId}` on connect (`main.js::onWsOpen`); the server accepts `socket_player_id` from that client-supplied `playerId` after checking the player exists and has a `password_hash` set (`get_player_by_id`). **Known gap**: this never actually verifies the connecting browser's `session_token` JWT (issued by the real password check at `/api/login`) — it trusts the client-asserted ID once *any* password exists for that account. Closing this by decoding the `session_token` cookie already present on the WS handshake (browsers attach cookies to WS upgrades automatically) and deriving `socket_player_id` from the JWT's `sub` claim instead is a scoped, not-yet-implemented follow-up.
+- **Projection gating**: `preseason_predictions` (team win projections) must never reach a non-admin socket. `ConnectionManager` (in `draft_routes.py`) tracks `admin_sockets` per connection (set via `set_admin()` once a socket's `reauthenticate` resolves) and `broadcast()` strips that field (`draft_service.strip_admin_only_fields`) for every non-admin recipient — enforced server-side on every `"state"` send path (initial connect, `switch_season`, and the post-`reauthenticate` broadcast), not left to client-side rendering.
+
+### Mock Draft (Practice)
+
+A standalone, **login-free** solo draft simulator at `/mock-draft` — a shareable
+link for players to try the app before the real draft, with zero setup.
+
+- **Page**: `templates/mock_draft.html` deliberately does **not** extend
+  `base.html` (which would pull in `main.js`'s login wall) and loads only
+  `static/js/mock_draft.js` — no `main.js`/`websocket_service.js`/`auth_service.js`.
+  It mirrors the real draft room's layout (clock card, pick queue, teams grid
+  with select-then-confirm, running portfolio, collapsible full board) minus
+  chat and minus a real countdown (practice has no timer).
+- **Backend**: `services/mock_draft_service.py` (pure, stateless — no DB
+  writes) + `routes/mock_draft_routes.py` (`GET /setup`, `POST /pick`,
+  `POST /results`).
+- **Pick order** comes from `draft_order_rules` (the real draft's own
+  pick-sequence pattern), using whichever season currently has rows —
+  deliberately decoupled from whichever season supplies team projections, so
+  the mock draft survives an admin resetting the real season's draft order.
+- **Bots** pick using the same blended model/consensus projections as the
+  real draft (`get_season_projection_legacy_shape`), weighted toward
+  higher-projected teams via `_weighted_rank_pick`, with a guaranteed minimum
+  of `MIN_WILDCARDS_PER_DRAFT` (2) uniform-random "wildcard" picks across a
+  full draft's bot picks — enforced by a stateless pity mechanic in
+  `bot_pick()` (the caller passes running `wildcardsSoFar`/`botPicksRemaining`
+  counters each call; nothing is stored server-side).
+- **Projections are admin-gated** exactly like the live draft: `GET /setup`
+  only includes `projections` for a valid admin session (`get_is_admin`);
+  `POST /results` rankings include `totalProjectedWins` only for admins, and
+  carry a `graded: false` flag (never a fabricated rank) when a season has no
+  projection data at all.
 
 ### ML Predictions
 
