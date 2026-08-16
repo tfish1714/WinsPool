@@ -163,6 +163,7 @@ class App {
         }
         moreLinks.push(
             { href: '/draft/history', label: 'Draft History' },
+            { href: '/mock-draft',    label: 'Mock Draft' },
             { href: '/history',       label: 'All-Time History' },
             null,
             { href: '/profile',       label: 'Profile' },
