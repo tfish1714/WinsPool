@@ -52,7 +52,18 @@ class MockDraft {
     }
 
     showError(message) {
-        this.$error.textContent = message;
+        this.$error.innerHTML = '';
+        const msg = document.createElement('div');
+        msg.textContent = message;
+        this.$error.appendChild(msg);
+
+        const restartBtn = document.createElement('button');
+        restartBtn.type = 'button';
+        restartBtn.className = 'btn';
+        restartBtn.textContent = 'Restart Draft';
+        restartBtn.addEventListener('click', () => this.restart());
+        this.$error.appendChild(restartBtn);
+
         this.$error.classList.remove('hidden');
     }
 
@@ -120,18 +131,26 @@ class MockDraft {
         await new Promise(resolve => setTimeout(resolve, BOT_PICK_DELAY_MS));
 
         const remaining = this.totalBotPicks - this.botPicksDone;
-        const res = await fetch('/api/mock-draft/pick', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                season: this.setup.season,
-                availableTeams: this.availableTeams(),
-                wildcardsSoFar: this.wildcardsSoFar,
-                botPicksRemaining: remaining,
-            }),
-        });
-        if (!res.ok) return this.showError((await res.json()).error || 'Bot pick failed.');
-        const { team, wasWildcard } = await res.json();
+        let team, wasWildcard;
+        try {
+            const res = await fetch('/api/mock-draft/pick', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    season: this.setup.season,
+                    availableTeams: this.availableTeams(),
+                    wildcardsSoFar: this.wildcardsSoFar,
+                    botPicksRemaining: remaining,
+                }),
+            });
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.error || 'Bot pick failed.');
+            }
+            ({ team, wasWildcard } = await res.json());
+        } catch (err) {
+            return this.showError(err.message || 'Bot pick failed. Please restart the draft.');
+        }
         if (wasWildcard) this.wildcardsSoFar += 1;
         this.botPicksDone += 1;
         this.$botTurn.textContent = `Bot ${entry.slot} picks ${team}${wasWildcard ? ' (wildcard!)' : ''}`;
