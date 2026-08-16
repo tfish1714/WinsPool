@@ -1,6 +1,8 @@
 /**
  * WinsPool Mock Draft — standalone, login-free solo draft simulator.
- * Drives the entire 30-pick loop client-side against /api/mock-draft/*.
+ * Drives the entire pick loop client-side against /api/mock-draft/* (30
+ * picks under a full draft order, fewer if the season's draft_order_rules
+ * data is partial — see get_pick_sequence()).
  * Deliberately independent of main.js / websocket_service.js / auth_service.js.
  */
 
@@ -10,7 +12,6 @@ function teamLogo(code) {
 }
 
 const BOT_PICK_DELAY_MS = 600;
-const TOTAL_PICKS = 30;
 
 class MockDraft {
     constructor() {
@@ -59,7 +60,7 @@ class MockDraft {
 
         const restartBtn = document.createElement('button');
         restartBtn.type = 'button';
-        restartBtn.className = 'btn';
+        restartBtn.className = 'btn-primary';
         restartBtn.textContent = 'Restart Draft';
         restartBtn.addEventListener('click', () => this.restart());
         this.$error.appendChild(restartBtn);
@@ -97,7 +98,7 @@ class MockDraft {
             return this.finish();
         }
         const entry = this.setup.pickSequence[this.pickIndex];
-        this.$status.textContent = `Pick ${entry.pick} of ${TOTAL_PICKS}`;
+        this.$status.textContent = `Pick ${entry.pick} of ${this.setup.pickSequence.length}`;
 
         if (entry.slot === this.mySlot) {
             this.renderHumanTurn();
@@ -183,13 +184,19 @@ class MockDraft {
             });
             if (!res.ok) throw new Error((await res.json()).error || 'Ranking failed.');
             const { rankings } = await res.json();
-            rankings.sort((a, b) => a.rank - b.rank);
-            this.$rankings.innerHTML = `<h3>Final Rankings</h3>` + rankings.map(r => {
-                const isYou = r.slot === this.mySlot;
-                const label = isYou ? 'You' : `Bot ${r.slot}`;
-                const totalText = 'totalProjectedWins' in r ? ` — ${r.totalProjectedWins}W` : '';
-                return `<div class="mock-rank-row${isYou ? ' is-you' : ''}">#${r.rank} ${label}${totalText}</div>`;
-            }).join('');
+            const graded = rankings.length > 0 && rankings.every(r => r.graded);
+            if (!graded) {
+                this.$rankings.innerHTML = `<h3>Final Rankings</h3>
+                    <p>Rankings unavailable — no projection data for this season yet.</p>`;
+            } else {
+                rankings.sort((a, b) => a.rank - b.rank);
+                this.$rankings.innerHTML = `<h3>Final Rankings</h3>` + rankings.map(r => {
+                    const isYou = r.slot === this.mySlot;
+                    const label = isYou ? 'You' : `Bot ${r.slot}`;
+                    const totalText = 'totalProjectedWins' in r ? ` — ${r.totalProjectedWins}W` : '';
+                    return `<div class="mock-rank-row${isYou ? ' is-you' : ''}">#${r.rank} ${label}${totalText}</div>`;
+                }).join('');
+            }
         } catch (err) {
             this.showError(err.message);
         }
