@@ -171,7 +171,7 @@ def test_get_is_admin_prefers_bearer_header_over_cookie_when_both_present(monkey
     assert session_service.get_is_admin(authorization=f"Bearer {admin_token}", session_token=user_token) is True
 
 
-def test_get_is_admin_false_for_non_bearer_authorization_header(monkeypatch):
+def test_get_is_admin_true_for_non_bearer_header_falls_through_to_cookie(monkeypatch):
     """Verify non-Bearer Authorization headers (e.g. 'Basic xyz') are ignored and fall through to cookie check."""
     monkeypatch.setenv("JWT_SECRET", "test-secret-is-admin")
     from services import session_service
