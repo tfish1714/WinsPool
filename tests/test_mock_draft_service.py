@@ -58,3 +58,68 @@ class TestNflTeams:
         from services.mock_draft_service import NFL_TEAMS
         assert len(NFL_TEAMS) == 32
         assert len(set(NFL_TEAMS)) == 32
+
+
+class TestBotPick:
+
+    def test_returns_team_from_available_teams(self):
+        from services.mock_draft_service import bot_pick
+        projections = {"KC": {"projected_wins": 11.2}, "DAL": {"projected_wins": 9.1}}
+        with patch("services.mock_draft_service.get_season_projection_legacy_shape", return_value=projections):
+            for _ in range(50):
+                team, _ = bot_pick(2026, ["KC", "DAL"], wildcards_so_far=5, bot_picks_remaining=10)
+                assert team in ["KC", "DAL"]
+
+    def test_falls_back_to_uniform_random_when_no_projections(self):
+        from services.mock_draft_service import bot_pick
+        with patch("services.mock_draft_service.get_season_projection_legacy_shape", return_value={}):
+            team, was_wildcard = bot_pick(2026, ["KC", "DAL"], wildcards_so_far=5, bot_picks_remaining=10)
+        assert team in ["KC", "DAL"]
+        assert was_wildcard is False
+
+    def test_forces_wildcard_when_shortfall_equals_remaining_picks(self):
+        """wildcardsSoFar=0, botPicksRemaining=1 with MIN=2 -> needed(2) >= remaining(1) -> forced."""
+        from services.mock_draft_service import bot_pick
+        projections = {"KC": {"projected_wins": 11.2}, "DAL": {"projected_wins": 9.1}}
+        with patch("services.mock_draft_service.get_season_projection_legacy_shape", return_value=projections):
+            _, was_wildcard = bot_pick(2026, ["KC", "DAL"], wildcards_so_far=0, bot_picks_remaining=1)
+        assert was_wildcard is True
+
+    def test_forces_wildcard_at_exact_boundary(self):
+        """wildcardsSoFar=1, botPicksRemaining=1 -> needed(1) >= remaining(1) -> forced."""
+        from services.mock_draft_service import bot_pick
+        projections = {"KC": {"projected_wins": 11.2}, "DAL": {"projected_wins": 9.1}}
+        with patch("services.mock_draft_service.get_season_projection_legacy_shape", return_value=projections):
+            _, was_wildcard = bot_pick(2026, ["KC", "DAL"], wildcards_so_far=1, bot_picks_remaining=1)
+        assert was_wildcard is True
+
+    def test_does_not_force_wildcard_once_minimum_already_met(self):
+        """wildcardsSoFar=2 (minimum already hit) -> needed=0 -> never forced; disable the random roll to prove it."""
+        from services.mock_draft_service import bot_pick
+        projections = {"KC": {"projected_wins": 11.2}, "DAL": {"projected_wins": 9.1}}
+        with patch("services.mock_draft_service.get_season_projection_legacy_shape", return_value=projections), \
+             patch("services.mock_draft_service.random.random", return_value=0.99):
+            _, was_wildcard = bot_pick(2026, ["KC", "DAL"], wildcards_so_far=2, bot_picks_remaining=1)
+        assert was_wildcard is False
+
+    def test_full_draft_simulation_hits_minimum_wildcards(self):
+        """Simulate 27 bot picks (a full mock draft's bot slots) many times; every run has >= 2 wildcards."""
+        from services.mock_draft_service import bot_pick, MIN_WILDCARDS_PER_DRAFT
+        projections = {t: {"projected_wins": 32 - i} for i, t in enumerate(
+            ["KC", "DAL", "SF", "BUF", "PHI", "BAL", "DET", "MIA", "GB", "LA",
+             "CIN", "HOU", "MIN", "NYJ", "LAC", "PIT", "SEA", "TB", "IND", "DEN",
+             "NO", "ATL", "CHI", "ARI", "WAS", "CLE", "NYG", "TEN", "JAX", "CAR",
+             "NE", "LV"]
+        )}
+        with patch("services.mock_draft_service.get_season_projection_legacy_shape", return_value=projections):
+            for _ in range(20):  # repeat to cover the probabilistic (non-forced) path too
+                available = list(projections.keys())
+                wildcards_so_far = 0
+                total_bot_picks = 27
+                for i in range(total_bot_picks):
+                    remaining = total_bot_picks - i
+                    team, was_wildcard = bot_pick(2026, available, wildcards_so_far, remaining)
+                    available.remove(team)
+                    if was_wildcard:
+                        wildcards_so_far += 1
+                assert wildcards_so_far >= MIN_WILDCARDS_PER_DRAFT

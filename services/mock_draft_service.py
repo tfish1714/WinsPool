@@ -55,3 +55,54 @@ def get_projection_season() -> int:
     if order_df.empty:
         raise ValueError("No draft_order configured for any season.")
     return int(order_df["season"].max())
+
+
+def _weighted_rank_pick(ranked_teams: List[str]) -> str:
+    """Weighted-random pick from a projection-ranked list: the top team is
+    most likely, decaying geometrically down the list, rather than always
+    taking the single best team (so 9 bots don't draft identically).
+    """
+    weights = [0.6 ** i for i in range(len(ranked_teams))]
+    total = sum(weights)
+    roll = random.random() * total
+    cumulative = 0.0
+    for team, weight in zip(ranked_teams, weights):
+        cumulative += weight
+        if roll <= cumulative:
+            return team
+    return ranked_teams[-1]
+
+
+def bot_pick(
+    season: int,
+    available_teams: List[str],
+    wildcards_so_far: int,
+    bot_picks_remaining: int,
+) -> Tuple[str, bool]:
+    """Choose a team for a bot-controlled mock draft slot.
+
+    Returns (team, was_wildcard). Guarantees at least MIN_WILDCARDS_PER_DRAFT
+    wildcard picks across a full draft's worth of calls via a pity mechanic:
+    once the remaining bot picks can no longer make up the shortfall against
+    the minimum, this pick is forced to be a wildcard.
+    """
+    if not available_teams:
+        raise ValueError("available_teams must not be empty.")
+
+    needed = max(0, MIN_WILDCARDS_PER_DRAFT - wildcards_so_far)
+    forced = needed >= bot_picks_remaining
+    was_wildcard = forced or random.random() < WILDCARD_PROBABILITY
+
+    if was_wildcard:
+        return random.choice(available_teams), True
+
+    projections = get_season_projection_legacy_shape(season)
+    if not projections:
+        return random.choice(available_teams), False
+
+    ranked = sorted(
+        available_teams,
+        key=lambda t: (projections.get(t) or {}).get("projected_wins", 0) or 0,
+        reverse=True,
+    )
+    return _weighted_rank_pick(ranked), False
