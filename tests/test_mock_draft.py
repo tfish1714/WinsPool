@@ -71,8 +71,8 @@ class TestMockDraftResults:
 
     def test_non_admin_results_have_rank_only(self):
         with patch("routes.mock_draft_routes.rank_rosters", return_value=[
-            {"slot": 1, "totalProjectedWins": 20.2, "rank": 1},
-            {"slot": 2, "totalProjectedWins": 7.0, "rank": 2},
+            {"slot": 1, "totalProjectedWins": 20.2, "rank": 1, "graded": True},
+            {"slot": 2, "totalProjectedWins": 7.0, "rank": 2, "graded": True},
         ]):
             resp = client.post("/api/mock-draft/results", json={
                 "season": 2026, "rosters": {"1": ["KC", "DAL"], "2": ["NE", "LV"]},
@@ -81,10 +81,11 @@ class TestMockDraftResults:
         rankings = resp.json()["rankings"]
         assert all("totalProjectedWins" not in r for r in rankings)
         assert {r["rank"] for r in rankings} == {1, 2}
+        assert all(r["graded"] is True for r in rankings)
 
     def test_admin_results_include_totals(self, admin_token):
         with patch("routes.mock_draft_routes.rank_rosters", return_value=[
-            {"slot": 1, "totalProjectedWins": 20.2, "rank": 1},
+            {"slot": 1, "totalProjectedWins": 20.2, "rank": 1, "graded": True},
         ]):
             resp = client.post(
                 "/api/mock-draft/results",
@@ -93,3 +94,30 @@ class TestMockDraftResults:
             )
         assert resp.status_code == 200
         assert resp.json()["rankings"][0]["totalProjectedWins"] == 20.2
+
+    def test_ungraded_signal_survives_for_non_admin(self):
+        """When rank_rosters marks entries ungraded (no projection data for the season),
+        the non-admin response variant must still carry that signal through so the
+        frontend can show an honest message instead of a fabricated rank."""
+        with patch("routes.mock_draft_routes.rank_rosters", return_value=[
+            {"slot": 1, "totalProjectedWins": 0.0, "rank": 1, "graded": False},
+            {"slot": 2, "totalProjectedWins": 0.0, "rank": 2, "graded": False},
+        ]):
+            resp = client.post("/api/mock-draft/results", json={
+                "season": 2026, "rosters": {"1": ["KC", "DAL"], "2": ["NE", "LV"]},
+            })
+        assert resp.status_code == 200
+        rankings = resp.json()["rankings"]
+        assert all(r["graded"] is False for r in rankings)
+
+    def test_ungraded_signal_survives_for_admin(self, admin_token):
+        with patch("routes.mock_draft_routes.rank_rosters", return_value=[
+            {"slot": 1, "totalProjectedWins": 0.0, "rank": 1, "graded": False},
+        ]):
+            resp = client.post(
+                "/api/mock-draft/results",
+                json={"season": 2026, "rosters": {"1": ["KC", "DAL"]}},
+                headers={"Authorization": admin_token},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["rankings"][0]["graded"] is False

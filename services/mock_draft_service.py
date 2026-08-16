@@ -111,17 +111,26 @@ def bot_pick(
 def rank_rosters(season: int, rosters: Dict[str, List[str]]) -> List[Dict]:
     """Rank each mock draft slot's 3-team roster by total projected wins.
 
-    Returns one entry per slot: {"slot", "totalProjectedWins", "rank"},
+    Returns one entry per slot: {"slot", "totalProjectedWins", "rank", "graded"},
     sorted by rank ascending (1 = highest total). Teams with no projection
     on record contribute 0.0, never an error.
+
+    "graded" is False for every entry when the season has zero projection
+    data at all (get_season_projection_legacy_shape returns {}) — in that
+    case every roster totals 0.0 and the "rank"/order below is purely an
+    artifact of dict iteration, not a real comparison. Ranks are still
+    returned (same response shape either way) but callers must not present
+    them as meaningful; mirrors how bot_pick() falls back to uniform-random
+    rather than pretending a projection-informed pick was made.
     """
     projections = get_season_projection_legacy_shape(season)
+    graded = bool(projections)
 
     def total_wins(teams: List[str]) -> float:
         return sum((projections.get(t) or {}).get("projected_wins", 0) or 0 for t in teams)
 
     totals = [
-        {"slot": int(slot), "totalProjectedWins": round(total_wins(teams), 1)}
+        {"slot": int(slot), "totalProjectedWins": round(total_wins(teams), 1), "graded": graded}
         for slot, teams in rosters.items()
     ]
     totals.sort(key=lambda r: r["totalProjectedWins"], reverse=True)

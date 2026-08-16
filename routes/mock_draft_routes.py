@@ -72,5 +72,5 @@ async def mock_draft_results(body: MockDraftResultsRequest, is_admin: bool = Dep
         return server_error("Failed to rank rosters.")
 
     if not is_admin:
-        rankings = [{"slot": r["slot"], "rank": r["rank"]} for r in rankings]
+        rankings = [{"slot": r["slot"], "rank": r["rank"], "graded": r["graded"]} for r in rankings]
     return {"rankings": rankings}
