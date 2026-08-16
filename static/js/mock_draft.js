@@ -1,9 +1,10 @@
 /**
  * WinsPool Mock Draft — standalone, login-free solo draft simulator.
- * Drives the entire pick loop client-side against /api/mock-draft/* (30
- * picks under a full draft order, fewer if the season's draft_order_rules
- * data is partial — see get_pick_sequence()).
- * Deliberately independent of main.js / websocket_service.js / auth_service.js.
+ * Mirrors the real draft room's layout (clock card, pick queue, teams grid,
+ * running portfolio, full board toggle) minus chat and minus a real timer —
+ * drives the entire pick loop client-side against /api/mock-draft/* instead
+ * of a WebSocket. Deliberately independent of main.js / websocket_service.js
+ * / auth_service.js.
  */
 
 const TEAM_LOGO_OVERRIDES = { LA: 'LAR', WAS: 'WSH' };
@@ -15,7 +16,9 @@ function esc(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-const BOT_PICK_DELAY_MS = 600;
+const BOT_PICK_DELAY_MS = 700;
+const QUEUE_PAST = 3;
+const QUEUE_FUTURE = 2;
 
 // Cosmetic only — assigned per slot for the session, always shown alongside
 // the slot number so it's still clear which pick is which.
@@ -31,24 +34,36 @@ class MockDraft {
     constructor() {
         this.setup = null;       // { pickSequence, teams, season, teamSchedules, projections? }
         this.mySlot = null;
+        this.slots = [];         // distinct slot numbers, ascending
         this.rosters = {};       // slot -> [team, team, team]
         this.botNames = {};      // slot -> cosmetic name (non-human slots only)
-        this.pickHistory = [];   // [{ pick, slot, team, wasWildcard }] in draft order
+        this.pickHistory = [];   // [{ pick, slot, team, wasWildcard }] in draft order, same length as pickSequence once done
         this.picked = new Set(); // teams already taken
         this.pickIndex = 0;      // index into pickSequence
+        this.selectedTeam = null;
         this.wildcardsSoFar = 0;
         this.totalBotPicks = 0;
         this.botPicksDone = 0;
+        this.boardExpanded = false;
 
         this.$slotSelect = document.getElementById('mock-slot-select');
         this.$slotGrid = document.getElementById('mock-slot-grid');
         this.$randomSlotBtn = document.getElementById('mock-random-slot');
+        this.$seasonDisplay = document.getElementById('mock-season-display');
+        this.$roundLabel = document.getElementById('mock-round-label');
+
         this.$board = document.getElementById('mock-draft-board');
-        this.$status = document.getElementById('mock-status');
-        this.$botTurn = document.getElementById('mock-bot-turn');
+        this.$clockCard = document.getElementById('mock-clock-card');
+        this.$pickQueue = document.getElementById('mock-pick-queue');
         this.$teamGrid = document.getElementById('mock-team-grid');
-        this.$rosters = document.getElementById('mock-rosters');
-        this.$pickHistory = document.getElementById('mock-pick-history');
+        this.$selectionPreview = document.getElementById('mock-selection-preview');
+        this.$selectedTeamName = document.getElementById('mock-selected-team-name');
+        this.$confirmPickBtn = document.getElementById('mock-confirm-pick-btn');
+        this.$portfolio = document.getElementById('mock-portfolio-content');
+        this.$boardToggleBtn = document.getElementById('mock-board-toggle-btn');
+        this.$fullBoardSection = document.getElementById('mock-full-board-section');
+        this.$fullBoard = document.getElementById('mock-full-board');
+
         this.$results = document.getElementById('mock-results');
         this.$yourTeams = document.getElementById('mock-your-teams');
         this.$rankings = document.getElementById('mock-rankings');
@@ -57,6 +72,8 @@ class MockDraft {
 
         this.$randomSlotBtn.addEventListener('click', () => this.chooseSlot(null));
         this.$again.addEventListener('click', () => this.restart());
+        this.$confirmPickBtn.addEventListener('click', () => this.confirmPick());
+        this.$boardToggleBtn.addEventListener('click', () => this.toggleFullBoard());
     }
 
     async init() {
@@ -64,6 +81,8 @@ class MockDraft {
             const res = await fetch('/api/mock-draft/setup');
             if (!res.ok) throw new Error((await res.json()).error || 'Setup failed.');
             this.setup = await res.json();
+            this.slots = [...new Set(this.setup.pickSequence.map(e => e.slot))].sort((a, b) => a - b);
+            this.$seasonDisplay.textContent = this.setup.season;
             this.renderSlotGrid();
         } catch (err) {
             this.showError(err.message);
@@ -87,8 +106,7 @@ class MockDraft {
     }
 
     renderSlotGrid() {
-        const slots = [...new Set(this.setup.pickSequence.map(e => e.slot))].sort((a, b) => a - b);
-        this.$slotGrid.innerHTML = slots.map(slot => `
+        this.$slotGrid.innerHTML = this.slots.map(slot => `
             <button class="mock-slot-btn" data-slot="${slot}">
                 <span class="mock-slot-label">Slot</span>
                 <span class="mock-slot-num">${slot}</span>
@@ -100,20 +118,19 @@ class MockDraft {
     }
 
     chooseSlot(slot) {
-        const slots = [...new Set(this.setup.pickSequence.map(e => e.slot))];
-        this.mySlot = slot === null ? slots[Math.floor(Math.random() * slots.length)] : slot;
+        this.mySlot = slot === null ? this.slots[Math.floor(Math.random() * this.slots.length)] : slot;
         this.totalBotPicks = this.setup.pickSequence.filter(e => e.slot !== this.mySlot).length;
-        slots.forEach(s => { this.rosters[s] = []; });
-        this.assignBotNames(slots);
+        this.slots.forEach(s => { this.rosters[s] = []; });
+        this.assignBotNames();
 
         this.$slotSelect.classList.add('hidden');
-        this.$board.classList.remove('hidden');
-        this.renderRosters();
-        this.renderPickHistory();
+        this.$board.style.display = '';
+        this.renderPortfolio();
+        this.renderFullBoard();
         this.advance();
     }
 
-    assignBotNames(slots) {
+    assignBotNames() {
         const pool = [...BOT_NAME_POOL];
         for (let i = pool.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
@@ -121,7 +138,7 @@ class MockDraft {
         }
         this.botNames = {};
         let i = 0;
-        slots.forEach(s => {
+        this.slots.forEach(s => {
             if (s !== this.mySlot) {
                 this.botNames[s] = pool[i % pool.length];
                 i += 1;
@@ -133,15 +150,12 @@ class MockDraft {
         return slot === this.mySlot ? 'You' : `${this.botNames[slot]} – Slot ${slot}`;
     }
 
-    availableTeams() {
-        return this.setup.teams.filter(t => !this.picked.has(t));
+    roundFor(pick) {
+        return Math.ceil(pick / this.slots.length);
     }
 
-    renderStatus(isYourTurn) {
-        const total = this.setup.pickSequence.length;
-        const entry = this.setup.pickSequence[this.pickIndex];
-        const dotClass = isYourTurn ? 'dot warn pulse' : 'dot pulse';
-        this.$status.innerHTML = `<span class="${dotClass}"></span><span>PICK ${entry.pick} OF ${total}</span>`;
+    availableTeams() {
+        return this.setup.teams.filter(t => !this.picked.has(t));
     }
 
     async advance() {
@@ -149,18 +163,133 @@ class MockDraft {
             return this.finish();
         }
         const entry = this.setup.pickSequence[this.pickIndex];
-        this.renderStatus(entry.slot === this.mySlot);
+        const isYourTurn = entry.slot === this.mySlot;
 
-        if (entry.slot === this.mySlot) {
+        this.$roundLabel.textContent = ` / round ${this.roundFor(entry.pick)}`;
+        this.renderClockCard(entry, isYourTurn);
+        this.renderPickQueue();
+
+        if (isYourTurn) {
+            this.$teamGrid.classList.remove('hidden');
             this.renderHumanTurn();
         } else {
+            this.$teamGrid.classList.add('hidden');
+            this.$selectionPreview.classList.add('hidden');
             await this.runBotTurn(entry);
         }
     }
 
+    renderClockCard(entry, isYourTurn) {
+        const total = this.setup.pickSequence.length;
+        this.$clockCard.innerHTML = `
+            <div class="cc-left">
+                <div class="eyebrow" style="color:var(--ink-3)">On the clock</div>
+                <div class="cc-name"${isYourTurn ? ' style="color:var(--link)"' : ''}>${esc(this.slotLabel(entry.slot))}</div>
+                <div class="cc-sub">Round ${this.roundFor(entry.pick)} &middot; Pick ${entry.pick} of ${total}</div>
+            </div>
+            <div class="cc-pick">
+                <span class="numeral" style="font-size:26px;color:var(--ink-2)">${entry.pick}</span>
+                <span style="color:var(--ink-3);font-size:13px">/${total}</span>
+            </div>
+            <div class="cc-timer">
+                <div class="eyebrow" style="color:var(--ink-3)">Status</div>
+                <div style="display:flex;justify-content:flex-end;margin-top:30px">
+                    <span class="mono-pill">
+                        <span class="dot${isYourTurn ? ' warn' : ''} pulse"></span>${isYourTurn ? 'Your pick' : 'Picking…'}
+                    </span>
+                </div>
+            </div>`;
+    }
+
+    renderPickQueue() {
+        const start = Math.max(0, this.pickIndex - QUEUE_PAST);
+        const end = Math.min(this.setup.pickSequence.length - 1, this.pickIndex + QUEUE_FUTURE);
+        const rows = [];
+        for (let idx = start; idx <= end; idx++) {
+            const entry = this.setup.pickSequence[idx];
+            const done = this.pickHistory[idx];
+            const isActive = idx === this.pickIndex;
+            const isYou = entry.slot === this.mySlot;
+
+            let right;
+            if (done) {
+                right = `
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <img src="${teamLogo(done.team)}" alt="${done.team}" style="width:16px;height:16px;object-fit:contain;">
+                        <span style="background:#444;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace">${done.team}${done.wasWildcard ? ' 🎲' : ''}</span>
+                    </div>`;
+            } else if (isActive) {
+                right = '<span class="mono-pill"><span class="dot pulse"></span>picking</span>';
+            } else {
+                right = '<span class="mono" style="color:var(--ink-3);font-size:11px">—</span>';
+            }
+
+            rows.push(`
+                <div class="q-row" style="
+                    opacity:${done ? 0.6 : 1};
+                    background:${isActive ? 'rgba(255,255,255,0.025)' : 'transparent'};
+                    border-color:${isActive ? 'var(--line-strong)' : 'var(--line)'}">
+                    <span class="numeral" style="font-size:22px;color:${isActive ? 'var(--ink)' : 'var(--ink-3)'};min-width:28px">${entry.pick}</span>
+                    <div style="flex:1;min-width:0">
+                        <div style="font-size:14px;font-weight:600;${isYou ? 'color:var(--link)' : ''}">${esc(this.slotLabel(entry.slot))}</div>
+                        <div class="mono" style="font-size:11px;color:var(--ink-3)">R${this.roundFor(entry.pick)}&middot;P${entry.pick}</div>
+                    </div>
+                    ${right}
+                </div>`);
+        }
+        this.$pickQueue.innerHTML = rows.join('');
+    }
+
+    renderPortfolio() {
+        const rows = this.slots.map(slot => {
+            const isYou = slot === this.mySlot;
+            const teamsHtml = (this.rosters[slot] || []).map(t => `
+                <span style="display:inline-block;padding:2px 6px;background:rgba(255,255,255,0.1);border-radius:4px;margin:2px;font-size:0.8rem;">
+                    <img src="${teamLogo(t)}" alt="${t}" style="width:14px;height:14px;vertical-align:middle;margin-right:4px;">${t}
+                </span>`).join('') || '<span style="color:var(--ink-3);">No teams yet</span>';
+            return `
+                <tr>
+                    <td style="padding:0.5rem;border-bottom:1px solid var(--line);font-weight:bold;${isYou ? 'color:var(--link);' : ''}">${esc(this.slotLabel(slot))}</td>
+                    <td style="padding:0.5rem;border-bottom:1px solid var(--line);">${teamsHtml}</td>
+                </tr>`;
+        }).join('');
+        this.$portfolio.innerHTML = `
+            <table style="width:100%;border-collapse:collapse;text-align:left;">
+                <thead><tr>
+                    <th style="padding:0.5rem;border-bottom:1px solid var(--glass-border);">Player</th>
+                    <th style="padding:0.5rem;border-bottom:1px solid var(--glass-border);">Teams</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>`;
+    }
+
+    renderFullBoard() {
+        this.$fullBoard.innerHTML = this.setup.pickSequence.map((entry, idx) => {
+            const done = this.pickHistory[idx];
+            const isActive = idx === this.pickIndex;
+            const isYou = entry.slot === this.mySlot;
+            return `
+                <li class="draft-item${isActive ? ' active' : ''}${done ? ' completed' : ''}">
+                    <div class="pick-main">
+                        <span class="pick-number">#${entry.pick}</span>
+                        <span class="pick-player"${isYou ? ' style="color:var(--link)"' : ''}>${esc(this.slotLabel(entry.slot))}</span>
+                    </div>
+                    ${done ? `
+                        <div class="pick-result">
+                            <img src="${teamLogo(done.team)}" class="tiny-logo" alt="">
+                            <span class="pick-team">${done.team}${done.wasWildcard ? ' 🎲' : ''}</span>
+                        </div>` : ''}
+                </li>`;
+        }).join('');
+    }
+
+    toggleFullBoard() {
+        this.boardExpanded = !this.boardExpanded;
+        this.$fullBoardSection.style.display = this.boardExpanded ? 'block' : 'none';
+        this.$boardToggleBtn.textContent = this.boardExpanded ? 'Hide full board ▴' : 'Show full board ▾';
+    }
+
     renderHumanTurn() {
-        this.$botTurn.classList.add('hidden');
-        this.$teamGrid.classList.remove('hidden');
         const projections = this.setup.projections;
         const schedules = this.setup.teamSchedules;
         this.$teamGrid.innerHTML = this.availableTeams().map(team => {
@@ -173,17 +302,34 @@ class MockDraft {
                     <div style="flex:1;min-width:0"><div class="team-btn-city">${team}</div>${sub}</div>
                 </button>`;
         }).join('');
+        this.selectedTeam = null;
+        this.$selectionPreview.classList.add('hidden');
         this.$teamGrid.querySelectorAll('.team-btn').forEach(btn => {
-            btn.addEventListener('click', () => this.applyPick(this.mySlot, btn.dataset.team, false));
+            btn.addEventListener('click', () => this.selectTeam(btn));
         });
     }
 
-    async runBotTurn(entry) {
-        this.$teamGrid.classList.add('hidden');
-        this.$botTurn.classList.remove('hidden');
-        this.$botTurn.textContent = `${this.slotLabel(entry.slot)} is picking…`;
-        await new Promise(resolve => setTimeout(resolve, BOT_PICK_DELAY_MS));
+    selectTeam(btn) {
+        if (this.selectedTeam === btn.dataset.team) {
+            this.selectedTeam = null;
+            btn.classList.remove('selected');
+            this.$selectionPreview.classList.add('hidden');
+            return;
+        }
+        this.selectedTeam = btn.dataset.team;
+        this.$selectedTeamName.textContent = this.selectedTeam;
+        this.$selectionPreview.classList.remove('hidden');
+        this.$teamGrid.querySelectorAll('.team-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+    }
 
+    confirmPick() {
+        if (!this.selectedTeam) return;
+        this.$selectionPreview.classList.add('hidden');
+        this.applyPick(this.mySlot, this.selectedTeam, false);
+    }
+
+    async runBotTurn(entry) {
         const remaining = this.totalBotPicks - this.botPicksDone;
         let team, wasWildcard;
         try {
@@ -205,10 +351,9 @@ class MockDraft {
         } catch (err) {
             return this.showError(err.message || 'Bot pick failed. Please restart the draft.');
         }
+        await new Promise(resolve => setTimeout(resolve, BOT_PICK_DELAY_MS));
         if (wasWildcard) this.wildcardsSoFar += 1;
         this.botPicksDone += 1;
-        this.$botTurn.textContent = `${this.slotLabel(entry.slot)} picks ${team}${wasWildcard ? ' (wildcard!)' : ''}`;
-        await new Promise(resolve => setTimeout(resolve, BOT_PICK_DELAY_MS));
         this.applyPick(entry.slot, team, wasWildcard);
     }
 
@@ -218,53 +363,13 @@ class MockDraft {
         this.rosters[slot].push(team);
         this.picked.add(team);
         this.pickIndex += 1;
-        this.renderRosters();
-        this.renderPickHistory();
+        this.renderPortfolio();
+        this.renderFullBoard();
         this.advance();
     }
 
-    renderRosters() {
-        const slots = [...new Set(this.setup.pickSequence.map(e => e.slot))].sort((a, b) => a - b);
-        this.$rosters.innerHTML = slots.map(slot => {
-            const isYou = slot === this.mySlot;
-            const teams = (this.rosters[slot] || []).map(t =>
-                `<img src="${teamLogo(t)}" alt="${t}" title="${t}" style="width:18px;height:18px;object-fit:contain;">`
-            ).join('') || '<span style="opacity:0.4;">—</span>';
-            return `
-                <div class="mock-roster-row${isYou ? ' is-you' : ''}">
-                    <div class="mock-roster-label">${esc(this.slotLabel(slot))}</div>
-                    <div class="mock-roster-teams">${teams}</div>
-                </div>`;
-        }).join('');
-    }
-
-    renderPickHistory() {
-        this.$pickHistory.innerHTML = this.setup.pickSequence.map((entry, idx) => {
-            const done = this.pickHistory[idx];
-            const isCurrent = !done && idx === this.pickIndex;
-            const isYou = entry.slot === this.mySlot;
-            let right;
-            if (done) {
-                right = `<span class="mock-history-team">
-                    <img src="${teamLogo(done.team)}" alt="${done.team}" style="width:16px;height:16px;object-fit:contain;">
-                    ${done.team}${done.wasWildcard ? ' 🎲' : ''}
-                </span>`;
-            } else if (isCurrent) {
-                right = '<span style="opacity:0.7;">on the clock</span>';
-            } else {
-                right = '<span style="opacity:0.4;">—</span>';
-            }
-            return `
-                <div class="mock-history-row${isCurrent ? ' is-current' : ''}${isYou ? ' is-you' : ''}">
-                    <span class="mock-history-pick">#${entry.pick}</span>
-                    <span class="mock-history-label">${esc(this.slotLabel(entry.slot))}</span>
-                    ${right}
-                </div>`;
-        }).join('');
-    }
-
     async finish() {
-        this.$board.classList.add('hidden');
+        this.$board.style.display = 'none';
         this.$results.classList.remove('hidden');
 
         this.$yourTeams.innerHTML = `<div class="eyebrow" style="margin-bottom:8px;">Your teams</div>` +
@@ -310,7 +415,7 @@ class MockDraft {
     }
 
     restart() {
-        this.$board.classList.add('hidden');
+        this.$board.style.display = 'none';
         this.$results.classList.add('hidden');
         this.$error.classList.add('hidden');
         this.mySlot = null;
@@ -319,8 +424,12 @@ class MockDraft {
         this.pickHistory = [];
         this.picked = new Set();
         this.pickIndex = 0;
+        this.selectedTeam = null;
         this.wildcardsSoFar = 0;
         this.botPicksDone = 0;
+        this.boardExpanded = false;
+        this.$fullBoardSection.style.display = 'none';
+        this.$boardToggleBtn.textContent = 'Show full board ▾';
         this.$slotSelect.classList.remove('hidden');
         this.init();
     }

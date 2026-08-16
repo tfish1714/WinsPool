@@ -9,13 +9,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@500;700&family=Newsreader:ital,opsz,wght@1,12,500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css?v=23">
     <style>
-        .mock-shell { max-width: 760px; margin: 0 auto; padding: 32px 16px 80px; }
+        .mock-shell { max-width: 1040px; margin: 0 auto; padding: 32px 16px 80px; }
 
-        /* Status pill — reuses the site's mono-pill/dot idiom: green pulse while a
-           bot is thinking, warm/gold pulse when it's your turn (never both at once). */
-        #mock-status.mono-pill { margin-bottom: 18px; font-size: 12px; padding: 7px 14px; }
-
-        /* Slot picker — small draft-card tiles rather than plain buttons */
+        /* Slot picker — the one screen with no real-draft equivalent */
         .mock-slot-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 20px 0 24px; }
         .mock-slot-btn {
             display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
@@ -27,39 +23,8 @@
         .mock-slot-label { font: 600 10px/1 'JetBrains Mono', monospace; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
         .mock-slot-num { font-family: 'Newsreader', Georgia, serif; font-style: italic; font-size: 26px; color: var(--ink); }
 
-        /* The "X is picking..." beat — the one moment worth a flourish */
-        .mock-bot-turn {
-            text-align: center; padding: 26px 16px; margin-bottom: 16px;
-            background: var(--bg-elev); border: 1px solid var(--line-strong); border-radius: 12px;
-            font-family: 'Newsreader', Georgia, serif; font-style: italic; font-size: 18px; color: var(--ink-2);
-        }
-
         #mock-error { color: var(--neg); text-align: center; padding: 24px; }
         #mock-error button { margin-top: 12px; }
-
-        /* Rosters + pick history panels */
-        .mock-panels { display: grid; grid-template-columns: 1fr; gap: 16px; margin-top: 20px; }
-        @media (min-width: 640px) { .mock-panels { grid-template-columns: 1fr 1fr; } }
-        .mock-panel {
-            background: var(--bg-elev); border: 1px solid var(--line-strong);
-            border-radius: 14px; padding: 14px; max-height: 340px; overflow-y: auto;
-        }
-        .mock-roster-row { display: flex; align-items: center; gap: 8px; padding: 7px 4px; border-bottom: 1px solid var(--line); border-radius: 6px; }
-        .mock-roster-row.is-you { background: rgba(122,162,255,0.07); }
-        .mock-roster-row.is-you .mock-roster-label { color: var(--link); font-weight: 600; }
-        .mock-roster-row .mock-roster-label { flex: 1; min-width: 0; font-size: 13px; }
-        .mock-roster-row .mock-roster-teams { display: flex; gap: 4px; flex-shrink: 0; }
-
-        .mock-history-row {
-            display: flex; justify-content: space-between; align-items: center; gap: 8px;
-            padding: 6px 4px; border-radius: 6px; font-size: 12.5px;
-        }
-        .mock-history-row .mock-history-pick { font-family: 'JetBrains Mono', monospace; color: var(--ink-3); width: 26px; flex-shrink: 0; }
-        .mock-history-row .mock-history-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .mock-history-row.is-you .mock-history-label { color: var(--link); font-weight: 600; }
-        .mock-history-row.is-current { background: rgba(217,168,108,0.10); }
-        .mock-history-row.is-current .mock-history-label { color: var(--warn); font-weight: 600; }
-        .mock-history-team { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
 
         /* Final rankings — team logos in line with each rank, gold reserved for #1
            (matches the rest of the site's convention: gold = leader, nowhere else) */
@@ -82,10 +47,13 @@
 <body>
     <div class="glass-bg"></div>
     <div class="mock-shell">
-        <header class="wp-top" style="margin-bottom: 24px; padding-bottom: 20px;">
+        <header class="wp-top">
             <div>
-                <div class="eyebrow">WinsPool · Practice Draft</div>
-                <h1 class="wp-h1" style="font-size: 36px;">Mock Draft</h1>
+                <div class="eyebrow">Practice Draft · <span id="mock-season-display"></span></div>
+                <h1 class="wp-h1">Mock Draft<span class="room-year" id="mock-round-label"></span></h1>
+            </div>
+            <div class="wp-top-right">
+                <span class="mono-pill"><span class="dot"></span>PRACTICE — NOT SAVED</span>
             </div>
         </header>
 
@@ -97,22 +65,47 @@
             <button id="mock-random-slot" class="btn-primary">Random Spot</button>
         </section>
 
-        <section id="mock-draft-board" class="hidden">
-            <span class="mono-pill" id="mock-status"></span>
-            <div id="mock-bot-turn" class="mock-bot-turn hidden"></div>
-            <div class="mock-team-grid" id="mock-team-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"></div>
+        <!-- Draft Board — mirrors the real draft room's layout (minus chat) -->
+        <main class="dashboard" id="mock-draft-board" style="display: none;">
 
-            <div class="mock-panels">
-                <div class="mock-panel">
-                    <div class="eyebrow" style="margin-bottom:8px;">Rosters so far</div>
-                    <div id="mock-rosters"></div>
-                </div>
-                <div class="mock-panel">
-                    <div class="eyebrow" style="margin-bottom:8px;">Pick order</div>
-                    <div id="mock-pick-history"></div>
-                </div>
+            <!-- Clock card — real draft shows a countdown here; practice mode has no
+                 timer, so the third column shows whose turn it is instead -->
+            <div class="clock-card" id="mock-clock-card"></div>
+
+            <div class="room-split">
+
+                <!-- Left: Pick Queue -->
+                <section id="mock-pick-queue-section">
+                    <div class="eyebrow" style="margin-bottom:14px; color:var(--ink-3)">Pick queue</div>
+                    <div id="mock-pick-queue"></div>
+                </section>
+
+                <!-- Right: Teams Grid -->
+                <section class="available-teams-section">
+                    <div id="mock-selection-preview" class="selection-preview hidden">
+                        <p>Selected Team: <span id="mock-selected-team-name">None</span></p>
+                        <button id="mock-confirm-pick-btn" class="btn-primary">Confirm Pick</button>
+                    </div>
+                    <div class="mock-team-grid" id="mock-team-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"></div>
+                </section>
+
             </div>
-        </section>
+
+            <!-- Running portfolio (below both columns, same as the real draft room) -->
+            <section id="mock-portfolio-section" style="margin-top:1.5rem;">
+                <div class="eyebrow" style="margin-bottom:10px; color:var(--ink-3)">Running portfolio</div>
+                <div id="mock-portfolio-content" style="overflow-x:auto;"></div>
+            </section>
+
+            <!-- Full board toggle -->
+            <div class="board-toggle-row">
+                <button id="mock-board-toggle-btn" class="board-toggle">Show full board ▾</button>
+            </div>
+            <section id="mock-full-board-section" style="display:none;">
+                <ul class="draft-list" id="mock-full-board"></ul>
+            </section>
+
+        </main>
 
         <section id="mock-results" class="hidden">
             <div class="eyebrow">Draft complete</div>
