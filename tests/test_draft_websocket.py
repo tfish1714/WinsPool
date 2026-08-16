@@ -62,6 +62,59 @@ class TestConnectionManager:
         asyncio.run(mgr.broadcast({"type": "ping"}))
         ws_good.send_json.assert_awaited_once()
 
+    def test_set_admin_true_adds_to_admin_sockets(self):
+        mgr = ConnectionManager()
+        ws = MagicMock()
+        mgr.set_admin(ws, True)
+        assert ws in mgr.admin_sockets
+
+    def test_set_admin_false_removes_from_admin_sockets(self):
+        mgr = ConnectionManager()
+        ws = MagicMock()
+        mgr.admin_sockets.add(ws)
+        mgr.set_admin(ws, False)
+        assert ws not in mgr.admin_sockets
+
+    def test_disconnect_also_clears_admin_sockets(self):
+        mgr = ConnectionManager()
+        ws = MagicMock()
+        mgr.active_connections.append(ws)
+        mgr.admin_sockets.add(ws)
+        mgr.disconnect(ws)
+        assert ws not in mgr.admin_sockets
+
+    def test_broadcast_state_strips_predictions_for_non_admin_only(self):
+        """A 'state' broadcast with preseason_predictions goes full to admins, stripped to everyone else."""
+        mgr = ConnectionManager()
+        admin_ws, player_ws = AsyncMock(), AsyncMock()
+        mgr.active_connections = [admin_ws, player_ws]
+        mgr.set_admin(admin_ws, True)
+        payload = {"season": 2026, "preseason_predictions": {"KC": {"projected_wins": 11.2}}}
+        asyncio.run(mgr.broadcast({"type": "state", "payload": payload}))
+
+        admin_sent = admin_ws.send_json.call_args[0][0]
+        player_sent = player_ws.send_json.call_args[0][0]
+        assert admin_sent["payload"]["preseason_predictions"] == {"KC": {"projected_wins": 11.2}}
+        assert player_sent["payload"]["preseason_predictions"] == {}
+
+    def test_broadcast_state_without_predictions_key_is_unaffected(self):
+        """Existing behavior (no predictions key) must be unchanged for every recipient."""
+        mgr = ConnectionManager()
+        ws1, ws2 = AsyncMock(), AsyncMock()
+        mgr.active_connections = [ws1, ws2]
+        asyncio.run(mgr.broadcast({"type": "state", "payload": {}}))
+        ws1.send_json.assert_awaited_once_with({"type": "state", "payload": {}})
+        ws2.send_json.assert_awaited_once_with({"type": "state", "payload": {}})
+
+    def test_broadcast_non_state_message_is_unaffected(self):
+        """Non-'state' messages (chat, errors) are sent identically to everyone regardless of admin status."""
+        mgr = ConnectionManager()
+        ws1, ws2 = AsyncMock(), AsyncMock()
+        mgr.active_connections = [ws1, ws2]
+        asyncio.run(mgr.broadcast({"type": "chat_message", "text": "hi"}))
+        ws1.send_json.assert_awaited_once_with({"type": "chat_message", "text": "hi"})
+        ws2.send_json.assert_awaited_once_with({"type": "chat_message", "text": "hi"})
+
 
 # ---------------------------------------------------------------------------
 # WebSocket endpoint integration tests

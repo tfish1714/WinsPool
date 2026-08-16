@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from services.data_service import (
     load_data, get_available_years, get_draft_years, get_active_season,
 )
-from services.draft_service import load_draft_state, save_pick, undo_pick, reset_pick
+from services.draft_service import load_draft_state, save_pick, undo_pick, reset_pick, strip_admin_only_fields
 from services.db_service import get_collection_df, add_draft_order, add_draft_rule
 from services.chat_service import post_system_message, post_chat_message, get_recent_messages
 import services.analysis_service as analysis
@@ -57,6 +57,7 @@ def _format_pick_time(seconds: int) -> str:
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
+        self.admin_sockets: set[WebSocket] = set()
 
     async def connect(self, ws: WebSocket):
         await ws.accept()
@@ -65,11 +66,27 @@ class ConnectionManager:
     def disconnect(self, ws: WebSocket):
         if ws in self.active_connections:
             self.active_connections.remove(ws)
+        self.admin_sockets.discard(ws)
+
+    def set_admin(self, ws: WebSocket, is_admin: bool):
+        """Record whether this connection has authenticated as an admin.
+
+        Drives per-recipient stripping in broadcast() — new connections
+        default to non-admin (the safe default) until this is called.
+        """
+        if is_admin:
+            self.admin_sockets.add(ws)
+        else:
+            self.admin_sockets.discard(ws)
 
     async def broadcast(self, message: dict):
+        stripped = message
+        if message.get("type") == "state" and "preseason_predictions" in message.get("payload", {}):
+            stripped = {**message, "payload": strip_admin_only_fields(message["payload"])}
         for conn in self.active_connections:
+            out = message if conn in self.admin_sockets else stripped
             try:
-                await conn.send_json(message)
+                await conn.send_json(out)
             except Exception:
                 pass
 
