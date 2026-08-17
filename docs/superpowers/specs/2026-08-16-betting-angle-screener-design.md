@@ -21,16 +21,19 @@ branch for future games — both always populate `explanation`, regardless of th
 `--features` flag, which only controls the *separate* `prediction_features` SHAP-style
 audit store).
 
-`scripts/cache_builder.py` (run nightly by `scripts/run_cron.py`) also writes to
-`game_predictions`, but only a thin 4-field record (`pred_winner`, `pred_su_conf`,
-`pred_ats_pick`, `pred_prob`), via `services/cache_service.py::write_game_predictions`,
-which does a full per-season document overwrite — not a merge. Every nightly run
-silently destroys whatever richer `explanation` data a prior backfill run wrote for
-that season. This is why the admin's prediction-explain tooltip shows nothing useful
-for 2026 games right now (confirmed: `.local_db/game_predictions_2026.json` was last
-written 2026-08-13 by the cron path and has only the 4 thin fields), and it is also why
-the screener can't be built without fixing this first — every season's `elo_diff` and
-`vegas_line` data lives inside `explanation`, which cron currently wipes.
+`scripts/cache_builder.py` (called by `scripts/run_cron.py`, and runnable standalone)
+also writes to `game_predictions`, but only a thin 4-field record (`pred_winner`,
+`pred_su_conf`, `pred_ats_pick`, `pred_prob`), via
+`services/cache_service.py::write_game_predictions`, which does a full per-season
+document overwrite — not a merge. Any run of this path silently destroys whatever
+richer `explanation` data a prior backfill run wrote for that season. This is why the
+admin's prediction-explain tooltip shows nothing useful for 2026 games right now
+(confirmed: `.local_db/game_predictions_2026.json` was last written 2026-08-13 — shape
+matches a `cache_builder.py` write, consistent with it having been run locally to
+refresh analytics after the preseason/Elo-boost/MC-simulation model fixes made around
+that date, not necessarily a scheduled trigger), and it is also why the screener can't
+be built without fixing this first — every season's `elo_diff` and `vegas_line` data
+lives inside `explanation`, which this path currently wipes.
 
 **Fix:** `cache_builder.py`'s `game_predictions` write path reads the existing stored
 record for each game first (via `services.cache_service.get_game_predictions(year)`)
