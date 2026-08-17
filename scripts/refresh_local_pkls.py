@@ -168,6 +168,34 @@ def dump_prediction_features():
         log.error(f"    ✗ Failed 'prediction_features': {e}")
 
 
+def dump_elo_history():
+    """Pull all elo_history docs from Firestore → .local_db/elo_history_{season}.json."""
+    log.info("  Fetching 'elo_history' from Firestore...")
+    try:
+        db = get_db()
+        docs = list(db.collection("elo_history").stream())
+        if not docs:
+            log.warning("    'elo_history' returned no documents — skipping")
+            return
+
+        written = 0
+        for doc in docs:
+            d = doc.to_dict()
+            season = d.get("season")
+            rows = d.get("rows")
+            if season is None or not rows:
+                continue
+            out_path = LOCAL_DB / f"elo_history_{int(season)}.json"
+            with open(out_path, "w") as f:
+                json.dump(d, f, default=str)
+            written += 1
+            log.info(f"    ✓ {len(rows)} rows → elo_history_{int(season)}.json")
+
+        log.info(f"    ✓ {written} seasons written")
+    except Exception as e:
+        log.error(f"    ✗ Failed 'elo_history': {e}")
+
+
 def dump_config_settings():
     """Pull config/settings doc → .local_db/config_settings.json."""
     log.info("  Fetching 'config/settings' from Firestore...")
@@ -202,6 +230,9 @@ def main():
 
     log.info("\n-- ML feature audit --")
     dump_prediction_features()
+
+    log.info("\n-- Elo rating history --")
+    dump_elo_history()
 
     log.info("\n-- App config --")
     dump_config_settings()

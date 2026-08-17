@@ -93,6 +93,69 @@ class TestPredictionFeaturesCache:
         assert get_prediction_features(2099, "nn_v1+xgb_v1+lr_v1") is None
 
 
+class TestEloHistoryCache:
+    """Tests for get_elo_history_season / get_all_elo_history / write_elo_history_season."""
+
+    def test_write_then_read_local_season(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+        monkeypatch.setattr("services.cache_service._GAME_PRED_DIR", tmp_path)
+
+        from services.cache_service import write_elo_history_season, get_elo_history_season
+
+        rows = [{"season": 2025, "week": 1, "home_team": "KC", "away_team": "SF", "home_elo_post": 1520.0}]
+        write_elo_history_season(2025, rows, use_local=True)
+
+        result = get_elo_history_season(2025)
+        assert result == rows
+
+    def test_get_nonexistent_season_returns_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+        monkeypatch.setattr("services.cache_service._GAME_PRED_DIR", tmp_path)
+
+        from services.cache_service import get_elo_history_season
+        assert get_elo_history_season(2099) is None
+
+    def test_get_all_combines_and_sorts_seasons(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+        monkeypatch.setattr("services.cache_service._GAME_PRED_DIR", tmp_path)
+
+        from services.cache_service import write_elo_history_season, get_all_elo_history
+
+        write_elo_history_season(2025, [{"season": 2025, "week": 1, "home_team": "KC"}], use_local=True)
+        write_elo_history_season(2006, [{"season": 2006, "week": 1, "home_team": "PIT"}], use_local=True)
+
+        all_rows = get_all_elo_history()
+        assert [r["season"] for r in all_rows] == [2006, 2025]
+
+    def test_write_firestore_writes_document(self, mock_firestore, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+
+        from services.cache_service import write_elo_history_season
+
+        rows = [{"season": 2025, "week": 1, "home_team": "KC"}]
+        write_elo_history_season(2025, rows, use_local=False)
+
+        mock_firestore.collection.assert_called_with("elo_history")
+        mock_firestore.collection.return_value.document.assert_called_with("2025")
+        mock_firestore.collection.return_value.document.return_value.set.assert_called_with({
+            "season": 2025, "rows": rows,
+        })
+
+    def test_get_all_firestore_streams_every_doc(self, mock_firestore, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", False)
+
+        from services.cache_service import get_all_elo_history
+
+        doc_2006 = MagicMock()
+        doc_2006.to_dict.return_value = {"season": 2006, "rows": [{"season": 2006, "week": 1}]}
+        doc_2025 = MagicMock()
+        doc_2025.to_dict.return_value = {"season": 2025, "rows": [{"season": 2025, "week": 1}]}
+        mock_firestore.collection.return_value.stream.return_value = [doc_2025, doc_2006]
+
+        all_rows = get_all_elo_history()
+        assert [r["season"] for r in all_rows] == [2006, 2025]
+
+
 def test_merge_game_predictions_includes_edge_vs_vegas():
     """merge_game_predictions must propagate edge_vs_vegas from prediction dict."""
     import pandas as pd

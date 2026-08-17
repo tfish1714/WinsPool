@@ -124,13 +124,17 @@ async def update_prediction_config(body: PredictionConfigRequest, _: dict = Depe
 async def get_elo_history(_: dict = Depends(require_admin)):
     """Admin-only: Elo ratings over time for all teams, structured for Chart.js."""
     try:
+        import json
+
         import pandas as pd
 
-        elo_path = pathlib.Path(__file__).parent.parent / "rawdata" / "elo_computed.csv"
-        if not elo_path.exists():
-            return JSONResponse(status_code=404, content={"error": "elo_computed.csv not found. Run scripts/compute_elo.py first."})
+        from services.cache_service import get_all_elo_history
 
-        df = pd.read_csv(elo_path)
+        rows = get_all_elo_history()
+        if not rows:
+            return JSONResponse(status_code=404, content={"error": "No Elo history found. Run scripts/compute_elo.py --firestore first."})
+
+        df = pd.DataFrame(rows)
 
         records = []
         for _, row in df.iterrows():
@@ -154,17 +158,17 @@ async def get_elo_history(_: dict = Depends(require_admin)):
                 teams_data[team][season_key] = []
             teams_data[team][season_key].append({"week": int(week), "elo": group["elo"].iloc[0]})
 
-        teams_csv = pathlib.Path(__file__).parent.parent / "rawdata" / "teams_colors_logos.csv"
+        team_meta_path = pathlib.Path(__file__).parent.parent / "static" / "data" / "team_meta.json"
         divisions: dict = {}
         conferences: dict = {}
         colors: dict = {}
-        if teams_csv.exists():
-            tdf = pd.read_csv(teams_csv)
-            for _, tr in tdf.iterrows():
-                abbr = str(tr["team_abbr"])
-                divisions[abbr] = str(tr["team_division"])
-                conferences[abbr] = str(tr["team_conf"])
-                colors[abbr] = str(tr["team_color"])
+        if team_meta_path.exists():
+            with open(team_meta_path) as f:
+                team_meta = json.load(f)
+            for abbr, meta in team_meta.items():
+                divisions[abbr] = meta["division"]
+                conferences[abbr] = meta["conference"]
+                colors[abbr] = meta["color"]
 
         return JSONResponse(content={
             "seasons": seasons,

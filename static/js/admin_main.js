@@ -613,26 +613,83 @@ class AdminApp {
                 </tr>`).join('') + '</tbody></table>';
         }
 
-        const hasActuals = s.has_actuals;
-        wrap.innerHTML = `
-            <table class="admin-table"><thead><tr>
-                <th>Team</th><th>Model</th><th>Consensus</th><th>Range</th>
-                <th>Δ</th><th>Outlier z</th><th>Rank Δ</th><th>n</th>
-                ${hasActuals ? '<th>Actual</th><th>Model err</th><th>Cons err</th>' : ''}
-            </tr></thead><tbody>` +
-            data.teams.map(t => `<tr>
-                <td><strong>${t.team}</strong></td>
-                <td>${f(t.model_wins, 1)}</td>
-                <td>${f(t.consensus_median, 1)}</td>
-                <td>${t.consensus_min === null ? '—' : `${f(t.consensus_min, 1)}–${f(t.consensus_max, 1)}`}</td>
-                <td class="${t.delta > 0 ? 'pos' : t.delta < 0 ? 'neg' : ''}">${f(t.delta, 1)}</td>
-                <td>${f(t.outlier_z)}</td>
-                <td>${t.rank_delta === null ? '—' : t.rank_delta}</td>
-                <td>${t.n_sources}</td>
-                ${hasActuals ? `<td>${t.actual_wins === null ? '—' : t.actual_wins}</td>
-                                <td>${f(t.model_error, 1)}</td>
-                                <td>${f(t.consensus_error, 1)}</td>` : ''}
-            </tr>`).join('') + '</tbody></table>';
+        this._consensusTeams = data.teams;
+        this._consensusHasActuals = s.has_actuals;
+        this.renderConsensusTable();
+    }
+
+    /* Column defs for the sortable consensus table. `key` is the sort
+       comparator's data source; `render` produces the cell markup. Range
+       has no single scalar value, so it sorts by its lower bound. */
+    static CONSENSUS_COLUMNS = [
+        { label: 'Team', key: 'team', render: t => `<strong>${t.team}</strong>` },
+        { label: 'Model', key: 'model_wins', render: t => AdminApp._fmt(t.model_wins, 1) },
+        { label: 'Consensus', key: 'consensus_median', render: t => AdminApp._fmt(t.consensus_median, 1) },
+        {
+            label: 'Range', key: 'consensus_min',
+            render: t => t.consensus_min === null ? '—' : `${AdminApp._fmt(t.consensus_min, 1)}–${AdminApp._fmt(t.consensus_max, 1)}`,
+        },
+        {
+            label: 'Δ', key: 'delta',
+            render: t => `<span class="${t.delta > 0 ? 'pos' : t.delta < 0 ? 'neg' : ''}">${AdminApp._fmt(t.delta, 1)}</span>`,
+        },
+        { label: 'Outlier z', key: 'outlier_z', render: t => AdminApp._fmt(t.outlier_z) },
+        { label: 'Rank Δ', key: 'rank_delta', render: t => t.rank_delta === null ? '—' : t.rank_delta },
+        { label: 'n', key: 'n_sources', render: t => t.n_sources },
+        {
+            label: 'Actual', key: 'actual_wins', actualsOnly: true,
+            render: t => t.actual_wins === null ? '—' : t.actual_wins,
+        },
+        { label: 'Model err', key: 'model_error', actualsOnly: true, render: t => AdminApp._fmt(t.model_error, 1) },
+        { label: 'Cons err', key: 'consensus_error', actualsOnly: true, render: t => AdminApp._fmt(t.consensus_error, 1) },
+    ];
+
+    static _fmt(v, d = 2) {
+        return (v === null || v === undefined) ? '—' : Number(v).toFixed(d);
+    }
+
+    renderConsensusTable() {
+        const wrap = document.getElementById('consensus-table-wrap');
+        const teams = this._consensusTeams;
+        const hasActuals = this._consensusHasActuals;
+        if (!wrap || !teams) return;
+
+        const columns = AdminApp.CONSENSUS_COLUMNS.filter(c => !c.actualsOnly || hasActuals);
+
+        if (!this.consensusSort) this.consensusSort = { key: 'team', dir: 1 };
+        const { key, dir } = this.consensusSort;
+        const sorted = [...teams].sort((a, b) => {
+            const av = a[key], bv = b[key];
+            if (av === null || av === undefined) return 1;
+            if (bv === null || bv === undefined) return -1;
+            if (typeof av === 'string' || typeof bv === 'string') {
+                return String(av).localeCompare(String(bv)) * dir;
+            }
+            return (av - bv) * dir;
+        });
+
+        const headHtml = columns.map(c => {
+            const arrow = c.key === key ? (dir === 1 ? ' ▲' : ' ▼') : '';
+            return `<th data-sort-key="${c.key}" style="cursor:pointer; user-select:none;">${c.label}${arrow}</th>`;
+        }).join('');
+
+        const bodyHtml = sorted.map(t =>
+            `<tr>${columns.map(c => `<td>${c.render(t)}</td>`).join('')}</tr>`
+        ).join('');
+
+        wrap.innerHTML = `<table class="admin-table"><thead><tr>${headHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>`;
+
+        wrap.querySelectorAll('th[data-sort-key]').forEach(th => {
+            th.onclick = () => {
+                const clickedKey = th.dataset.sortKey;
+                if (this.consensusSort.key === clickedKey) {
+                    this.consensusSort.dir *= -1;
+                } else {
+                    this.consensusSort = { key: clickedKey, dir: 1 };
+                }
+                this.renderConsensusTable();
+            };
+        });
     }
 }
 

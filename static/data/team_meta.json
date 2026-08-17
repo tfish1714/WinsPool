@@ -1,0 +1,182 @@
+{
+  "ARI": {
+    "color": "#97233F",
+    "conference": "NFC",
+    "division": "NFC West"
+  },
+  "ATL": {
+    "color": "#A71930",
+    "conference": "NFC",
+    "division": "NFC South"
+  },
+  "BAL": {
+    "color": "#241773",
+    "conference": "AFC",
+    "division": "AFC North"
+  },
+  "BUF": {
+    "color": "#00338D",
+    "conference": "AFC",
+    "division": "AFC East"
+  },
+  "CAR": {
+    "color": "#0085CA",
+    "conference": "NFC",
+    "division": "NFC South"
+  },
+  "CHI": {
+    "color": "#0B162A",
+    "conference": "NFC",
+    "division": "NFC North"
+  },
+  "CIN": {
+    "color": "#FB4F14",
+    "conference": "AFC",
+    "division": "AFC North"
+  },
+  "CLE": {
+    "color": "#FF3C00",
+    "conference": "AFC",
+    "division": "AFC North"
+  },
+  "DAL": {
+    "color": "#002244",
+    "conference": "NFC",
+    "division": "NFC East"
+  },
+  "DEN": {
+    "color": "#002244",
+    "conference": "AFC",
+    "division": "AFC West"
+  },
+  "DET": {
+    "color": "#0076B6",
+    "conference": "NFC",
+    "division": "NFC North"
+  },
+  "GB": {
+    "color": "#203731",
+    "conference": "NFC",
+    "division": "NFC North"
+  },
+  "HOU": {
+    "color": "#03202F",
+    "conference": "AFC",
+    "division": "AFC South"
+  },
+  "IND": {
+    "color": "#002C5F",
+    "conference": "AFC",
+    "division": "AFC South"
+  },
+  "JAX": {
+    "color": "#006778",
+    "conference": "AFC",
+    "division": "AFC South"
+  },
+  "KC": {
+    "color": "#E31837",
+    "conference": "AFC",
+    "division": "AFC West"
+  },
+  "LA": {
+    "color": "#003594",
+    "conference": "NFC",
+    "division": "NFC West"
+  },
+  "LAC": {
+    "color": "#007BC7",
+    "conference": "AFC",
+    "division": "AFC West"
+  },
+  "LAR": {
+    "color": "#003594",
+    "conference": "NFC",
+    "division": "NFC West"
+  },
+  "LV": {
+    "color": "#000000",
+    "conference": "AFC",
+    "division": "AFC West"
+  },
+  "MIA": {
+    "color": "#008E97",
+    "conference": "AFC",
+    "division": "AFC East"
+  },
+  "MIN": {
+    "color": "#4F2683",
+    "conference": "NFC",
+    "division": "NFC North"
+  },
+  "NE": {
+    "color": "#002244",
+    "conference": "AFC",
+    "division": "AFC East"
+  },
+  "NO": {
+    "color": "#D3BC8D",
+    "conference": "NFC",
+    "division": "NFC South"
+  },
+  "NYG": {
+    "color": "#0B2265",
+    "conference": "NFC",
+    "division": "NFC East"
+  },
+  "NYJ": {
+    "color": "#003F2D",
+    "conference": "AFC",
+    "division": "AFC East"
+  },
+  "OAK": {
+    "color": "#000000",
+    "conference": "AFC",
+    "division": "AFC West"
+  },
+  "PHI": {
+    "color": "#004C54",
+    "conference": "NFC",
+    "division": "NFC East"
+  },
+  "PIT": {
+    "color": "#000000",
+    "conference": "AFC",
+    "division": "AFC North"
+  },
+  "SD": {
+    "color": "#007BC7",
+    "conference": "AFC",
+    "division": "AFC West"
+  },
+  "SEA": {
+    "color": "#002244",
+    "conference": "NFC",
+    "division": "NFC West"
+  },
+  "SF": {
+    "color": "#AA0000",
+    "conference": "NFC",
+    "division": "NFC West"
+  },
+  "STL": {
+    "color": "#003594",
+    "conference": "NFC",
+    "division": "NFC West"
+  },
+  "TB": {
+    "color": "#A71930",
+    "conference": "NFC",
+    "division": "NFC South"
+  },
+  "TEN": {
+    "color": "#002244",
+    "conference": "AFC",
+    "division": "AFC South"
+  },
+  "WAS": {
+    "color": "#5A1414",
+    "conference": "NFC",
+    "division": "NFC East"
+  }
+}

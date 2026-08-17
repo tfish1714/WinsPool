@@ -362,3 +362,88 @@ def write_prediction_features(
             db.collection("prediction_features").document(doc_id).set(firestore_payload)
         except Exception:
             logger.exception("Failed to write prediction_features to Firestore season=%s", season)
+
+
+# ---------------------------------------------------------------------------
+# Elo rating history (Elo Ratings Explorer)
+# ---------------------------------------------------------------------------
+# One document per season, mirroring game_predictions above -- a single doc
+# holding every season would serialize past Firestore's 1MB document limit
+# (the full 2006-2025 dataset is ~1.12MB as JSON) and only grows from here.
+# Local: .local_db/elo_history_{season}.json. Firestore: elo_history/{season}.
+# Written exclusively by scripts/compute_elo.py --firestore. Read via
+# get_all_elo_history() by routes/prediction_routes.py -- never
+# rawdata/elo_computed.csv directly (that CSV is for ML training code only).
+
+
+def get_elo_history_season(season: int) -> list[dict] | None:
+    """Return the list of per-game Elo rows for one season, or None if absent."""
+    if _USE_LOCAL:
+        p = _GAME_PRED_DIR / f"elo_history_{season}.json"
+        if p.exists():
+            try:
+                with open(p) as f:
+                    return json.load(f).get("rows")
+            except Exception:
+                return None
+        return None
+    else:
+        try:
+            from services.db_service import get_db
+            db = get_db()
+            doc = db.collection("elo_history").document(str(season)).get()
+            if doc.exists:
+                return doc.to_dict().get("rows")
+        except Exception:
+            pass
+        return None
+
+
+def get_all_elo_history() -> list[dict]:
+    """Return every computed Elo row across all seasons, sorted oldest first."""
+    all_rows: list[dict] = []
+    if _USE_LOCAL:
+        for p in sorted(_GAME_PRED_DIR.glob("elo_history_*.json")):
+            try:
+                with open(p) as f:
+                    all_rows.extend(json.load(f).get("rows", []))
+            except Exception:
+                logger.warning("Failed to read %s", p)
+    else:
+        try:
+            from services.db_service import get_db
+            db = get_db()
+            for doc in db.collection("elo_history").stream():
+                all_rows.extend(doc.to_dict().get("rows", []))
+        except Exception:
+            logger.exception("Failed to fetch elo_history from Firestore")
+    all_rows.sort(key=lambda r: (r.get("season", 0), r.get("week", 0)))
+    return all_rows
+
+
+def write_elo_history_season(season: int, rows: list[dict], *, use_local: bool | None = None) -> None:
+    """Persist one season's computed Elo rows (local JSON or Firestore).
+
+    Called exclusively by scripts/compute_elo.py --firestore.
+
+    Args:
+        use_local: Override the _USE_LOCAL env setting. Pass True to force
+                   local JSON, False to force Firestore. None = auto.
+    """
+    _local = _USE_LOCAL if use_local is None else use_local
+
+    if _local:
+        _GAME_PRED_DIR.mkdir(parents=True, exist_ok=True)
+        p = _GAME_PRED_DIR / f"elo_history_{season}.json"
+        with open(p, "w") as f:
+            json.dump({"season": season, "rows": rows}, f, default=str)
+    else:
+        try:
+            from services.db_service import get_db
+            db = get_db()
+            db.collection("elo_history").document(str(season)).set({
+                "season": season,
+                "rows": rows,
+            })
+        except Exception as e:
+            logger.error("Failed to write elo_history/%s: %s", season, e)

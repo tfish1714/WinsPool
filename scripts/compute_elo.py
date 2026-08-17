@@ -15,11 +15,18 @@ Requires:
 
 Output:
   - rawdata/elo_computed.csv: one row per regular-season game with pre-game Elo values
+  - .local_db/elo_history_{season}.json: per-season mirror for the local dev
+    server (always written); the admin Elo Ratings Explorer reads this
+    instead of the CSV directly (routes must never read rawdata/ CSVs).
+  - Firestore elo_history/{season} docs, one per season, when --firestore is
+    passed -- required for the Elo Ratings Explorer to work in production,
+    since rawdata/ is gitignored and never reaches the deployed image.
 
 Usage:
     python scripts/compute_elo.py
     python scripts/compute_elo.py --min-season 2006 --max-season 2025
     python scripts/compute_elo.py --output rawdata/elo_computed.csv
+    python scripts/compute_elo.py --firestore
 """
 
 import argparse
@@ -328,6 +335,9 @@ def main():
     parser.add_argument("--min-season", type=int, default=2006)
     parser.add_argument("--max-season", type=int, default=2025)
     parser.add_argument("--output", type=str, default=str(DEFAULT_OUTPUT))
+    parser.add_argument("--firestore", action="store_true",
+                        help="Also push per-season rows to the Firestore elo_history "
+                             "collection (used by the admin Elo Ratings Explorer)")
     args = parser.parse_args()
 
     print("=" * 65)
@@ -344,6 +354,18 @@ def main():
     print(f"\n  Saved -> {output_path}")
 
     _print_season_summary(final_elo)
+
+    from services.cache_service import write_elo_history_season
+    print("\n  Writing per-season rows to local elo_history cache...")
+    for season, group in df.groupby("season"):
+        write_elo_history_season(int(season), group.to_dict(orient="records"), use_local=True)
+    print(f"  Wrote {df['season'].nunique()} seasons -> .local_db/elo_history_<season>.json")
+
+    if args.firestore:
+        print("\n  Pushing per-season rows to Firestore elo_history collection...")
+        for season, group in df.groupby("season"):
+            write_elo_history_season(int(season), group.to_dict(orient="records"), use_local=False)
+        print(f"  Pushed {df['season'].nunique()} seasons to Firestore")
 
     try:
         save_metadata("sync_elo", {
