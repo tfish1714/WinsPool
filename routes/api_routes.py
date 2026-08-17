@@ -400,7 +400,7 @@ async def set_config(request: Request, _auth: dict = Depends(require_admin)):
     from services.db_service import set_config_settings
     try:
         body = await request.json()
-        allowed = {k: v for k, v in body.items() if k in {"draft_active"}}
+        allowed = {k: v for k, v in body.items() if k in {"draft_active", "mock_draft_active"}}
         set_config_settings(allowed)
         try:
             from routes.draft_routes import manager as ws_manager

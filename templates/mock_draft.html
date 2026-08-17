@@ -49,13 +49,19 @@
     <div class="mock-shell">
         <header class="wp-top">
             <div>
-                <div class="eyebrow">Practice Draft · <span id="mock-season-display"></span></div>
-                <h1 class="wp-h1">Mock Draft<span class="room-year" id="mock-round-label"></span></h1>
+                <div class="eyebrow">Practice Draft{% if active %} · <span id="mock-season-display"></span>{% endif %}</div>
+                <h1 class="wp-h1">Mock Draft{% if active %}<span class="room-year" id="mock-round-label"></span>{% endif %}</h1>
             </div>
+            {% if active %}
             <div class="wp-top-right">
                 <span class="mono-pill"><span class="dot"></span>PRACTICE — NOT SAVED</span>
             </div>
+            {% endif %}
         </header>
+
+        {% if not active %}
+        <p style="color: var(--ink-2);">Mock draft is not currently available — check back closer to draft day.</p>
+        {% else %}
 
         <div id="mock-error" class="hidden"></div>
 
@@ -114,9 +120,12 @@
             <div id="mock-rankings"></div>
             <button id="mock-again" class="btn-primary" style="margin-top: 16px;">Draft Again</button>
         </section>
+        {% endif %}
     </div>
 
+    {% if active %}
     <script type="module" src="/static/js/mock_draft.js"></script>
+    {% endif %}
 </body>
 
 </html>

@@ -1,5 +1,6 @@
 """tests/test_mock_draft.py — /api/mock-draft/* route tests."""
 import pandas as pd
+import pytest
 from unittest.mock import patch
 from starlette.testclient import TestClient
 
@@ -21,6 +22,26 @@ def _mock_collection_df(name, filters=None):
     if name == "draft_order":
         return ORDER_DF
     return pd.DataFrame()
+
+
+@pytest.fixture(autouse=True)
+def _mock_draft_active_by_default():
+    """Every test in this file assumes the feature is toggled on unless it
+    explicitly overrides this patch — only TestMockDraftActiveGate cares
+    about the off state.
+    """
+    with patch("routes.mock_draft_routes.get_config_settings", return_value={"mock_draft_active": True}):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit_buckets():
+    """The limiter's bucket dict is module-level state — clear it between
+    tests so one test's call volume can't affect another's.
+    """
+    from routes import mock_draft_routes
+    mock_draft_routes._rate_limit_buckets.clear()
+    yield
 
 
 class TestMockDraftSetup:
@@ -129,3 +150,74 @@ class TestMockDraftResults:
             )
         assert resp.status_code == 200
         assert resp.json()["rankings"][0]["graded"] is False
+
+
+class TestMockDraftActiveGate:
+
+    def test_page_shows_unavailable_when_inactive(self):
+        with patch("routes.mock_draft_routes.get_config_settings", return_value={"mock_draft_active": False}):
+            resp = client.get("/mock-draft")
+        assert resp.status_code == 200
+        assert "not currently available" in resp.text.lower()
+        assert "mock_draft.js" not in resp.text
+
+    def test_page_shows_draft_ui_when_active(self):
+        resp = client.get("/mock-draft")
+        assert resp.status_code == 200
+        assert "mock_draft.js" in resp.text
+
+    def test_page_bypasses_gate_for_admin(self, admin_token):
+        with patch("routes.mock_draft_routes.get_config_settings", return_value={"mock_draft_active": False}):
+            resp = client.get("/mock-draft", headers={"Authorization": admin_token})
+        assert resp.status_code == 200
+        assert "mock_draft.js" in resp.text
+
+    def test_setup_blocked_for_non_admin_when_inactive(self):
+        with patch("routes.mock_draft_routes.get_config_settings", return_value={"mock_draft_active": False}):
+            resp = client.get("/api/mock-draft/setup")
+        assert resp.status_code == 403
+
+    def test_setup_allowed_for_admin_when_inactive(self, admin_token):
+        with patch("routes.mock_draft_routes.get_config_settings", return_value={"mock_draft_active": False}), \
+             patch("services.mock_draft_service.get_collection_df", side_effect=_mock_collection_df):
+            resp = client.get("/api/mock-draft/setup", headers={"Authorization": admin_token})
+        assert resp.status_code == 200
+
+    def test_pick_blocked_for_non_admin_when_inactive(self):
+        with patch("routes.mock_draft_routes.get_config_settings", return_value={"mock_draft_active": False}):
+            resp = client.post("/api/mock-draft/pick", json={
+                "season": 2026, "availableTeams": ["KC"], "wildcardsSoFar": 0, "botPicksRemaining": 10,
+            })
+        assert resp.status_code == 403
+
+    def test_results_blocked_for_non_admin_when_inactive(self):
+        with patch("routes.mock_draft_routes.get_config_settings", return_value={"mock_draft_active": False}):
+            resp = client.post("/api/mock-draft/results", json={
+                "season": 2026, "rosters": {"1": ["KC"]},
+            })
+        assert resp.status_code == 403
+
+
+class TestMockDraftRateLimit:
+
+    def test_setup_rate_limited_after_threshold(self):
+        with patch("services.mock_draft_service.get_collection_df", side_effect=_mock_collection_df):
+            statuses = [client.get("/api/mock-draft/setup").status_code for _ in range(41)]
+        assert statuses[:40] == [200] * 40
+        assert statuses[40] == 429
+
+    def test_pick_rate_limited_after_threshold(self):
+        body = {"season": 2026, "availableTeams": ["KC"], "wildcardsSoFar": 0, "botPicksRemaining": 10}
+        with patch("routes.mock_draft_routes.bot_pick", return_value=("KC", False)):
+            statuses = [client.post("/api/mock-draft/pick", json=body).status_code for _ in range(41)]
+        assert statuses[:40] == [200] * 40
+        assert statuses[40] == 429
+
+    def test_rate_limit_is_per_endpoint_bucket_shared_by_ip(self):
+        """setup + pick + results share one bucket per client — hammering one
+        endpoint exhausts the allowance for the others too."""
+        with patch("services.mock_draft_service.get_collection_df", side_effect=_mock_collection_df):
+            for _ in range(40):
+                client.get("/api/mock-draft/setup")
+        resp = client.post("/api/mock-draft/results", json={"season": 2026, "rosters": {"1": ["KC"]}})
+        assert resp.status_code == 429

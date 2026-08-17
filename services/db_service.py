@@ -511,8 +511,8 @@ def get_metadata(doc_id: str):
 
 
 def get_config_settings() -> dict:
-    """Returns app config settings. Defaults to {"draft_active": False}."""
-    default = {"draft_active": False}
+    """Returns app config settings. Defaults to draft_active/mock_draft_active both False."""
+    default = {"draft_active": False, "mock_draft_active": False}
     use_local = os.environ.get("USE_LOCAL_DATA", "False").lower() == "true"
 
     if use_local:
@@ -533,16 +533,25 @@ def get_config_settings() -> dict:
 
 
 def set_config_settings(data: dict):
-    """Writes config settings to Firestore and local json cache."""
+    """Merges config settings into Firestore and the local json cache.
+
+    Uses merge=True (not a plain .set()) because draft_active and
+    mock_draft_active share this one doc — a caller toggling just one flag
+    must not blow away whatever the other flag was already set to.
+    """
     db = get_db()
     if db:
-        db.collection("config").document("settings").set(data)
+        db.collection("config").document("settings").set(data, merge=True)
 
     local_path = pathlib.Path(".local_db") / "config_settings.json"
     try:
         local_path.parent.mkdir(parents=True, exist_ok=True)
+        existing = {}
+        if local_path.exists():
+            with open(local_path) as f:
+                existing = json.load(f)
         with open(local_path, "w") as f:
-            json.dump(data, f)
+            json.dump({**existing, **data}, f)
     except Exception as e:
         logger.warning("Failed to persist config_settings locally: %s", e)
 

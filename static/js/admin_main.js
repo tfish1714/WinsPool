@@ -694,7 +694,60 @@ async function initDraftActiveToggle() {
     });
 }
 
+async function initMockDraftActiveToggle() {
+    const toggle = document.getElementById('mock-draft-active-toggle');
+    const knob = document.getElementById('mock-draft-active-knob');
+    const sub = document.getElementById('mock-draft-active-sub');
+    if (!toggle || !knob || !sub) return;
+
+    function applyState(active) {
+        toggle.setAttribute('aria-pressed', active ? 'true' : 'false');
+        toggle.style.background = active ? 'var(--pos)' : 'rgba(255,255,255,0.12)';
+        knob.style.left = active ? '21px' : '3px';
+        sub.textContent = active
+            ? 'Mock Draft visible in nav · open to everyone'
+            : 'Shows Mock Draft in nav and allows /mock-draft for everyone';
+        sub.style.color = active ? 'var(--pos)' : 'var(--ink-3)';
+    }
+
+    // Load current state
+    try {
+        const cfg = await fetch('/api/config/settings').then(r => r.json());
+        applyState(cfg.mock_draft_active === true);
+    } catch (e) {
+        console.warn('[Admin] Could not load config/settings', e);
+    }
+
+    // Toggle on click
+    toggle.addEventListener('click', async () => {
+        if (toggle.disabled) return;
+        const current = toggle.getAttribute('aria-pressed') === 'true';
+        const next = !current;
+        applyState(next); // optimistic
+        toggle.disabled = true;
+        try {
+            const token = AuthService.getToken();
+            const res = await fetch('/api/admin/config/settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify({ mock_draft_active: next }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            localStorage.setItem('nfl_wins_mock_draft_active', String(next));
+        } catch (e) {
+            console.error('[Admin] Failed to save mock_draft_active', e);
+            applyState(current); // revert on error
+        } finally {
+            toggle.disabled = false;
+        }
+    });
+}
+
 initDraftActiveToggle();
+initMockDraftActiveToggle();
 
 // Start Admin App
 const admin = new AdminApp();

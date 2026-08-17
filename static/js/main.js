@@ -16,6 +16,7 @@ class App {
         this.draftSummary = null;
         this.shameTimerInterval = null;
         this.draftActive = localStorage.getItem('nfl_wins_draft_active') === 'true';
+        this.mockDraftActive = localStorage.getItem('nfl_wins_mock_draft_active') === 'true';
 
         this.ws = new WebSocketService({
             onMessage: (msg) => this.handleWsMessage(msg),
@@ -70,6 +71,13 @@ class App {
                 localStorage.setItem('nfl_wins_draft_active', String(freshDraftActive));
                 if (freshDraftActive !== this.draftActive) {
                     this.draftActive = freshDraftActive;
+                    needsNavUpdate = true;
+                }
+
+                const freshMockDraftActive = cfg.mock_draft_active === true;
+                localStorage.setItem('nfl_wins_mock_draft_active', String(freshMockDraftActive));
+                if (freshMockDraftActive !== this.mockDraftActive) {
+                    this.mockDraftActive = freshMockDraftActive;
                     needsNavUpdate = true;
                 }
             }
@@ -163,7 +171,11 @@ class App {
         }
         moreLinks.push(
             { href: '/draft/history', label: 'Draft History' },
-            { href: '/mock-draft',    label: 'Mock Draft' },
+        );
+        if (this.mockDraftActive) {
+            moreLinks.push({ href: '/mock-draft', label: 'Mock Draft' });
+        }
+        moreLinks.push(
             { href: '/history',       label: 'All-Time History' },
             null,
             { href: '/profile',       label: 'Profile' },
@@ -200,6 +212,12 @@ class App {
         const drawerLiveDraft = document.getElementById('drawer-live-draft-link');
         if (drawerLiveDraft) {
             drawerLiveDraft.classList.toggle('hidden', !this.draftActive);
+        }
+
+        // ── Drawer Mock Draft link ──
+        const drawerMockDraft = document.getElementById('drawer-mock-draft-link');
+        if (drawerMockDraft) {
+            drawerMockDraft.classList.toggle('hidden', !this.mockDraftActive);
         }
 
         // ── Drawer footer ──
