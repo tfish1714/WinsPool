@@ -239,3 +239,14 @@ class TestScreenGames:
             target_season=2026, target_week=1,
         )
         assert all(c["already_played"] is False for c in result["candidates"])
+
+    def test_candidate_spread_line_matches_its_own_side(self):
+        result = screen_games(
+            self._predictions(), self._games_df(),
+            target_season=2026, target_week=1,
+        )
+        by_side = {c["side"]: c for c in result["candidates"]}
+        # DAL (home) is the underdog: raw vegas_line=-2.0 is already home-perspective
+        assert by_side["home"]["spread_line"] == -2.0
+        # PHI (away) is the favorite: must be flipped to +2.0, not left at -2.0
+        assert by_side["away"]["spread_line"] == 2.0

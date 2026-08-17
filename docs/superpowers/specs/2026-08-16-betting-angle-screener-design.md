@@ -63,9 +63,11 @@ already-existing sources, both already reached through sanctioned paths (never
    `home_score`, `away_score`, and `result` (`home_score - away_score`) for grading
    historical covers. Confirmed via a live row: `result=-7.0` for a 13-20 home loss.
 
-These are joined in-memory by `(season, week, home_team, away_team)` at request time —
-no caching layer needed given the existing per-request `load_data()`/`get_game_predictions()`
-caching already in place (1-hour TTL in-memory, pickle/Firestore below that).
+These are joined in-memory by `(season, week, home_team, away_team)` at request time.
+`load_data()` has its own 1-hour TTL in-memory cache, but `get_game_predictions()`
+does not memoize anything — each call is a direct disk/Firestore read, hit once per
+season per request. That's an accepted tradeoff for a low-traffic admin tool, not
+a caching layer that already exists.
 
 ## Filter model
 

@@ -197,7 +197,7 @@ def screen_games(
                         "season": season, "week": wk,
                         "home_team": ht, "away_team": at,
                         "side": cand_side,
-                        "spread_line": spread_line,
+                        "spread_line": spread_for_side,
                         "elo_diff": elo_for_side,
                         "already_played": outcome is not None,
                     })

@@ -224,8 +224,14 @@ async def get_betting_screen(
                 target_week = 1
 
         max_season = int(all_games["season"].max())
+        # BACKTEST_MIN_SEASON=2006 is when Elo data starts, but games_df (used to
+        # grade ATS outcomes) only goes back to 2013 -- looping earlier seasons
+        # would fetch prediction docs that can never be graded (no matching game
+        # result), wasting Firestore reads and silently misrepresenting how much
+        # history actually backs the reported n.
+        min_season = max(BACKTEST_MIN_SEASON, int(all_games["season"].min()))
         predictions_by_season = {}
-        for yr in range(BACKTEST_MIN_SEASON, max_season + 1):
+        for yr in range(min_season, max_season + 1):
             preds = get_game_predictions(yr)
             if preds:
                 predictions_by_season[yr] = preds
@@ -239,6 +245,7 @@ async def get_betting_screen(
         )
         result["target_season"] = target_season
         result["target_week"] = target_week
+        result["seasons_covered"] = [min_season, max_season]
         return JSONResponse(content=result)
     except Exception as e:
         logger.exception("Unhandled error in get_betting_screen")

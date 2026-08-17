@@ -85,3 +85,23 @@ def test_filter_narrows_candidates(admin_token):
 
     assert response.status_code == 200
     assert response.json()["candidates"] == []
+
+
+def test_response_includes_seasons_covered(admin_token):
+    games = pd.DataFrame([
+        {"season": 2020, "week": 1, "home_team": "KC", "away_team": "SF",
+         "home_score": 30, "away_score": 20, "result": 10.0},
+        {"season": 2026, "week": 1, "home_team": "KC", "away_team": "SF",
+         "home_score": None, "away_score": None, "result": None},
+    ])
+    with patch("routes.prediction_routes.load_data", return_value=(None, None, games, None, None, None, None)), \
+         patch("services.cache_service.get_game_predictions", side_effect=_predictions_for):
+        response = client.get(
+            "/api/admin/betting/screen?season=2026&week=1",
+            headers={"Authorization": admin_token},
+        )
+    assert response.status_code == 200
+    data = response.json()
+    # min_season must reflect the actual games-data floor (2020 here), not the
+    # hardcoded BACKTEST_MIN_SEASON=2006 constant.
+    assert data["seasons_covered"] == [2020, 2026]
