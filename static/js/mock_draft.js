@@ -158,6 +158,14 @@ class MockDraft {
         return this.setup.teams.filter(t => !this.picked.has(t));
     }
 
+    // Admin-only ranking key: model + consensus projected wins, added together
+    // so teams strong on both signals float to the top. Missing either signal
+    // just contributes 0 rather than excluding the team.
+    projectionSortValue(d) {
+        if (!d) return 0;
+        return (d.model ? d.model.projected_wins : 0) + (d.consensus ? d.consensus.consensus_mean : 0);
+    }
+
     async advance() {
         if (this.pickIndex >= this.setup.pickSequence.length) {
             return this.finish();
@@ -290,11 +298,26 @@ class MockDraft {
     }
 
     renderHumanTurn() {
-        const projections = this.setup.projections;
+        const detail = this.setup.projectionsDetail;
         const schedules = this.setup.teamSchedules;
-        this.$teamGrid.innerHTML = this.availableTeams().map(team => {
-            const proj = projections && projections[team];
-            const sub = proj ? `<div class="team-btn-sub">${proj.projected_wins}W</div>` : '';
+
+        let teams = this.availableTeams();
+        if (detail) {
+            // Admin only: best teams left first, ranked by model + consensus combined.
+            teams = [...teams].sort((a, b) => this.projectionSortValue(detail[b]) - this.projectionSortValue(detail[a]));
+        } else {
+            teams = [...teams].sort((a, b) => a.localeCompare(b));
+        }
+
+        this.$teamGrid.innerHTML = teams.map(team => {
+            const d = detail && detail[team];
+            let sub = '';
+            if (d) {
+                const modelLine = d.model ? `Model: ${d.model.projected_wins}W &plusmn;${d.model.std_dev}` : '';
+                const consensusLine = d.consensus ? `Consensus: ${d.consensus.consensus_mean.toFixed(1)}W` : '';
+                sub = [modelLine, consensusLine].filter(Boolean)
+                    .map(line => `<div class="team-btn-sub">${line}</div>`).join('');
+            }
             const schedule = schedules && schedules[team] ? schedules[team].join('\n') : '';
             return `
                 <button class="team-btn" data-team="${team}" title="${esc(schedule)}">

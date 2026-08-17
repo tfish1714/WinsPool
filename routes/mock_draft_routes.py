@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.templating import Jinja2Templates
 
 from routes.models import MockDraftPickRequest, MockDraftResultsRequest
-from services.data_service import get_season_projection_legacy_shape
+from services.data_service import get_season_projection_dual, get_season_projection_legacy_shape
 from services.db_service import get_config_settings
 from services.mock_draft_service import (
     NFL_TEAMS, bot_pick, get_pick_sequence, get_projection_season, get_team_schedules, rank_rosters,
@@ -109,6 +109,7 @@ async def mock_draft_setup(request: Request, is_admin: bool = Depends(get_is_adm
     }
     if is_admin:
         content["projections"] = get_season_projection_legacy_shape(season)
+        content["projectionsDetail"] = get_season_projection_dual(season)
     return content
 
 

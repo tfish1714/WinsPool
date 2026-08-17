@@ -20,7 +20,7 @@ from routes.history_routes import router as history_router, templates as history
 from routes.draft_routes import router as draft_router, templates as draft_templates
 from routes.api_routes import router as api_router
 from routes.auth_routes import router as auth_router
-from routes.admin_routes import router as admin_router, _page_router as admin_page_router
+from routes.admin_routes import router as admin_router, _page_router as admin_page_router, _templates as admin_templates
 from routes.prediction_routes import router as prediction_router
 from routes.mock_draft_routes import router as mock_draft_router, page_router as mock_draft_page_router
 
@@ -55,8 +55,17 @@ async def add_process_time_header(request: Request, call_next):
     return await call_next(request)
 
 # Register Jinja2 globals
-for t in [standings_templates, history_templates, draft_templates]:
+def _current_season_label():
+    """Active NFL season, for base.html's login-screen footer -- registered as
+    a Jinja global (not per-route context) because that footer renders on
+    every page before any page-specific route handler runs.
+    """
+    bundle = load_data()
+    return get_active_season(bundle.games, bundle.draft_results)
+
+for t in [standings_templates, history_templates, draft_templates, admin_templates]:
     t.env.globals['get_team_logo'] = get_team_logo
+    t.env.globals['current_season_label'] = _current_season_label
 
 # ── Static files ──────────────────────────────────────────────────────────────
 STATIC_PATH = os.environ.get("STATIC_PATH", "static")

@@ -7,7 +7,9 @@ computation. Nothing here writes to the database.
 import random
 from typing import Dict, List, Tuple
 
-from services.data_service import get_season_projection_legacy_shape, get_team_schedule, load_data_season
+from services.data_service import (
+    get_season_projection_dual, get_season_projection_legacy_shape, get_team_schedule, load_data_season,
+)
 from services.db_service import get_collection_df
 
 NFL_TEAMS = [
@@ -59,8 +61,27 @@ def get_team_schedules(season: int) -> Dict[str, List[str]]:
 
 def get_projection_season() -> int:
     """The season whose team win projections the mock draft should use —
-    the most recent season present in draft_order.
+    the most recent season with actual projection data (model output and/or
+    analyst consensus), not the most recent season with a draft_order.
+
+    draft_order/draft_order_rules for the upcoming season are typically only
+    created closer to draft day (via the real "create new season" admin
+    flow), but preseason_predictions/consensus_projections are usually ready
+    well before that. Tying this to draft_order left the mock draft showing
+    last season's projections for weeks after this season's were already
+    live. Falls back to draft_order's max season only if neither projection
+    collection has any rows yet (e.g. a brand-new season with nothing seeded).
     """
+    preds_df = get_collection_df("preseason_predictions")
+    consensus_df = get_collection_df("consensus_projections")
+    seasons = set()
+    if not preds_df.empty:
+        seasons |= set(preds_df["season"].dropna().astype(int))
+    if not consensus_df.empty:
+        seasons |= set(consensus_df["season"].dropna().astype(int))
+    if seasons:
+        return max(seasons)
+
     order_df = get_collection_df("draft_order")
     if order_df.empty:
         raise ValueError("No draft_order configured for any season.")

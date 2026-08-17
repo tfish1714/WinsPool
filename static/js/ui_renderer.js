@@ -168,32 +168,33 @@ export const UiRenderer = {
         container.innerHTML = html;
     },
 
-    renderTeamGrid(availableTeams, selectedTeam, role, predictions, schedules, draftBoard) {
+    renderTeamGrid(availableTeams, selectedTeam, role, predictions, schedules, draftBoard, projectionDetail) {
         const grid = document.getElementById('teams-grid');
         if (!grid) return;
 
         const _esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const isAdmin = role === 'admin' && projectionDetail;
+        const _sortVal = (d) => !d ? 0 : (d.model ? d.model.projected_wins : 0) + (d.consensus ? d.consensus.consensus_mean : 0);
 
         let available = [...availableTeams];
-        if (role === 'admin' && predictions) {
-            available.sort((a, b) => {
-                const pA = predictions[a] && typeof predictions[a] === 'object' ? predictions[a].projected_wins : (predictions[a] || 0);
-                const pB = predictions[b] && typeof predictions[b] === 'object' ? predictions[b].projected_wins : (predictions[b] || 0);
-                return pB - pA;
-            });
+        if (isAdmin) {
+            available.sort((a, b) => _sortVal(projectionDetail[b]) - _sortVal(projectionDetail[a]));
+        } else {
+            available.sort((a, b) => a.localeCompare(b));
         }
 
         grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;';
         grid.innerHTML = available.map(team => {
             const isSelected = team === selectedTeam;
-            const pred       = (role === 'admin' && predictions) ? predictions[team] : null;
+            const detail     = isAdmin ? projectionDetail[team] : null;
             const schedule   = schedules && schedules[team] ? schedules[team].join('\n') : '';
 
             let subHtml = '';
-            if (pred) {
-                subHtml = typeof pred === 'object'
-                    ? `<div class="team-btn-sub">${pred.projected_wins}W &plusmn;${pred.std_dev}</div>`
-                    : `<div class="team-btn-sub">${pred}W</div>`;
+            if (detail) {
+                const modelLine = detail.model ? `Model: ${detail.model.projected_wins}W &plusmn;${detail.model.std_dev}` : '';
+                const consensusLine = detail.consensus ? `Consensus: ${detail.consensus.consensus_mean.toFixed(1)}W` : '';
+                subHtml = [modelLine, consensusLine].filter(Boolean)
+                    .map(line => `<div class="team-btn-sub">${line}</div>`).join('');
             }
 
             return `

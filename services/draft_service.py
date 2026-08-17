@@ -3,7 +3,9 @@ import os
 import pandas as pd
 from typing import Dict, Any, List
 from services.db_service import get_collection_df, add_draft_result, update_player_cell, delete_draft_pick
-from services.data_service import get_season_projection_legacy_shape, get_team_schedule, load_data
+from services.data_service import (
+    get_season_projection_dual, get_season_projection_legacy_shape, get_team_schedule, load_data,
+)
 import time
 
 logger = logging.getLogger(__name__)
@@ -31,7 +33,7 @@ def strip_admin_only_fields(payload: dict) -> dict:
     """
     if "preseason_predictions" not in payload:
         return payload
-    return {**payload, "preseason_predictions": {}}
+    return {**payload, "preseason_predictions": {}, "projection_detail": {}}
 
 def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]:
     """
@@ -149,6 +151,12 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
     # (static/js/main.js, ui_renderer.js) and Jinja templates, which read
     # `.projected_wins` / `.std_dev` directly.
     preseason_predictions = get_season_projection_legacy_shape(int(season))
+    # Admin-only, separate from preseason_predictions above: exposes model and
+    # consensus numbers individually (instead of collapsed to one) for the
+    # available-teams grid's per-team display and sort. preseason_predictions
+    # keeps its merged shape for the draft board's "Base" tag and portfolio
+    # totals, which don't need this distinction.
+    projection_detail = get_season_projection_dual(int(season))
     team_schedules = {t: get_team_schedule(t, games_season, int(season)) for t in all_nfl_teams}
     
     # 6. Player Info Metadata
@@ -193,6 +201,7 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
         "available_teams": available_teams, "draft_ready": True,
         "connected_players": list(connected_players), "all_players": all_players_info,
         "pick_start_time": pick_start_time, "preseason_predictions": preseason_predictions,
+        "projection_detail": projection_detail,
         "team_schedules": team_schedules,
     }
     

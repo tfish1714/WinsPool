@@ -464,6 +464,32 @@ def get_season_projection_legacy_shape(season: int) -> Dict[str, dict]:
         }
     return out
 
+def get_season_projection_dual(season: int) -> Dict[str, dict]:
+    """Per-team model AND consensus projections, both exposed separately --
+    unlike get_season_projection_legacy_shape(), which collapses to whichever
+    one source_type wins and discards the other. Admin-only data: callers
+    must gate this the same way they gate the legacy shape.
+
+    Returns {team: {"model": {"projected_wins", "std_dev"} | None,
+                     "consensus": {"consensus_mean", "consensus_median", "consensus_std"} | None}}
+    """
+    model = get_preseason_predictions(season)
+    consensus = get_consensus_projections(season)
+
+    out = {}
+    for team in set(model) | set(consensus):
+        m = model.get(team)
+        c = consensus.get(team)
+        out[team] = {
+            "model": {"projected_wins": m["projected_wins"], "std_dev": m["std_dev"]} if m else None,
+            "consensus": {
+                "consensus_mean": c["consensus_mean"],
+                "consensus_median": c["consensus_median"],
+                "consensus_std": c["consensus_std"],
+            } if c else None,
+        }
+    return out
+
 def get_team_schedule(team: str, games_df: pd.DataFrame, season: int) -> List[str]:
     """Extracts a team's sequential 17-game schedule from the NFL Games dataframe."""
     schedule = []

@@ -440,7 +440,7 @@ class App {
     // --- Draft Logic ---
 
     renderDraftState(state) {
-        const { active_pick, draft_board, available_teams, draft_ready, preseason_predictions, team_schedules, season } = state;
+        const { active_pick, draft_board, available_teams, draft_ready, preseason_predictions, projection_detail, team_schedules, season } = state;
 
         // Update Year Context
         const yearDisplay = document.getElementById('season-display');
@@ -480,7 +480,7 @@ class App {
         }
 
         // Render Teams
-        UiRenderer.renderTeamGrid(available_teams, this.selectedTeam, this.user.role, preseason_predictions, team_schedules, draft_board);
+        UiRenderer.renderTeamGrid(available_teams, this.selectedTeam, this.user.role, preseason_predictions, team_schedules, draft_board, projection_detail);
 
         // Setup individual card clicks
         this.attachTeamCardClickHandlers();
