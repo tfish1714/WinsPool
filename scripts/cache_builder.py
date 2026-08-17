@@ -38,7 +38,10 @@ import numpy as np
 import pandas as pd
 
 from services.data_service import load_data, get_available_years, get_latest_week_for_year
-from services.cache_service import write_cache, is_cache_final, write_game_predictions
+from services.cache_service import (
+    write_cache, is_cache_final, write_game_predictions,
+    get_game_predictions, merge_thin_game_predictions,
+)
 import services.analysis_service as analysis
 from services.prediction_service import PredictionService
 from services.nn_projection_engine import NNProjectionEngine
@@ -233,8 +236,11 @@ def build_year(standings, games, players, draft_order, draft_results,
                             'pred_ats_pick': r.get('pred_ats_pick'),
                         }
                 if pmap:
-                    write_game_predictions(year, pmap)
-                    print(f"  [ok]   game_predictions year={year} ({len(pmap)} games)")
+                    existing = get_game_predictions(year)
+                    merged = merge_thin_game_predictions(existing, pmap)
+                    write_game_predictions(year, merged)
+                    print(f"  [ok]   game_predictions year={year} "
+                          f"({len(pmap)} refreshed, {len(merged)} total)")
 
             # Store only the columns the web app needs to avoid huge payloads
             cols = ['week', 'gameday', 'home_team', 'away_team', 'home_score', 'away_score',
