@@ -180,3 +180,66 @@ async def get_elo_history(_: dict = Depends(require_admin)):
     except Exception as e:
         logger.exception("Unhandled error in prediction endpoint")
         return server_error()
+
+
+@router.get("/admin/betting/screen")
+async def get_betting_screen(
+    season: int | None = None,
+    week: int | None = None,
+    side: str = "any",
+    favorite_or_dog: str = "any",
+    spread_min: float | None = None,
+    spread_max: float | None = None,
+    elo_diff_min: float | None = None,
+    elo_diff_max: float | None = None,
+    _: dict = Depends(require_admin),
+):
+    """Admin-only: backtest an Elo/spread angle and list a week's matching games.
+
+    Never touches the NN+XGB+LR ensemble -- reads only the elo_diff/vegas_line
+    already stored per game (services.cache_service.get_game_predictions) plus
+    actual results (services.data_service.load_data) for grading.
+    """
+    try:
+        from services.betting_screener_service import (
+            screen_games, find_next_upcoming_week, BACKTEST_MIN_SEASON,
+        )
+        from services.cache_service import get_game_predictions
+
+        if side not in ("home", "away", "any"):
+            return JSONResponse(status_code=400, content={"error": "side must be home, away, or any"})
+        if favorite_or_dog not in ("favorite", "dog", "any"):
+            return JSONResponse(status_code=400, content={"error": "favorite_or_dog must be favorite, dog, or any"})
+
+        _, _, all_games, _, _, _, _ = load_data()
+        if all_games.empty:
+            return JSONResponse(status_code=404, content={"error": "No schedule data available."})
+
+        target_season = season if season is not None else int(all_games["season"].max())
+
+        target_week = week
+        if target_week is None:
+            target_week = find_next_upcoming_week(all_games, target_season)
+            if target_week is None:
+                target_week = 1
+
+        max_season = int(all_games["season"].max())
+        predictions_by_season = {}
+        for yr in range(BACKTEST_MIN_SEASON, max_season + 1):
+            preds = get_game_predictions(yr)
+            if preds:
+                predictions_by_season[yr] = preds
+
+        result = screen_games(
+            predictions_by_season, all_games,
+            target_season=target_season, target_week=target_week,
+            side=side, favorite_or_dog=favorite_or_dog,
+            spread_min=spread_min, spread_max=spread_max,
+            elo_diff_min=elo_diff_min, elo_diff_max=elo_diff_max,
+        )
+        result["target_season"] = target_season
+        result["target_week"] = target_week
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.exception("Unhandled error in get_betting_screen")
+        return server_error()
