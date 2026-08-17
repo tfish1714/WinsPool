@@ -230,6 +230,26 @@ def write_game_predictions(season: int, predictions: dict) -> None:
             logger.error("Failed to write game_predictions/%s: %s", season, e)
 
 
+def merge_thin_game_predictions(existing: dict, fresh: dict) -> dict:
+    """Merge a thin per-game predictions map into an existing one, preserving any
+    richer fields (explanation, model_spread, edge_vs_vegas, locked) already stored
+    for a game that `fresh` doesn't know about.
+
+    Used by scripts/cache_builder.py, which recomputes only pred_winner/pred_su_conf/
+    pred_ats_pick/pred_prob on every run. Without this merge, write_game_predictions'
+    whole-document overwrite would silently destroy whatever
+    scripts/backfill_schedule_predictions.py --features previously computed for every
+    game in the season -- including the elo_diff/vegas_line data the admin
+    prediction-explain tooltip and the betting screener both depend on.
+
+    Pure function -- does not mutate `existing` or `fresh`.
+    """
+    merged = {k: dict(v) for k, v in existing.items()}
+    for key, thin in fresh.items():
+        merged[key] = {**merged.get(key, {}), **thin}
+    return merged
+
+
 # ---------------------------------------------------------------------------
 # Prediction features audit store
 # ---------------------------------------------------------------------------

@@ -180,3 +180,60 @@ def test_merge_game_predictions_includes_edge_vs_vegas():
 
     assert 'edge_vs_vegas' in result.columns
     assert result.iloc[0]['edge_vs_vegas'] == 4.5
+
+
+class TestMergeThinGamePredictions:
+    """Tests for merge_thin_game_predictions -- the fix for cache_builder.py
+    silently overwriting the richer explanation/model_spread/edge_vs_vegas/locked
+    fields that scripts/backfill_schedule_predictions.py writes."""
+
+    def test_preserves_explanation_from_existing(self):
+        from services.cache_service import merge_thin_game_predictions
+
+        existing = {
+            "W01_KC_SF": {
+                "pred_winner": "KC", "pred_su_conf": 60.0, "pred_ats_pick": "KC",
+                "pred_prob": 0.6, "model_spread": 3.0, "edge_vs_vegas": 0.5,
+                "locked": True,
+                "explanation": {"elo_diff": 42.0, "vegas_line": 2.5},
+            }
+        }
+        fresh = {
+            "W01_KC_SF": {
+                "pred_winner": "KC", "pred_su_conf": 61.0,
+                "pred_ats_pick": "KC", "pred_prob": 0.61,
+            }
+        }
+
+        merged = merge_thin_game_predictions(existing, fresh)
+
+        assert merged["W01_KC_SF"]["pred_su_conf"] == 61.0  # fresh value wins
+        assert merged["W01_KC_SF"]["explanation"] == {"elo_diff": 42.0, "vegas_line": 2.5}  # preserved
+        assert merged["W01_KC_SF"]["model_spread"] == 3.0  # preserved
+        assert merged["W01_KC_SF"]["locked"] is True  # preserved
+
+    def test_creates_new_entry_when_key_not_in_existing(self):
+        from services.cache_service import merge_thin_game_predictions
+
+        merged = merge_thin_game_predictions(
+            {}, {"W02_BUF_MIA": {"pred_winner": "BUF", "pred_prob": 0.7}}
+        )
+        assert merged == {"W02_BUF_MIA": {"pred_winner": "BUF", "pred_prob": 0.7}}
+
+    def test_preserves_existing_keys_not_touched_by_fresh(self):
+        from services.cache_service import merge_thin_game_predictions
+
+        existing = {"W01_KC_SF": {"pred_winner": "KC"}, "W02_BUF_MIA": {"pred_winner": "BUF"}}
+        merged = merge_thin_game_predictions(existing, {"W01_KC_SF": {"pred_winner": "SF"}})
+
+        assert merged["W01_KC_SF"]["pred_winner"] == "SF"
+        assert merged["W02_BUF_MIA"]["pred_winner"] == "BUF"  # untouched, still present
+
+    def test_does_not_mutate_inputs(self):
+        from services.cache_service import merge_thin_game_predictions
+
+        existing = {"W01_KC_SF": {"pred_winner": "KC", "explanation": {"elo_diff": 1.0}}}
+        fresh = {"W01_KC_SF": {"pred_winner": "SF"}}
+        merge_thin_game_predictions(existing, fresh)
+
+        assert existing["W01_KC_SF"]["pred_winner"] == "KC"  # original untouched
