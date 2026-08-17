@@ -1222,13 +1222,15 @@ git commit -m "feat: add admin_betting.js — filter builder + results rendering
 
 **Files:** none (verification only)
 
-This is a UI-visible change, so per `CLAUDE.md`'s Frontend Testing section it must be manually verified in-browser before being considered done. It also needs real (not synthetic) `explanation` data in the local dev cache, since Task 1/2's fix only stops *future* clobbering — it doesn't retroactively repair 2026's already-thinned local data from this session.
+This is a UI-visible change, so per `CLAUDE.md`'s Frontend Testing section it must be manually verified in-browser before being considered done. It also needs real (not synthetic) `explanation` data in the local dev cache, since Task 1/2's fix only stops *future* clobbering — it doesn't retroactively repair 2026's already-thinned data (local or production) from this session.
 
-- [ ] **Step 1: Regenerate 2026 (and current-year-adjacent) prediction data locally**
+- [ ] **Step 1: Regenerate 2026 (and current-year-adjacent) prediction data, local AND production**
 
-Run: `python scripts/backfill_schedule_predictions.py --seasons 2025 2026`
+Run: `python scripts/backfill_schedule_predictions.py --seasons 2025 2026 --firestore`
 
-Expected: console output showing predictions written for both seasons, each with an `explanation` field (confirm by re-running the inspection check: `python -c "import json; d=json.load(open('.local_db/game_predictions_2026.json')); print(list(d['predictions'].values())[0].keys())"` should now include `explanation`, not just the 4 thin fields).
+The `--firestore` flag means this writes to the **live production** `game_predictions` Firestore collection (in addition to the local `.local_db` mirror it always writes) — this is what actually fixes the tooltip on the deployed site, not just local dev. It requires real Firebase credentials (`firebase_credentials.json` in the project root, or `FIREBASE_CREDENTIALS` env var), same as any other `--firestore` script run in this repo. Confirm with the user before running this step if it wasn't already covered by the plan approval — writing to production is exactly the kind of action this repo's own conventions (see `CLAUDE.md`) and this assistant's standing safety rules call out as worth a beat of confirmation, even though the user has already asked for `--firestore` to be included here.
+
+Expected: console output showing predictions written for both seasons, each with an `explanation` field, plus a line confirming the Firestore write (mirroring the `--firestore` output shape already used elsewhere in this script, e.g. `[ok, Firestore]`). Confirm locally by re-running the inspection check: `python -c "import json; d=json.load(open('.local_db/game_predictions_2026.json')); print(list(d['predictions'].values())[0].keys())"` — should now include `explanation`, not just the 4 thin fields. There is no equivalent one-line production check; if you want to confirm the production write landed, do it via the admin prediction-explain tooltip against the deployed site itself, not against local dev.
 
 - [ ] **Step 2: Start the local dev server**
 
