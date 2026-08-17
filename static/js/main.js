@@ -1,6 +1,6 @@
 import { ApiService } from './api.js';
 import { AuthService } from './auth_service.js';
-import { UiRenderer } from './ui_renderer.js?v=3';
+import { UiRenderer } from './ui_renderer.js?v=4';
 import { WebSocketService } from './websocket_service.js';
 import { initChat, loadHistory, appendMessage } from './chat.js';
 
