@@ -499,6 +499,47 @@
         <!-- Results -->
         <div id="betting-backtest-summary" style="margin-top: 1.25rem;"></div>
         <div id="betting-candidates-wrap" style="margin-top: 1.25rem; overflow-x: auto;"></div>
+
+        <hr style="margin: 2rem 0; border-color: var(--border-color, rgba(255,255,255,0.12));">
+
+        <h3>Pattern Scanner</h3>
+        <p style="color: var(--text-secondary); font-size: 0.9rem;">
+            Automated angle miner: sweeps single- and 2-feature threshold combinations
+            across history (Elo, Vegas spread, model spread, edge vs Vegas, EPA matchups,
+            roster deltas, rest/travel, trench dominance) and ranks by how far off the 50%
+            breakeven line each combo's cover rate / win rate sits. Walk-forward validated --
+            searches only the training seasons, then checks each candidate once against
+            held-out recent seasons. Everything here is in-sample-derived and exploratory --
+            treat results as leads to investigate, not proven edges.
+        </p>
+
+        <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; margin-top: 1rem;">
+            <div>
+                <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">Min sample (train)</label>
+                <input id="scanner-min-sample" type="number" class="admin-input" style="width: 90px;" value="50">
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">Test seasons</label>
+                <input id="scanner-test-seasons" type="number" class="admin-input" style="width: 90px;" value="5">
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.4rem; padding-bottom: 6px;">
+                <input id="scanner-include-pairs" type="checkbox" checked>
+                <label for="scanner-include-pairs" style="font-size: 0.85rem;">Include 2-feature combos</label>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.4rem; padding-bottom: 6px;">
+                <input id="scanner-held-up-only" type="checkbox">
+                <label for="scanner-held-up-only" style="font-size: 0.85rem;">Held-up only</label>
+            </div>
+            <button id="scanner-run-btn" class="btn-primary" style="padding: 0.5rem 1.25rem;">Scan for Patterns</button>
+        </div>
+
+        <div id="scanner-baseline" style="margin-top: 1.25rem;"></div>
+
+        <h4 style="margin-top: 1.5rem;">ATS (Against the Spread) Leaderboard</h4>
+        <div id="scanner-ats-wrap" style="overflow-x: auto;"></div>
+
+        <h4 style="margin-top: 1.5rem;">Straight-Up (ML) Leaderboard</h4>
+        <div id="scanner-su-wrap" style="overflow-x: auto;"></div>
     </div>
 
     <p id="admin-message" style="margin-top: 1rem; text-align: center; font-weight: 600;"></p>
@@ -525,6 +566,7 @@
 <script type="module" src="/static/js/admin_elo.js"></script>
 <script type="module" src="/static/js/admin_accuracy.js"></script>
 <script type="module" src="/static/js/admin_betting.js"></script>
+<script type="module" src="/static/js/admin_pattern_scanner.js"></script>
 <script type="module" src="/static/js/schedule_explain.js"></script>
 <script src="/static/js/admin_health.js"></script>
 {% endblock %}
