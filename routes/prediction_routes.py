@@ -188,21 +188,23 @@ async def get_betting_screen(
     week: int | None = None,
     side: str = "any",
     favorite_or_dog: str = "any",
-    spread_min: float | None = None,
-    spread_max: float | None = None,
-    elo_diff_min: float | None = None,
-    elo_diff_max: float | None = None,
+    filters: str | None = None,
     _: dict = Depends(require_admin),
 ):
-    """Admin-only: backtest an Elo/spread angle and list a week's matching games.
+    """Admin-only: backtest an Elo/spread/model angle and list a week's matching
+    games (one row per game).
 
-    Never touches the NN+XGB+LR ensemble -- reads only the elo_diff/vegas_line
+    Never touches the NN+XGB+LR ensemble -- reads only the `explanation` dict
     already stored per game (services.cache_service.get_game_predictions) plus
     actual results (services.data_service.load_data) for grading.
+
+    `filters` is a JSON-encoded array of {"feature": <key in
+    betting_screener_service.FILTERABLE_FEATURES>, "min": float|None, "max": float|None}.
     """
     try:
+        import json as _json
         from services.betting_screener_service import (
-            screen_games, find_next_upcoming_week, BACKTEST_MIN_SEASON,
+            screen_games, find_next_upcoming_week, BACKTEST_MIN_SEASON, FILTERABLE_FEATURES,
         )
         from services.cache_service import get_game_predictions
 
@@ -210,6 +212,19 @@ async def get_betting_screen(
             return JSONResponse(status_code=400, content={"error": "side must be home, away, or any"})
         if favorite_or_dog not in ("favorite", "dog", "any"):
             return JSONResponse(status_code=400, content={"error": "favorite_or_dog must be favorite, dog, or any"})
+
+        parsed_filters = []
+        if filters:
+            try:
+                parsed_filters = _json.loads(filters)
+            except _json.JSONDecodeError:
+                return JSONResponse(status_code=400, content={"error": "filters must be valid JSON"})
+            if not isinstance(parsed_filters, list):
+                return JSONResponse(status_code=400, content={"error": "filters must be a JSON array"})
+            for f in parsed_filters:
+                if not isinstance(f, dict) or f.get("feature") not in FILTERABLE_FEATURES:
+                    bad = f.get("feature") if isinstance(f, dict) else f
+                    return JSONResponse(status_code=400, content={"error": f"unknown filter feature: {bad!r}"})
 
         _, _, all_games, _, _, _, _ = load_data()
         if all_games.empty:
@@ -240,8 +255,7 @@ async def get_betting_screen(
             predictions_by_season, all_games,
             target_season=target_season, target_week=target_week,
             side=side, favorite_or_dog=favorite_or_dog,
-            spread_min=spread_min, spread_max=spread_max,
-            elo_diff_min=elo_diff_min, elo_diff_max=elo_diff_max,
+            filters=parsed_filters,
         )
         result["target_season"] = target_season
         result["target_week"] = target_week
