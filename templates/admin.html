@@ -444,9 +444,10 @@
 
     <div id="betting-section" class="tab-content card-glass hidden" style="height: auto;">
         <h2>Betting Angle Screener</h2>
-        <p>Backtest simple Elo/spread rules against the spread (ATS), then see which
-           games in a chosen week currently match. Goes beyond the NN+XGB+LR model --
-           this reads raw Elo and Vegas-line signals directly.</p>
+        <p>Backtest Elo/spread/model rules against the spread (ATS), then see which
+           games in a chosen week currently match. Reads Elo, Vegas, and the model's
+           own feature signals (model spread, edge vs Vegas, EPA matchups, roster
+           deltas, rest/travel, etc.) directly -- doesn't re-run the NN+XGB+LR ensemble.</p>
 
         <!-- Prebuilt angles -->
         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem;">
@@ -457,7 +458,7 @@
             <button class="betting-angle-btn btn-secondary" data-angle="big_underdog" style="padding: 0.25rem 0.75rem; font-size: 0.8rem;">Big Underdog (10+)</button>
         </div>
 
-        <!-- Custom filter builder -->
+        <!-- Side / favorite-dog / season / week -->
         <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; margin-top: 1.25rem;">
             <div>
                 <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">Side</label>
@@ -476,22 +477,6 @@
                 </select>
             </div>
             <div>
-                <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">Spread min</label>
-                <input id="betting-spread-min" type="number" step="0.5" class="admin-input" style="width: 90px;">
-            </div>
-            <div>
-                <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">Spread max</label>
-                <input id="betting-spread-max" type="number" step="0.5" class="admin-input" style="width: 90px;">
-            </div>
-            <div>
-                <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">Elo diff min</label>
-                <input id="betting-elo-min" type="number" step="1" class="admin-input" style="width: 90px;">
-            </div>
-            <div>
-                <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">Elo diff max</label>
-                <input id="betting-elo-max" type="number" step="1" class="admin-input" style="width: 90px;">
-            </div>
-            <div>
                 <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">Season</label>
                 <input id="betting-season" type="number" class="admin-input" style="width: 90px;">
             </div>
@@ -500,6 +485,15 @@
                 <input id="betting-week" type="number" class="admin-input" style="width: 70px;">
             </div>
             <button id="betting-run-btn" class="btn-primary" style="padding: 0.5rem 1.25rem;">Run Screen</button>
+        </div>
+
+        <!-- Custom filter builder: one row per {feature, min, max} bound -->
+        <div style="margin-top: 1.25rem;">
+            <label style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">
+                Filters <span style="opacity: 0.7;">(positive = home team, negative = away team)</span>
+            </label>
+            <div id="betting-filter-rows" style="display: flex; flex-direction: column; gap: 0.5rem;"></div>
+            <button id="betting-add-filter-btn" class="btn-secondary" style="padding: 0.25rem 0.75rem; font-size: 0.8rem; margin-top: 0.5rem;">+ Add filter</button>
         </div>
 
         <!-- Results -->

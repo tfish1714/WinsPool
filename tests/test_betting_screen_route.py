@@ -1,4 +1,5 @@
 """Tests for GET /api/admin/betting/screen."""
+import json
 from unittest.mock import patch
 import pandas as pd
 
@@ -49,6 +50,25 @@ def test_rejects_invalid_favorite_or_dog(admin_token):
     assert response.status_code == 400
 
 
+def test_rejects_malformed_filters_json(admin_token):
+    with patch("routes.prediction_routes.load_data", return_value=(None, None, _games_df(), None, None, None, None)):
+        response = client.get(
+            "/api/admin/betting/screen?filters=not-json",
+            headers={"Authorization": admin_token},
+        )
+    assert response.status_code == 400
+
+
+def test_rejects_unknown_filter_feature(admin_token):
+    with patch("routes.prediction_routes.load_data", return_value=(None, None, _games_df(), None, None, None, None)):
+        filters = json.dumps([{"feature": "not_a_real_feature", "min": 0}])
+        response = client.get(
+            f"/api/admin/betting/screen?filters={filters}",
+            headers={"Authorization": admin_token},
+        )
+    assert response.status_code == 400
+
+
 def test_default_season_and_week_resolve_from_schedule(admin_token):
     with patch("routes.prediction_routes.load_data", return_value=(None, None, _games_df(), None, None, None, None)), \
          patch("services.cache_service.get_game_predictions", side_effect=_predictions_for):
@@ -75,11 +95,27 @@ def test_explicit_week_used_over_default(admin_token):
     assert weeks == {2}
 
 
-def test_filter_narrows_candidates(admin_token):
+def test_candidates_are_one_row_per_game(admin_token):
     with patch("routes.prediction_routes.load_data", return_value=(None, None, _games_df(), None, None, None, None)), \
          patch("services.cache_service.get_game_predictions", side_effect=_predictions_for):
         response = client.get(
-            "/api/admin/betting/screen?season=2026&week=1&elo_diff_min=100",
+            "/api/admin/betting/screen?season=2026&week=1",
+            headers={"Authorization": admin_token},
+        )
+
+    assert response.status_code == 200
+    candidates = response.json()["candidates"]
+    assert len(candidates) == 1
+    assert candidates[0]["home_team"] == "KC"
+    assert candidates[0]["away_team"] == "SF"
+
+
+def test_generic_filter_narrows_candidates(admin_token):
+    filters = json.dumps([{"feature": "elo_diff", "min": 100.0}])
+    with patch("routes.prediction_routes.load_data", return_value=(None, None, _games_df(), None, None, None, None)), \
+         patch("services.cache_service.get_game_predictions", side_effect=_predictions_for):
+        response = client.get(
+            f"/api/admin/betting/screen?season=2026&week=1&filters={filters}",
             headers={"Authorization": admin_token},
         )
 
