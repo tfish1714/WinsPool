@@ -458,12 +458,15 @@ def write_elo_history_season(season: int, rows: list[dict], *, use_local: bool |
         with open(p, "w") as f:
             json.dump({"season": season, "rows": rows}, f, default=str)
     else:
-        try:
-            from services.db_service import get_db
-            db = get_db()
-            db.collection("elo_history").document(str(season)).set({
-                "season": season,
-                "rows": rows,
-            })
-        except Exception as e:
-            logger.error("Failed to write elo_history/%s: %s", season, e)
+        from services.db_service import get_db
+        db = get_db()
+        if db is None:
+            raise RuntimeError(
+                f"Cannot write elo_history/{season} to Firestore: get_db() returned "
+                "None (USE_LOCAL_DATA is set). Set USE_LOCAL_DATA=False before calling "
+                "write_elo_history_season(use_local=False)."
+            )
+        db.collection("elo_history").document(str(season)).set({
+            "season": season,
+            "rows": rows,
+        })

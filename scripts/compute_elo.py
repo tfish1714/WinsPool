@@ -31,6 +31,7 @@ Usage:
 
 import argparse
 import math
+import os
 import pathlib
 import sys
 import time
@@ -339,6 +340,14 @@ def main():
                         help="Also push per-season rows to the Firestore elo_history "
                              "collection (used by the admin Elo Ratings Explorer)")
     args = parser.parse_args()
+
+    if args.firestore:
+        # get_db() (services/db_service.py) returns None whenever USE_LOCAL_DATA
+        # is true, regardless of the use_local=False passed to
+        # write_elo_history_season below -- so on a normal local dev machine
+        # this must be forced before any Firestore write is attempted, same as
+        # refresh_local_pkls.py / cache_builder.py / run_predictions.py do.
+        os.environ["USE_LOCAL_DATA"] = "False"
 
     print("=" * 65)
     print("  NFL Elo Rating Computation")
