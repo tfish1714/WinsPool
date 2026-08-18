@@ -71,7 +71,7 @@ const CORE_COLUMNS = [
       render: c => c.already_played ? 'Played' : 'Upcoming' },
 ];
 
-class BettingScreener {
+export class BettingScreener {
     constructor() {
         this._loaded = false;
         this._sortKey = 'week';
@@ -174,6 +174,19 @@ class BettingScreener {
         this._run();
     }
 
+    /** Loads a Pattern Scanner leaderboard combo's conditions (each a
+     * {feature, label, min?, max?}) into the filter builder and runs it. Combos
+     * are side-agnostic by construction (they match whichever side satisfies
+     * the thresholds), so side/favorite-dog reset to "any". */
+    applyCombo(conditions) {
+        this._side.value = 'any';
+        this._favDog.value = 'any';
+        this._clearFilterRows();
+        conditions.forEach(c => this._addFilterRow(c.feature, c.min ?? '', c.max ?? ''));
+        this._run();
+        document.getElementById('betting-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
     _buildQuery() {
         const params = new URLSearchParams();
         if (this._side.value !== 'any') params.set('side', this._side.value);
@@ -273,4 +286,11 @@ class BettingScreener {
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => new BettingScreener());
+let _instance = null;
+document.addEventListener('DOMContentLoaded', () => { _instance = new BettingScreener(); });
+
+/** The page's single BettingScreener instance -- used by admin_pattern_scanner.js
+ * to load a scan result's combo into the filter builder ("Apply to filters"). */
+export function getBettingScreener() {
+    return _instance;
+}

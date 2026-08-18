@@ -182,6 +182,30 @@ async def get_elo_history(_: dict = Depends(require_admin)):
         return server_error()
 
 
+def _load_predictions_by_season(all_games):
+    """{season: {game_key: pred_dict}} for every season from BACKTEST_MIN_SEASON
+    (or the games data's own floor, if later) through the latest season present
+    in `all_games`. Shared by the betting screener and pattern scanner endpoints.
+
+    BACKTEST_MIN_SEASON=2006 is when Elo data starts, but games_df (used to
+    grade ATS/SU outcomes) only goes back to 2013 -- looping earlier seasons
+    would fetch prediction docs that can never be graded (no matching game
+    result), wasting Firestore reads and silently misrepresenting how much
+    history actually backs the reported n.
+    """
+    from services.betting_screener_service import BACKTEST_MIN_SEASON
+    from services.cache_service import get_game_predictions
+
+    max_season = int(all_games["season"].max())
+    min_season = max(BACKTEST_MIN_SEASON, int(all_games["season"].min()))
+    predictions_by_season = {}
+    for yr in range(min_season, max_season + 1):
+        preds = get_game_predictions(yr)
+        if preds:
+            predictions_by_season[yr] = preds
+    return predictions_by_season, min_season, max_season
+
+
 @router.get("/admin/betting/screen")
 async def get_betting_screen(
     season: int | None = None,
@@ -204,9 +228,8 @@ async def get_betting_screen(
     try:
         import json as _json
         from services.betting_screener_service import (
-            screen_games, find_next_upcoming_week, BACKTEST_MIN_SEASON, FILTERABLE_FEATURES,
+            screen_games, find_next_upcoming_week, FILTERABLE_FEATURES,
         )
-        from services.cache_service import get_game_predictions
 
         if side not in ("home", "away", "any"):
             return JSONResponse(status_code=400, content={"error": "side must be home, away, or any"})
@@ -238,18 +261,7 @@ async def get_betting_screen(
             if target_week is None:
                 target_week = 1
 
-        max_season = int(all_games["season"].max())
-        # BACKTEST_MIN_SEASON=2006 is when Elo data starts, but games_df (used to
-        # grade ATS outcomes) only goes back to 2013 -- looping earlier seasons
-        # would fetch prediction docs that can never be graded (no matching game
-        # result), wasting Firestore reads and silently misrepresenting how much
-        # history actually backs the reported n.
-        min_season = max(BACKTEST_MIN_SEASON, int(all_games["season"].min()))
-        predictions_by_season = {}
-        for yr in range(min_season, max_season + 1):
-            preds = get_game_predictions(yr)
-            if preds:
-                predictions_by_season[yr] = preds
+        predictions_by_season, min_season, max_season = _load_predictions_by_season(all_games)
 
         result = screen_games(
             predictions_by_season, all_games,
@@ -263,4 +275,50 @@ async def get_betting_screen(
         return JSONResponse(content=result)
     except Exception as e:
         logger.exception("Unhandled error in get_betting_screen")
+        return server_error()
+
+
+@router.get("/admin/betting/scan")
+async def get_betting_pattern_scan(
+    test_seasons: int = 5,
+    include_pairs: bool = True,
+    min_sample: int = 50,
+    min_test_sample: int = 15,
+    top_n: int = 20,
+    _: dict = Depends(require_admin),
+):
+    """Admin-only: automated angle miner. Sweeps single- and 2-feature threshold
+    combinations across services.betting_screener_service.FILTERABLE_FEATURES
+    against history, ranked by distance from the 50% breakeven line.
+
+    Walk-forward validated: the sweep only searches the training seasons
+    (everything before the most recent `test_seasons`), then each surfaced
+    combo is evaluated once -- no re-tuning -- against the held-out seasons.
+    Results are in-sample-derived leads to investigate, not proven edges.
+    """
+    try:
+        from services.pattern_scanner_service import scan_angles
+
+        if top_n < 1 or top_n > 100:
+            return JSONResponse(status_code=400, content={"error": "top_n must be between 1 and 100"})
+        if min_sample < 1 or min_test_sample < 1:
+            return JSONResponse(status_code=400, content={"error": "min_sample and min_test_sample must be positive"})
+        if test_seasons < 0:
+            return JSONResponse(status_code=400, content={"error": "test_seasons must be non-negative"})
+
+        _, _, all_games, _, _, _, _ = load_data()
+        if all_games.empty:
+            return JSONResponse(status_code=404, content={"error": "No schedule data available."})
+
+        predictions_by_season, min_season, max_season = _load_predictions_by_season(all_games)
+
+        result = scan_angles(
+            predictions_by_season, all_games,
+            test_seasons=test_seasons, include_pairs=include_pairs,
+            min_sample=min_sample, min_test_sample=min_test_sample, top_n=top_n,
+        )
+        result["seasons_covered"] = [min_season, max_season]
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.exception("Unhandled error in get_betting_pattern_scan")
         return server_error()
