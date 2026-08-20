@@ -23,6 +23,16 @@ def send_weekly_recap_email(to_emails: list, subject: str, html_content: str) ->
     return all(_send(email, subject, html_content) for email in to_emails)
 
 
+def send_alert_email(subject: str, message: str) -> bool:
+    """Send a job-failure alert to the address in ALERT_EMAIL. Returns False (no-op) if unconfigured."""
+    to_email = os.getenv("ALERT_EMAIL")
+    if not to_email:
+        logger.error("ALERT_EMAIL not set — alert email not sent. Subject: %s", subject)
+        return False
+    html = f"<p>{subject}</p><pre>{message}</pre>"
+    return _send(to_email, subject, html)
+
+
 def _send(to_email: str, subject: str, html: str) -> bool:
     """Send a single transactional email via Resend. Returns True on success."""
     api_key = os.getenv("RESEND_API_KEY")
