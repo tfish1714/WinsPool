@@ -16,7 +16,7 @@ This spec covers wiring up real, scheduled automation for three things: refreshi
 
 ## Non-goals
 
-- Changing what the model considers (e.g. using ESPN's per-game injury data to override a predicted starter) — verified feasible (see Appendix), explicitly deferred as a separate feature-engineering follow-up.
+- Changing what the model considers (e.g. using ESPN's per-game injury data to override a predicted starter) — verified feasible, tracked separately in `2026-08-19-espn-pregame-injury-signal-design.md` (see Open follow-ups below).
 - Sub-minute live score/play-by-play tracking — out of scope; "live" here means "within ~5 minutes."
 - Retraining the model on a schedule — out of scope; `train_nn_model.py` stays a manual, deliberate action.
 
@@ -76,13 +76,8 @@ All Cloud Run Jobs (no idle cost, billed only for actual execution time):
 - New tests for `send_alert_email()`.
 - Manual dry-run of each job locally (`USE_LOCAL_DATA=False` against prod or a scratch Firestore) before wiring the actual Cloud Scheduler/Cloud Tasks triggers.
 
-## Appendix: ESPN pregame injury data (verified, deferred)
-
-`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event={id}` (per-game, not the scoreboard endpoint) returns a real, timestamped `injuries[]` array — verified live during this design session (e.g. a `"Questionable"` status timestamped same-day). This is fresher than nflverse's daily-cadence `injuries_{year}.csv` and could in principle catch a same-day starter change. Two caveats: it's per-game (one call per matchup, not league-wide in one call — still cheap for a ~13-game Sunday), and it's the same unofficial/no-SLA ESPN API family as the scoreboard endpoint.
-
-**Deferred, not designed here:** actually using this to change a prediction (e.g. swap the modeled starting QB if ESPN reports them Out) requires touching `nn_feature_engine.py`'s QB-tier/starter logic — a feature-engineering change with its own design/testing needs, out of scope for a scheduling spec. Flagged as a named follow-up.
-
 ## Open follow-ups (not in this spec)
 
+- **ESPN pregame injury data → prediction pipeline.** Split into its own tracked spec: `docs/superpowers/specs/2026-08-19-espn-pregame-injury-signal-design.md`. Summary: ESPN's per-game `summary?event={id}` endpoint (verified live during this design session) has real timestamped pregame injury data, fresher than nflverse's daily-cadence injury files — but using it to actually change a prediction requires new work in `nn_feature_engine.py`, since the existing `compute_starter_qb_flags()` is retrospective (built from post-game data) and isn't reusable as a live pregame signal. Marked "not designed" there — needs its own brainstorming pass.
 - CLAUDE.md's Key Environment Variables list still documents `SMTP_SERVER/PORT/USER` for email delivery; actual code uses Resend (`RESEND_API_KEY`, `FROM_EMAIL`). Stale, not fixed here.
 - ESPN pregame injury data → prediction pipeline (see Appendix).
