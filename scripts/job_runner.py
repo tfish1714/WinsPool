@@ -28,7 +28,7 @@ def _run_step(step: dict, log) -> tuple[bool, str]:
     log(f"[{name}] Starting...")
     try:
         result = subprocess.run(
-            [sys.executable, str(script)],
+            [sys.executable, str(script), *step.get("args", [])],
             capture_output=True,
             text=True,
             timeout=600,

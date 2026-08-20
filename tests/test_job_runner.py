@@ -64,3 +64,16 @@ def test_unhandled_exception_sends_alert_and_returns_false(mock_run, mock_alert,
 
     assert ok is False
     mock_alert.assert_called_once()
+
+
+@patch("scripts.job_runner.send_alert_email")
+@patch("scripts.job_runner.subprocess.run")
+def test_step_args_are_passed_to_subprocess(mock_run, mock_alert, tmp_path):
+    script = tmp_path / "a.py"
+    script.write_text("")
+    mock_run.return_value = _fake_result(returncode=0)
+
+    run_steps([{"name": "A", "script": script, "args": ["--firestore"], "required": True}], job_name="test-job")
+
+    called_cmd = mock_run.call_args[0][0]
+    assert "--firestore" in called_cmd
