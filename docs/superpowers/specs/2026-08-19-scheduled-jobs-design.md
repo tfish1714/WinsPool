@@ -35,12 +35,18 @@ Cloud Scheduler cannot run arbitrary scripts directly — it targets HTTP endpoi
 
 | Job | Trigger | Image | Purpose |
 |---|---|---|---|
-| `winspool-sync-daily` | Cloud Scheduler cron, ~9:00am UTC, year-round | `winspool-sync` | Full raw data refresh (rosters, depth charts, injuries, snap counts, pfr_advstats, schedules, stats_team — `sync_nflverse_data.py` default priority 3) → `compute_elo.py --firestore` → `daily_nfl_sync.py` (standings) |
-| `winspool-predict-daily` | Cloud Scheduler cron, ~9:15am UTC, year-round | `winspool-predict` | Fixed baseline prediction regen. Always runs regardless of the dynamic path below, guaranteeing at least one fresh refresh+predict per day even if dynamic scheduling fails entirely. |
-| `winspool-schedule-kickoffs` | Cloud Scheduler cron, weekly (Tue ~10am UTC), in-season only | `winspool-sync` | Reads that week's `gameday`/`gametime` from the schedule, computes each distinct kickoff-time cluster, and enqueues 2 Cloud Tasks per cluster: `winspool-sync-daily` at (kickoff − 75 min), `winspool-predict-daily` at (kickoff − 60 min). Cloud Tasks (not Cloud Scheduler) is the correct primitive for "run once at this specific future timestamp" vs. Cloud Scheduler's recurring-cron model. |
-| `winspool-live-scores` | Cloud Scheduler cron, every 5 min, Sept 1 – ~Feb 10 | `winspool-sync` | New `scripts/sync_live_scores.py` (below). |
+| `winspool-sync-daily` | Cloud Scheduler cron, ~9:00am UTC, **Aug 1 – ~Feb 10 only** | `winspool-sync` | Full raw data refresh (rosters, depth charts, injuries, snap counts, pfr_advstats, schedules, stats_team — `sync_nflverse_data.py` default priority 3) → `compute_elo.py --firestore` → `daily_nfl_sync.py` (standings) |
+| `winspool-predict-daily` | Cloud Scheduler cron, ~9:15am UTC, **Aug 1 – ~Feb 10 only** | `winspool-predict` | Fixed baseline prediction regen. Always runs regardless of the dynamic path below, guaranteeing at least one fresh refresh+predict per day even if dynamic scheduling fails entirely. |
+| `winspool-schedule-kickoffs` | Cloud Scheduler cron, weekly (Tue ~10am UTC), **Sept 1 – ~Feb 10 only** | `winspool-sync` | Reads that week's `gameday`/`gametime` from the schedule, computes each distinct kickoff-time cluster, and enqueues 2 Cloud Tasks per cluster: `winspool-sync-daily` at (kickoff − 75 min), `winspool-predict-daily` at (kickoff − 60 min). Cloud Tasks (not Cloud Scheduler) is the correct primitive for "run once at this specific future timestamp" vs. Cloud Scheduler's recurring-cron model. |
+| `winspool-live-scores` | Cloud Scheduler cron, every 5 min, **Sept 1 – ~Feb 10 only** | `winspool-sync` | New `scripts/sync_live_scores.py` (below). |
 
-Rationale for the dynamic-vs-fixed split: the live-score job is cheap enough per-run that a broad always-on cadence is fine (verified: comfortably inside the Cloud Run free tier even at every-5-min/day). The predict job is not — hourly-all-day-year-round would exceed the free tier (~230k vCPU-sec/month against a 180k allowance, by rough estimate). Dynamic per-kickoff-cluster scheduling gets precision (re-syncs + re-predicts shortly before each actual kickoff, catching Thu/Sun-early/Sun-late/Sun-night/Mon/occasional-Sat/international slates individually) without paying for runs nobody needs. The fixed daily baseline is the failure-mode backstop: if `winspool-schedule-kickoffs` itself fails silently, the week still gets one guaranteed daily refresh instead of nothing (and that failure fires the alert below).
+None of these four run in the offseason (~Feb 10 – Jul 31) — no games, no roster/depth-chart churn worth tracking, no reason to pay for or even execute a run. Two different windows rather than one shared one:
+- **`winspool-sync-daily`/`winspool-predict-daily`: Aug 1 – Feb 10.** Starts a month before Week 1 on purpose — preseason roster cuts, depth-chart formation, and draft-board projections (the exact ATL preseason-composite investigation from earlier this session) all happen in August, and the draft itself happens before Week 1 using this data.
+- **`winspool-schedule-kickoffs`/`winspool-live-scores`: Sept 1 – Feb 10.** These are specifically about actual games with real kickoffs and pool-standings-relevant results — preseason exhibition games don't need last-minute re-syncs or live tracking the way regular-season/playoff games do.
+
+The exact start/end dates should live as one place to edit (e.g. a constant in each script, or a shared config), not copy-pasted across four Cloud Scheduler job definitions — implementation detail for the plan, not decided here.
+
+Rationale for the dynamic-vs-fixed split within the in-season window: the live-score job is cheap enough per-run that a broad always-on cadence is fine (verified: comfortably inside the Cloud Run free tier even at every-5-min/day). The predict job is not — hourly-all-day for the full Aug–Feb window would exceed the free tier (~230k vCPU-sec/month against a 180k allowance, by rough estimate). Dynamic per-kickoff-cluster scheduling gets precision (re-syncs + re-predicts shortly before each actual kickoff, catching Thu/Sun-early/Sun-late/Sun-night/Mon/occasional-Sat/international slates individually) without paying for runs nobody needs. The fixed daily baseline is the failure-mode backstop: if `winspool-schedule-kickoffs` itself fails silently, the week still gets one guaranteed daily refresh instead of nothing (and that failure fires the alert below).
 
 ## New script: `scripts/sync_live_scores.py`
 
@@ -59,9 +65,9 @@ Runs every 5 minutes in-season. Two parts:
 
 ## Cost estimate
 
-All Cloud Run Jobs (no idle cost, billed only for actual execution time):
+All Cloud Run Jobs (no idle cost, billed only for actual execution time). None of the four run outside Aug 1 – Feb 10, so the ~5.5-month offseason costs $0, not just "cheap":
 
-- `winspool-sync-daily` + `winspool-predict-daily`: ~18k + ~5k vCPU-sec/month — well inside the 180k free tier.
+- `winspool-sync-daily` + `winspool-predict-daily`: ~18k + ~5k vCPU-sec/month during the active window — well inside the 180k free tier.
 - `winspool-live-scores`: every 5 min in-season, lightweight (~30k vCPU-sec across the whole season) — trivial.
 - Dynamic kickoff-cluster runs: ~4-6 clusters/week × 2 tasks × ~18 weeks — comparable order of magnitude to the daily baseline, still inside free tier.
 - Cloud Scheduler: 4 recurring jobs, first 3/month free, $0.10/job/month after — ~$0.10-0.30/month.
