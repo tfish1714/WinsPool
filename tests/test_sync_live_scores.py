@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 from unittest.mock import patch, MagicMock
 from scripts.sync_live_scores import overlay_espn_live_fields
 
@@ -57,3 +58,36 @@ class TestOverlayEspnLiveFields:
             from scripts.sync_live_scores import run_espn_overlay_safely
             result = run_espn_overlay_safely(db, _games_df())
         assert result == 0
+
+
+class TestAlertingPaths:
+    """I5: coverage on the two alerting-path constraints -- the authoritative
+    path must alert + exit 1 on failure, and the best-effort ESPN overlay
+    path must never alert (it degrades silently, per the two-part design)."""
+
+    def test_authoritative_failure_sends_alert_and_exits_1(self):
+        """sync_authoritative() raising inside main() must call
+        send_alert_email exactly once and exit the process with code 1."""
+        with patch("scripts.sync_live_scores.initialize_firebase", return_value=MagicMock()), \
+             patch("scripts.sync_live_scores.sync_authoritative", side_effect=RuntimeError("boom")), \
+             patch("scripts.sync_live_scores.send_alert_email") as mock_alert:
+            from scripts.sync_live_scores import main
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+
+        assert exc_info.value.code == 1
+        mock_alert.assert_called_once()
+        args, _ = mock_alert.call_args
+        assert "winspool-live-scores" in args[0]
+
+    def test_espn_overlay_failure_does_not_alert(self):
+        """get_live_updates() raising inside the overlay path must NOT call
+        send_alert_email -- only the authoritative path alerts."""
+        db = MagicMock()
+        with patch("scripts.sync_live_scores.get_live_updates", side_effect=Exception("ESPN down")), \
+             patch("scripts.sync_live_scores.send_alert_email") as mock_alert:
+            from scripts.sync_live_scores import run_espn_overlay_safely
+            result = run_espn_overlay_safely(db, _games_df())
+
+        assert result == 0
+        mock_alert.assert_not_called()
