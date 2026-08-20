@@ -18,7 +18,7 @@ Schedule: Cloud Scheduler, ~9:00am UTC, Aug 1 - Feb 10 only.
 import sys
 import pathlib
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 LOG_DIR = pathlib.Path('logs')
 LOG_DIR.mkdir(exist_ok=True)
@@ -35,16 +35,28 @@ SCRIPTS_DIR = pathlib.Path(__file__).parent
 sys.path.insert(0, str(SCRIPTS_DIR.parent))
 from scripts.job_runner import run_steps
 
+# compute_elo.py's --max-season defaults to a hardcoded 2025 (do not change
+# that default -- other things may depend on it). Without an explicit
+# override here, every unattended run would recompute Elo only through 2025
+# and overwrite rawdata/elo_computed.csv wholesale, silently stripping the
+# current season's Elo data the ML feature engine depends on for elo_pre.
+# Mirrors the CURRENT_SEASON derivation in sync_nflverse_data.py.
+_today = date.today()
+CURRENT_SEASON = _today.year if _today.month >= 9 else _today.year - 1
+
 STEPS = [
     {
         'name': 'nflverse Raw Data Sync',
         'script': SCRIPTS_DIR / 'sync_nflverse_data.py',
-        'required': False,  # Failure is non-fatal — rawdata/ may still be current
+        # Non-fatal: still attempt downstream steps even if this fails, so
+        # the failure detail (visible in the alert) is easier to diagnose
+        # than an early abort.
+        'required': False,
     },
     {
         'name': 'Elo Recompute + Firestore Push',
         'script': SCRIPTS_DIR / 'compute_elo.py',
-        'args': ['--firestore'],
+        'args': ['--firestore', '--max-season', str(CURRENT_SEASON)],
         'required': False,  # Elo staleness doesn't block standings/predictions
     },
     {

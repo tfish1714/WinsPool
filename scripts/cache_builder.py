@@ -23,16 +23,19 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # cache_builder always reads from Firestore (never from local pkl)
 os.environ['USE_LOCAL_DATA'] = 'False'
 
-# Initialize Firebase before importing data_service (which reads from Firestore)
+# Initialize Firebase before importing data_service (which reads from Firestore).
+# Delegates to daily_nfl_sync.py::initialize_firebase(), which checks the
+# FIREBASE_CREDENTIALS env var (base64-encoded service account JSON -- how
+# Cloud Run passes credentials) before falling back to a local
+# firebase_credentials.json file. Previously this block only ever looked for
+# the local file, which is gitignored and never present in the deployed
+# image, so this job could never actually start on Cloud Run: it would
+# sys.exit(1) at import time -- before _run_with_alerting() is even reached,
+# so the failure produced no alert email either.
 import firebase_admin
-from firebase_admin import credentials, firestore as _fs
-if not firebase_admin._apps:
-    _creds_path = pathlib.Path(__file__).parent.parent / 'firebase_credentials.json'
-    if not _creds_path.exists():
-        print(f"ERROR: firebase_credentials.json not found at {_creds_path}. "
-              f"Set FIREBASE_CREDENTIALS env var or place the file in the project root.")
-        sys.exit(1)
-    firebase_admin.initialize_app(credentials.Certificate(str(_creds_path)))
+from firebase_admin import firestore as _fs
+from scripts.daily_nfl_sync import initialize_firebase
+initialize_firebase()
 
 import numpy as np
 import pandas as pd

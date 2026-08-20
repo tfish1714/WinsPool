@@ -15,6 +15,7 @@ service account with run.invoker on the target job.
 See docs/superpowers/specs/2026-08-19-scheduled-jobs-design.md.
 """
 import os
+import subprocess
 import sys
 import pathlib
 from datetime import datetime, timedelta, timezone
@@ -29,6 +30,7 @@ from scripts.daily_nfl_sync import load_games
 from services.email_service import send_alert_email
 
 RAWDATA_DIR = pathlib.Path(__file__).parent.parent / "rawdata"
+SCRIPTS_DIR = pathlib.Path(__file__).parent
 
 GCP_PROJECT = os.environ.get("GCP_PROJECT")
 GCP_REGION = os.environ.get("GCP_REGION", "us-east1")
@@ -95,7 +97,18 @@ def enqueue_task(tasks_client, run_at: datetime, job_name: str) -> None:
     ts = timestamp_pb2.Timestamp()
     ts.FromDatetime(run_at.astimezone(timezone.utc))
 
+    # Deterministic task name so Cloud Tasks' built-in dedup applies -- a
+    # Cloud Scheduler retry of the weekly winspool-schedule-kickoffs job (or
+    # a manual re-run) would otherwise enqueue duplicate tasks for the same
+    # kickoff cluster.
+    task_id = f"{job_name}-{run_at.strftime('%Y%m%dT%H%M')}"
+    task_name = (
+        f"projects/{GCP_PROJECT}/locations/{GCP_REGION}/"
+        f"queues/{GCP_TASKS_QUEUE}/tasks/{task_id}"
+    )
+
     task = {
+        "name": task_name,
         "http_request": {
             "http_method": tasks_v2.HttpMethod.POST,
             "url": _run_url(job_name),
@@ -106,10 +119,32 @@ def enqueue_task(tasks_client, run_at: datetime, job_name: str) -> None:
     tasks_client.create_task(request={"parent": parent, "task": task})
 
 
+def _sync_schedule_data() -> None:
+    """Re-pull rawdata/schedules/games.csv before reading it. In the actual
+    Cloud Run Job container (ephemeral, no baked-in rawdata), games.csv won't
+    exist otherwise, so load_games() would sys.exit(1) on every single run --
+    zero Cloud Tasks ever get enqueued, every week. Mirrors
+    sync_live_scores.py::sync_authoritative()'s subprocess pattern: non-fatal
+    on failure -- a fresh container has no stale-but-present games.csv to
+    fall back on anyway, so any failure here is worth surfacing (via
+    load_games()'s own sys.exit(1) if the file genuinely isn't there
+    afterward) but shouldn't be treated differently than that established
+    pattern."""
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS_DIR / "sync_nflverse_data.py"), "--priority", "1"],
+        capture_output=True, text=True, timeout=120,
+        cwd=str(SCRIPTS_DIR.parent),
+    )
+    if result.returncode != 0:
+        print(f"[warn] sync_nflverse_data.py --priority 1 exited non-zero (non-fatal): "
+              f"{result.stderr.strip()[:500]}")
+
+
 def main():
     try:
         from google.cloud import tasks_v2
 
+        _sync_schedule_data()
         games = load_games()
         season, week = _current_season_week(games)
         clusters = compute_kickoff_clusters(games, season, week)

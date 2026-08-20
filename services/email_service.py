@@ -1,3 +1,4 @@
+import html
 import logging
 import os
 from dotenv import load_dotenv
@@ -29,8 +30,12 @@ def send_alert_email(subject: str, message: str) -> bool:
     if not to_email:
         logger.error("ALERT_EMAIL not set — alert email not sent. Subject: %s", subject)
         return False
-    html = f"<p>{subject}</p><pre>{message}</pre>"
-    return _send(to_email, subject, html)
+    # Escape both -- nearly every Python traceback contains
+    # `File "...", line N, in <module>`, and an unescaped `<module>` gets
+    # silently eaten as an unknown HTML tag by mail clients, degrading the
+    # most important content of a failure alert in the common case.
+    body_html = f"<p>{html.escape(subject)}</p><pre>{html.escape(message)}</pre>"
+    return _send(to_email, subject, body_html)
 
 
 def _send(to_email: str, subject: str, html: str) -> bool:

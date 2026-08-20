@@ -12,9 +12,12 @@ Runs every 5 minutes, in-season (Sept 1 - Feb 10) only. Two parts:
    very likely fresh. We then re-run the same compute_standings()
    daily_nfl_sync.py uses, filtered to the current + prior season only (the
    5-minute cadence makes a full historical rewrite needlessly expensive),
-   and push nfl_standings + nfl_games via the same batch_upload() (full
-   overwrite, same semantics as the daily sync). Intentionally does not
-   depend on ESPN.
+   and push nfl_standings via the same batch_upload() (full overwrite, same
+   semantics as the daily sync). The nfl_games push is narrowed further, to
+   just the last ~7 days by gameday -- standings need the full current
+   season to be correct, but only games that could plausibly be live or
+   recently finished need to be rewritten every 5 minutes. Intentionally
+   does not depend on ESPN.
 
 2. Best-effort (cosmetic only, must never affect wins or crash part 1):
    fetch ESPN's live scoreboard and merge-write only is_live/clock/period
@@ -73,8 +76,20 @@ def sync_authoritative(db) -> pd.DataFrame:
 
     standings = compute_standings(recent)
     batch_upload(db, "nfl_standings", standings)
-    batch_upload(db, "nfl_games", recent)
-    return recent
+
+    # Narrow the nfl_games push (but NOT the standings input above) to games
+    # with a gameday in roughly the last week -- these are the only games
+    # that could plausibly be live or have just finished. Pushing all of
+    # `recent` (current + prior season, ~620 docs) every 5 minutes measured
+    # at ~179k Firestore writes/day, ~9x the free tier. compute_standings()
+    # still needs the full current season to produce correct win/loss
+    # totals, so only the nfl_games push is narrowed here.
+    gameday = pd.to_datetime(recent["gameday"], errors="coerce")
+    today = pd.Timestamp.now().normalize()
+    window = recent[(gameday >= today - pd.Timedelta(days=7)) & (gameday <= today)].copy()
+
+    batch_upload(db, "nfl_games", window)
+    return window
 
 
 def overlay_espn_live_fields(db, games: pd.DataFrame, live_data: dict) -> int:
@@ -128,8 +143,13 @@ def run_espn_overlay_safely(db, games: pd.DataFrame) -> int:
 
 
 def main():
-    db = initialize_firebase()
     try:
+        # initialize_firebase() itself calls sys.exit(1) (SystemExit) when no
+        # credentials are configured at all -- kept inside this try/except so
+        # that failure reaches the alert handler below instead of escaping
+        # uncaught, same class of bug as sync_authoritative()'s SystemExit
+        # case (see comment below).
+        db = initialize_firebase()
         games = sync_authoritative(db)
     except (Exception, SystemExit):
         # SystemExit is caught too: load_games() (called from
@@ -147,11 +167,18 @@ def main():
         )
         sys.exit(1)
 
+    written = run_espn_overlay_safely(db, games)
+
     # Signal cache invalidation so the app's caches pick up the fresh
-    # standings/games just written, matching daily_nfl_sync.py's pattern.
+    # standings/games + ESPN overlay fields just written, matching
+    # daily_nfl_sync.py's pattern. Deliberately placed *after* the overlay
+    # step, not right after sync_authoritative() -- a page request landing
+    # in that earlier window would rebuild the cache from nfl_games docs
+    # that were just fully overwritten without is_live/clock/period (those
+    # are added by the overlay step above), systematically caching away the
+    # LIVE badge for a full 5-minute cycle during actual game traffic.
     db.collection("metadata").document("cache_control").set({"last_update": time.time()})
 
-    written = run_espn_overlay_safely(db, games)
     print(f"Live sync complete. ESPN overlay wrote {written} game(s).")
 
 
