@@ -80,6 +80,30 @@ class TestAlertingPaths:
         args, _ = mock_alert.call_args
         assert "winspool-live-scores" in args[0]
 
+    def test_systemexit_from_sync_authoritative_still_alerts_and_exits_1(self):
+        """Regression: load_games() (called from sync_authoritative()) calls
+        sys.exit(1) directly when rawdata/schedules/games.csv is genuinely
+        missing, which raises SystemExit -- not a subclass of Exception. A
+        bare `except Exception` around sync_authoritative() would let that
+        specific failure mode propagate straight past the alert handler,
+        contradicting the spec's must-not-fail-silently requirement for the
+        authoritative part. Exercise the real path: subprocess succeeds (so
+        the non-fatal warning branch is skipped) but load_games() itself
+        raises SystemExit."""
+        with patch("scripts.sync_live_scores.initialize_firebase", return_value=MagicMock()), \
+             patch("scripts.sync_live_scores.subprocess.run",
+                   return_value=MagicMock(returncode=0, stderr="")), \
+             patch("scripts.sync_live_scores.load_games", side_effect=SystemExit(1)), \
+             patch("scripts.sync_live_scores.send_alert_email") as mock_alert:
+            from scripts.sync_live_scores import main
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+
+        assert exc_info.value.code == 1
+        mock_alert.assert_called_once()
+        args, _ = mock_alert.call_args
+        assert "winspool-live-scores" in args[0]
+
     def test_espn_overlay_failure_does_not_alert(self):
         """get_live_updates() raising inside the overlay path must NOT call
         send_alert_email -- only the authoritative path alerts."""

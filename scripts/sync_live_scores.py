@@ -131,7 +131,16 @@ def main():
     db = initialize_firebase()
     try:
         games = sync_authoritative(db)
-    except Exception:
+    except (Exception, SystemExit):
+        # SystemExit is caught too: load_games() (called from
+        # sync_authoritative()) calls sys.exit(1) directly when
+        # rawdata/schedules/games.csv is genuinely missing (e.g. the
+        # schedules download itself failed, not just the benign stats_team
+        # 404 case above), and SystemExit does not subclass Exception -- an
+        # `except Exception` alone would let that specific failure escape
+        # this alert handler silently. traceback.format_exc() still works
+        # correctly for a caught SystemExit (it reads sys.exc_info(), not
+        # exception type).
         send_alert_email(
             "WinsPool job 'winspool-live-scores' failed",
             f"Authoritative sync failed:\n\n{traceback.format_exc()}",
