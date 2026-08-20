@@ -333,3 +333,81 @@ class TestProfileUpdate:
             resp = client.post("/api/profile/update", json=body)
         assert resp.status_code == 200
         mock_update.assert_called_once()
+
+
+# ── Last Login Tracking Tests ──────────────────────────────────────────────
+
+class TestLastLoginTracking:
+
+    def test_login_updates_last_login(self):
+        """Successful login records last_login timestamp."""
+        player = {
+            "playerId": 10,
+            "fullName": "Test Player",
+            "email": "player@test.com",
+            "password_hash": "$2b$12$eIX/mockhash",
+            "role": "user",
+            "lockout_until": None,
+            "failed_login_attempts": 0,
+            "mfa_enabled": False,
+            "must_change_password": False,
+        }
+        with patch("routes.auth_routes.get_player_by_email", return_value=player), \
+             patch("routes.auth_routes.verify_password", return_value=True), \
+             patch("routes.auth_routes.update_player_profile") as mock_update:
+            resp = client.post("/api/login", json={"email": "player@test.com", "password": "ValidPassword1!"})
+        assert resp.status_code == 200
+        assert mock_update.called
+        update_args = mock_update.call_args[0]
+        assert update_args[0] == "10"
+        assert "last_login" in update_args[1]
+        assert isinstance(update_args[1]["last_login"], float)
+
+    def test_set_password_updates_last_login(self):
+        """Claiming account via set_password records last_login timestamp."""
+        player = {
+            "playerId": 11,
+            "fullName": "New Player",
+            "email": "new@test.com",
+            "password_hash": None,
+            "role": "user",
+            "lockout_until": None,
+            "failed_setup_attempts": 0,
+        }
+        with patch("routes.auth_routes.get_player_by_email", return_value=player), \
+             patch("routes.auth_routes.update_player_credentials") as mock_creds, \
+             patch("routes.auth_routes.update_player_profile") as mock_update:
+            resp = client.post("/api/set_password", json={
+                "email": "new@test.com",
+                "password": "ValidPassword1!",
+                "confirm_password": "ValidPassword1!",
+            })
+        assert resp.status_code == 200
+        assert mock_creds.called
+        assert mock_update.called
+        update_args = mock_update.call_args[0]
+        assert update_args[0] == "11"
+        assert "last_login" in update_args[1]
+        assert isinstance(update_args[1]["last_login"], float)
+
+    def test_verify_mfa_updates_last_login(self):
+        """MFA verification records last_login timestamp."""
+        code = "123456"
+        token_hash = hashlib.sha256(code.encode()).hexdigest()
+        player = {
+            "playerId": 12,
+            "fullName": "MFA Player",
+            "email": "mfa@test.com",
+            "role": "user",
+            "mfa_token": token_hash,
+            "mfa_expiry": time.time() + 600,
+        }
+        with patch("services.db_service.get_player_by_id", return_value=player), \
+             patch("routes.auth_routes.update_player_profile") as mock_update:
+            resp = client.post("/api/mfa/verify", json={"playerId": "12", "code": code})
+        assert resp.status_code == 200
+        assert mock_update.called
+        update_args = mock_update.call_args[0]
+        assert update_args[0] == "12"
+        assert "last_login" in update_args[1]
+        assert isinstance(update_args[1]["last_login"], float)

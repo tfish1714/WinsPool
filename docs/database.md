@@ -29,6 +29,8 @@ Stores all pool participants.
 | `mfa_code` | `string` | One-time MFA verification code (optional) |
 | `failed_setup_attempts` | `int` | Rate limiter counter for password setup |
 | `lockout_until` | `float` | Unix timestamp of lockout expiry (optional) |
+| `must_change_password` | `bool` | Flag set when a temporary password is assigned by admin, requiring change on next login |
+| `last_login` | `float` | Unix epoch timestamp (seconds) of player's most recent login |
 
 **Document ID**: `{playerId}`
 

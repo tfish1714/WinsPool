@@ -8,6 +8,7 @@ import time
 
 from typing import Annotated
 
+import pandas as pd
 from fastapi import APIRouter, Depends, Path as FPath, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -78,10 +79,32 @@ async def create_new_season(body: NewSeasonRequest, _: dict = Depends(require_ad
 
 @router.get("/admin/players")
 async def fetch_admin_players(_: dict = Depends(require_admin)):
-    """Retrieve all players for the admin selection grid."""
+    """Retrieve all players for the admin selection grid and player management."""
     try:
         _, _, _, players_df, _, _, _ = load_data()
-        return JSONResponse(content=sanitize_state(players_df.to_dict(orient="records")))
+        records = []
+        for r in players_df.to_dict(orient="records"):
+            pw_hash = r.get("password_hash")
+            has_pw = bool(pw_hash) if pd.notna(pw_hash) else False
+            must_change = bool(r.get("must_change_password", False)) if pd.notna(r.get("must_change_password")) else False
+            last_login_val = r.get("last_login")
+            last_login = float(last_login_val) if pd.notna(last_login_val) and last_login_val is not None else None
+
+            rec = {
+                "playerId": int(r["playerId"]),
+                "fullName": str(r.get("fullName", "")),
+                "nickName": str(r.get("nickName", "")),
+                "email": str(r.get("email", "")),
+                "cell": str(r.get("cell", "")) if pd.notna(r.get("cell")) else "",
+                "role": str(r.get("role", "user")),
+                "has_password": has_pw,
+                "must_change_password": must_change,
+                "last_login": last_login,
+            }
+            if "failed_setup_attempts" in r and pd.notna(r.get("failed_setup_attempts")):
+                rec["failed_setup_attempts"] = int(r["failed_setup_attempts"])
+            records.append(rec)
+        return JSONResponse(content=sanitize_state(records))
     except Exception as e:
         logger.exception("Unhandled error in admin endpoint")
         return server_error()
@@ -89,7 +112,7 @@ async def fetch_admin_players(_: dict = Depends(require_admin)):
 
 @router.get("/admin/members/{season}")
 async def get_season_members(season: int, _: dict = Depends(require_admin)):
-    """Return all players enrolled in a season with their draft order and paid status."""
+    """Return all players enrolled in a season with draft order, paid status, password state, and last login."""
     try:
         _, _, _, players_df, _, _, _ = load_data()
         order_df = get_collection_df("draft_order")
@@ -103,6 +126,12 @@ async def get_season_members(season: int, _: dict = Depends(require_admin)):
             if player.empty:
                 continue
             p = player.iloc[0]
+            pw_hash = p.get("password_hash")
+            has_pw = bool(pw_hash) if pd.notna(pw_hash) else False
+            must_change = bool(p.get("must_change_password", False)) if pd.notna(p.get("must_change_password")) else False
+            last_login_val = p.get("last_login")
+            last_login = float(last_login_val) if pd.notna(last_login_val) and last_login_val is not None else None
+
             members.append({
                 "playerId": pid,
                 "fullName": str(p.get("fullName", "")),
@@ -110,6 +139,9 @@ async def get_season_members(season: int, _: dict = Depends(require_admin)):
                 "role": str(p.get("role", "member")),
                 "draftOrder": int(row.get("draftOrder", 0)),
                 "paid": bool(row.get("paid", False)),
+                "has_password": has_pw,
+                "must_change_password": must_change,
+                "last_login": last_login,
             })
         members.sort(key=lambda x: x["draftOrder"])
         return JSONResponse(content={"members": members})

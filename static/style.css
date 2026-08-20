@@ -113,8 +113,8 @@
 
 .members-table-head {
     display: grid;
-    grid-template-columns: 1.8fr 1.8fr 0.9fr 0.9fr 80px;
-    gap: 24px;
+    grid-template-columns: 1.5fr 1.5fr 0.7fr 0.8fr 1fr 1.2fr 80px;
+    gap: 16px;
     padding: 0 16px 12px;
     font: 600 11px/1 'Outfit', sans-serif;
     letter-spacing: 0.14em;
@@ -125,10 +125,10 @@
 
 .members-row {
     display: grid;
-    grid-template-columns: 1.8fr 1.8fr 0.9fr 0.9fr 80px;
-    gap: 24px;
+    grid-template-columns: 1.5fr 1.5fr 0.7fr 0.8fr 1fr 1.2fr 80px;
+    gap: 16px;
     align-items: center;
-    padding: 18px 16px;
+    padding: 14px 16px;
     border-bottom: 1px solid var(--line);
     transition: background 120ms ease;
 }
@@ -136,8 +136,10 @@
 .members-row:hover { background: rgba(255,255,255,0.02); }
 
 .members-row-name { font-weight: 600; font-size: 15px; }
-.members-row-email { font-family: 'JetBrains Mono', monospace; color: var(--ink-2); font-size: 12px; }
+.members-row-email { font-family: 'JetBrains Mono', monospace; color: var(--ink-2); font-size: 12px; word-break: break-all; }
 .members-row-order { font-family: 'JetBrains Mono', monospace; color: var(--ink-3); font-size: 13px; }
+.members-row-login { font-family: 'JetBrains Mono', monospace; color: var(--ink-2); font-size: 12px; }
+.members-row-pw { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
 
 .paid-toggle {
     display: inline-flex;

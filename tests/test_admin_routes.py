@@ -548,3 +548,141 @@ def test_consensus_endpoint_populated(admin_token, monkeypatch):
     assert body["available"] is True
     assert body["teams"][0]["team"] == "BUF"
     assert body["summary"]["n_compared"] == 1
+
+
+# ── /api/admin/players & /api/admin/members/{season} ──────────────────────────
+
+class TestFetchAdminPlayers:
+
+    def test_requires_admin(self, auth_token):
+        """Non-admin token is rejected."""
+        resp = client.get("/api/admin/players", headers={"Authorization": auth_token})
+        assert resp.status_code in (401, 403)
+
+    def test_happy_path_returns_password_and_login_metadata(self, admin_token):
+        """Returns player records with has_password, must_change_password, and last_login, redacting password_hash."""
+        fake_players = pd.DataFrame([
+            {
+                "playerId": 1,
+                "fullName": "Alice Admin",
+                "nickName": "AA",
+                "email": "alice@test.com",
+                "cell": "555-1234",
+                "role": "admin",
+                "password_hash": "$2b$12$somehash123",
+                "must_change_password": False,
+                "last_login": 1700000000.0,
+            },
+            {
+                "playerId": 2,
+                "fullName": "Bob Member",
+                "nickName": "BM",
+                "email": "bob@test.com",
+                "cell": "",
+                "role": "user",
+                "password_hash": None,
+                "must_change_password": False,
+                "last_login": None,
+            },
+            {
+                "playerId": 3,
+                "fullName": "Charlie Temp",
+                "nickName": "CT",
+                "email": "charlie@test.com",
+                "cell": "",
+                "role": "user",
+                "password_hash": "$2b$12$temphash",
+                "must_change_password": True,
+                "last_login": None,
+            }
+        ])
+
+        with patch("routes.admin_routes.load_data", return_value=(None, None, None, fake_players, None, None, None)):
+            resp = client.get("/api/admin/players", headers={"Authorization": admin_token})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 3
+
+        # Alice: password set, last_login present
+        alice = next(p for p in data if p["playerId"] == 1)
+        assert alice["has_password"] is True
+        assert alice["must_change_password"] is False
+        assert alice["last_login"] == 1700000000.0
+        assert "password_hash" not in alice
+
+        # Bob: no password, never logged in
+        bob = next(p for p in data if p["playerId"] == 2)
+        assert bob["has_password"] is False
+        assert bob["must_change_password"] is False
+        assert bob["last_login"] is None
+        assert "password_hash" not in bob
+
+        # Charlie: temp password
+        charlie = next(p for p in data if p["playerId"] == 3)
+        assert charlie["has_password"] is True
+        assert charlie["must_change_password"] is True
+        assert charlie["last_login"] is None
+        assert "password_hash" not in charlie
+
+
+class TestGetSeasonMembers:
+
+    def test_requires_admin(self, auth_token):
+        """Non-admin token is rejected."""
+        resp = client.get("/api/admin/members/2026", headers={"Authorization": auth_token})
+        assert resp.status_code in (401, 403)
+
+    def test_happy_path_returns_member_records_with_auth_metadata(self, admin_token):
+        """Members response includes draft order, paid status, password status, and last login."""
+        fake_players = pd.DataFrame([
+            {
+                "playerId": 1,
+                "fullName": "Alice Admin",
+                "email": "alice@test.com",
+                "role": "admin",
+                "password_hash": "$2b$12$somehash",
+                "must_change_password": False,
+                "last_login": 1700000000.0,
+            },
+            {
+                "playerId": 2,
+                "fullName": "Bob Member",
+                "email": "bob@test.com",
+                "role": "user",
+                "password_hash": None,
+                "must_change_password": False,
+                "last_login": None,
+            },
+        ])
+        fake_order = pd.DataFrame([
+            {"season": 2026, "playerId": 1, "draftOrder": 1, "paid": True},
+            {"season": 2026, "playerId": 2, "draftOrder": 2, "paid": False},
+        ])
+
+        with patch("routes.admin_routes.load_data", return_value=(None, None, None, fake_players, None, None, None)), \
+             patch("routes.admin_routes.get_collection_df", return_value=fake_order):
+            resp = client.get("/api/admin/members/2026", headers={"Authorization": admin_token})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "members" in data
+        members = data["members"]
+        assert len(members) == 2
+
+        m1 = members[0]
+        assert m1["playerId"] == 1
+        assert m1["draftOrder"] == 1
+        assert m1["paid"] is True
+        assert m1["has_password"] is True
+        assert m1["must_change_password"] is False
+        assert m1["last_login"] == 1700000000.0
+
+        m2 = members[1]
+        assert m2["playerId"] == 2
+        assert m2["draftOrder"] == 2
+        assert m2["paid"] is False
+        assert m2["has_password"] is False
+        assert m2["must_change_password"] is False
+        assert m2["last_login"] is None
+

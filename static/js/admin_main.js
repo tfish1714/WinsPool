@@ -121,12 +121,25 @@ class AdminApp {
                 ? `<span class="mono-pill" style="border-color:var(--leader); color:var(--leader); font-size:10px; padding:3px 8px;">${this._esc(m.role)}</span>`
                 : `<span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--ink-3);">${this._esc(m.role || '—')}</span>`;
 
+            let memberPwPill = '';
+            if (m.must_change_password) {
+                memberPwPill = `<span class="mono-pill" style="border-color:var(--accent-orange); color:var(--accent-orange); font-size:10px; padding:2px 6px;">Temp</span>`;
+            } else if (m.has_password) {
+                memberPwPill = `<span class="mono-pill" style="border-color:var(--pos); color:var(--pos); font-size:10px; padding:2px 6px;">Set</span>`;
+            } else {
+                memberPwPill = `<span class="mono-pill" style="border-color:var(--ink-3); color:var(--ink-3); font-size:10px; padding:2px 6px;">None</span>`;
+            }
+
+            const memberLastLogin = m.last_login ? this._formatDate(m.last_login) : 'Never';
             const paidState = m.paid ? 'paid' : 'unpaid';
+
             row.innerHTML = `
                 <div class="members-row-name">${this._esc(m.fullName)}</div>
                 <div class="members-row-email">${this._esc(m.email || '—')}</div>
                 <div>${rolePill}</div>
                 <div class="members-row-order">#${m.draftOrder ?? '—'}</div>
+                <div class="members-row-pw">${memberPwPill}</div>
+                <div class="members-row-login">${this._esc(memberLastLogin)}</div>
                 <div>
                     <button class="paid-toggle" data-paid="${m.paid ? '1' : '0'}" aria-label="Toggle paid">
                         <span class="paid-toggle__track" style="background:${m.paid ? 'var(--pos)' : 'var(--line-strong)'};">
@@ -241,14 +254,29 @@ class AdminApp {
             card.style.cssText = 'border: 1px solid var(--glass-border); border-radius: 8px; padding: 0.75rem 1rem; background: rgba(0,0,0,0.15);';
             card.setAttribute('data-player-id', p.playerId);
 
+            let pwBadge = '';
+            if (p.must_change_password) {
+                pwBadge = `<span class="mono-pill" style="border-color:var(--accent-orange); color:var(--accent-orange); font-size:10px; padding:2px 7px;">Temp Password</span>`;
+            } else if (p.has_password) {
+                pwBadge = `<span class="mono-pill" style="border-color:var(--pos); color:var(--pos); font-size:10px; padding:2px 7px;">Password Set</span>`;
+            } else {
+                pwBadge = `<span class="mono-pill" style="border-color:var(--ink-3); color:var(--ink-3); font-size:10px; padding:2px 7px;">No Password</span>`;
+            }
+
+            const lastLoginText = p.last_login ? this._formatDate(p.last_login) : 'Never';
+
             // Display mode
             const displayHtml = `
                 <div class="player-mgmt-display" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
                     <div>
-                        <strong style="color: var(--text-primary);">${this._esc(p.fullName)}</strong>
-                        <span style="color: var(--text-secondary); font-size: 0.85rem; margin-left: 0.5rem;">(${this._esc(p.nickName || '')})</span>
-                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">
-                            ${this._esc(p.email || '')}${p.cell ? ' | ' + this._esc(p.cell) : ''}
+                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                            <strong style="color: var(--text-primary);">${this._esc(p.fullName)}</strong>
+                            <span style="color: var(--text-secondary); font-size: 0.85rem;">(${this._esc(p.nickName || '')})</span>
+                            ${pwBadge}
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; display: flex; gap: 12px; flex-wrap: wrap;">
+                            <span>${this._esc(p.email || '')}${p.cell ? ' | ' + this._esc(p.cell) : ''}</span>
+                            <span style="font-family:'JetBrains Mono',monospace; color:var(--ink-2);">Last login: ${this._esc(lastLoginText)}</span>
                         </div>
                     </div>
                     <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
@@ -322,6 +350,23 @@ class AdminApp {
 
             confirmTempBtn.addEventListener('click', () => this.setTempPassword(p.playerId, card));
         });
+    }
+
+    _formatDate(ts) {
+        if (!ts) return 'Never';
+        try {
+            const date = new Date(Number(ts) * 1000);
+            if (isNaN(date.getTime())) return 'Never';
+            return date.toLocaleDateString(undefined, {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+            });
+        } catch (_) {
+            return 'Never';
+        }
     }
 
     _esc(str) {

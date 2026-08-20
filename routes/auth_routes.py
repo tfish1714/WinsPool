@@ -106,6 +106,10 @@ async def set_password(body: SetPasswordRequest):
 
         hashed = get_password_hash(password)
         update_player_credentials(str(player["playerId"]), hashed)
+        update_player_profile(str(player["playerId"]), {
+            "last_login": time.time(),
+            "must_change_password": False,
+        })
 
         role = player.get("role", "user")
         token = create_token(int(player["playerId"]), role)
@@ -160,9 +164,8 @@ async def login(body: LoginRequest):
         if _is_legacy_sha256(stored_hash):
             reset_fields["password_hash"] = get_password_hash(password)
 
-        update_player_profile(str(player["playerId"]), reset_fields)
-
         if player.get("must_change_password"):
+            update_player_profile(str(player["playerId"]), reset_fields)
             return JSONResponse(content={
                 "status": "must_change_password",
                 "playerId": str(player["playerId"]),
@@ -170,6 +173,7 @@ async def login(body: LoginRequest):
             })
 
         if player.get("mfa_enabled"):
+            update_player_profile(str(player["playerId"]), reset_fields)
             mfa_code = "".join([str(secrets.randbelow(10)) for _ in range(6)])
             mfa_token_hash = hashlib.sha256(mfa_code.encode()).hexdigest()
             update_player_profile(str(player["playerId"]), {
@@ -184,6 +188,9 @@ async def login(body: LoginRequest):
                 "playerId": str(player["playerId"]),
                 "message": "A 6-digit verification code has been sent to your email."
             })
+
+        reset_fields["last_login"] = time.time()
+        update_player_profile(str(player["playerId"]), reset_fields)
 
         role = player.get("role", "user")
         token = create_token(int(player["playerId"]), role)
@@ -265,6 +272,7 @@ async def update_profile(body: UpdateProfileRequest):
             if not re.match(PASSWORD_COMPLEXITY_RE, new_password):
                 return JSONResponse(status_code=400, content={"error": "New password too weak."})
             updates["password_hash"] = get_password_hash(new_password)
+            updates["must_change_password"] = False
 
         updates["mfa_enabled"] = bool(mfa_enabled)
 
@@ -300,7 +308,7 @@ async def verify_mfa(body: MfaVerifyRequest):
         if submitted_hash != stored_hash:
             return JSONResponse(status_code=401, content={"error": "Incorrect verification code."})
 
-        update_player_profile(pid, {"mfa_token": None, "mfa_expiry": 0})
+        update_player_profile(pid, {"mfa_token": None, "mfa_expiry": 0, "last_login": time.time()})
 
         role = player.get("role", "user")
         token = create_token(int(pid), role)
