@@ -30,9 +30,10 @@ docker run -p 8000:8080 -e USE_LOCAL_DATA=True winspool
 python scripts/sync_nflverse_data.py                      # Update rawdata/ from nflverse (current season)
 python scripts/sync_nflverse_data.py --seasons 2020 2025  # Full historical rebuild
 python scripts/sync_nflverse_data.py --include-pbp        # Also fetch large play-by-play files
-python scripts/compute_elo.py                             # Recompute rawdata/elo_computed.csv from scratch (run after rawdata sync)
+python scripts/compute_elo.py                             # Recompute rawdata/elo_computed.csv + local elo_history cache from scratch (run after rawdata sync)
+python scripts/compute_elo.py --firestore                  # Same, plus push elo_history/{season} to Firestore — required for the Elo Ratings Explorer in prod; NOT called by run_cron.py, still a manual step
 python scripts/daily_nfl_sync.py                          # Read rawdata/schedules/games.csv → compute standings → push nfl_games + nfl_standings to Firestore
-python scripts/run_cron.py                                # Run full pipeline (sync + firestore + cache)
+python scripts/run_cron.py                                # Run full pipeline (sync + firestore + cache) — does NOT include compute_elo.py
 
 # Local dev cache (USE_LOCAL_DATA=True)
 python scripts/refresh_local_pkls.py                      # Rebuild ALL local pkl/json from Firestore (run after any Firestore change)
@@ -56,6 +57,11 @@ python scripts/seed_consensus.py --season 2026 --firestore    # Seed analyst con
 python scripts/migrate_consensus.py --firestore               # One-shot: move 2017-2025 consensus out of preseason_predictions
 python scripts/refresh_preseason.py --season 2026             # Full preseason refresh + freshness preflight + projection diff
 python scripts/refresh_preseason.py --season 2026 --check-freshness   # Preflight only
+
+# Diagnostics
+python scripts/rank_position_groups.py --season 2026                  # Rank all 32 teams (CSV) on each preseason Elo-boost input dimension
+python scripts/rank_position_groups.py --season 2026 --team ATL       # One team's dimension breakdown, sorted by weighted contribution
+python scripts/rank_position_groups.py --season 2026 --dim dl_perf    # All 32 teams ranked on a single dimension
 ```
 
 ### Tests
@@ -176,6 +182,7 @@ Firestore collections and their local equivalents:
 | `consensus_projections` | `.local_db/consensus_projections.pkl` + `_{year}.pkl` | Analyst win projections; `preseason_predictions` is model output only |
 | `game_predictions` | `.local_db/game_predictions_{year}.json` | JSON, not pkl; one doc per season |
 | `analytics_cache` | `.local_db/analytics/{analytic}_{year}_{week}.json` | JSON |
+| `elo_history` | `.local_db/elo_history_{season}.json` | JSON, one doc per season; written by `scripts/compute_elo.py --firestore` (not the normal service-write path — see gotcha below); powers the admin Elo Ratings Explorer |
 | `config` | *(no local pkl — always reads Firestore)* | Single doc `config/settings`; stores `draft_active` flag and app-level settings |
 
 `.local_db/backup_preseason_consensus_*.json` holds the pre-migration backup of
@@ -197,6 +204,21 @@ python scripts/refresh_local_pkls.py
 # If you need to push rawdata/ changes to Firestore first:
 python scripts/daily_nfl_sync.py && python scripts/refresh_local_pkls.py
 ```
+
+**Gotcha: any script that writes to Firestore must force `USE_LOCAL_DATA=False`.**
+`services/db_service.py::get_db()` returns `None` whenever `USE_LOCAL_DATA` is
+true in the environment — regardless of any `use_local=False` argument passed
+deeper in the call stack. A normal local dev `.env` has `USE_LOCAL_DATA=True`,
+so a new script that pushes to Firestore must set
+`os.environ["USE_LOCAL_DATA"] = "False"` near the top, before importing
+anything from `services.db_service` (see `refresh_local_pkls.py`,
+`cache_builder.py`, `run_predictions.py`, `smart_refresh.py`, and
+`compute_elo.py --firestore` for the established pattern). Historically this
+failed silently rather than raising — a bare `except Exception` around the
+Firestore call would catch `None.collection(...)`'s `AttributeError` and only
+`logger.error` it, so the script would print a false success message. That's
+exactly what left prod's `elo_history` collection empty for days: the script
+had been run without this override and reported success anyway.
 
 ### Auth
 
@@ -300,7 +322,11 @@ Not synced (redundant or unmaintained): `FiveThirtyEight.csv` (FTE, stops 2022),
 ### Recommended Cloud Scheduler jobs
 ```
 # Weekly nflverse raw data sync + Elo recompute — Tuesdays 9 AM UTC (after MNF)
-0 9 * * 2   →  python scripts/sync_nflverse_data.py && python scripts/compute_elo.py
+# NOTE: not currently provisioned — compute_elo.py has been a fully manual
+# step (run_cron.py below does not call it). The --firestore flag is required
+# here or this job would do nothing prod-visible; see the USE_LOCAL_DATA
+# gotcha above before wiring this up.
+0 9 * * 2   →  python scripts/sync_nflverse_data.py && python scripts/compute_elo.py --firestore
 
 # Nightly Firestore sync + cache rebuild — 2 AM ET daily
 0 7 * * *   →  python scripts/run_cron.py
