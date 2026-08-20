@@ -53,6 +53,7 @@ from services.nn_feature_engine import (
 )
 from services.constants import UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 import services.live_score_service as live_scores
+from services.email_service import send_alert_email
 
 ANALYTICS = [
     'wins_pool_standings',
@@ -380,5 +381,17 @@ def main():
     print("\n[cache_builder] Done.")
 
 
+def _run_with_alerting():
+    try:
+        main()
+    except Exception:
+        import traceback
+        send_alert_email(
+            "WinsPool job 'winspool-predict-daily' failed",
+            f"cache_builder.py raised an unhandled exception:\n\n{traceback.format_exc()}",
+        )
+        raise
+
+
 if __name__ == '__main__':
-    main()
+    _run_with_alerting()
