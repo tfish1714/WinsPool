@@ -13,3 +13,4 @@ openpyxl>=3.1.5
 
 resend>=2.0.0
 pywebpush>=2.0.0
+google-cloud-tasks>=2.16.0
