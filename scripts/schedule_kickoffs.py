@@ -18,6 +18,7 @@ import os
 import sys
 import pathlib
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 os.environ["USE_LOCAL_DATA"] = "False"
 
@@ -37,8 +38,11 @@ GCP_SCHEDULER_SERVICE_ACCOUNT = os.environ.get("GCP_SCHEDULER_SERVICE_ACCOUNT")
 SYNC_LEAD_MINUTES = 75
 PREDICT_LEAD_MINUTES = 60
 
-# NFL gametime is published in US/Eastern per nflverse convention.
-_EASTERN = timezone(timedelta(hours=-4))  # EDT; DST-naive for the September-January season window
+# NFL gametime is published in US/Eastern per nflverse convention. Use a
+# proper DST-aware zone -- clocks fall back to EST (UTC-5) the first Sunday
+# of November, which is squarely inside this job's Sept 1 - Feb 10 window
+# (Thanksgiving primetime, most of the playoffs, the Super Bowl).
+_EASTERN = ZoneInfo("America/New_York")
 
 
 def compute_kickoff_clusters(games: pd.DataFrame, season: int, week: int) -> list[datetime]:
@@ -103,9 +107,9 @@ def enqueue_task(tasks_client, run_at: datetime, job_name: str) -> None:
 
 
 def main():
-    from google.cloud import tasks_v2
-
     try:
+        from google.cloud import tasks_v2
+
         games = load_games()
         season, week = _current_season_week(games)
         clusters = compute_kickoff_clusters(games, season, week)
@@ -116,7 +120,10 @@ def main():
             enqueue_task(client, kickoff - timedelta(minutes=PREDICT_LEAD_MINUTES), "winspool-predict-daily")
 
         print(f"Enqueued {len(clusters)} kickoff cluster(s) x 2 tasks for {season} week {week}.")
-    except Exception:
+    except (Exception, SystemExit):
+        # `except Exception` alone would let `load_games()`'s `sys.exit(1)`
+        # (raised as SystemExit, which does not subclass Exception) escape
+        # uncaught and bypass the alert email below.
         import traceback
         send_alert_email(
             "WinsPool job 'winspool-schedule-kickoffs' failed",
