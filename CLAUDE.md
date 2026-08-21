@@ -31,9 +31,11 @@ python scripts/sync_nflverse_data.py                      # Update rawdata/ from
 python scripts/sync_nflverse_data.py --seasons 2020 2025  # Full historical rebuild
 python scripts/sync_nflverse_data.py --include-pbp        # Also fetch large play-by-play files
 python scripts/compute_elo.py                             # Recompute rawdata/elo_computed.csv + local elo_history cache from scratch (run after rawdata sync)
-python scripts/compute_elo.py --firestore                  # Same, plus push elo_history/{season} to Firestore — required for the Elo Ratings Explorer in prod; NOT called by run_cron.py, still a manual step
+python scripts/compute_elo.py --firestore                  # Same, plus push elo_history/{season} to Firestore — required for the Elo Ratings Explorer in prod; runs daily in prod as a step inside run_cron.py (below) — this is for a manual/out-of-band recompute
 python scripts/daily_nfl_sync.py                          # Read rawdata/schedules/games.csv → compute standings → push nfl_games + nfl_standings to Firestore
-python scripts/run_cron.py                                # Run full pipeline (sync + firestore + cache) — does NOT include compute_elo.py
+python scripts/run_cron.py                                # winspool-sync-daily Cloud Run Job entrypoint: nflverse sync → compute_elo.py --firestore → daily_nfl_sync.py. Does NOT run cache_builder.py (predictions) — see Scheduled Jobs below
+python scripts/sync_live_scores.py                         # winspool-live-scores Cloud Run Job entrypoint: authoritative re-sync + best-effort ESPN live-score overlay (is_live/clock/period)
+python scripts/schedule_kickoffs.py                        # winspool-schedule-kickoffs Cloud Run Job entrypoint: enqueues per-game Cloud Tasks for sync/predict shortly before kickoff
 
 # Local dev cache (USE_LOCAL_DATA=True)
 python scripts/refresh_local_pkls.py                      # Rebuild ALL local pkl/json from Firestore (run after any Firestore change)
@@ -97,14 +99,21 @@ width and a narrow (~390px) mobile width before calling it done.
 
 ### Dependencies
 - `requirements.txt` — web app only; this is what the Dockerfile installs.
-- `requirements-ml.txt` — TensorFlow, scikit-learn, XGBoost, scipy. Install where you train or run batch predictions: `pip install -r requirements.txt -r requirements-ml.txt`. **Deliberately excluded from the deployed image** — Cloud Run reads stored predictions from Firestore and never loads a model, which is why the prediction services guard their imports behind `TF_AVAILABLE` / `SKLEARN_AVAILABLE`. TensorFlow is pinned because the `.keras` artifact format has changed across minor versions and `models/nn_v*.keras` were trained under 2.21.0.
+- `requirements-ml.txt` — TensorFlow, Keras, scikit-learn, XGBoost, scipy. Install where you train or run batch predictions: `pip install -r requirements.txt -r requirements-ml.txt`. **Excluded from the main web-service image** (`Dockerfile`) — the deployed `winspool` Cloud Run *service* reads stored predictions from Firestore and never loads a model, which is why the prediction services guard their imports behind `TF_AVAILABLE` / `SKLEARN_AVAILABLE`. It **is** installed by `Dockerfile.predict` (the `winspool-predict-daily` scheduled job that regenerates predictions — see Scheduled Jobs below), which is why that image is pinned to `python:3.11-slim` rather than the web service's `python:3.10-slim`: `keras==3.13.2` (required to load `models/nn_v14.keras` — Keras added a Dense-layer config field in 3.13 that older Keras can't deserialize) has no Python 3.10 wheel at all. TensorFlow itself is pinned because the `.keras` artifact format has changed across minor versions and `models/nn_v*.keras` were trained under 2.21.0.
 
 ### Key Environment Variables
 ```
 USE_LOCAL_DATA=True         # True → .local_db/ pickles, False → Firestore
 FIREBASE_CREDENTIALS=...    # Base64-encoded service account JSON
 GEMINI_API_KEY=...          # For recap generation
-SMTP_SERVER/PORT/USER/...   # Email delivery (optional)
+SMTP_SERVER/PORT/USER/...   # Legacy email delivery (optional; Resend is now the primary path)
+RESEND_API_KEY=...          # Resend API key — primary email provider (alerts, recaps, MFA codes)
+FROM_EMAIL=...              # Resend sender address (default onboarding@resend.dev — no domain verified yet)
+ALERT_EMAIL=...             # Recipient for send_alert_email() job-failure alerts — set on all 4 scheduled Cloud Run Jobs
+MAX_RETRIES=...             # Must match the job's own --max-retries, or alerting fails open (see Scheduled Jobs)
+GCP_PROJECT/GCP_REGION=...           # Used by schedule_kickoffs.py to target the right Cloud Run Jobs Admin API
+GCP_TASKS_QUEUE=...                  # Cloud Tasks queue name (winspool-kickoff-triggers)
+GCP_SCHEDULER_SERVICE_ACCOUNT=...    # Service account schedule_kickoffs.py's enqueued tasks authenticate as
 VAPID_PUBLIC_KEY=...        # Web Push VAPID public key (base64url)
 VAPID_PRIVATE_KEY=...       # Web Push VAPID private key (base64url)
 VAPID_CLAIMS_EMAIL=...      # Contact email included in VAPID JWT claims
@@ -134,7 +143,7 @@ services/
   recap_service.py       # Gemini-powered weekly summaries
   ai_service.py          # Gemini API wrapper
   cache_service.py       # In-memory cache with TTL
-  email_service.py       # SMTP recap distribution
+  email_service.py       # Resend-based email: weekly recaps, MFA codes, and send_alert_email() job-failure alerts
   live_score_service.py  # Live game score updates
   push_service.py        # Web Push notifications (VAPID)
   chat_service.py        # Draft room chat message persistence
@@ -281,6 +290,33 @@ Each registry tracks all versions and designates `latest` and `best`. When retra
 - `scripts/walk_forward_validate.py` scores the ensemble out-of-sample (train on seasons strictly before the fold, predict the fold) → `reports/walk_forward_validation.csv` — a diagnostic for "is the model actually better than consensus," not a production path. It can't exercise the preseason-profile branch above for most historical folds (see `docs/prediction_model.md`'s Season Win Projection section); `scripts/walk_forward_diagnose_preseason_path.py` forces that branch for the 2025 fold specifically as a one-off check.
 - See `docs/prediction_model.md` for a full description of all 26 features, model architectures, and all three prediction paths (in-season, single-game preseason, season-simulation)
 
+### Scheduled Jobs
+
+Four Cloud Run Jobs run in production, orchestrated by Cloud Scheduler
+(recurring) and Cloud Tasks (one-off, dynamically scheduled). All 4 are
+live, in-season only (Aug/Sept 1 – Feb 10), in `us-east1` of the
+`fishbone-wins-pool` GCP project. See
+`docs/superpowers/specs/2026-08-19-scheduled-jobs-design.md` for the full
+design and `docs/superpowers/plans/2026-08-19-scheduled-jobs.md` for how the
+GCP infrastructure itself was provisioned (Task 9 — one-time setup, not
+repeated by normal deploys).
+
+| Job | Entrypoint | Trigger | What it does |
+|---|---|---|---|
+| `winspool-sync-daily` | `scripts/run_cron.py` | Daily 9:00 UTC (Aug–Jan `winspool-sync-daily-trigger`; Feb 1–10 `-trigger-feb`) | nflverse raw data sync → `compute_elo.py --firestore` → `daily_nfl_sync.py` (standings + `nfl_games`) |
+| `winspool-predict-daily` | `scripts/cache_builder.py` | Daily 9:15 UTC (same Aug–Jan / Feb 1–10 split) | Regenerates predictions/analytics cache; the only job that installs `requirements-ml.txt` (`Dockerfile.predict`) |
+| `winspool-live-scores` | `scripts/sync_live_scores.py` | Every 5 min (Sept–Jan `winspool-live-scores-trigger`; Feb 1–10 `-trigger-feb`) | Authoritative re-sync (narrow, last-7-days `nfl_games` window) + best-effort ESPN live-score overlay (`is_live`/`clock`/`period`) — **only overlays games nflverse's own `schedules` data source carries, which never includes preseason (`game_type="PRE"`) games at all**, confirmed 2026-08-21 |
+| `winspool-schedule-kickoffs` | `scripts/schedule_kickoffs.py` | Weekly, Tuesdays 10:00 UTC, Sept–Jan (`winspool-schedule-kickoffs-trigger`) | Reads the upcoming week's real kickoff times, enqueues 2 Cloud Tasks per kickoff cluster (sync at kickoff−75min, predict at kickoff−60min) against the Cloud Run Jobs Admin API |
+
+**Two Docker images**, split by dependency weight:
+- `Dockerfile.sync` (`python:3.10-slim`, `requirements.txt` only) — used by `winspool-sync-daily`, `winspool-live-scores`, `winspool-schedule-kickoffs`.
+- `Dockerfile.predict` (`python:3.11-slim`, `requirements.txt` + `requirements-ml.txt`) — used only by `winspool-predict-daily`. Built via `cloudbuild-{sync,predict}.yaml` (`gcloud builds submit --tag` can't target a non-default Dockerfile name, hence explicit Cloud Build configs). **Must be built from a real checkout, not a bare `git worktree`** — `models/*.keras`/`*.pkl` are gitignored, and a worktree only checks out tracked files, so a build run from one silently ships whatever stale/missing model files happen to exist there with no error (this shipped `nn_v1.keras` instead of `nn_v14.keras` once). `deploy/deploy.ps1` rebuilds and redeploys both images on every deploy run.
+
+**Alerting is two-layer** (`services/email_service.py::send_alert_email()` + a Cloud Monitoring alert policy):
+- In-script: each job's own exception handler calls `send_alert_email()`, which suppresses itself on any non-final Cloud Run retry attempt (comparing the auto-injected `CLOUD_RUN_TASK_ATTEMPT` against a `MAX_RETRIES` env var that must be kept in sync with the job's actual `--max-retries`, or it fails open and sends once per attempt — see the Deployment gotcha below) and prefixes the subject `[WinsPool Alert]`. Reply-To is set to the same alert address (not the From address — Resend can't send *as* an arbitrary address without a verified domain, and Gmail's DMARC policy would bounce a spoofed `@gmail.com` From anyway; Reply-To has no such restriction).
+- Infra-level: a Cloud Monitoring alert policy watches `run.googleapis.com/job/completed_execution_count` with `result="failed"`, catching failures the script never gets to handle (OOM, bad image, crash before the exception handler runs).
+- `scripts/job_runner.py` is `run_cron.py`'s shared step-runner — runs a list of steps as subprocesses, logs each, and fires one summary alert if any *required* step failed. `cache_builder.py` doesn't use it (single-process, not multi-step); it has its own `_run_with_alerting()` wrapper around `main()` that calls `send_alert_email()` directly on any unhandled exception.
+
 ## Raw Data Sources
 
 All rawdata comes from nflverse, synced by `scripts/sync_nflverse_data.py`. There is no longer any dependency on LeeSharpe/nfldata — `daily_nfl_sync.py` reads from local rawdata only.
@@ -319,18 +355,9 @@ Not synced (redundant or unmaintained): `FiveThirtyEight.csv` (FTE, stops 2022),
 - `rawdata/Seasons-2024(1)` and `rawdata/Seasons-2024(2)` — duplicate files
 - `rawdata/SeasonRoster-*.csv` — superseded; feature engine now uses snap_counts
 
-### Recommended Cloud Scheduler jobs
-```
-# Weekly nflverse raw data sync + Elo recompute — Tuesdays 9 AM UTC (after MNF)
-# NOTE: not currently provisioned — compute_elo.py has been a fully manual
-# step (run_cron.py below does not call it). The --firestore flag is required
-# here or this job would do nothing prod-visible; see the USE_LOCAL_DATA
-# gotcha above before wiring this up.
-0 9 * * 2   →  python scripts/sync_nflverse_data.py && python scripts/compute_elo.py --firestore
-
-# Nightly Firestore sync + cache rebuild — 2 AM ET daily
-0 7 * * *   →  python scripts/run_cron.py
-```
+Cloud Scheduler triggers for the nflverse sync + Elo recompute are live in
+production — see **Scheduled Jobs** above for the actual deployed schedule
+(this used to be a manual/unprovisioned step; it isn't anymore).
 
 ## Deployment
 
@@ -368,4 +395,5 @@ set, every attempt sends its own alert (4 emails per failure at the default
 If you ever change a job's `--max-retries`, update its `MAX_RETRIES` env var
 to match, or alerting silently reverts to "fail open" (always sends).
 
-Cloud Scheduler is used to run `scripts/daily_nfl_sync.py` on a schedule in production.
+See **Scheduled Jobs** (under Architecture, above) for the full set of
+Cloud Scheduler/Cloud Tasks triggers running in production.
