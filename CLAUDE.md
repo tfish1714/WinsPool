@@ -296,9 +296,9 @@ Four Cloud Run Jobs run in production, orchestrated by Cloud Scheduler
 (recurring) and Cloud Tasks (one-off, dynamically scheduled). All 4 are
 live, in-season only (Aug/Sept 1 – Feb 10), in `us-east1` of the
 `fishbone-wins-pool` GCP project. See
-`docs/superpowers/specs/2026-08-19-scheduled-jobs-design.md` for the full
-design and `docs/superpowers/plans/2026-08-19-scheduled-jobs.md` for how the
-GCP infrastructure itself was provisioned (Task 9 — one-time setup, not
+`docs/superpowers/specs/completed/2026-08-19-scheduled-jobs-design.md` for
+the full design and `docs/superpowers/plans/completed/2026-08-19-scheduled-jobs.md`
+for how the GCP infrastructure itself was provisioned (Task 9 — one-time setup, not
 repeated by normal deploys).
 
 | Job | Entrypoint | Trigger | What it does |
@@ -372,7 +372,7 @@ Use the `/deploy` Claude slash command (`.claude/commands/deploy.md`) to run the
 (the 4 Cloud Run Jobs' images) via `cloudbuild-sync.yaml`/`cloudbuild-predict.yaml`
 on every run — it does not repeat Task 9's one-time GCP setup (API enablement,
 service account/IAM, the Cloud Tasks queue, Cloud Scheduler triggers); see
-`docs/superpowers/plans/2026-08-19-scheduled-jobs.md` Task 9 for that.
+`docs/superpowers/plans/completed/2026-08-19-scheduled-jobs.md` Task 9 for that.
 
 **Gotcha: `gcloud builds submit` must run from a checkout that actually has
 the model binaries on disk, not a bare git worktree.** `models/*.keras` and

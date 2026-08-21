@@ -8,7 +8,7 @@
 
 **Tech Stack:** FastAPI route (`routes/prediction_routes.py`), a new pure-Python service module, vanilla-JS admin tab (`static/js/admin_betting.js`, self-contained like `admin_elo.js`), Jinja2 template addition (`templates/admin.html`). pytest for all new logic.
 
-**Spec:** `docs/superpowers/specs/2026-08-16-betting-angle-screener-design.md`
+**Spec:** `docs/superpowers/specs/completed/2026-08-16-betting-angle-screener-design.md`
 
 ## Global Constraints
 

@@ -13,7 +13,7 @@ This script will:
 1. Check / prompt for `gcloud` authentication
 2. Build the Docker image via Cloud Build and push to `gcr.io/fishbone-wins-pool/winspool`
 3. Deploy to Cloud Run (`winspool` service, `us-east1`, project `fishbone-wins-pool`)
-4. Rebuild the `winspool-sync`/`winspool-predict` images (`cloudbuild-sync.yaml`/`cloudbuild-predict.yaml`) and update the 4 scheduled Cloud Run Jobs to use them — see CLAUDE.md's **Scheduled Jobs** section for what those are. This step does NOT repeat one-time GCP setup (API enablement, IAM, the Cloud Tasks queue, Cloud Scheduler triggers) — see `docs/superpowers/plans/2026-08-19-scheduled-jobs.md` Task 9 for that.
+4. Rebuild the `winspool-sync`/`winspool-predict` images (`cloudbuild-sync.yaml`/`cloudbuild-predict.yaml`) and update the 4 scheduled Cloud Run Jobs to use them — see CLAUDE.md's **Scheduled Jobs** section for what those are. This step does NOT repeat one-time GCP setup (API enablement, IAM, the Cloud Tasks queue, Cloud Scheduler triggers) — see `docs/superpowers/plans/completed/2026-08-19-scheduled-jobs.md` Task 9 for that.
 
 **Service URL:** `https://winspool-1045965963135.us-east1.run.app`
 
@@ -92,5 +92,5 @@ Full schedule table, alerting design, and the two job Docker images
 (`Dockerfile.sync` / `Dockerfile.predict`) are documented in CLAUDE.md's
 **Scheduled Jobs** section — that's the source of truth, not this file.
 One-time GCP provisioning (APIs, IAM, the Cloud Tasks queue, the Scheduler
-triggers themselves) is `docs/superpowers/plans/2026-08-19-scheduled-jobs.md`
+triggers themselves) is `docs/superpowers/plans/completed/2026-08-19-scheduled-jobs.md`
 Task 9; `deploy.ps1` only rebuilds/redeploys the job *images* on each run.

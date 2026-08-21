@@ -29,7 +29,7 @@ Runs every 5 minutes, in-season (Sept 1 - Feb 10) only. Two parts:
    services/utils.py::normalize_team_abbr) since e.g. ESPN's "LAR"/"WSH"/
    "JAC" differ from nflverse's "LA"/"WAS"/"JAX".
 
-See docs/superpowers/specs/2026-08-19-scheduled-jobs-design.md.
+See docs/superpowers/specs/completed/2026-08-19-scheduled-jobs-design.md.
 """
 import subprocess
 import sys

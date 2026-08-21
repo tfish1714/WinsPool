@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python (existing stack), `google-cloud-tasks` (new dependency), Cloud Run Jobs, Cloud Scheduler, Cloud Tasks, Cloud Monitoring.
 
-**Spec:** `docs/superpowers/specs/2026-08-19-scheduled-jobs-design.md`
+**Spec:** `docs/superpowers/specs/completed/2026-08-19-scheduled-jobs-design.md`
 
 ## Global Constraints
 

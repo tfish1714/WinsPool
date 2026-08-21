@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12, FastAPI, pandas, numpy, Firestore (firebase-admin), pytest, vanilla ES6 JS, Jinja2.
 
-**Spec:** `docs/superpowers/specs/2026-08-11-consensus-benchmark-design.md`
+**Spec:** `docs/superpowers/specs/completed/2026-08-11-consensus-benchmark-design.md`
 
 ## Global Constraints
 
