@@ -36,6 +36,11 @@ def send_alert_email(subject: str, message: str) -> bool:
     this fails open and sends on every attempt rather than risk silently
     swallowing a real alert because the env var was never configured.
     """
+    # Prefixed once, here, so both the actual Subject header and the body's
+    # repeated subject line (below) pick it up -- lets the inbox be
+    # filtered/searched on one fixed string regardless of which job sent it.
+    subject = f"[WinsPool Alert] {subject}"
+
     attempt = os.getenv("CLOUD_RUN_TASK_ATTEMPT")
     max_retries = os.getenv("MAX_RETRIES")
     if attempt is not None and max_retries is not None and int(attempt) < int(max_retries):
