@@ -1,13 +1,15 @@
 # Offline ML stack — model training, batch prediction, and evaluation.
 #
-# NOT installed by the Dockerfile. The deployed Cloud Run app reads stored
-# predictions from Firestore (game_predictions, preseason_predictions) and never
-# loads a model, which is why nn_prediction_service.py and its siblings guard
-# their imports behind TF_AVAILABLE / SKLEARN_AVAILABLE and degrade gracefully.
-# Adding these to requirements.txt would put ~700MB into the request path for no
-# benefit.
+# NOT installed by the main web-service Dockerfile. The deployed winspool
+# Cloud Run *service* reads stored predictions from Firestore (game_predictions,
+# preseason_predictions) and never loads a model, which is why
+# nn_prediction_service.py and its siblings guard their imports behind
+# TF_AVAILABLE / SKLEARN_AVAILABLE and degrade gracefully. Adding these to
+# requirements.txt would put ~700MB into the request path for no benefit.
 #
-# Install only where you train or run batch predictions:
+# IS installed by Dockerfile.predict (the winspool-predict-daily scheduled
+# job, which regenerates predictions) -- that's the actual production
+# consumer of this file, alongside local training/batch-prediction use:
 #     pip install -r requirements.txt -r requirements-ml.txt
 #
 # Used by: scripts/train_nn_model.py, scripts/predict_season.py,
@@ -19,6 +21,14 @@
 # floor rather than a pin risks a future version failing to load nn_v*.keras.
 tensorflow==2.21.0
 
-scikit-learn>=1.8.0
+# tensorflow==2.21.0 leaves keras itself unpinned, so pip resolves whatever
+# keras happens to be latest at install time -- discovered when a Docker
+# build resolved keras==3.12.4 while a local install had 3.13.2, and only
+# 3.12.4 failed to load models/nn_v14.keras ("could not be deserialized
+# properly" on Dense's 'quantization_config' key, which Keras added in
+# 3.13). Pin to the version verified to load the current models.
+keras==3.13.2
+
+scikit-learn>=1.3.0
 xgboost>=3.2.0
-scipy>=1.17.1
+scipy>=1.10.0

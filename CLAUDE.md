@@ -341,4 +341,31 @@ See `DEPLOY.md` for full instructions. Three options:
 
 Use the `/deploy` Claude slash command (`.claude/commands/deploy.md`) to run the full pre-flight + deploy flow: git commit → tests → push → confirm → `.\deploy\deploy.ps1`.
 
+`deploy.ps1` also rebuilds and redeploys `winspool-sync`/`winspool-predict`
+(the 4 Cloud Run Jobs' images) via `cloudbuild-sync.yaml`/`cloudbuild-predict.yaml`
+on every run — it does not repeat Task 9's one-time GCP setup (API enablement,
+service account/IAM, the Cloud Tasks queue, Cloud Scheduler triggers); see
+`docs/superpowers/plans/2026-08-19-scheduled-jobs.md` Task 9 for that.
+
+**Gotcha: `gcloud builds submit` must run from a checkout that actually has
+the model binaries on disk, not a bare git worktree.** `models/*.keras` and
+`models/*.pkl` are gitignored (large binaries) and `.gcloudignore` re-includes
+them for `Dockerfile.predict`'s build — but a `git worktree` only checks out
+*tracked* files, so a build run from a worktree silently ships whatever stale
+or missing model files happen to exist there (discovered when a worktree-built
+`winspool-predict` image had only `nn_v1.keras`, the first-ever model, instead
+of the current `nn_v14.keras` — Cloud Run Jobs don't error on a wrong model
+version, they just predict worse). Run `deploy.ps1` from the main checkout.
+
+**Gotcha: each scheduled job needs a `MAX_RETRIES` env var matching its own
+`--max-retries`.** `send_alert_email()` (`services/email_service.py`) only
+actually sends on the job's final retry attempt, comparing Cloud Run's
+auto-injected `CLOUD_RUN_TASK_ATTEMPT` against this env var — Cloud Run does
+NOT auto-inject the configured max-retries itself, so without `MAX_RETRIES`
+set, every attempt sends its own alert (4 emails per failure at the default
+`maxRetries=3`, i.e. 4 total attempts). All 4 jobs currently have
+`MAX_RETRIES=3` to match their (default, never overridden) `--max-retries=3`.
+If you ever change a job's `--max-retries`, update its `MAX_RETRIES` env var
+to match, or alerting silently reverts to "fail open" (always sends).
+
 Cloud Scheduler is used to run `scripts/daily_nfl_sync.py` on a schedule in production.

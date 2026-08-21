@@ -230,8 +230,8 @@ class LRPredictionService:
         with open(scaler_path, "wb") as f: pickle.dump(self.scaler, f)
 
         entry = {
-            "model_path":      str(model_path),
-            "scaler_path":     str(scaler_path),
+            "model_path":      f"models/lr_{version}.pkl",
+            "scaler_path":     f"models/lr_{version}_scaler.pkl",
             "feature_columns": FEATURE_COLUMNS,
             "n_features":      len(FEATURE_COLUMNS),
             "metrics":         self._eval_metrics or {},
@@ -277,8 +277,16 @@ class LRPredictionService:
         if not entry:
             raise FileNotFoundError(f"LR version '{version}' not found in registry.")
 
-        with open(entry["model_path"],  "rb") as f: self.model  = pickle.load(f)
-        with open(entry["scaler_path"], "rb") as f: self.scaler = pickle.load(f)
+        # Reconstruct from MODEL_DIR + version rather than trusting the
+        # registry's stored path literally -- older registry entries have
+        # an absolute path baked in from whichever machine trained that
+        # version (e.g. a Windows dev path), which doesn't exist in a
+        # deployed container. Matches nn_prediction_service.py's pattern.
+        model_path = MODEL_DIR / f"lr_{version}.pkl"
+        scaler_path = MODEL_DIR / f"lr_{version}_scaler.pkl"
+
+        with open(model_path,  "rb") as f: self.model  = pickle.load(f)
+        with open(scaler_path, "rb") as f: self.scaler = pickle.load(f)
         self._is_trained = True
         self.loaded_version = version
         logger.info("Loaded LR model %s", version)

@@ -1,7 +1,7 @@
 {
   "v1": {
-    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v1.pkl",
-    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v1_scaler.pkl",
+    "model_path": "models/lr_v1.pkl",
+    "scaler_path": "models/lr_v1_scaler.pkl",
     "feature_columns": [
       "tm_elo_pre",
       "opp_elo_pre",
@@ -91,8 +91,8 @@
     "season_r2": "v1"
   },
   "v2": {
-    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v2.pkl",
-    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v2_scaler.pkl",
+    "model_path": "models/lr_v2.pkl",
+    "scaler_path": "models/lr_v2_scaler.pkl",
     "feature_columns": [
       "tm_elo_pre",
       "opp_elo_pre",
@@ -177,8 +177,8 @@
     "trained_at": "2026-05-22T02:33:26.890159+00:00"
   },
   "v3": {
-    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v3.pkl",
-    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v3_scaler.pkl",
+    "model_path": "models/lr_v3.pkl",
+    "scaler_path": "models/lr_v3_scaler.pkl",
     "feature_columns": [
       "tm_elo_pre",
       "opp_elo_pre",
@@ -263,8 +263,8 @@
     "trained_at": "2026-05-23T03:38:44.147828+00:00"
   },
   "v4": {
-    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v4.pkl",
-    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v4_scaler.pkl",
+    "model_path": "models/lr_v4.pkl",
+    "scaler_path": "models/lr_v4_scaler.pkl",
     "feature_columns": [
       "elo_diff",
       "elo_confidence",
@@ -344,8 +344,8 @@
     "trained_at": "2026-05-26T22:50:34.623369+00:00"
   },
   "v5": {
-    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v5.pkl",
-    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v5_scaler.pkl",
+    "model_path": "models/lr_v5.pkl",
+    "scaler_path": "models/lr_v5_scaler.pkl",
     "feature_columns": [
       "elo_diff",
       "elo_confidence",
@@ -425,8 +425,8 @@
     "trained_at": "2026-05-28T02:20:40.820687+00:00"
   },
   "v6": {
-    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v6.pkl",
-    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\lr_v6_scaler.pkl",
+    "model_path": "models/lr_v6.pkl",
+    "scaler_path": "models/lr_v6_scaler.pkl",
     "feature_columns": [
       "elo_diff",
       "elo_confidence",

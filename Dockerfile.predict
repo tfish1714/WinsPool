@@ -1,6 +1,11 @@
 # winspool-predict: ML-capable image for prediction regeneration only
 # (cache_builder.py)
-FROM python:3.10-slim
+#
+# Python 3.11, not 3.10: keras>=3.13 (required to load models/nn_v14.keras --
+# see requirements-ml.txt) has no Python 3.10 wheel at all. Discovered by
+# actually executing winspool-predict-daily in production and hitting a
+# model deserialization error, not by testing beforehand.
+FROM python:3.11-slim
 
 WORKDIR /app
 

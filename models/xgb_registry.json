@@ -1,7 +1,7 @@
 {
   "v1": {
-    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v1.json",
-    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v1_scaler.pkl",
+    "model_path": "models/xgb_v1.json",
+    "scaler_path": "models/xgb_v1_scaler.pkl",
     "feature_columns": [
       "tm_elo_pre",
       "opp_elo_pre",
@@ -80,8 +80,8 @@
     "season_r2": "v1"
   },
   "v2": {
-    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v2.json",
-    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v2_scaler.pkl",
+    "model_path": "models/xgb_v2.json",
+    "scaler_path": "models/xgb_v2_scaler.pkl",
     "feature_columns": [
       "tm_elo_pre",
       "opp_elo_pre",
@@ -156,8 +156,8 @@
     "trained_at": "2026-05-16T02:13:47.078773+00:00"
   },
   "v3": {
-    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v3.json",
-    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v3_scaler.pkl",
+    "model_path": "models/xgb_v3.json",
+    "scaler_path": "models/xgb_v3_scaler.pkl",
     "feature_columns": [
       "tm_elo_pre",
       "opp_elo_pre",
@@ -232,8 +232,8 @@
     "trained_at": "2026-05-16T02:34:53.931438+00:00"
   },
   "v4": {
-    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v4.json",
-    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v4_scaler.pkl",
+    "model_path": "models/xgb_v4.json",
+    "scaler_path": "models/xgb_v4_scaler.pkl",
     "feature_columns": [
       "tm_elo_pre",
       "opp_elo_pre",
@@ -307,8 +307,8 @@
     "trained_at": "2026-05-22T02:33:27.130977+00:00"
   },
   "v5": {
-    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v5.json",
-    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v5_scaler.pkl",
+    "model_path": "models/xgb_v5.json",
+    "scaler_path": "models/xgb_v5_scaler.pkl",
     "feature_columns": [
       "tm_elo_pre",
       "opp_elo_pre",
@@ -382,8 +382,8 @@
     "trained_at": "2026-05-23T03:38:45.754993+00:00"
   },
   "v6": {
-    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v6.json",
-    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v6_scaler.pkl",
+    "model_path": "models/xgb_v6.json",
+    "scaler_path": "models/xgb_v6_scaler.pkl",
     "feature_columns": [
       "elo_diff",
       "elo_confidence",
@@ -452,8 +452,8 @@
     "trained_at": "2026-05-26T22:49:26.979352+00:00"
   },
   "v7": {
-    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v7.json",
-    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v7_scaler.pkl",
+    "model_path": "models/xgb_v7.json",
+    "scaler_path": "models/xgb_v7_scaler.pkl",
     "feature_columns": [
       "elo_diff",
       "elo_confidence",
@@ -522,8 +522,8 @@
     "trained_at": "2026-05-28T02:19:35.007118+00:00"
   },
   "v8": {
-    "model_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v8.json",
-    "scaler_path": "C:\\Users\\fisch\\OneDrive\\Documents\\Code\\WinsPool\\models\\xgb_v8_scaler.pkl",
+    "model_path": "models/xgb_v8.json",
+    "scaler_path": "models/xgb_v8_scaler.pkl",
     "feature_columns": [
       "elo_diff",
       "elo_confidence",
