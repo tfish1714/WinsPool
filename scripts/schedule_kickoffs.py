@@ -9,8 +9,14 @@ clusters, and enqueues 2 Cloud Tasks per cluster:
 Cloud Tasks (not Cloud Scheduler) is used because it supports a specific
 one-off future execution timestamp per task, whereas Cloud Scheduler is
 built for recurring cron patterns. Each task's HTTP target hits the Cloud
-Run Jobs Admin API's :run endpoint, authenticated via an OIDC token from a
-service account with run.invoker on the target job.
+Run Jobs Admin API's :run endpoint -- a *.googleapis.com Google Cloud API,
+not a Cloud Run Service's own HTTPS endpoint -- so it's authenticated via
+an OAuth access token (oauth_token), not an OIDC identity token: OIDC is
+for a target that validates the ID token itself (e.g. a Cloud Run Service
+with IAM invoker checks); OAuth is for calling a Google API on the caller's
+behalf, which is what :run is. This matches Task 9's own Cloud Scheduler
+setup, which uses --oauth-service-account-email against the identical URL.
+The service account still needs run.invoker on the target job either way.
 
 See docs/superpowers/specs/2026-08-19-scheduled-jobs-design.md.
 """
@@ -90,6 +96,7 @@ def _run_url(job_name: str) -> str:
 
 
 def enqueue_task(tasks_client, run_at: datetime, job_name: str) -> None:
+    from google.api_core.exceptions import AlreadyExists
     from google.cloud import tasks_v2
     from google.protobuf import timestamp_pb2
 
@@ -100,7 +107,11 @@ def enqueue_task(tasks_client, run_at: datetime, job_name: str) -> None:
     # Deterministic task name so Cloud Tasks' built-in dedup applies -- a
     # Cloud Scheduler retry of the weekly winspool-schedule-kickoffs job (or
     # a manual re-run) would otherwise enqueue duplicate tasks for the same
-    # kickoff cluster.
+    # kickoff cluster. A named CreateTask does NOT silently no-op on a
+    # duplicate name -- it raises AlreadyExists, which we must catch here:
+    # letting it propagate would abort the whole enqueue loop mid-week (the
+    # remaining clusters never get scheduled) and fire a false failure
+    # alert on every ordinary retry -- worse than having no dedup at all.
     task_id = f"{job_name}-{run_at.strftime('%Y%m%dT%H%M')}"
     task_name = (
         f"projects/{GCP_PROJECT}/locations/{GCP_REGION}/"
@@ -112,11 +123,17 @@ def enqueue_task(tasks_client, run_at: datetime, job_name: str) -> None:
         "http_request": {
             "http_method": tasks_v2.HttpMethod.POST,
             "url": _run_url(job_name),
-            "oidc_token": {"service_account_email": GCP_SCHEDULER_SERVICE_ACCOUNT},
+            # :run is a Google Cloud API endpoint (*.googleapis.com), not a
+            # Cloud Run Service's own HTTPS endpoint -- OAuth, not OIDC. See
+            # the module docstring.
+            "oauth_token": {"service_account_email": GCP_SCHEDULER_SERVICE_ACCOUNT},
         },
         "schedule_time": ts,
     }
-    tasks_client.create_task(request={"parent": parent, "task": task})
+    try:
+        tasks_client.create_task(request={"parent": parent, "task": task})
+    except AlreadyExists:
+        print(f"[skip] task already enqueued: {task_id}")
 
 
 def _sync_schedule_data() -> None:

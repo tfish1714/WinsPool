@@ -68,3 +68,78 @@ class TestCurrentSeasonWeek:
         ])
         with pytest.raises(ValueError):
             _current_season_week(games)
+
+
+class TestEnqueueTask:
+    """enqueue_task's target (:run) is a *.googleapis.com Google Cloud API
+    endpoint, not a Cloud Run Service's own HTTPS endpoint -- it must use
+    oauth_token (not oidc_token), matching Task 9's own Cloud Scheduler
+    --oauth-service-account-email usage against the identical URL. And a
+    named CreateTask raises AlreadyExists on a duplicate rather than
+    silently deduping -- that must be caught, or a routine Cloud Scheduler
+    retry aborts the whole week's enqueue loop and fires a false alert."""
+
+    def _kickoff(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        return datetime(2026, 9, 20, 13, 0, tzinfo=ZoneInfo("America/New_York"))
+
+    def test_uses_oauth_token_not_oidc_token(self, monkeypatch):
+        from unittest.mock import MagicMock
+        from scripts.schedule_kickoffs import enqueue_task
+
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_PROJECT", "test-project")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_REGION", "us-east1")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_TASKS_QUEUE", "test-queue")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_SCHEDULER_SERVICE_ACCOUNT", "sa@test.iam.gserviceaccount.com")
+
+        client = MagicMock()
+        client.queue_path.return_value = "projects/test-project/locations/us-east1/queues/test-queue"
+
+        enqueue_task(client, self._kickoff(), "winspool-sync-daily")
+
+        client.create_task.assert_called_once()
+        task = client.create_task.call_args.kwargs["request"]["task"]
+        assert "oauth_token" in task["http_request"]
+        assert "oidc_token" not in task["http_request"]
+        assert task["http_request"]["oauth_token"]["service_account_email"] == "sa@test.iam.gserviceaccount.com"
+
+    def test_already_exists_is_caught_not_raised(self, monkeypatch, capsys):
+        from unittest.mock import MagicMock
+        from google.api_core.exceptions import AlreadyExists
+        from scripts.schedule_kickoffs import enqueue_task
+
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_PROJECT", "test-project")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_REGION", "us-east1")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_TASKS_QUEUE", "test-queue")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_SCHEDULER_SERVICE_ACCOUNT", "sa@test.iam.gserviceaccount.com")
+
+        client = MagicMock()
+        client.queue_path.return_value = "projects/test-project/locations/us-east1/queues/test-queue"
+        client.create_task.side_effect = AlreadyExists("duplicate task")
+
+        # Must not raise -- a Scheduler retry re-enqueuing the same cluster
+        # must be able to continue on to the *next* cluster, not abort here.
+        enqueue_task(client, self._kickoff(), "winspool-sync-daily")
+
+        assert "already enqueued" in capsys.readouterr().out
+
+    def test_other_errors_still_propagate(self, monkeypatch):
+        from unittest.mock import MagicMock
+        import pytest
+        from scripts.schedule_kickoffs import enqueue_task
+
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_PROJECT", "test-project")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_REGION", "us-east1")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_TASKS_QUEUE", "test-queue")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_SCHEDULER_SERVICE_ACCOUNT", "sa@test.iam.gserviceaccount.com")
+
+        client = MagicMock()
+        client.queue_path.return_value = "projects/test-project/locations/us-east1/queues/test-queue"
+        client.create_task.side_effect = RuntimeError("network error")
+
+        # Only AlreadyExists should be swallowed -- a genuine failure must
+        # still surface (main()'s except (Exception, SystemExit) turns it
+        # into an alert email).
+        with pytest.raises(RuntimeError):
+            enqueue_task(client, self._kickoff(), "winspool-sync-daily")
