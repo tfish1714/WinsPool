@@ -3,7 +3,7 @@
 Runs a list of steps as subprocesses (same shape run_cron.py originally
 used), logs each step's output, and sends one alert email summarizing any
 failures via services.email_service.send_alert_email -- the in-script half
-of the two-layer alerting design (see docs/superpowers/specs/
+of the two-layer alerting design (see docs/superpowers/specs/completed/
 2026-08-19-scheduled-jobs-design.md). The Cloud Monitoring alert policy on
 job execution failure is the other half, catching crashes this code never
 gets to run for (OOM, bad image, network down).

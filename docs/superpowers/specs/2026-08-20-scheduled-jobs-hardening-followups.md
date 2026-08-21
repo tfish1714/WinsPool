@@ -23,7 +23,7 @@ Found while building `scripts/sync_live_scores.py` (which deliberately does **no
 
 ## 2. Test coverage gaps from the final review's fix wave
 
-The final whole-branch review's one allowed fix wave (9 findings, `docs/superpowers/plans/2026-08-19-scheduled-jobs.md`) added zero tests for any of its fixes — the 27/27 passing reported at the time was regression evidence for pre-existing behavior, not verification of the new fixes. Some of this gap was closed in a follow-up session (see below); the rest is still open.
+The final whole-branch review's one allowed fix wave (9 findings, `docs/superpowers/plans/completed/2026-08-19-scheduled-jobs.md`) added zero tests for any of its fixes — the 27/27 passing reported at the time was regression evidence for pre-existing behavior, not verification of the new fixes. Some of this gap was closed in a follow-up session (see below); the rest is still open.
 
 **Closed since the final review** (real tests added, verified against actual behavior):
 - `schedule_kickoffs.py`'s `oauth_token` (not `oidc_token`) choice — `TestEnqueueTask::test_uses_oauth_token_not_oidc_token`.

@@ -18,7 +18,7 @@ behalf, which is what :run is. This matches Task 9's own Cloud Scheduler
 setup, which uses --oauth-service-account-email against the identical URL.
 The service account still needs run.invoker on the target job either way.
 
-See docs/superpowers/specs/2026-08-19-scheduled-jobs-design.md.
+See docs/superpowers/specs/completed/2026-08-19-scheduled-jobs-design.md.
 """
 import os
 import subprocess

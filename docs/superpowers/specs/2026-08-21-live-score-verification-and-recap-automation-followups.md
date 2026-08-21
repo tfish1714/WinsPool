@@ -6,7 +6,7 @@
 ## Origin
 
 While verifying the live scheduled-jobs infrastructure (Task 9/10 of
-`docs/superpowers/plans/2026-08-19-scheduled-jobs.md`), two follow-up asks
+`docs/superpowers/plans/completed/2026-08-19-scheduled-jobs.md`), two follow-up asks
 came up that are real but out of scope for that deploy: testing the
 live-score polling path more rigorously once a real game is available, and
 automating the weekly recap email the same way the other 4 jobs were
@@ -77,7 +77,7 @@ automated.
 Automate the weekly recap (`services/recap_service.py`, Gemini-generated
 summary + `services/email_service.py::send_weekly_recap_email()`) as a 5th
 scheduled Cloud Run Job, following the pattern established in
-`docs/superpowers/plans/2026-08-19-scheduled-jobs.md`.
+`docs/superpowers/plans/completed/2026-08-19-scheduled-jobs.md`.
 
 ### What already exists to build on
 

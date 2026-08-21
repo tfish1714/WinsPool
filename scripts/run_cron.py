@@ -11,7 +11,7 @@ Runs:
 Does NOT run cache_builder.py (prediction regen) -- that needs
 requirements-ml.txt and runs as the separate winspool-predict-daily job
 (scripts/cache_builder.py directly). See
-docs/superpowers/specs/2026-08-19-scheduled-jobs-design.md.
+docs/superpowers/specs/completed/2026-08-19-scheduled-jobs-design.md.
 
 Schedule: Cloud Scheduler, ~9:00am UTC, Aug 1 - Feb 10 only.
 """
