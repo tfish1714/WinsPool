@@ -36,8 +36,52 @@ gcloud run deploy winspool `
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "[SUCCESS] Cloud Run Deployment Complete!" -ForegroundColor Green
-    Write-Host "[FINISH] Deployment process finished." -ForegroundColor Green
 }
 else {
     Write-Host "[ERROR] Cloud Run Deployment Failed. See errors above." -ForegroundColor Red
+    exit 1
 }
+
+# --- Scheduled jobs (winspool-sync-daily, winspool-live-scores,
+# winspool-schedule-kickoffs, winspool-predict-daily) ---
+#
+# This rebuilds and redeploys the two job images every run. It does NOT
+# repeat any of Task 9's one-time GCP setup (API enablement, service
+# account/IAM, the Cloud Tasks queue, or the Cloud Scheduler triggers) --
+# `gcloud run jobs update` only swaps the image on jobs that already exist.
+# If you need to create these jobs or their scheduler/queue from scratch,
+# see docs/superpowers/plans/2026-08-19-scheduled-jobs.md Task 9.
+$SYNC_IMAGE = "us-east1-docker.pkg.dev/$PROJECT_ID/winspool/winspool-sync:latest"
+$PREDICT_IMAGE = "us-east1-docker.pkg.dev/$PROJECT_ID/winspool/winspool-predict:latest"
+
+Write-Host "[BUILD] Building winspool-sync image..." -ForegroundColor Cyan
+gcloud builds submit --config=cloudbuild-sync.yaml --project=$PROJECT_ID .
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] winspool-sync image build failed. Scheduled jobs NOT updated." -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "[BUILD] Building winspool-predict image (this installs TensorFlow -- can take several minutes)..." -ForegroundColor Cyan
+gcloud builds submit --config=cloudbuild-predict.yaml --project=$PROJECT_ID .
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] winspool-predict image build failed. Scheduled jobs NOT updated." -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "[DEPLOY] Updating scheduled Cloud Run Jobs to the freshly built images..." -ForegroundColor Cyan
+$syncJobs = @("winspool-sync-daily", "winspool-live-scores", "winspool-schedule-kickoffs")
+foreach ($job in $syncJobs) {
+    gcloud run jobs update $job --image=$SYNC_IMAGE --region=us-east1 --project=$PROJECT_ID
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Failed to update job $job." -ForegroundColor Red
+        exit 1
+    }
+}
+gcloud run jobs update winspool-predict-daily --image=$PREDICT_IMAGE --region=us-east1 --project=$PROJECT_ID
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Failed to update job winspool-predict-daily." -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "[SUCCESS] Scheduled jobs updated!" -ForegroundColor Green
+Write-Host "[FINISH] Deployment process finished." -ForegroundColor Green

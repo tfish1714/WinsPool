@@ -255,8 +255,8 @@ class XGBPredictionService:
             pickle.dump(self.scaler, f)
 
         entry = {
-            "model_path":       str(model_path),
-            "scaler_path":      str(scaler_path),
+            "model_path":       f"models/xgb_{version}.json",
+            "scaler_path":      f"models/xgb_{version}_scaler.pkl",
             "feature_columns":  FEATURE_COLUMNS,
             "n_features":       len(FEATURE_COLUMNS),
             "metrics":          self._eval_metrics or {},
@@ -303,10 +303,18 @@ class XGBPredictionService:
         if not entry:
             raise FileNotFoundError(f"XGB version '{version}' not found in registry.")
 
+        # Reconstruct from MODEL_DIR + version rather than trusting the
+        # registry's stored path literally -- older registry entries have
+        # an absolute path baked in from whichever machine trained that
+        # version (e.g. a Windows dev path), which doesn't exist in a
+        # deployed container. Matches nn_prediction_service.py's pattern.
+        model_path = MODEL_DIR / f"xgb_{version}.json"
+        scaler_path = MODEL_DIR / f"xgb_{version}_scaler.pkl"
+
         self.model = xgb.XGBClassifier()
-        self.model.load_model(entry["model_path"])
-        with open(entry["scaler_path"], "rb") as f:
+        self.model.load_model(str(model_path))
+        with open(scaler_path, "rb") as f:
             self.scaler = pickle.load(f)
         self._is_trained = True
         self.loaded_version = version
-        logger.info("Loaded XGB model %s from %s", version, entry["model_path"])
+        logger.info("Loaded XGB model %s from %s", version, model_path)

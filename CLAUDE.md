@@ -341,4 +341,20 @@ See `DEPLOY.md` for full instructions. Three options:
 
 Use the `/deploy` Claude slash command (`.claude/commands/deploy.md`) to run the full pre-flight + deploy flow: git commit → tests → push → confirm → `.\deploy\deploy.ps1`.
 
+`deploy.ps1` also rebuilds and redeploys `winspool-sync`/`winspool-predict`
+(the 4 Cloud Run Jobs' images) via `cloudbuild-sync.yaml`/`cloudbuild-predict.yaml`
+on every run — it does not repeat Task 9's one-time GCP setup (API enablement,
+service account/IAM, the Cloud Tasks queue, Cloud Scheduler triggers); see
+`docs/superpowers/plans/2026-08-19-scheduled-jobs.md` Task 9 for that.
+
+**Gotcha: `gcloud builds submit` must run from a checkout that actually has
+the model binaries on disk, not a bare git worktree.** `models/*.keras` and
+`models/*.pkl` are gitignored (large binaries) and `.gcloudignore` re-includes
+them for `Dockerfile.predict`'s build — but a `git worktree` only checks out
+*tracked* files, so a build run from a worktree silently ships whatever stale
+or missing model files happen to exist there (discovered when a worktree-built
+`winspool-predict` image had only `nn_v1.keras`, the first-ever model, instead
+of the current `nn_v14.keras` — Cloud Run Jobs don't error on a wrong model
+version, they just predict worse). Run `deploy.ps1` from the main checkout.
+
 Cloud Scheduler is used to run `scripts/daily_nfl_sync.py` on a schedule in production.
