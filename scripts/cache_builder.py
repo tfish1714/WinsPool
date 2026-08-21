@@ -13,6 +13,7 @@ import os
 import json
 import argparse
 import pathlib
+import subprocess
 import time
 
 # Ensure project root is on the path
@@ -329,13 +330,49 @@ def build_year(standings, games, players, draft_order, draft_results,
             print(f"  [err]  {analytic}: {e}")
 
 
+SCRIPTS_DIR = pathlib.Path(__file__).parent
+
+
+def _sync_rawdata() -> None:
+    """Re-pull rawdata/ from nflverse before build_master_feature_table() reads
+    it. winspool-predict-daily runs in its own, separate Cloud Run Job
+    container from winspool-sync-daily -- Cloud Run Jobs are stateless,
+    one-shot executions with no shared filesystem between them, so whatever
+    winspool-sync-daily downloaded into ITS container (running ~15 min
+    earlier per the dynamic kickoff schedule) is gone by the time this job
+    starts. Default priority (3, full sync: rosters/depth_charts/injuries/
+    snap_counts/pfr_advstats/schedules/stats_team) since build_master_feature_table()
+    needs all of it, unlike the lightweight priority-1-only syncs in
+    sync_live_scores.py/schedule_kickoffs.py. Non-fatal on failure, same
+    established pattern as those two -- a stale-but-present rawdata/ from a
+    prior local run isn't available in a fresh container either way, so any
+    failure here is worth surfacing (via whatever downstream code hits
+    missing files) rather than treated specially."""
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS_DIR / "sync_nflverse_data.py")],
+        capture_output=True, text=True, timeout=300,
+        cwd=str(SCRIPTS_DIR.parent),
+    )
+    if result.returncode != 0:
+        print(f"[warn] sync_nflverse_data.py exited non-zero (non-fatal): "
+              f"{result.stderr.strip()[:500]}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Pre-compute analytics into cache")
     parser.add_argument('--year', type=int, default=None, help="Only rebuild this year")
     parser.add_argument('--force', action='store_true',
                         help="Ignore is_final and recompute everything. "
                              "Use this after retraining models to refresh historical predictions.")
+    parser.add_argument('--skip-sync', action='store_true',
+                        help="Skip the rawdata/ sync step (for local runs where rawdata/ "
+                             "is already fresh -- the deployed winspool-predict-daily job "
+                             "never passes this, since its container starts empty).")
     args = parser.parse_args()
+
+    if not args.skip_sync:
+        print("[cache_builder] Syncing rawdata/ from nflverse...")
+        _sync_rawdata()
 
     print("[cache_builder] Loading raw data from Firestore / local cache...")
     standings, teams, games, players, draft_order, draft_results, draft_order_rules = load_data()

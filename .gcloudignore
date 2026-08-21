@@ -1,0 +1,17 @@
+# Cloud Build derives its build context from .gitignore when no
+# .gcloudignore is present -- which would silently exclude the pretrained
+# model artifacts Dockerfile.predict needs (cache_builder.py loads them via
+# NNPredictionService/XGBPredictionService/LRPredictionService), since
+# .gitignore excludes models/*.keras and models/*.pkl as large binaries
+# that don't belong in git history.
+#
+# rawdata/ is deliberately NOT re-included here: winspool-predict-daily
+# syncs its own copy at job start (see cache_builder.py::_sync_rawdata()),
+# since it runs in a separate, stateless Cloud Run Job container from
+# winspool-sync-daily with no shared filesystem -- baking a multi-GB
+# rawdata/ into the image would be both wasted space and stale by the next
+# nflverse update anyway.
+#!include:.gitignore
+
+!models/*.keras
+!models/*.pkl
