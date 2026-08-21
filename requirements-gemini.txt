@@ -1,0 +1,12 @@
+# Gemini (weekly recap generation) -- web service only.
+#
+# Split out of requirements.txt: google-generativeai's pinned
+# google-ai-generativelanguage==0.6.15 requires protobuf<6, while
+# tensorflow==2.21.0 (requirements-ml.txt) requires protobuf>=6.31.1 -- no
+# overlapping compatible protobuf version exists between the two, so
+# `pip install -r requirements.txt -r requirements-ml.txt` (Dockerfile.predict)
+# was unresolvable with this in the base file. cache_builder.py (the only
+# thing that runs in Dockerfile.predict) never imports google.generativeai /
+# ai_service.py / recap_service.py, so it doesn't need this at all -- only
+# the web service's own Dockerfile installs this file.
+google-generativeai==0.8.6

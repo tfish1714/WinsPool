@@ -4,9 +4,13 @@ FROM python:3.10-slim
 # Set the working directory
 WORKDIR /app
 
-# Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies. requirements-gemini.txt is split out of
+# requirements.txt so the ML prediction image (Dockerfile.predict) doesn't
+# have to resolve google-generativeai against tensorflow's incompatible
+# protobuf requirement -- see requirements-gemini.txt. The web service
+# needs both.
+COPY requirements.txt requirements-gemini.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-gemini.txt
 
 # Copy the source code
 COPY . .
