@@ -25,7 +25,26 @@ def send_weekly_recap_email(to_emails: list, subject: str, html_content: str) ->
 
 
 def send_alert_email(subject: str, message: str) -> bool:
-    """Send a job-failure alert to the address in ALERT_EMAIL. Returns False (no-op) if unconfigured."""
+    """Send a job-failure alert to the address in ALERT_EMAIL. Returns False (no-op) if unconfigured.
+
+    Suppressed on any non-final Cloud Run Job retry attempt -- a job with
+    maxRetries=3 (Cloud Run's default) makes 4 attempts total on a real
+    failure, and without this every attempt would send its own copy of the
+    same alert. CLOUD_RUN_TASK_ATTEMPT (0-indexed) is injected automatically
+    by Cloud Run Jobs; MAX_RETRIES is NOT auto-injected -- it must be set as
+    a job env var matching that job's --max-retries (see deploy docs), or
+    this fails open and sends on every attempt rather than risk silently
+    swallowing a real alert because the env var was never configured.
+    """
+    attempt = os.getenv("CLOUD_RUN_TASK_ATTEMPT")
+    max_retries = os.getenv("MAX_RETRIES")
+    if attempt is not None and max_retries is not None and int(attempt) < int(max_retries):
+        logger.info(
+            "Suppressing alert email on attempt %s/%s (not the final retry). Subject: %s",
+            attempt, max_retries, subject,
+        )
+        return False
+
     to_email = os.getenv("ALERT_EMAIL")
     if not to_email:
         logger.error("ALERT_EMAIL not set — alert email not sent. Subject: %s", subject)
@@ -35,10 +54,15 @@ def send_alert_email(subject: str, message: str) -> bool:
     # silently eaten as an unknown HTML tag by mail clients, degrading the
     # most important content of a failure alert in the common case.
     body_html = f"<p>{html.escape(subject)}</p><pre>{html.escape(message)}</pre>"
-    return _send(to_email, subject, body_html)
+    # Reply-To, not From: Resend can't send *as* an arbitrary address (only
+    # a verified domain), and gmail.com's own DMARC policy would bounce or
+    # spam-filter a spoofed From anyway. Reply-To has no such restriction --
+    # hitting "reply" on an alert lands back in the same inbox it alerted,
+    # without touching the sending identity at all.
+    return _send(to_email, subject, body_html, reply_to=to_email)
 
 
-def _send(to_email: str, subject: str, html: str) -> bool:
+def _send(to_email: str, subject: str, html: str, reply_to: str = None) -> bool:
     """Send a single transactional email via Resend. Returns True on success."""
     api_key = os.getenv("RESEND_API_KEY")
     if not api_key:
@@ -48,13 +72,17 @@ def _send(to_email: str, subject: str, html: str) -> bool:
     resend.api_key = api_key
     from_email = os.getenv("FROM_EMAIL", "onboarding@resend.dev")
 
+    payload = {
+        "from": from_email,
+        "to": [to_email],
+        "subject": subject,
+        "html": html,
+    }
+    if reply_to:
+        payload["reply_to"] = [reply_to]
+
     try:
-        resend.Emails.send({
-            "from": from_email,
-            "to": [to_email],
-            "subject": subject,
-            "html": html,
-        })
+        resend.Emails.send(payload)
         return True
     except Exception as e:
         logger.error("Error sending email to %s: %s", to_email, e)

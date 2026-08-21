@@ -357,4 +357,15 @@ or missing model files happen to exist there (discovered when a worktree-built
 of the current `nn_v14.keras` — Cloud Run Jobs don't error on a wrong model
 version, they just predict worse). Run `deploy.ps1` from the main checkout.
 
+**Gotcha: each scheduled job needs a `MAX_RETRIES` env var matching its own
+`--max-retries`.** `send_alert_email()` (`services/email_service.py`) only
+actually sends on the job's final retry attempt, comparing Cloud Run's
+auto-injected `CLOUD_RUN_TASK_ATTEMPT` against this env var — Cloud Run does
+NOT auto-inject the configured max-retries itself, so without `MAX_RETRIES`
+set, every attempt sends its own alert (4 emails per failure at the default
+`maxRetries=3`, i.e. 4 total attempts). All 4 jobs currently have
+`MAX_RETRIES=3` to match their (default, never overridden) `--max-retries=3`.
+If you ever change a job's `--max-retries`, update its `MAX_RETRIES` env var
+to match, or alerting silently reverts to "fail open" (always sends).
+
 Cloud Scheduler is used to run `scripts/daily_nfl_sync.py` on a schedule in production.
