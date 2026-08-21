@@ -13,6 +13,7 @@ import os
 import json
 import argparse
 import pathlib
+import subprocess
 import time
 
 # Ensure project root is on the path
@@ -23,16 +24,19 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # cache_builder always reads from Firestore (never from local pkl)
 os.environ['USE_LOCAL_DATA'] = 'False'
 
-# Initialize Firebase before importing data_service (which reads from Firestore)
+# Initialize Firebase before importing data_service (which reads from Firestore).
+# Delegates to daily_nfl_sync.py::initialize_firebase(), which checks the
+# FIREBASE_CREDENTIALS env var (base64-encoded service account JSON -- how
+# Cloud Run passes credentials) before falling back to a local
+# firebase_credentials.json file. Previously this block only ever looked for
+# the local file, which is gitignored and never present in the deployed
+# image, so this job could never actually start on Cloud Run: it would
+# sys.exit(1) at import time -- before _run_with_alerting() is even reached,
+# so the failure produced no alert email either.
 import firebase_admin
-from firebase_admin import credentials, firestore as _fs
-if not firebase_admin._apps:
-    _creds_path = pathlib.Path(__file__).parent.parent / 'firebase_credentials.json'
-    if not _creds_path.exists():
-        print(f"ERROR: firebase_credentials.json not found at {_creds_path}. "
-              f"Set FIREBASE_CREDENTIALS env var or place the file in the project root.")
-        sys.exit(1)
-    firebase_admin.initialize_app(credentials.Certificate(str(_creds_path)))
+from firebase_admin import firestore as _fs
+from scripts.daily_nfl_sync import initialize_firebase
+initialize_firebase()
 
 import numpy as np
 import pandas as pd
@@ -53,6 +57,7 @@ from services.nn_feature_engine import (
 )
 from services.constants import UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 import services.live_score_service as live_scores
+from services.email_service import send_alert_email
 
 ANALYTICS = [
     'wins_pool_standings',
@@ -325,13 +330,49 @@ def build_year(standings, games, players, draft_order, draft_results,
             print(f"  [err]  {analytic}: {e}")
 
 
+SCRIPTS_DIR = pathlib.Path(__file__).parent
+
+
+def _sync_rawdata() -> None:
+    """Re-pull rawdata/ from nflverse before build_master_feature_table() reads
+    it. winspool-predict-daily runs in its own, separate Cloud Run Job
+    container from winspool-sync-daily -- Cloud Run Jobs are stateless,
+    one-shot executions with no shared filesystem between them, so whatever
+    winspool-sync-daily downloaded into ITS container (running ~15 min
+    earlier per the dynamic kickoff schedule) is gone by the time this job
+    starts. Default priority (3, full sync: rosters/depth_charts/injuries/
+    snap_counts/pfr_advstats/schedules/stats_team) since build_master_feature_table()
+    needs all of it, unlike the lightweight priority-1-only syncs in
+    sync_live_scores.py/schedule_kickoffs.py. Non-fatal on failure, same
+    established pattern as those two -- a stale-but-present rawdata/ from a
+    prior local run isn't available in a fresh container either way, so any
+    failure here is worth surfacing (via whatever downstream code hits
+    missing files) rather than treated specially."""
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS_DIR / "sync_nflverse_data.py")],
+        capture_output=True, text=True, timeout=300,
+        cwd=str(SCRIPTS_DIR.parent),
+    )
+    if result.returncode != 0:
+        print(f"[warn] sync_nflverse_data.py exited non-zero (non-fatal): "
+              f"{result.stderr.strip()[:500]}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Pre-compute analytics into cache")
     parser.add_argument('--year', type=int, default=None, help="Only rebuild this year")
     parser.add_argument('--force', action='store_true',
                         help="Ignore is_final and recompute everything. "
                              "Use this after retraining models to refresh historical predictions.")
+    parser.add_argument('--skip-sync', action='store_true',
+                        help="Skip the rawdata/ sync step (for local runs where rawdata/ "
+                             "is already fresh -- the deployed winspool-predict-daily job "
+                             "never passes this, since its container starts empty).")
     args = parser.parse_args()
+
+    if not args.skip_sync:
+        print("[cache_builder] Syncing rawdata/ from nflverse...")
+        _sync_rawdata()
 
     print("[cache_builder] Loading raw data from Firestore / local cache...")
     standings, teams, games, players, draft_order, draft_results, draft_order_rules = load_data()
@@ -380,5 +421,17 @@ def main():
     print("\n[cache_builder] Done.")
 
 
+def _run_with_alerting():
+    try:
+        main()
+    except Exception:
+        import traceback
+        send_alert_email(
+            "WinsPool job 'winspool-predict-daily' failed",
+            f"cache_builder.py raised an unhandled exception:\n\n{traceback.format_exc()}",
+        )
+        raise
+
+
 if __name__ == '__main__':
-    main()
+    _run_with_alerting()

@@ -1,3 +1,4 @@
+import html
 import logging
 import os
 from dotenv import load_dotenv
@@ -21,6 +22,20 @@ def send_mfa_code_email(to_email: str, code: str) -> bool:
 def send_weekly_recap_email(to_emails: list, subject: str, html_content: str) -> bool:
     """Send a weekly recap email to each recipient individually via Resend."""
     return all(_send(email, subject, html_content) for email in to_emails)
+
+
+def send_alert_email(subject: str, message: str) -> bool:
+    """Send a job-failure alert to the address in ALERT_EMAIL. Returns False (no-op) if unconfigured."""
+    to_email = os.getenv("ALERT_EMAIL")
+    if not to_email:
+        logger.error("ALERT_EMAIL not set — alert email not sent. Subject: %s", subject)
+        return False
+    # Escape both -- nearly every Python traceback contains
+    # `File "...", line N, in <module>`, and an unescaped `<module>` gets
+    # silently eaten as an unknown HTML tag by mail clients, degrading the
+    # most important content of a failure alert in the common case.
+    body_html = f"<p>{html.escape(subject)}</p><pre>{html.escape(message)}</pre>"
+    return _send(to_email, subject, body_html)
 
 
 def _send(to_email: str, subject: str, html: str) -> bool:

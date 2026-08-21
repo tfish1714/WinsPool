@@ -1,0 +1,12 @@
+# winspool-sync: lean image for scheduled jobs that don't need ML deps
+# (run_cron.py / sync_live_scores.py / schedule_kickoffs.py / compute_elo.py)
+FROM python:3.10-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+ENV USE_LOCAL_DATA False
