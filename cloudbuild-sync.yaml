@@ -1,0 +1,13 @@
+# Builds winspool-sync: the lean, no-ML-deps image for the scheduled jobs
+# that don't need TensorFlow/XGBoost/scikit-learn (run_cron.py,
+# sync_live_scores.py, schedule_kickoffs.py, compute_elo.py).
+#
+# `gcloud builds submit --tag` only ever runs `docker build .` against a
+# file literally named `Dockerfile` -- this repo has three (Dockerfile,
+# Dockerfile.sync, Dockerfile.predict), so building from a specific one
+# needs an explicit build step instead.
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-f', 'Dockerfile.sync', '-t', 'us-east1-docker.pkg.dev/$PROJECT_ID/winspool/winspool-sync:latest', '.']
+images:
+  - 'us-east1-docker.pkg.dev/$PROJECT_ID/winspool/winspool-sync:latest'

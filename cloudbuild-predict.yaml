@@ -1,0 +1,11 @@
+# Builds winspool-predict: the ML-capable image (+requirements-ml.txt) for
+# winspool-predict-daily (cache_builder.py's prediction regen). See
+# cloudbuild-sync.yaml for why this needs an explicit build step rather
+# than `gcloud builds submit --tag`.
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-f', 'Dockerfile.predict', '-t', 'us-east1-docker.pkg.dev/$PROJECT_ID/winspool/winspool-predict:latest', '.']
+    timeout: 1200s
+images:
+  - 'us-east1-docker.pkg.dev/$PROJECT_ID/winspool/winspool-predict:latest'
+timeout: 1500s
