@@ -9,6 +9,15 @@ logger = logging.getLogger(__name__)
 
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 
+# ESPN's status.type.name values that mean "game is underway, show the LIVE
+# badge" -- STATUS_IN_PROGRESS alone misses halftime, which ESPN reports as
+# its own distinct status rather than a flavor of in-progress.
+LIVE_STATUSES = {"STATUS_IN_PROGRESS", "STATUS_HALFTIME"}
+
+
+def is_live_status(status: str) -> bool:
+    return status in LIVE_STATUSES
+
 def fetch_espn_scores():
     """
     Fetches the current week's scores from ESPN.
@@ -38,24 +47,33 @@ def get_live_updates():
         away_team = ""
         home_score = 0
         away_score = 0
-        
+        possession = None
+        # comp['situation'] only exists while a game is live and ESPN has
+        # attributed the current play to a team -- absent between plays
+        # (e.g. right after a score), not just for non-live games.
+        possession_team_id = comp.get('situation', {}).get('possession')
+
         for team_data in comp.get('competitors', []):
             abbr = team_data.get('team', {}).get('abbreviation')
             score = int(team_data.get('score', 0))
-            if team_data.get('homeAway') == 'home':
+            home_away = team_data.get('homeAway')
+            if home_away == 'home':
                 home_team = abbr
                 home_score = score
             else:
                 away_team = abbr
                 away_score = score
-        
+            if possession_team_id and team_data.get('team', {}).get('id') == possession_team_id:
+                possession = home_away
+
         if home_team and away_team:
             updates[(home_team, away_team)] = {
                 "home_score": home_score,
                 "away_score": away_score,
                 "status": status,
                 "clock": event.get('status', {}).get('displayClock', ''),
-                "period": event.get('status', {}).get('period', 0)
+                "period": event.get('status', {}).get('period', 0),
+                "possession": possession
             }
             
     return updates
@@ -100,9 +118,9 @@ def sync_live_scores_to_df(games_df: pd.DataFrame) -> pd.DataFrame:
             df.at[idx, 'result'] = update['home_score'] - update['away_score']
             
             # Add metadata for the UI to show 'LIVE'
-            if espn_status == 'STATUS_IN_PROGRESS':
+            if is_live_status(espn_status):
                 df.at[idx, 'is_live'] = True
-                df.at[idx, 'clock'] = update['clock']
+                df.at[idx, 'clock'] = 'Halftime' if espn_status == 'STATUS_HALFTIME' else update['clock']
                 df.at[idx, 'period'] = update['period']
             elif espn_status == 'STATUS_FINAL':
                 # Check if it was previously NOT final in our local DF logic

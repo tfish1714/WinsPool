@@ -44,7 +44,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import pandas as pd
 
 from scripts.daily_nfl_sync import compute_standings, batch_upload, initialize_firebase, load_games
-from services.live_score_service import get_live_updates
+from services.live_score_service import get_live_updates, is_live_status
 from services.email_service import send_alert_email
 from services.utils import normalize_team_abbr
 
@@ -110,11 +110,13 @@ def overlay_espn_live_fields(db, games: pd.DataFrame, live_data: dict) -> int:
         if pd.notna(row.get("result")):
             continue
 
+        espn_status = update["status"]
         db.collection("nfl_games").document(str(row["game_id"])).set(
             {
-                "is_live": update["status"] == "STATUS_IN_PROGRESS",
-                "clock": update.get("clock"),
+                "is_live": is_live_status(espn_status),
+                "clock": "Halftime" if espn_status == "STATUS_HALFTIME" else update.get("clock"),
                 "period": update.get("period"),
+                "possession": update.get("possession"),
             },
             merge=True,
         )

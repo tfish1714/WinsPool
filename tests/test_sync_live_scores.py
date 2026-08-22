@@ -34,8 +34,42 @@ class TestOverlayEspnLiveFields:
         doc_ref = db.collection.return_value.document.return_value
         doc_ref.set.assert_called_once()
         written_data, kwargs = doc_ref.set.call_args
-        assert written_data[0] == {"is_live": True, "clock": "5:23", "period": 2}
+        assert written_data[0] == {"is_live": True, "clock": "5:23", "period": 2, "possession": None}
         assert kwargs["merge"] is True
+
+    def test_halftime_game_is_treated_as_live(self):
+        """ESPN reports halftime as STATUS_HALFTIME, not STATUS_IN_PROGRESS --
+        a game at halftime is still live and must get the same is_live=True
+        badge, with a 'Halftime' clock label instead of a stale '0:00'."""
+        db = MagicMock()
+        live_data = {
+            ("BUF", "KC"): {"home_score": 10, "away_score": 7, "status": "STATUS_HALFTIME",
+                             "clock": "0:00", "period": 2},
+        }
+        result = overlay_espn_live_fields(db, _games_df(), live_data)
+
+        assert result == 1
+        doc_ref = db.collection.return_value.document.return_value
+        doc_ref.set.assert_called_once()
+        written_data, kwargs = doc_ref.set.call_args
+        assert written_data[0] == {"is_live": True, "clock": "Halftime", "period": 2, "possession": None}
+        assert kwargs["merge"] is True
+
+    def test_possession_field_is_written_through(self):
+        """The possession indicator (which team has the ball, 'home'/'away'/
+        None) must be merge-written alongside is_live/clock/period so the
+        schedule page can show a ball icon next to the right team."""
+        db = MagicMock()
+        live_data = {
+            ("BUF", "KC"): {"home_score": 10, "away_score": 7, "status": "STATUS_IN_PROGRESS",
+                             "clock": "5:23", "period": 2, "possession": "away"},
+        }
+        result = overlay_espn_live_fields(db, _games_df(), live_data)
+
+        assert result == 1
+        doc_ref = db.collection.return_value.document.return_value
+        written_data, kwargs = doc_ref.set.call_args
+        assert written_data[0]["possession"] == "away"
 
     def test_already_final_game_is_not_overwritten(self):
         """A game nflverse already marked final (has a non-null result) must not

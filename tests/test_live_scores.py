@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 from unittest.mock import patch
-from services.live_score_service import sync_live_scores_to_df
+from services.live_score_service import sync_live_scores_to_df, get_live_updates
 
 def test_sync_live_scores_handles_empty_df():
     """Verify that an empty DataFrame returns safely without KeyError."""
@@ -42,3 +42,48 @@ def test_sync_live_scores_triggers_cache_rebuild_on_final(mock_signal, mock_get_
     
     # CRITICAL: Verify the cache rebuild signal was fired
     mock_signal.assert_called_once()
+
+
+def _espn_event(possession_team_id=None):
+    return {
+        "status": {"type": {"name": "STATUS_IN_PROGRESS"}, "displayClock": "10:00", "period": 1},
+        "competitions": [{
+            "situation": {"possession": possession_team_id} if possession_team_id else {},
+            "competitors": [
+                {"team": {"abbreviation": "PIT", "id": "23"}, "score": "7", "homeAway": "home"},
+                {"team": {"abbreviation": "NYJ", "id": "20"}, "score": "0", "homeAway": "away"},
+            ],
+        }],
+    }
+
+
+@patch("services.live_score_service.fetch_espn_scores")
+def test_get_live_updates_reports_home_team_possession(mock_fetch):
+    """ESPN's situation.possession holds the team id with the ball -- when it
+    matches the home competitor's team id, the update must say 'home'."""
+    mock_fetch.return_value = {"events": [_espn_event(possession_team_id="23")]}
+
+    updates = get_live_updates()
+
+    assert updates[("PIT", "NYJ")]["possession"] == "home"
+
+
+@patch("services.live_score_service.fetch_espn_scores")
+def test_get_live_updates_reports_away_team_possession(mock_fetch):
+    mock_fetch.return_value = {"events": [_espn_event(possession_team_id="20")]}
+
+    updates = get_live_updates()
+
+    assert updates[("PIT", "NYJ")]["possession"] == "away"
+
+
+@patch("services.live_score_service.fetch_espn_scores")
+def test_get_live_updates_possession_none_when_absent(mock_fetch):
+    """Between plays (e.g. right after a score) ESPN may omit situation.possession
+    entirely -- must not crash, and must report no possession rather than
+    guessing."""
+    mock_fetch.return_value = {"events": [_espn_event(possession_team_id=None)]}
+
+    updates = get_live_updates()
+
+    assert updates[("PIT", "NYJ")]["possession"] is None

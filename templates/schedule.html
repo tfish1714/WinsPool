@@ -55,7 +55,7 @@
                         <img src="{{ get_team_logo(row['away_team']) }}" class="tiny-logo" alt="">
                         <div class="team-name-box">
                             <span class="team-name-text">
-                                {{ row['away_team'] }} <span class="team-record-sub">({{ row['away_record'] }})</span>
+                                {{ row['away_team'] }}{% if row.get('is_live') and row.get('possession') == 'away' %} <span class="possession-ball" title="Possession">&#127944;</span>{% endif %} <span class="team-record-sub">({{ row['away_record'] }})</span>
                                 {% if row['spread_line'] is not none and row['spread_line']|float < 0 %} <span
                                     class="odds-chip"> {{ row['spread_line'] }}</span>
                             {% elif row['spread_line'] == 0 or row['spread_line'] == 'PK' %}
@@ -76,7 +76,7 @@
                         <img src="{{ get_team_logo(row['home_team']) }}" class="tiny-logo" alt="">
                         <div class="team-name-box">
                             <span class="team-name-text">
-                                {{ row['home_team'] }} <span class="team-record-sub">({{ row['home_record'] }})</span>
+                                {{ row['home_team'] }}{% if row.get('is_live') and row.get('possession') == 'home' %} <span class="possession-ball" title="Possession">&#127944;</span>{% endif %} <span class="team-record-sub">({{ row['home_record'] }})</span>
                                 {% if row['spread_line'] is not none and row['spread_line']|float > 0 %}
                                 <span class="odds-chip"> -{{ row['spread_line'] }}</span>
                                 {% endif %}
@@ -91,9 +91,15 @@
                     </div>
                 </div>
                 <div class="game-info-aside">
-                    <span class="game-status-label {% if row['result'] is number and row['result'] != -1000 %}status-final{% endif %}">
+                    <span class="game-status-label {% if row['result'] is number and row['result'] != -1000 %}status-final{% elif row.get('is_live') %}status-live{% endif %}">
                         {%- if row['result'] is number and row['result'] != -1000 -%}
                             Final
+                        {%- elif row.get('is_live') -%}
+                            {%- if row.get('clock') == 'Halftime' -%}
+                                Halftime
+                            {%- else -%}
+                                Q{{ row['period'] }} {{ row['clock'] }}
+                            {%- endif -%}
                         {%- elif row.get('gametime_display') -%}
                             {{ row['gametime_display'] }}
                         {%- else -%}
