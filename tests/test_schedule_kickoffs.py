@@ -143,3 +143,69 @@ class TestEnqueueTask:
         # into an alert email).
         with pytest.raises(RuntimeError):
             enqueue_task(client, self._kickoff(), "winspool-sync-daily")
+
+
+class TestEnqueueTaskWithOverrides:
+    def _kickoff(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        return datetime(2026, 9, 20, 13, 0, tzinfo=ZoneInfo("America/New_York"))
+
+    def test_job_args_produce_container_override_body(self, monkeypatch):
+        from unittest.mock import MagicMock
+        from scripts.schedule_kickoffs import enqueue_task
+
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_PROJECT", "test-project")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_REGION", "us-east1")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_TASKS_QUEUE", "test-queue")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_SCHEDULER_SERVICE_ACCOUNT", "sa@test.iam.gserviceaccount.com")
+
+        client = MagicMock()
+        client.queue_path.return_value = "projects/test-project/locations/us-east1/queues/test-queue"
+
+        enqueue_task(client, self._kickoff(), "winspool-predict-daily",
+                      job_args=["--resimulate", "2026_03_KC_WAS"])
+
+        task = client.create_task.call_args.kwargs["request"]["task"]
+        assert "body" in task["http_request"]
+        import json
+        body = json.loads(task["http_request"]["body"])
+        assert body["overrides"]["containerOverrides"][0]["args"] == ["--resimulate", "2026_03_KC_WAS"]
+
+    def test_no_job_args_omits_body(self, monkeypatch):
+        """Existing sync/predict calls (no job_args) must be unaffected -- no
+        body means the job runs with its normal configured command."""
+        from unittest.mock import MagicMock
+        from scripts.schedule_kickoffs import enqueue_task
+
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_PROJECT", "test-project")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_REGION", "us-east1")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_TASKS_QUEUE", "test-queue")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_SCHEDULER_SERVICE_ACCOUNT", "sa@test.iam.gserviceaccount.com")
+
+        client = MagicMock()
+        client.queue_path.return_value = "projects/test-project/locations/us-east1/queues/test-queue"
+
+        enqueue_task(client, self._kickoff(), "winspool-sync-daily")
+
+        task = client.create_task.call_args.kwargs["request"]["task"]
+        assert "body" not in task["http_request"]
+
+
+class TestComputeKickoffClustersWithGames:
+    def test_pairs_each_cluster_with_its_game_ids(self):
+        from scripts.schedule_kickoffs import compute_kickoff_clusters_with_games
+        games = pd.DataFrame([
+            {"season": 2026, "week": 3, "game_type": "REG", "game_id": "g1",
+             "gameday": "2026-09-20", "gametime": "13:00"},
+            {"season": 2026, "week": 3, "game_type": "REG", "game_id": "g2",
+             "gameday": "2026-09-20", "gametime": "13:00"},
+            {"season": 2026, "week": 3, "game_type": "REG", "game_id": "g3",
+             "gameday": "2026-09-20", "gametime": "16:25"},
+        ])
+        result = compute_kickoff_clusters_with_games(games, 2026, 3)
+        assert len(result) == 2
+        early = next(g for dt, g in result if dt.hour == 13)
+        late = next(g for dt, g in result if dt.hour == 16)
+        assert sorted(early) == ["g1", "g2"]
+        assert late == ["g3"]

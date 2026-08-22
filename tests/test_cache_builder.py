@@ -145,3 +145,135 @@ class TestApplyPredictionsFallback:
         fallback_engine.simulate_season.side_effect = Exception("model unavailable")
         out = _apply_predictions(schedule, 2026, {}, fallback_engine=fallback_engine)
         assert out.iloc[0]["pred_winner"] is None
+
+
+def _games_df():
+    return pd.DataFrame([
+        {"game_id": "2026_03_KC_WAS", "season": 2026, "week": 3,
+         "home_team": "WAS", "away_team": "KC", "game_type": "REG"},
+        {"game_id": "2026_03_SF_LAC", "season": 2026, "week": 3,
+         "home_team": "LAC", "away_team": "SF", "game_type": "REG"},
+    ])
+
+
+class TestPublishGameProbs:
+    def test_publishes_only_requested_game(self):
+        from scripts.cache_builder import _publish_game_probs
+
+        game_probs = {
+            "W03_WAS_KC": {"mean_prob": 0.62, "model_spread": -3.0,
+                           "home_team": "WAS", "away_team": "KC", "week": 3},
+            "W03_LAC_SF": {"mean_prob": 0.55, "model_spread": -1.0,
+                           "home_team": "LAC", "away_team": "SF", "week": 3},
+        }
+        with patch("scripts.cache_builder.get_game_predictions", return_value={}), \
+             patch("scripts.cache_builder.write_game_predictions") as mock_write:
+            n = _publish_game_probs(["2026_03_KC_WAS"], _games_df(), 2026, game_probs)
+
+        assert n == 1
+        mock_write.assert_called_once()
+        year, merged = mock_write.call_args[0]
+        assert year == 2026
+        assert "W03_WAS_KC" in merged
+        assert "W03_LAC_SF" not in merged  # the other game was never touched
+
+    def test_preserves_existing_richer_fields_for_untouched_games(self):
+        from scripts.cache_builder import _publish_game_probs
+
+        existing = {"W03_LAC_SF": {"model_spread": -3.5, "edge_vs_vegas": 1.2}}
+        game_probs = {
+            "W03_WAS_KC": {"mean_prob": 0.62, "model_spread": -3.0,
+                           "home_team": "WAS", "away_team": "KC", "week": 3},
+        }
+        with patch("scripts.cache_builder.get_game_predictions", return_value=existing), \
+             patch("scripts.cache_builder.write_game_predictions") as mock_write:
+            _publish_game_probs(["2026_03_KC_WAS"], _games_df(), 2026, game_probs)
+
+        _year, merged = mock_write.call_args[0]
+        assert merged["W03_LAC_SF"] == existing["W03_LAC_SF"]
+
+    def test_no_matching_game_id_returns_zero(self):
+        from scripts.cache_builder import _publish_game_probs
+        with patch("scripts.cache_builder.write_game_predictions") as mock_write:
+            n = _publish_game_probs(["nonexistent"], _games_df(), 2026, {})
+        assert n == 0
+        mock_write.assert_not_called()
+
+    def test_no_game_probs_entry_for_requested_game_returns_zero(self):
+        from scripts.cache_builder import _publish_game_probs
+        with patch("scripts.cache_builder.get_game_predictions", return_value={}), \
+             patch("scripts.cache_builder.write_game_predictions") as mock_write:
+            n = _publish_game_probs(["2026_03_KC_WAS"], _games_df(), 2026, {})
+        assert n == 0
+        mock_write.assert_not_called()
+
+
+class TestResimulateModeWiring:
+    def test_resimulate_flag_skips_full_multi_year_build(self, monkeypatch):
+        """--resimulate must not call build_year() (the full standings/analytics
+        rebuild) at all -- only the scoped ESPN-check + re-simulate + publish path."""
+        import sys
+        from scripts.cache_builder import main
+
+        monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--resimulate", "2026_03_KC_WAS", "--skip-sync"])
+        with patch("scripts.cache_builder.load_data") as mock_load_data, \
+             patch("scripts.cache_builder.build_year") as mock_build_year, \
+             patch("scripts.cache_builder.NNProjectionEngine") as mock_engine_cls, \
+             patch("scripts.cache_builder._publish_game_probs", return_value=0) as mock_publish, \
+             patch("scripts.cache_builder._fs"):
+            mock_load_data.return_value = (
+                pd.DataFrame(), pd.DataFrame(), _games_df(), pd.DataFrame(),
+                pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+            )
+            mock_engine_cls.return_value.simulate_season.return_value = {"game_probs": {}}
+            main()
+
+        mock_build_year.assert_not_called()
+        mock_engine_cls.return_value.initialize.assert_called_once()
+        mock_publish.assert_called_once()
+
+    def test_resimulate_flag_fetches_espn_overrides_and_passes_to_initialize(self, monkeypatch):
+        import sys
+        from scripts.cache_builder import main
+
+        monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--resimulate", "2026_03_KC_WAS", "--skip-sync"])
+        with patch("scripts.cache_builder.load_data") as mock_load_data, \
+             patch("scripts.cache_builder.build_year"), \
+             patch("scripts.cache_builder.NNProjectionEngine") as mock_engine_cls, \
+             patch("services.espn_injury_service.get_espn_injury_overrides",
+                   return_value={(3, "QB1"): 0.0}) as mock_espn, \
+             patch("scripts.cache_builder._publish_game_probs", return_value=1), \
+             patch("scripts.cache_builder._fs"):
+            mock_load_data.return_value = (
+                pd.DataFrame(), pd.DataFrame(), _games_df(), pd.DataFrame(),
+                pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+            )
+            mock_engine_cls.return_value.simulate_season.return_value = {"game_probs": {}}
+            main()
+
+        mock_espn.assert_called_once()
+        init_kwargs = mock_engine_cls.return_value.initialize.call_args.kwargs
+        assert init_kwargs["espn_overrides"] == {(3, "QB1"): 0.0}
+
+    def test_resimulate_flag_espn_failure_still_publishes(self, monkeypatch):
+        """ESPN fetch failing must not abort the re-simulate -- it just proceeds
+        with no overrides, matching the established graceful-degradation pattern."""
+        import sys
+        from scripts.cache_builder import main
+
+        monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--resimulate", "2026_03_KC_WAS", "--skip-sync"])
+        with patch("scripts.cache_builder.load_data") as mock_load_data, \
+             patch("scripts.cache_builder.build_year"), \
+             patch("scripts.cache_builder.NNProjectionEngine") as mock_engine_cls, \
+             patch("services.espn_injury_service.get_espn_injury_overrides",
+                   side_effect=Exception("ESPN down")), \
+             patch("scripts.cache_builder._publish_game_probs", return_value=1) as mock_publish, \
+             patch("scripts.cache_builder._fs"):
+            mock_load_data.return_value = (
+                pd.DataFrame(), pd.DataFrame(), _games_df(), pd.DataFrame(),
+                pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+            )
+            mock_engine_cls.return_value.simulate_season.return_value = {"game_probs": {}}
+            main()  # must not raise
+
+        mock_publish.assert_called_once()

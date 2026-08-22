@@ -2,9 +2,13 @@
 
 Runs weekly (Tue ~10am UTC), in-season only (Sept 1 - Feb 10). Reads the
 upcoming week's actual gameday/gametime, computes distinct kickoff-time
-clusters, and enqueues 2 Cloud Tasks per cluster:
+clusters, and enqueues 3 Cloud Tasks per cluster:
   - winspool-sync-daily    at (kickoff - 75 min)
   - winspool-predict-daily at (kickoff - 60 min)
+  - winspool-predict-daily at (kickoff - 70 min), with its container args
+    overridden to `--resimulate <game_ids>` (Task 6) -- a scoped ESPN
+    injury check + re-simulate for just that cluster's games, reusing the
+    existing winspool-predict-daily job/image rather than a new one.
 
 Cloud Tasks (not Cloud Scheduler) is used because it supports a specific
 one-off future execution timestamp per task, whereas Cloud Scheduler is
@@ -45,6 +49,14 @@ GCP_SCHEDULER_SERVICE_ACCOUNT = os.environ.get("GCP_SCHEDULER_SERVICE_ACCOUNT")
 
 SYNC_LEAD_MINUTES = 75
 PREDICT_LEAD_MINUTES = 60
+# How close to kickoff the ESPN check + re-simulate runs. Anchored to the
+# NFL's official inactive-list deadline (kickoff-90min, league rule) -- this
+# leaves 20 minutes of margin after that deadline before this task fires.
+# NOT yet validated against a measured runtime of --resimulate (Task 6) in
+# production: before relying on this in-season, time a real invocation (see
+# Step 9 below) and adjust this constant if it runs longer than the margin
+# allows.
+RESIMULATE_LEAD_MINUTES = 70
 
 # NFL gametime is published in US/Eastern per nflverse convention. Use a
 # proper DST-aware zone -- clocks fall back to EST (UTC-5) the first Sunday
@@ -72,6 +84,23 @@ def compute_kickoff_clusters(games: pd.DataFrame, season: int, week: int) -> lis
     return sorted(clusters)
 
 
+def compute_kickoff_clusters_with_games(games: pd.DataFrame, season: int, week: int) -> list[tuple[datetime, list]]:
+    """Same clustering as compute_kickoff_clusters(), but paired with each
+    cluster's game_ids so the caller knows what to pass to --resimulate."""
+    wk = games[
+        (games["season"] == season)
+        & (games["week"] == week)
+        & (games["game_type"] == "REG")
+    ]
+    clusters: dict = {}
+    for _, row in wk.iterrows():
+        key_dt = datetime.strptime(
+            f"{row['gameday']} {row['gametime']}", "%Y-%m-%d %H:%M"
+        ).replace(tzinfo=_EASTERN)
+        clusters.setdefault(key_dt, []).append(row["game_id"])
+    return sorted(clusters.items())
+
+
 def _current_season_week(games: pd.DataFrame) -> tuple[int, int]:
     """The next upcoming REG-season week: the (season, week) of the earliest
     not-yet-played REG game (result is null). Deliberately NOT
@@ -95,10 +124,11 @@ def _run_url(job_name: str) -> str:
     )
 
 
-def enqueue_task(tasks_client, run_at: datetime, job_name: str) -> None:
+def enqueue_task(tasks_client, run_at: datetime, job_name: str, job_args: list = None) -> None:
     from google.api_core.exceptions import AlreadyExists
     from google.cloud import tasks_v2
     from google.protobuf import timestamp_pb2
+    import json
 
     parent = tasks_client.queue_path(GCP_PROJECT, GCP_REGION, GCP_TASKS_QUEUE)
     ts = timestamp_pb2.Timestamp()
@@ -118,16 +148,25 @@ def enqueue_task(tasks_client, run_at: datetime, job_name: str) -> None:
         f"queues/{GCP_TASKS_QUEUE}/tasks/{task_id}"
     )
 
+    http_request = {
+        "http_method": tasks_v2.HttpMethod.POST,
+        "url": _run_url(job_name),
+        # :run is a Google Cloud API endpoint (*.googleapis.com), not a
+        # Cloud Run Service's own HTTPS endpoint -- OAuth, not OIDC. See
+        # the module docstring.
+        "oauth_token": {"service_account_email": GCP_SCHEDULER_SERVICE_ACCOUNT},
+    }
+    if job_args:
+        # Cloud Run Jobs Admin API's :run RunJobRequest body -- overrides the
+        # container's configured args for just this execution, so the
+        # re-simulate can reuse winspool-predict-daily's existing job instead
+        # of provisioning a new one.
+        body = {"overrides": {"containerOverrides": [{"args": job_args}]}}
+        http_request["body"] = json.dumps(body).encode("utf-8")
+
     task = {
         "name": task_name,
-        "http_request": {
-            "http_method": tasks_v2.HttpMethod.POST,
-            "url": _run_url(job_name),
-            # :run is a Google Cloud API endpoint (*.googleapis.com), not a
-            # Cloud Run Service's own HTTPS endpoint -- OAuth, not OIDC. See
-            # the module docstring.
-            "oauth_token": {"service_account_email": GCP_SCHEDULER_SERVICE_ACCOUNT},
-        },
+        "http_request": http_request,
         "schedule_time": ts,
     }
     try:
@@ -164,14 +203,18 @@ def main():
         _sync_schedule_data()
         games = load_games()
         season, week = _current_season_week(games)
-        clusters = compute_kickoff_clusters(games, season, week)
 
         client = tasks_v2.CloudTasksClient()
-        for kickoff in clusters:
+        clusters_with_games = compute_kickoff_clusters_with_games(games, season, week)
+        for kickoff, game_ids in clusters_with_games:
             enqueue_task(client, kickoff - timedelta(minutes=SYNC_LEAD_MINUTES), "winspool-sync-daily")
             enqueue_task(client, kickoff - timedelta(minutes=PREDICT_LEAD_MINUTES), "winspool-predict-daily")
+            enqueue_task(
+                client, kickoff - timedelta(minutes=RESIMULATE_LEAD_MINUTES), "winspool-predict-daily",
+                job_args=["--resimulate", ",".join(str(g) for g in game_ids)],
+            )
 
-        print(f"Enqueued {len(clusters)} kickoff cluster(s) x 2 tasks for {season} week {week}.")
+        print(f"Enqueued {len(clusters_with_games)} kickoff cluster(s) x 3 tasks for {season} week {week}.")
     except (Exception, SystemExit):
         # `except Exception` alone would let `load_games()`'s `sys.exit(1)`
         # (raised as SystemExit, which does not subclass Exception) escape

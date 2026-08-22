@@ -73,6 +73,8 @@ def _build_pred_lookup(ft: pd.DataFrame, nn_svc, xgb_svc, lr_svc) -> dict:
 
 
 SIMULATE_SEASON_N_SIMS = 5000
+RESIMULATE_N_SIMS = 2000
+RAWDATA_DIR = pathlib.Path(__file__).parent.parent / "rawdata"
 
 
 def _build_completed_results(games: pd.DataFrame, year: int) -> dict:
@@ -90,6 +92,58 @@ def _build_completed_results(games: pd.DataFrame, year: int) -> dict:
             if ht and at and wk is not None:
                 completed[f"W{int(wk):02d}_{ht}_{at}"] = float(res)
     return completed
+
+
+def _publish_game_probs(game_ids: list, games: pd.DataFrame, year: int, game_probs: dict) -> int:
+    """Publish only game_ids' entries from a simulate_season() game_probs_out
+    dict into game_predictions, via the same merge-preserving path
+    build_year() already uses -- every other stored game (including richer
+    fields like model_spread/edge_vs_vegas the merge preserves) is untouched.
+    """
+    target = games[games["game_id"].astype(str).isin(game_ids)].copy()
+    if target.empty:
+        print(f"[cache_builder] --resimulate: no matching rows for {game_ids}")
+        return 0
+
+    pmap = {}
+    for _, row in target.iterrows():
+        ht = _normalize_team(str(row.get('home_team', '') or ''))
+        at = _normalize_team(str(row.get('away_team', '') or ''))
+        wk = row.get('week')
+        if not (ht and at and wk is not None):
+            continue
+        key = f"W{int(wk):02d}_{ht}_{at}"
+        gp = game_probs.get(key)
+        if not gp:
+            continue
+        hp = gp['mean_prob']
+        ms = gp['model_spread']
+        winner = ht if hp >= 0.5 else at
+        conf = round(max(hp, 1.0 - hp) * 100, 1)
+        spread = row.get('spread_line')
+        ats = winner
+        if pd.notna(spread):
+            try:
+                sl_val = float(spread)
+                ats = ht if ms > sl_val else at
+            except (ValueError, TypeError):
+                pass
+        pmap[key] = {
+            'pred_prob':     round(hp, 4),
+            'pred_winner':   winner,
+            'pred_su_conf':  conf,
+            'pred_ats_pick': ats,
+            'model_spread':  ms,
+        }
+
+    if not pmap:
+        print("[cache_builder] --resimulate: no predictions produced for requested games")
+        return 0
+
+    existing = get_game_predictions(year)
+    merged = merge_thin_game_predictions(existing, pmap)
+    write_game_predictions(year, merged)
+    return len(pmap)
 
 
 def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
@@ -401,6 +455,10 @@ def main():
                         help="Skip the rawdata/ sync step (for local runs where rawdata/ "
                              "is already fresh -- the deployed winspool-predict-daily job "
                              "never passes this, since its container starts empty).")
+    parser.add_argument('--resimulate', type=str, default=None,
+                        help="Comma-separated game_ids to re-run simulate_season() for "
+                             "with a fresh ESPN injury check, publishing only those "
+                             "games' predictions. For the close-to-kickoff last-mile refresh.")
     args = parser.parse_args()
 
     if not args.skip_sync:
@@ -409,6 +467,41 @@ def main():
 
     print("[cache_builder] Loading raw data from Firestore / local cache...")
     standings, teams, games, players, draft_order, draft_results, draft_order_rules = load_data()
+
+    if args.resimulate:
+        game_ids = [g.strip() for g in args.resimulate.split(",") if g.strip()]
+        target_rows = games[games["game_id"].astype(str).isin(game_ids)]
+        if target_rows.empty:
+            print(f"[cache_builder] --resimulate: no matching rows for {game_ids}; nothing to do")
+            return
+
+        year = int(target_rows["season"].iloc[0])
+        week = int(target_rows["week"].iloc[0])
+
+        espn_overrides = {}
+        try:
+            from services.espn_injury_service import get_espn_injury_overrides
+            target_pairs = list(zip(
+                target_rows["home_team"].map(_normalize_team),
+                target_rows["away_team"].map(_normalize_team),
+            ))
+            espn_overrides = get_espn_injury_overrides(target_pairs, year, week, RAWDATA_DIR)
+        except Exception as e:
+            print(f"[cache_builder] ESPN override fetch failed (non-fatal): {e}")
+
+        engine = NNProjectionEngine()
+        engine.initialize(year, espn_overrides=espn_overrides)
+
+        yr_games = games[games["season"] == year].copy()
+        completed_results = _build_completed_results(yr_games, year)
+        sim = engine.simulate_season(yr_games, n_sims=RESIMULATE_N_SIMS, completed_results=completed_results)
+
+        n = _publish_game_probs(game_ids, games, year, sim.get("game_probs", {}))
+        print(f"[cache_builder] --resimulate: published {n} prediction(s).")
+
+        db = _fs.client()
+        db.collection("metadata").document("cache_control").set({"last_update": time.time()})
+        return
 
     available_years = get_available_years(draft_results)
     current_year = max(available_years) if available_years else 2024
