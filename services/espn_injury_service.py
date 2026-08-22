@@ -57,7 +57,12 @@ def _load_espn_id_crosswalk(rawdata_dir: pathlib.Path, season: int, week: int) -
     fuzzy name matching."""
     path = rawdata_dir / "weekly_rosters" / f"roster_weekly_{season}.csv"
     try:
-        df = pd.read_csv(path, usecols=["season", "week", "gsis_id", "espn_id"], low_memory=False)
+        df = pd.read_csv(
+            path,
+            usecols=["season", "week", "gsis_id", "espn_id"],
+            dtype={"gsis_id": str, "espn_id": str},
+            low_memory=False,
+        )
     except Exception as e:
         logger.warning("espn_injury_service: cannot read %s -- %s", path, e)
         return {}
@@ -99,18 +104,18 @@ def _fetch_game_injuries(espn_event_id: str) -> List[dict]:
         if not resp.ok:
             return []
         data = resp.json()
+
+        rows: List[dict] = []
+        for team_block in data.get("injuries", []):
+            for entry in team_block.get("injuries", []):
+                espn_id = entry.get("athlete", {}).get("id")
+                if not espn_id:
+                    continue
+                rows.append({"espn_id": str(espn_id), "status": _extract_status(entry)})
+        return rows
     except Exception as e:
         logger.warning("espn_injury_service: summary fetch failed for event %s -- %s", espn_event_id, e)
         return []
-
-    rows: List[dict] = []
-    for team_block in data.get("injuries", []):
-        for entry in team_block.get("injuries", []):
-            espn_id = entry.get("athlete", {}).get("id")
-            if not espn_id:
-                continue
-            rows.append({"espn_id": str(espn_id), "status": _extract_status(entry)})
-    return rows
 
 
 def get_espn_injury_overrides(

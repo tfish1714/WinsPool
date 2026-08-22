@@ -42,6 +42,23 @@ class TestLoadEspnIdCrosswalk:
         result = _load_espn_id_crosswalk(tmp_path, 2025, 3)
         assert result == {"E1": "G1"}
 
+    def test_realistic_numeric_ids_not_coerced_to_float(self, tmp_path):
+        """Regression test: verify numeric-string IDs are preserved exactly,
+        not round-tripped through float (which would produce "4566092.0").
+        This catches the dtype-specification bug where espn_id is inferred as
+        float64 when other columns have NaN, breaking all real ESPN lookups."""
+        d = tmp_path / "weekly_rosters"
+        d.mkdir(parents=True)
+        # Realistic numeric IDs + a NaN elsewhere to trigger float coercion if dtype not set
+        pd.DataFrame([
+            {"season": 2025, "week": 3, "gsis_id": "00-0000001", "espn_id": "4566092", "some_col": float("nan")},
+            {"season": 2025, "week": 3, "gsis_id": "00-0000002", "espn_id": "8439", "some_col": "other"},
+        ]).to_csv(d / "roster_weekly_2025.csv", index=False)
+
+        result = _load_espn_id_crosswalk(tmp_path, 2025, 3)
+        # Key assertion: ESPN IDs must be exact strings, not "4566092.0" or "8439.0"
+        assert result == {"4566092": "00-0000001", "8439": "00-0000002"}
+
     def test_missing_file_returns_empty_dict(self, tmp_path):
         assert _load_espn_id_crosswalk(tmp_path, 2099, 1) == {}
 
@@ -110,6 +127,16 @@ class TestFetchGameInjuries:
         with patch("services.espn_injury_service.requests.get") as mock_get:
             mock_get.return_value.ok = True
             mock_get.return_value.json.return_value = fake_summary
+            assert _fetch_game_injuries("401555") == []
+
+    def test_malformed_json_response_returns_empty_list(self):
+        """Regression test: if resp.json() succeeds but returns unexpected
+        shape (e.g. list instead of dict), parsing failure should be caught
+        and return [] rather than raising AttributeError."""
+        with patch("services.espn_injury_service.requests.get") as mock_get:
+            mock_get.return_value.ok = True
+            # Simulate a response that's a list instead of dict
+            mock_get.return_value.json.return_value = [{"some": "list"}]
             assert _fetch_game_injuries("401555") == []
 
 
