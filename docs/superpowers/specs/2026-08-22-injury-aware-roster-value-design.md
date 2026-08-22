@@ -25,7 +25,9 @@ This also means Spec 2 (ESPN pregame signal) is narrower than originally scoped:
 
 **Part A** — grade the existing weekly roster-value computation by real injury severity (all positions, nflverse-sourced, weekly cadence).
 
-**Part B** — a narrow, same-day ESPN check for the window between the last scheduled predict run and kickoff, feeding the same weight scale, followed by a cheap single-slate repredict that publishes through the existing prediction store.
+**Part B0** — (discovered during implementation, see below) wire the live schedule page's upcoming-game prediction to the already-built, already-tested `simulate_season()` + real-results mechanism, and make its roster-value inputs week-aware — the necessary foundation for Part B, and a real fix in its own right independent of injuries.
+
+**Part B** — a narrow, same-day ESPN check for the window between the last scheduled predict run and kickoff, feeding the same weight scale, followed by a re-simulate that publishes through the existing prediction store.
 
 **Bundled final step** — retrain all three models once, after Part A ships (see "Retrain" section).
 
@@ -82,27 +84,53 @@ Extend `roster_value_service.py`'s test coverage: synthetic `injuries.csv` rows 
 
 ---
 
+## Part B0 — the discovered prerequisite: upcoming-game predictions don't consume in-season data at all
+
+**This section documents a finding made during implementation (after Part A shipped and Task 3 was reviewed), not something known when this spec was first written.** It changes Part B's design and is a real, load-bearing correction — not an incremental addition.
+
+### What was assumed vs. what's actually true
+
+The original Part B design assumed a live upcoming game's prediction flows through the same pipeline as a completed game's: `build_master_feature_table()` → ensemble lookup. It does not. `build_master_feature_table()` unconditionally drops every row without a final score (`sched.dropna(subset=["home_win"])`, `nn_feature_engine.py`) — it is structurally a training/completed-games-only table. `build_ensemble_lookup()`'s own docstring confirms this: "feature table has no rows for unplayed games."
+
+The actual mechanism behind every "predicted winner" shown today for an upcoming game is `NNProjectionEngine.game_win_probabilities_batch()`, called from `cache_builder.py::_apply_predictions()`'s fallback branch. This method builds **one static per-team profile, averaged from the entire prior season** (`NNProjectionEngine.initialize()`: `build_master_feature_table(min_season=2020, max_season=season-1)` — the target season's own already-played weeks are never included), computed once and reused unchanged for the rest of the season. It explicitly zeroes injury-flag features ("unknown for future games; model trained on 0-mean baseline") and pulls every roster-value feature from that same frozen prior-season average. **This is true today, independent of anything in this spec** — the live app's per-game prediction for an upcoming game already ignores this season's form and this week's injuries entirely.
+
+### The mechanism that should be used already exists and is already tested
+
+`NNProjectionEngine.simulate_season(schedule_df, n_sims, completed_results)` accepts `completed_results: {game_key: margin}` for already-played games this season. It walks weeks in ascending order: for a week already in `completed_results`, it applies the real margin deterministically and updates that team's Elo/EPA/margin state from it; for a week not yet played, it predicts from whatever state has accumulated so far (which already reflects every real result up to that point) and simulates forward. `tests/test_simulate_season.py::test_completed_results_applied_deterministically` proves this. `scripts/backfill_schedule_predictions.py` already calls it correctly, building `completed_results` from real `nfl_games` scores and writing the result into `game_predictions` — but that script is a manual command (per CLAUDE.md's Commands section), not one of the four automated Cloud Run Jobs. The automated daily job (`winspool-predict-daily` → `cache_builder.py`) never calls it.
+
+Separately, `simulate_season()`'s own per-game feature construction (`_precompute_static_features()`) has the same staleness problem as the fallback method it's replacing, just for a different feature group: it also pulls `off_roster_value_delta`/`def_roster_value_delta`/`st_value_delta`/`qb_resilience_delta`/`roster_talent_delta`/`trench_dominance_metric` from the same frozen prior-season-only `_team_profiles` average (comment in the code: "Roster value deltas ... from prior season"). The Elo/EPA momentum state evolves correctly via `completed_results`; the roster-value features next to it do not evolve at all.
+
+### Design (Part B0)
+
+1. **`NNProjectionEngine.initialize(season, espn_overrides=None)`** gains a second data source: in addition to the existing prior-season `_team_profiles`, compute `self._roster_value_cache = compute_roster_value(season, RAWDATA_DIR, espn_overrides=espn_overrides)` — the **target** season's own per-week roster value (already alpha-blended prior→current per player, and after Part A, already injury-graded).
+2. **`_precompute_static_features()`** is changed to look up each game's roster-value-family features from `self._roster_value_cache[(season, week, team)]` (keyed by that specific game's own `week`) instead of the flat `_team_profiles` average. The Elo/EPA dynamic-state mechanics (`_build_initial_state`, `_vectorized_elo_update`/`_vectorized_epa_update`) are untouched — they already transition correctly via `completed_results`; only the previously-frozen roster-value inputs change to be week-aware.
+3. **`cache_builder.py::_apply_predictions()`**'s fallback branch is changed to build `completed_results` from `schedule_df`'s own real scores and call `fallback_engine.simulate_season(schedule_df, n_sims=SIMULATE_SEASON_N_SIMS, completed_results=completed_results)` once (not per-row), then look up each unplayed row's prediction from the returned `game_probs_out` by its `W{wk:02d}_{home}_{away}` key — replacing the `game_win_probabilities_batch()` call entirely for this call site. `game_win_probabilities_batch()` itself is not removed (still used by `project_portfolio_wins()` for per-draft-pool portfolio math, a different, higher-volume use case where a full season simulation per player would be too expensive) — only this one call site changes.
+
+This is the real fix for "predictions should improve as the season progresses," independent of anything to do with injuries — and it is the necessary foundation Part B's ESPN signal needs, since there is no week-aware roster-value input to adjust otherwise.
+
+---
+
 ## Part B — ESPN last-hour pregame check + narrow repredict
 
 ### What's genuinely needed here
 
-Given Part A's weekly grading already covers the injury-report-to-model pipeline on the existing daily/kickoff−60min cadence, the only remaining gap is the window *after* the last scheduled predict run and *before* kickoff — e.g. a true last-minute inactive-list scratch, or nflverse's `injuries` file simply not yet reflecting a change that ESPN already shows.
+Given Part A's weekly grading and Part B0's week-aware wiring together cover the injury-report-to-model pipeline on the existing daily/kickoff−60min cadence, the only remaining gap is the window *after* the last scheduled predict run and *before* kickoff — e.g. a true last-minute inactive-list scratch, or nflverse's `injuries` file simply not yet reflecting a change that ESPN already shows.
 
 ### Signal
 
-For each game in the upcoming kickoff cluster, hit ESPN's per-game summary endpoint (`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event={id}`) and read its `injuries[]` array. Map each listed player's status onto the *same* weight scale as Part A (Out=0.0/Doubtful=0.15/Questionable=0.5/Full=1.0). Same position scope as Part A — no QB-only restriction.
-
-**Open implementation question:** ESPN's injuries payload uses ESPN's own player IDs, not nflverse's `gsis_id` directly. Confirm during implementation whether ESPN's summary endpoint exposes a cross-reference (many ESPN endpoints include external IDs), or whether a name+team match against the current week's roster is needed. If neither is reliable, this should degrade to a no-op for that game rather than guess.
+For each game in the upcoming kickoff cluster, hit ESPN's per-game summary endpoint (`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event={id}`) and read its `injuries[]` array. Map each listed player's status onto the *same* weight scale as Part A (Out=0.0/Doubtful=0.15/Questionable=0.5/Full=1.0). Same position scope as Part A — no QB-only restriction. ESPN's per-game injury entries are joined to nflverse's `gsis_id` via the exact `espn_id` column already present in `weekly_rosters/roster_weekly_{season}.csv` — no fuzzy name matching (resolved during Part A/Task 3 implementation; the dtype-coercion pitfall of that join, confirmed against real data, is documented in the implementation plan).
 
 ### Repredict
 
-Feed the refreshed availability weights into `roster_value_service.py`'s existing computation for just the affected `(season, week, team)` keys. Add a scoped mode to `cache_builder.py` (e.g. `--games <game_ids>`) that builds features for only those games — skipping the full multi-year historical rebuild `build_master_feature_table()` otherwise does — and publishes through the **same** path the full job already uses: `get_game_predictions()` → `merge_thin_game_predictions()` → `write_game_predictions()`, plus the same `metadata/cache_control` cache-invalidation write. No new store, no parallel publish path.
+Feed the refreshed `espn_overrides` into `NNProjectionEngine.initialize(season, espn_overrides=...)` (Part B0), then re-run `simulate_season()` for the current season — the same mechanism Part B0 wires into the daily job, just re-invoked on demand with fresher overrides and a lower `n_sims` (this refresh doesn't need daily-job-grade trial counts; it only needs to move the specific affected games' numbers). Publish only the affected games' entries from the resulting `game_probs_out` through the **same** path the full job already uses: `get_game_predictions()` → `merge_thin_game_predictions()` → `write_game_predictions()`, plus the same `metadata/cache_control` cache-invalidation write. No new store, no parallel publish path.
 
-Explicitly does **not** touch `prediction_snapshot` (season-level Monte Carlo win-total projections) — a single game's availability change doesn't warrant re-running a 5000-trial season simulation, and (per the related finding below) nothing reads that cache today regardless.
+Explicitly does **not** touch `prediction_snapshot` (the separate draft-portfolio Monte Carlo cache) — a single game's availability change doesn't warrant a full player-portfolio re-simulation, and (per the related finding below) nothing reads that cache today regardless.
+
+Since `simulate_season()` is already scoped to one season (unlike the old design's concern about a multi-year `build_master_feature_table()` rebuild), the "cheap scoped repredict" concern from the original Part B design is substantially reduced — the cost driver is Monte Carlo trial count, which is a simple, tunable parameter, not a data-scope problem requiring a bespoke narrow code path.
 
 ### Trigger
 
-`schedule_kickoffs.py` gains a third enqueued Cloud Task per kickoff cluster, hitting the existing `winspool-predict-daily` job via the Cloud Run Jobs Admin API's `:run` endpoint with an argument override (`--games`) instead of provisioning a new job. Exact minute-offset before kickoff is **not pinned in this spec** — it depends on the actual runtime of the new scoped mode, which doesn't exist yet to measure. The implementation plan must include measuring this once built (e.g. timing a real invocation against a live slate) before a final offset is chosen, rather than guessing. As a starting anchor: the NFL's official inactive list is public by rule at kickoff−90min league-wide, which the existing kickoff−75min sync / kickoff−60min predict schedule is already timed after.
+`schedule_kickoffs.py` gains a third enqueued Cloud Task per kickoff cluster, hitting the existing `winspool-predict-daily` job via the Cloud Run Jobs Admin API's `:run` endpoint with an argument override instead of provisioning a new job. Exact minute-offset before kickoff is **not pinned in this spec** — it depends on the actual runtime of the re-simulate mode, which doesn't exist yet to measure. The implementation plan must include measuring this once built before a final offset is chosen, rather than guessing. As a starting anchor: the NFL's official inactive list is public by rule at kickoff−90min league-wide, which the existing kickoff−75min sync / kickoff−60min predict schedule is already timed after.
 
 ### Failure handling
 
@@ -110,7 +138,7 @@ Matches the established pattern from `sync_live_scores.py`'s ESPN overlay: any f
 
 ### Testing
 
-Unit tests for ESPN status→weight mapping (including malformed/missing `injuries[]`), per-game failure isolation (one game's ESPN failure doesn't affect others in the same slate), and the scoped `cache_builder.py --games` mode writing only the targeted games into `game_predictions` via `merge_thin_game_predictions` without disturbing other games' stored predictions (including previously-stored richer fields like `model_spread`/`edge_vs_vegas`, which the merge already preserves — verify the scoped mode doesn't regress that).
+Unit tests for ESPN status→weight mapping (including malformed/missing `injuries[]`), per-game failure isolation (one game's ESPN failure doesn't affect others in the same slate), and the re-simulate mode writing only the targeted games into `game_predictions` via `merge_thin_game_predictions` without disturbing other games' stored predictions (including previously-stored richer fields like `model_spread`/`edge_vs_vegas`, which the merge already preserves).
 
 ---
 
