@@ -46,18 +46,23 @@ class TestLoadEspnIdCrosswalk:
         """Regression test: verify numeric-string IDs are preserved exactly,
         not round-tripped through float (which would produce "4566092.0").
         This catches the dtype-specification bug where espn_id is inferred as
-        float64 when other columns have NaN, breaking all real ESPN lookups."""
+        float64 when NaN values appear IN THE espn_id COLUMN, breaking all
+        real ESPN lookups. The real weekly_rosters CSV has some rows where
+        espn_id is genuinely missing for a player, forcing pandas to infer
+        the whole column as float64 without explicit dtype=str."""
         d = tmp_path / "weekly_rosters"
         d.mkdir(parents=True)
-        # Realistic numeric IDs + a NaN elsewhere to trigger float coercion if dtype not set
+        # Two rows for the same week: one with numeric espn_id, one with NaN in espn_id.
+        # The NaN in espn_id column forces pandas to infer the whole column as float64.
         pd.DataFrame([
-            {"season": 2025, "week": 3, "gsis_id": "00-0000001", "espn_id": "4566092", "some_col": float("nan")},
-            {"season": 2025, "week": 3, "gsis_id": "00-0000002", "espn_id": "8439", "some_col": "other"},
+            {"season": 2025, "week": 3, "gsis_id": "00-0000001", "espn_id": "4566092"},
+            {"season": 2025, "week": 3, "gsis_id": "00-0000002", "espn_id": float("nan")},
         ]).to_csv(d / "roster_weekly_2025.csv", index=False)
 
         result = _load_espn_id_crosswalk(tmp_path, 2025, 3)
-        # Key assertion: ESPN IDs must be exact strings, not "4566092.0" or "8439.0"
-        assert result == {"4566092": "00-0000001", "8439": "00-0000002"}
+        # After dropna(subset=["espn_id"]), only the first row survives.
+        # Key assertion: ESPN ID must be exact string "4566092", not "4566092.0"
+        assert result == {"4566092": "00-0000001"}
 
     def test_missing_file_returns_empty_dict(self, tmp_path):
         assert _load_espn_id_crosswalk(tmp_path, 2099, 1) == {}
