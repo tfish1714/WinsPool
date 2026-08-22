@@ -53,7 +53,7 @@ from services.nn_prediction_service import NNPredictionService, build_ensemble_l
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
 from services.nn_feature_engine import (
-    build_master_feature_table, FEATURE_COLUMNS, _normalize_team,
+    build_master_feature_table, FEATURE_COLUMNS, _normalize_team, RAWDATA_DIR,
 )
 from services.constants import UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 import services.live_score_service as live_scores
@@ -70,6 +70,56 @@ ANALYTICS = [
 def _build_pred_lookup(ft: pd.DataFrame, nn_svc, xgb_svc, lr_svc) -> dict:
     """Thin wrapper around the shared build_ensemble_lookup."""
     return build_ensemble_lookup(ft, nn_svc, xgb_svc, lr_svc)
+
+
+def _publish_games(game_ids: list, games: pd.DataFrame, year: int, pred_lookup: dict) -> int:
+    """Scoped publish: apply predictions to just game_ids and write only
+    those rows into game_predictions, without touching wins_pool_standings/
+    player_winlossmatrix/weekbyweek/prediction_snapshot or the
+    analytics_cache schedule_enriched blob (unread by any live route -- see
+    docs/superpowers/specs/2026-08-22-injury-aware-roster-value-design.md).
+    """
+    target = games[games["game_id"].astype(str).isin(game_ids)].copy()
+    if target.empty:
+        print(f"[cache_builder] --games: no matching rows for {game_ids}")
+        return 0
+
+    pred_winners, pred_confs, pred_ats, pred_probs = [], [], [], []
+    for _, row in target.iterrows():
+        ht = _normalize_team(str(row.get('home_team', '') or ''))
+        at = _normalize_team(str(row.get('away_team', '') or ''))
+        wk = row.get('week')
+        pred = pred_lookup.get((year, int(wk), ht, at)) if (ht and at and wk is not None) else None
+        pred_winners.append(pred['pred_winner'] if pred else None)
+        pred_confs.append(pred['pred_su_conf'] if pred else None)
+        pred_ats.append(pred['pred_ats_pick'] if pred else None)
+        pred_probs.append(pred['pred_prob'] if pred else None)
+
+    target['pred_winner'] = pred_winners
+    target['pred_su_conf'] = pred_confs
+    target['pred_ats_pick'] = pred_ats
+    target['pred_prob'] = pred_probs
+
+    pmap = {}
+    for _, r in target.dropna(subset=['pred_winner']).iterrows():
+        ht = _normalize_team(str(r.get('home_team', '') or ''))
+        at = _normalize_team(str(r.get('away_team', '') or ''))
+        wk = r.get('week')
+        pmap[f"W{int(wk):02d}_{ht}_{at}"] = {
+            'pred_prob':     r.get('pred_prob'),
+            'pred_winner':   r.get('pred_winner'),
+            'pred_su_conf':  r.get('pred_su_conf'),
+            'pred_ats_pick': r.get('pred_ats_pick'),
+        }
+
+    if not pmap:
+        print("[cache_builder] --games: no predictions produced for requested games")
+        return 0
+
+    existing = get_game_predictions(year)
+    merged = merge_thin_game_predictions(existing, pmap)
+    write_game_predictions(year, merged)
+    return len(pmap)
 
 
 def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
@@ -368,6 +418,10 @@ def main():
                         help="Skip the rawdata/ sync step (for local runs where rawdata/ "
                              "is already fresh -- the deployed winspool-predict-daily job "
                              "never passes this, since its container starts empty).")
+    parser.add_argument('--games', type=str, default=None,
+                        help="Comma-separated game_ids to scope a cheap single-slate "
+                             "repredict to, instead of the full multi-year rebuild. "
+                             "Publishes only to game_predictions.")
     args = parser.parse_args()
 
     if not args.skip_sync:
@@ -376,6 +430,42 @@ def main():
 
     print("[cache_builder] Loading raw data from Firestore / local cache...")
     standings, teams, games, players, draft_order, draft_results, draft_order_rules = load_data()
+
+    if args.games:
+        game_ids = [g.strip() for g in args.games.split(",") if g.strip()]
+        target_rows = games[games["game_id"].astype(str).isin(game_ids)]
+        if target_rows.empty:
+            print(f"[cache_builder] --games: no matching rows for {game_ids}; nothing to do")
+            return
+
+        year = int(target_rows["season"].iloc[0])
+        week = int(target_rows["week"].iloc[0])
+        espn_overrides = {}
+        try:
+            from services.espn_injury_service import get_espn_injury_overrides
+            target_pairs = list(zip(
+                target_rows["home_team"].map(_normalize_team),
+                target_rows["away_team"].map(_normalize_team),
+            ))
+            espn_overrides = get_espn_injury_overrides(target_pairs, year, week, RAWDATA_DIR)
+        except Exception as e:
+            print(f"[cache_builder] ESPN override fetch failed (non-fatal): {e}")
+
+        print("[cache_builder] Loading ML models...")
+        nn_svc  = NNPredictionService();  nn_svc.load_model()
+        xgb_svc = XGBPredictionService(); xgb_svc.load_model()
+        lr_svc  = LRPredictionService();  lr_svc.load_model()
+
+        print(f"[cache_builder] Building feature table (scoped to {year})...")
+        ft = build_master_feature_table(min_season=year, max_season=year, espn_overrides=espn_overrides)
+        pred_lookup = _build_pred_lookup(ft, nn_svc, xgb_svc, lr_svc)
+
+        n = _publish_games(game_ids, games, year, pred_lookup)
+        print(f"[cache_builder] --games: published {n} prediction(s).")
+
+        db = _fs.client()
+        db.collection("metadata").document("cache_control").set({"last_update": time.time()})
+        return
 
     available_years = get_available_years(draft_results)
     current_year = max(available_years) if available_years else 2024
