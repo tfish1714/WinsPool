@@ -72,19 +72,40 @@ def _build_pred_lookup(ft: pd.DataFrame, nn_svc, xgb_svc, lr_svc) -> dict:
     return build_ensemble_lookup(ft, nn_svc, xgb_svc, lr_svc)
 
 
+SIMULATE_SEASON_N_SIMS = 5000
+
+
+def _build_completed_results(games: pd.DataFrame, year: int) -> dict:
+    """{game_key: margin} for every completed REG game in `year` -- the shape
+    NNProjectionEngine.simulate_season() expects for its completed_results
+    parameter. Reused by the --resimulate mode (Task 6)."""
+    completed = {}
+    yr_games = games[games["season"] == year] if "season" in games.columns else games
+    for _, row in yr_games.iterrows():
+        res = row.get("result")
+        if pd.notna(res) and res != UNDRAFTED_SENTINEL and row.get("game_type") == "REG":
+            ht = _normalize_team(str(row.get("home_team", "") or ""))
+            at = _normalize_team(str(row.get("away_team", "") or ""))
+            wk = row.get("week")
+            if ht and at and wk is not None:
+                completed[f"W{int(wk):02d}_{ht}_{at}"] = float(res)
+    return completed
+
+
 def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
                        fallback_engine=None) -> pd.DataFrame:
     """Inject ML predictions into every row of schedule_df.
 
     For games found in pred_lookup (feature-table predictions), uses those.
-    For unplayed games not in pred_lookup, falls back to the team-profile engine,
-    batched into one model call rather than one call per game -- looping
-    game_win_probability() per row was the dominant cost of this script's
-    Analytics Cache Build step (unbatched single-row Keras predict() calls, each
-    carrying meaningful fixed overhead). Completed games with no feature data
-    get None. If the batched fallback call itself fails, every pending row gets
-    None rather than being retried individually -- a systemic model/scaler
-    failure isn't going to resolve itself on the next row.
+    For unplayed games not in pred_lookup, falls back to fallback_engine's
+    NNProjectionEngine.simulate_season() -- run ONCE across every unplayed row
+    (not per-row), seeded with completed_results from this schedule's own
+    real scores so the state feeding each future week's prediction has
+    already absorbed every real result up to that point. Completed games
+    with no feature data get None. If simulate_season() itself fails, every
+    pending row gets None rather than being retried individually -- a
+    systemic model/scaler failure isn't going to resolve itself on the next
+    row.
     """
     n = len(schedule_df)
     pred_winners: list = [None] * n
@@ -92,7 +113,7 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
     pred_ats: list = [None] * n
     pred_probs: list = [None] * n
 
-    fallback_idx, fallback_pairs, fallback_spreads = [], [], []
+    unplayed_idx: list = []
 
     for i, (_, row) in enumerate(schedule_df.iterrows()):
         ht = _normalize_team(str(row.get('home_team', '') or ''))
@@ -108,37 +129,49 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
             pred_probs[i]   = pred['pred_prob']
             continue
 
-        # Not in feature table — unplayed future game, queue for the team-profile fallback
+        # Not in feature table — unplayed future game, queue for simulate_season()
         result = row.get('result')
         is_unplayed = pd.isna(result) or result == UNDRAFTED_SENTINEL
         if is_unplayed and ht and at and fallback_engine:
-            fallback_idx.append(i)
-            fallback_pairs.append((ht, at))
-            fallback_spreads.append(row.get('spread_line'))
+            unplayed_idx.append(i)
 
-    if fallback_pairs:
+    if unplayed_idx and fallback_engine:
         try:
-            batch = fallback_engine.game_win_probabilities_batch(fallback_pairs)
+            completed_results = _build_completed_results(schedule_df, year)
+            sim = fallback_engine.simulate_season(
+                schedule_df, n_sims=SIMULATE_SEASON_N_SIMS, completed_results=completed_results,
+            )
+            game_probs = sim.get("game_probs", {})
         except Exception:
-            batch = None
-        if batch is not None:
-            for pos, i in enumerate(fallback_idx):
-                ht, at = fallback_pairs[pos]
-                spread = fallback_spreads[pos]
-                hp = batch[pos]['home_win_prob']
-                winner = ht if hp >= 0.5 else at
-                conf   = round(min(99.0, max(50.0, (hp if hp >= 0.5 else 1 - hp) * 100)), 1)
-                ats = winner
-                if pd.notna(spread):
-                    try:
-                        sv = float(spread)
-                        ats = at if sv < -3 else (ht if sv > 3 else (at if sv < 0 else ht))
-                    except (ValueError, TypeError):
-                        pass
-                pred_winners[i] = winner
-                pred_confs[i]   = conf
-                pred_ats[i]     = ats
-                pred_probs[i]   = round(hp, 4)
+            game_probs = {}
+
+        for i in unplayed_idx:
+            row = schedule_df.iloc[i]
+            ht = _normalize_team(str(row.get('home_team', '') or ''))
+            at = _normalize_team(str(row.get('away_team', '') or ''))
+            wk = row.get('week')
+            if not (ht and at and wk is not None):
+                continue
+            key = f"W{int(wk):02d}_{ht}_{at}"
+            gp = game_probs.get(key)
+            if not gp:
+                continue
+            hp = gp['mean_prob']
+            ms = gp['model_spread']
+            winner = ht if hp >= 0.5 else at
+            conf = round(max(hp, 1.0 - hp) * 100, 1)
+            spread = row.get('spread_line')
+            ats = winner
+            if pd.notna(spread):
+                try:
+                    sl_val = float(spread)
+                    ats = ht if ms > sl_val else at
+                except (ValueError, TypeError):
+                    pass
+            pred_winners[i] = winner
+            pred_confs[i]   = conf
+            pred_ats[i]     = ats
+            pred_probs[i]   = round(hp, 4)
 
     out = schedule_df.copy()
     out['pred_winner']  = pred_winners

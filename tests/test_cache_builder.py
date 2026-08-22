@@ -1,5 +1,6 @@
 import sys
 from unittest.mock import patch, MagicMock
+import pandas as pd
 import pytest
 
 # scripts/cache_builder.py always talks to Firestore directly (never the local
@@ -71,3 +72,76 @@ class TestMainSyncWiring:
         with pytest.raises(RuntimeError):
             main()
         mock_sync.assert_not_called()
+
+
+class TestBuildCompletedResults:
+    def test_extracts_completed_reg_games_only(self):
+        from scripts.cache_builder import _build_completed_results
+        games = pd.DataFrame([
+            {"season": 2026, "week": 3, "game_type": "REG", "home_team": "WAS",
+             "away_team": "KC", "result": 3.0},
+            {"season": 2026, "week": 4, "game_type": "REG", "home_team": "SF",
+             "away_team": "LAC", "result": None},
+            {"season": 2026, "week": 3, "game_type": "POST", "home_team": "DAL",
+             "away_team": "NYG", "result": -7.0},
+        ])
+        result = _build_completed_results(games, 2026)
+        assert result == {"W03_WAS_KC": 3.0}
+
+    def test_filters_to_requested_season(self):
+        from scripts.cache_builder import _build_completed_results
+        games = pd.DataFrame([
+            {"season": 2025, "week": 3, "game_type": "REG", "home_team": "WAS",
+             "away_team": "KC", "result": 3.0},
+            {"season": 2026, "week": 3, "game_type": "REG", "home_team": "SF",
+             "away_team": "LAC", "result": -7.0},
+        ])
+        result = _build_completed_results(games, 2026)
+        assert result == {"W03_SF_LAC": -7.0}
+
+
+class TestApplyPredictionsFallback:
+    def test_unplayed_game_uses_simulate_season_not_batch_method(self):
+        from scripts.cache_builder import _apply_predictions
+        schedule = pd.DataFrame([
+            {"home_team": "WAS", "away_team": "KC", "week": 3, "result": None,
+             "spread_line": -2.5},
+        ])
+        fallback_engine = MagicMock()
+        fallback_engine.simulate_season.return_value = {
+            "game_probs": {
+                "W03_WAS_KC": {"mean_prob": 0.62, "model_spread": -3.0,
+                               "home_team": "WAS", "away_team": "KC", "week": 3},
+            },
+            "team_stats": {},
+        }
+        out = _apply_predictions(schedule, 2026, {}, fallback_engine=fallback_engine)
+
+        fallback_engine.simulate_season.assert_called_once()
+        fallback_engine.game_win_probabilities_batch.assert_not_called()
+        assert out.iloc[0]["pred_winner"] == "WAS"
+        assert out.iloc[0]["pred_prob"] == 0.62
+
+    def test_completed_game_never_touches_fallback_engine(self):
+        from scripts.cache_builder import _apply_predictions
+        schedule = pd.DataFrame([
+            {"home_team": "WAS", "away_team": "KC", "week": 3, "result": 3.0},
+        ])
+        pred_lookup = {(2026, 3, "WAS", "KC"): {
+            "pred_winner": "WAS", "pred_su_conf": 70.0,
+            "pred_ats_pick": "WAS", "pred_prob": 0.7,
+        }}
+        fallback_engine = MagicMock()
+        out = _apply_predictions(schedule, 2026, pred_lookup, fallback_engine=fallback_engine)
+        fallback_engine.simulate_season.assert_not_called()
+        assert out.iloc[0]["pred_winner"] == "WAS"
+
+    def test_simulate_season_failure_leaves_predictions_none_not_raises(self):
+        from scripts.cache_builder import _apply_predictions
+        schedule = pd.DataFrame([
+            {"home_team": "WAS", "away_team": "KC", "week": 3, "result": None},
+        ])
+        fallback_engine = MagicMock()
+        fallback_engine.simulate_season.side_effect = Exception("model unavailable")
+        out = _apply_predictions(schedule, 2026, {}, fallback_engine=fallback_engine)
+        assert out.iloc[0]["pred_winner"] is None
