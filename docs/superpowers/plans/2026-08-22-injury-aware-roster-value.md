@@ -1622,14 +1622,17 @@ Add near `PREDICT_LEAD_MINUTES`:
 
 ```python
 PREDICT_LEAD_MINUTES = 60
-# How close to kickoff the ESPN check + re-simulate runs. Anchored to the
-# NFL's official inactive-list deadline (kickoff-90min, league rule) -- this
-# leaves 20 minutes of margin after that deadline before this task fires.
-# NOT yet validated against a measured runtime of --resimulate (Task 6) in
-# production: before relying on this in-season, time a real invocation (see
-# Step 9 below) and adjust this constant if it runs longer than the margin
-# allows.
-RESIMULATE_LEAD_MINUTES = 70
+# How close to kickoff the ESPN check + re-simulate runs. Must fire AFTER
+# PREDICT_LEAD_MINUTES's routine predict run, not before it -- otherwise the
+# routine run's stale, non-ESPN-aware prediction would simply overwrite the
+# freshly resimulated one. NOT yet validated against a measured runtime of
+# --resimulate (Task 6) in production: it still runs a full initialize()
+# (6-season build_master_feature_table() + compute_roster_value()) plus a
+# rawdata resync (no --skip-sync, since the Cloud Task's argument override
+# replaces the job's configured args entirely) -- before relying on this
+# in-season, time a real invocation (see Step 9 below) and adjust this
+# constant if it runs longer than the margin allows.
+RESIMULATE_LEAD_MINUTES = 20
 ```
 
 Add `compute_kickoff_clusters_with_games()` next to `compute_kickoff_clusters()`:
@@ -1810,4 +1813,4 @@ git commit -m "feat: retrain NN v15 + XGB v9 + LR v7 (graded injury weighting + 
 - **Spec coverage:** Part A → Task 1. Plumbing needed to make Part A's data reach the model → Task 2. Part B's ESPN signal → Task 3. Part B0 (the discovered prerequisite — week-aware roster value inside `NNProjectionEngine`) → Task 4. Part B0's daily-job wiring (`simulate_season()` + real results replacing the static fallback) → Task 5. Part B's ESPN-aware re-simulate + trigger/timing → Task 6. Bundled retrain → Task 7. The spec's "related finding" (dead `analytics_cache` reads) and all non-goals are explicitly *not* tasks, matching the spec.
 - **Revision history:** Tasks 4-7 were rewritten after Task 4's original design (a scoped `--games` feature-table repredict) was reviewed and found unable to work — `build_master_feature_table()` unconditionally drops unplayed games, so that design could never repredict the very games Part B exists to serve. The original Task 4 commit was reverted (`git revert`, preserved in history) rather than force-edited in place. See the spec's "Part B0" section for the full trace.
 - **Type consistency:** `espn_overrides`/`avail_mult` keyed as `Tuple[int, str]` (`(week, gsis_id)`) consistently across Task 1 (`_load_injury_report`, `compute_roster_value`), Task 2 (`build_master_feature_table`), Task 3 (`get_espn_injury_overrides`'s return shape), and Task 4 (`NNProjectionEngine.initialize`). The roster-value cache is keyed `Tuple[int, int, str]` (`(season, week, team)`) consistently between Task 1's `compute_roster_value()` return shape and Task 4's `_precompute_static_features()` lookup. `game_ids` are `list[str]` (nflverse `game_id` values) consistently across Task 6. `game_probs`/`game_probs_out` entries (`{mean_prob, model_spread, home_team, away_team, week}`) are used identically by Task 5's `_apply_predictions()` and Task 6's `_publish_game_probs()`.
-- **No placeholders:** `RESIMULATE_LEAD_MINUTES`'s value (70) is a real, reasoned default (kickoff−90min official deadline + 20min margin), not a TBD — Task 6 Step 9 makes tuning it an explicit, concrete follow-up action rather than leaving it unset. `SIMULATE_SEASON_N_SIMS` (5000, Task 5) and `RESIMULATE_N_SIMS` (2000, Task 6) are both real, functioning defaults with a stated rationale (daily-job thoroughness vs. last-mile refresh speed), not guesses left for later.
+- **No placeholders:** `RESIMULATE_LEAD_MINUTES`'s value (20, corrected during the final whole-branch review's fix wave from an earlier 70 that fired before the routine predict run) is a real, reasoned default, not a TBD — Task 6 Step 9 makes tuning it an explicit, concrete follow-up action rather than leaving it unset, and its code comment names the actual cost drivers (rawdata resync + 6-season feature table + roster value + simulation) it must be measured against. `SIMULATE_SEASON_N_SIMS` (5000, Task 5) and `RESIMULATE_N_SIMS` (2000, Task 6) are both real, functioning defaults with a stated rationale (daily-job thoroughness vs. last-mile refresh speed), not guesses left for later.

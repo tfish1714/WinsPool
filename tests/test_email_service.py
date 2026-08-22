@@ -55,7 +55,7 @@ def test_send_alert_email_success(mock_getenv, mock_send):
     mock_send.assert_called_once()
     call_params = mock_send.call_args[0][0]
     assert call_params["to"] == ["alerts@x.com"]
-    assert "winspool-sync-daily failed" == call_params["subject"]
+    assert call_params["subject"] == "[WinsPool Alert] winspool-sync-daily failed"
     assert "daily_nfl_sync.py" in call_params["html"]
 
 

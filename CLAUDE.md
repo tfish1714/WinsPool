@@ -35,11 +35,12 @@ python scripts/compute_elo.py --firestore                  # Same, plus push elo
 python scripts/daily_nfl_sync.py                          # Read rawdata/schedules/games.csv → compute standings → push nfl_games + nfl_standings to Firestore
 python scripts/run_cron.py                                # winspool-sync-daily Cloud Run Job entrypoint: nflverse sync → compute_elo.py --firestore → daily_nfl_sync.py. Does NOT run cache_builder.py (predictions) — see Scheduled Jobs below
 python scripts/sync_live_scores.py                         # winspool-live-scores Cloud Run Job entrypoint: authoritative re-sync + best-effort ESPN live-score overlay (is_live/clock/period)
-python scripts/schedule_kickoffs.py                        # winspool-schedule-kickoffs Cloud Run Job entrypoint: enqueues per-game Cloud Tasks for sync/predict shortly before kickoff
+python scripts/schedule_kickoffs.py                        # winspool-schedule-kickoffs Cloud Run Job entrypoint: enqueues per-game Cloud Tasks for sync/predict/ESPN-aware resimulate shortly before kickoff
 
 # Local dev cache (USE_LOCAL_DATA=True)
 python scripts/refresh_local_pkls.py                      # Rebuild ALL local pkl/json from Firestore (run after any Firestore change)
 python scripts/cache_builder.py                           # Pre-build analytics pkl cache
+python scripts/cache_builder.py --resimulate <game_ids>   # Scoped re-simulate for specific comma-separated game_ids, ESPN-injury-aware; used by winspool-schedule-kickoffs' close-to-kickoff task, not the daily full build
 
 # ML predictions
 python scripts/backfill_schedule_predictions.py                        # Backfill predictions local only
@@ -306,7 +307,7 @@ repeated by normal deploys).
 | `winspool-sync-daily` | `scripts/run_cron.py` | Daily 9:00 UTC (Aug–Jan `winspool-sync-daily-trigger`; Feb 1–10 `-trigger-feb`) | nflverse raw data sync → `compute_elo.py --firestore` → `daily_nfl_sync.py` (standings + `nfl_games`) |
 | `winspool-predict-daily` | `scripts/cache_builder.py` | Daily 9:15 UTC (same Aug–Jan / Feb 1–10 split) | Regenerates predictions/analytics cache; the only job that installs `requirements-ml.txt` (`Dockerfile.predict`) |
 | `winspool-live-scores` | `scripts/sync_live_scores.py` | Every 5 min (Sept–Jan `winspool-live-scores-trigger`; Feb 1–10 `-trigger-feb`) | Authoritative re-sync (narrow, last-7-days `nfl_games` window) + best-effort ESPN live-score overlay (`is_live`/`clock`/`period`) — **only overlays games nflverse's own `schedules` data source carries, which never includes preseason (`game_type="PRE"`) games at all**, confirmed 2026-08-21 |
-| `winspool-schedule-kickoffs` | `scripts/schedule_kickoffs.py` | Weekly, Tuesdays 10:00 UTC, Sept–Jan (`winspool-schedule-kickoffs-trigger`) | Reads the upcoming week's real kickoff times, enqueues 2 Cloud Tasks per kickoff cluster (sync at kickoff−75min, predict at kickoff−60min) against the Cloud Run Jobs Admin API |
+| `winspool-schedule-kickoffs` | `scripts/schedule_kickoffs.py` | Weekly, Tuesdays 10:00 UTC, Sept–Jan (`winspool-schedule-kickoffs-trigger`) | Reads the upcoming week's real kickoff times, enqueues 3 Cloud Tasks per kickoff cluster against the Cloud Run Jobs Admin API: sync (kickoff−75min), routine predict (kickoff−60min), and an ESPN-aware `cache_builder.py --resimulate` re-run (kickoff−20min, `RESIMULATE_LEAD_MINUTES` in `schedule_kickoffs.py` — must fire after the routine predict run, not before, or the routine run's stale prediction overwrites the fresher one; still unvalidated against a real measured runtime) |
 
 **Two Docker images**, split by dependency weight:
 - `Dockerfile.sync` (`python:3.10-slim`, `requirements.txt` only) — used by `winspool-sync-daily`, `winspool-live-scores`, `winspool-schedule-kickoffs`.

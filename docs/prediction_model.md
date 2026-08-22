@@ -442,6 +442,23 @@ Each of the 7 `PRESEASON_ELO_WEIGHTS` profile dimensions (`qb_tier`, `off_pass_e
 
 State (Elo + 4 EPA dims + margin) is tiled across N Monte Carlo trials, then for each week in schedule order: batch-predict every game across every trial with the ensemble, convert the resulting probability to an implied point margin, sample `Normal(implied, MC_MARGIN_STD)`, increment wins on the sampled margin's sign, and **update Elo/EPA state in place** so later weeks see the simulated record. The Elo update specifically uses `ELO_SIM_K`/`ELO_SIM_HFA`/`ELO_SIM_MOV_MIN`/`ELO_SIM_MOV_MAX` (matching `scripts/compute_elo.py`'s real-game methodology exactly) — **not** the separate `ELO_K`/`ELO_HOME_ADVANTAGE` constants used by the in-season path elsewhere in this file, which belong to an independently-calibrated Elo+Pythagorean engine. Win distributions across all trials give the final `mean_wins`/`median`/`std_dev`/`p5`/`p25`/`p75`/`p95`.
 
+### Step 3a: Roster-value features are week-aware, not part of the seeded/evolved state
+
+The four roster-value-family features (`off_roster_value_delta`, `def_roster_value_delta`,
+`st_value_delta`, `qb_resilience_delta`) are a separate mechanism from Steps 1/3 above —
+they are NOT part of the seeded-then-Elo/EPA-evolved state. `_precompute_static_features()`
+looks each one up per `(season, week, team)` from `roster_value_service.compute_roster_value()`
+(itself already blending prior-season into current-season per player as games accumulate,
+and grading each player's contribution by real injury severity from that week's official
+report). If the target week has no data yet (a future week nflverse's `weekly_rosters`
+hasn't reached), the lookup carries forward the latest available week's value for that
+team rather than zeroing out; if a team has no roster-value data at all, it falls back to
+the flat prior-season `_team_profiles` average Steps 1/3 otherwise use. This means these
+four features reflect real in-season roster/injury changes week to week — before this was
+added (2026-08-22, see `docs/superpowers/specs/2026-08-22-injury-aware-roster-value-design.md`'s
+"Part B0"), they were frozen at the same flat prior-season snapshot as every other feature
+in this section, for the whole season.
+
 ### Validation caveat
 
 `scripts/walk_forward_validate.py` (an out-of-sample MAE diagnostic, not a production path — scores the ensemble against seasons it never trained on) can't exercise this preseason-profile branch for most historical folds: `initialize()` only takes it when the target season's `snap_counts_{season}.csv` is missing, which is never true for a completed historical season, and pre-2025 depth-chart files use an incompatible schema this pipeline can't read. `scripts/walk_forward_diagnose_preseason_path.py` forces this specific path for the 2025 fold (the one year both conditions can be worked around) as a one-off check; there is no standing automated regression coverage for this code path otherwise.
