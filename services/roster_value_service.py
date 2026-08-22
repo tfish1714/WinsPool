@@ -29,7 +29,7 @@ import glob
 import logging
 import pathlib
 import warnings
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -85,6 +85,14 @@ _POS_GROUP: Dict[str, str] = {
 }
 
 _TEAM_MAP = {"LAR": "LA", "WSH": "WAS", "JAC": "JAX", "OAK": "LV", "SD": "LAC", "STL": "LA"}
+
+# Availability weight scale -- applied on top of the existing age multiplier
+# and depth discount as a third, independent factor. A player ruled Out or
+# Doubtful is still on the 53-man roster (so _ACTIVE_STATUSES doesn't
+# exclude them) but shouldn't count at full value for the week they're
+# actually out -- this is the gap _ACTIVE_STATUSES alone can't close, since
+# it only distinguishes "on roster" from "on IR/practice squad".
+_AVAILABILITY_WEIGHTS: Dict[str, float] = {"Out": 0.0, "Doubtful": 0.15, "Questionable": 0.5}
 
 
 # --------------------------------------------------------------------------- #
@@ -160,7 +168,10 @@ def _load_prior_epa(rawdata_dir: pathlib.Path, prior_season: int) -> pd.DataFram
                 "def_sacks", "def_qb_hits", "def_tackles_for_loss",
                 "def_tackles_solo", "def_pass_defended", "def_interceptions"]
     for c in num_cols:
-        reg[c] = pd.to_numeric(reg.get(c, 0), errors="coerce").fillna(0.0)
+        if c not in reg.columns:
+            reg[c] = 0.0
+        else:
+            reg[c] = pd.to_numeric(reg[c], errors="coerce").fillna(0.0)
 
     records = []
 
@@ -249,7 +260,10 @@ def _load_current_rolling_epa(rawdata_dir: pathlib.Path, target_season: int) -> 
                 "def_sacks", "def_qb_hits", "def_tackles_for_loss",
                 "def_tackles_solo", "def_pass_defended", "def_interceptions"]
     for c in num_cols:
-        reg[c] = pd.to_numeric(reg.get(c, 0), errors="coerce").fillna(0.0)
+        if c not in reg.columns:
+            reg[c] = 0.0
+        else:
+            reg[c] = pd.to_numeric(reg[c], errors="coerce").fillna(0.0)
 
     # Map position → group
     reg["position_group"] = reg["position"].map(_POS_GROUP)
@@ -428,6 +442,23 @@ def _load_weekly_roster(rawdata_dir: pathlib.Path, target_season: int) -> pd.Dat
     return df[["season", "week", "team", "gsis_id", "position", "birth_date"]].reset_index(drop=True)
 
 
+def _load_injury_report(rawdata_dir: pathlib.Path, target_season: int) -> Dict[Tuple[int, str], float]:
+    """(week, gsis_id) -> availability multiplier, from injuries_{season}.csv's
+    report_status. Only players actually listed on the report appear in the
+    returned dict -- callers must default a missing key to 1.0 (full go)."""
+    path = rawdata_dir / "injuries" / f"injuries_{target_season}.csv"
+    df = _read_safe(str(path))
+    if df.empty:
+        return {}
+
+    df = df.dropna(subset=["week", "gsis_id", "report_status"])
+    result: Dict[Tuple[int, str], float] = {}
+    for row in df.itertuples():
+        weight = _AVAILABILITY_WEIGHTS.get(row.report_status, 1.0)
+        result[(int(row.week), str(row.gsis_id))] = weight
+    return result
+
+
 # --------------------------------------------------------------------------- #
 # Main entry point
 # --------------------------------------------------------------------------- #
@@ -435,6 +466,7 @@ def _load_weekly_roster(rawdata_dir: pathlib.Path, target_season: int) -> pd.Dat
 def compute_roster_value(
     target_season: int,
     rawdata_dir: pathlib.Path,
+    espn_overrides: Optional[Dict[Tuple[int, str], float]] = None,
 ) -> Dict[Tuple[int, int, str], dict]:
     """
     Returns {(target_season, week, team): {off_roster_value, def_roster_value,
@@ -454,6 +486,8 @@ def compute_roster_value(
     kicker_roll  = _load_kicker_rolling(rawdata_dir, target_season, prior_season)
     punter_map   = _load_punter_prior(rawdata_dir, prior_season)
     weekly_ros   = _load_weekly_roster(rawdata_dir, target_season)
+    injury_report = _load_injury_report(rawdata_dir, target_season)
+    espn_overrides = espn_overrides or {}
 
     if weekly_ros.empty:
         logger.warning("roster_value: no weekly roster data for %d", target_season)
@@ -530,6 +564,17 @@ def compute_roster_value(
                     score = 0.0
 
                 adj = score * amlt
+
+                # ESPN's same-day check (when available) always wins over the
+                # nflverse weekly report for the exact (week, player) it
+                # covers -- it runs strictly closer to kickoff. Otherwise fall
+                # back to nflverse's graded report, defaulting to 1.0 (full
+                # go) for anyone not listed.
+                week_key = int(week)
+                avail_mult = espn_overrides.get(
+                    (week_key, pid), injury_report.get((week_key, pid), 1.0)
+                )
+                adj = adj * avail_mult
 
                 if grp in off_by_grp:
                     off_by_grp[grp].append(adj)
