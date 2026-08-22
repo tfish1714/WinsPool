@@ -191,6 +191,35 @@ class TestEnqueueTaskWithOverrides:
         task = client.create_task.call_args.kwargs["request"]["task"]
         assert "body" not in task["http_request"]
 
+    def test_job_args_produce_distinct_task_name_from_routine_task(self, monkeypatch):
+        """Both the routine predict task and the resimulate task target
+        job_name="winspool-predict-daily" -- two different kickoff clusters
+        exactly 40 minutes apart could otherwise land on the same
+        job_name/timestamp task_id and collide (AlreadyExists silently
+        skipping the second one). job_args must disambiguate the name."""
+        from unittest.mock import MagicMock
+        from scripts.schedule_kickoffs import enqueue_task
+
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_PROJECT", "test-project")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_REGION", "us-east1")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_TASKS_QUEUE", "test-queue")
+        monkeypatch.setattr("scripts.schedule_kickoffs.GCP_SCHEDULER_SERVICE_ACCOUNT", "sa@test.iam.gserviceaccount.com")
+
+        kickoff = self._kickoff()
+
+        client_routine = MagicMock()
+        client_routine.queue_path.return_value = "projects/test-project/locations/us-east1/queues/test-queue"
+        enqueue_task(client_routine, kickoff, "winspool-predict-daily")
+        routine_task = client_routine.create_task.call_args.kwargs["request"]["task"]
+
+        client_resim = MagicMock()
+        client_resim.queue_path.return_value = "projects/test-project/locations/us-east1/queues/test-queue"
+        enqueue_task(client_resim, kickoff, "winspool-predict-daily",
+                     job_args=["--resimulate", "2026_03_KC_WAS"])
+        resim_task = client_resim.create_task.call_args.kwargs["request"]["task"]
+
+        assert routine_task["name"] != resim_task["name"]
+
 
 class TestComputeKickoffClustersWithGames:
     def test_pairs_each_cluster_with_its_game_ids(self):

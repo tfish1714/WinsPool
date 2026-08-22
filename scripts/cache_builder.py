@@ -94,6 +94,34 @@ def _build_completed_results(games: pd.DataFrame, year: int) -> dict:
     return completed
 
 
+def _derive_prediction_fields(ht: str, at: str, mean_prob: float, model_spread: float, spread_line) -> dict:
+    """Shared winner/confidence/ATS-pick/edge-vs-vegas derivation from a
+    simulate_season() game_probs_out entry -- used by both
+    _apply_predictions()'s fallback branch and _publish_game_probs() so
+    the two call sites can't independently drift (previously only one of
+    them wrote model_spread, and neither computed edge_vs_vegas from it,
+    leaving a stale/inconsistent pair for anything reading edge_vs_vegas,
+    e.g. services/betting_screener_service.py)."""
+    winner = ht if mean_prob >= 0.5 else at
+    conf = round(max(mean_prob, 1.0 - mean_prob) * 100, 1)
+    ats = winner
+    edge_vs_vegas = None
+    if pd.notna(spread_line):
+        try:
+            sl_val = float(spread_line)
+            ats = ht if model_spread > sl_val else at
+            edge_vs_vegas = round(model_spread - sl_val, 1)
+        except (ValueError, TypeError):
+            pass
+    return {
+        "pred_winner": winner,
+        "pred_su_conf": conf,
+        "pred_ats_pick": ats,
+        "model_spread": model_spread,
+        "edge_vs_vegas": edge_vs_vegas,
+    }
+
+
 def _publish_game_probs(game_ids: list, games: pd.DataFrame, year: int, game_probs: dict) -> int:
     """Publish only game_ids' entries from a simulate_season() game_probs_out
     dict into game_predictions, via the same merge-preserving path
@@ -118,22 +146,15 @@ def _publish_game_probs(game_ids: list, games: pd.DataFrame, year: int, game_pro
             continue
         hp = gp['mean_prob']
         ms = gp['model_spread']
-        winner = ht if hp >= 0.5 else at
-        conf = round(max(hp, 1.0 - hp) * 100, 1)
         spread = row.get('spread_line')
-        ats = winner
-        if pd.notna(spread):
-            try:
-                sl_val = float(spread)
-                ats = ht if ms > sl_val else at
-            except (ValueError, TypeError):
-                pass
+        derived = _derive_prediction_fields(ht, at, hp, ms, spread)
         pmap[key] = {
-            'pred_prob':     round(hp, 4),
-            'pred_winner':   winner,
-            'pred_su_conf':  conf,
-            'pred_ats_pick': ats,
-            'model_spread':  ms,
+            'pred_prob':      round(hp, 4),
+            'pred_winner':    derived['pred_winner'],
+            'pred_su_conf':   derived['pred_su_conf'],
+            'pred_ats_pick':  derived['pred_ats_pick'],
+            'model_spread':   derived['model_spread'],
+            'edge_vs_vegas':  derived['edge_vs_vegas'],
         }
 
     if not pmap:
@@ -212,19 +233,11 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
                 continue
             hp = gp['mean_prob']
             ms = gp['model_spread']
-            winner = ht if hp >= 0.5 else at
-            conf = round(max(hp, 1.0 - hp) * 100, 1)
             spread = row.get('spread_line')
-            ats = winner
-            if pd.notna(spread):
-                try:
-                    sl_val = float(spread)
-                    ats = ht if ms > sl_val else at
-                except (ValueError, TypeError):
-                    pass
-            pred_winners[i] = winner
-            pred_confs[i]   = conf
-            pred_ats[i]     = ats
+            derived = _derive_prediction_fields(ht, at, hp, ms, spread)
+            pred_winners[i] = derived['pred_winner']
+            pred_confs[i]   = derived['pred_su_conf']
+            pred_ats[i]     = derived['pred_ats_pick']
             pred_probs[i]   = round(hp, 4)
 
     out = schedule_df.copy()

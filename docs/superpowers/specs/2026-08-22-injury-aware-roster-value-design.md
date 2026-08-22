@@ -126,7 +126,7 @@ Feed the refreshed `espn_overrides` into `NNProjectionEngine.initialize(season, 
 
 Explicitly does **not** touch `prediction_snapshot` (the separate draft-portfolio Monte Carlo cache) — a single game's availability change doesn't warrant a full player-portfolio re-simulation, and (per the related finding below) nothing reads that cache today regardless.
 
-Since `simulate_season()` is already scoped to one season (unlike the old design's concern about a multi-year `build_master_feature_table()` rebuild), the "cheap scoped repredict" concern from the original Part B design is substantially reduced — the cost driver is Monte Carlo trial count, which is a simple, tunable parameter, not a data-scope problem requiring a bespoke narrow code path.
+**Correction (post-implementation):** `--resimulate` is NOT a cheap, narrowly-scoped operation as actually implemented. It calls `engine.initialize(year)`, which still runs a full `build_master_feature_table(min_season=2020, max_season=year-1)` (a 6-season rebuild) plus `compute_roster_value()` — `simulate_season()` being scoped to one season doesn't avoid either of those, since `initialize()` runs them unconditionally before `simulate_season()` is ever called. Worse, since the Cloud Task's container-args override *replaces* the container's configured args entirely (not appends to them), `--skip-sync` is never passed by the enqueued resimulate task, so a full `_sync_rawdata()` (up to a 300-second subprocess timeout) also runs first. The actual cost has **not been measured**, and `RESIMULATE_LEAD_MINUTES` (currently 20) is an unvalidated placeholder pending that measurement — see `scripts/schedule_kickoffs.py`'s own comment on the constant.
 
 ### Trigger
 

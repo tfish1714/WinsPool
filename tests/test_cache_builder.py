@@ -156,6 +156,14 @@ def _games_df():
     ])
 
 
+def _games_df_with_spread():
+    return pd.DataFrame([
+        {"game_id": "2026_03_KC_WAS", "season": 2026, "week": 3,
+         "home_team": "WAS", "away_team": "KC", "game_type": "REG",
+         "spread_line": -1.0},
+    ])
+
+
 class TestPublishGameProbs:
     def test_publishes_only_requested_game(self):
         from scripts.cache_builder import _publish_game_probs
@@ -207,6 +215,26 @@ class TestPublishGameProbs:
         assert n == 0
         mock_write.assert_not_called()
 
+    def test_published_dict_includes_edge_vs_vegas_from_model_spread(self):
+        """model_spread and edge_vs_vegas must both be freshly derived
+        together (via _derive_prediction_fields) so a resimulated game never
+        ends up with a new model_spread sitting next to a stale
+        edge_vs_vegas computed from an old spread."""
+        from scripts.cache_builder import _publish_game_probs
+
+        game_probs = {
+            "W03_WAS_KC": {"mean_prob": 0.62, "model_spread": -3.0,
+                           "home_team": "WAS", "away_team": "KC", "week": 3},
+        }
+        with patch("scripts.cache_builder.get_game_predictions", return_value={}), \
+             patch("scripts.cache_builder.write_game_predictions") as mock_write:
+            _publish_game_probs(["2026_03_KC_WAS"], _games_df_with_spread(), 2026, game_probs)
+
+        _year, merged = mock_write.call_args[0]
+        entry = merged["W03_WAS_KC"]
+        assert entry["model_spread"] == -3.0
+        assert entry["edge_vs_vegas"] == pytest.approx(-2.0)  # -3.0 - (-1.0)
+
 
 class TestResimulateModeWiring:
     def test_resimulate_flag_skips_full_multi_year_build(self, monkeypatch):
@@ -219,6 +247,7 @@ class TestResimulateModeWiring:
         with patch("scripts.cache_builder.load_data") as mock_load_data, \
              patch("scripts.cache_builder.build_year") as mock_build_year, \
              patch("scripts.cache_builder.NNProjectionEngine") as mock_engine_cls, \
+             patch("services.espn_injury_service.get_espn_injury_overrides", return_value={}), \
              patch("scripts.cache_builder._publish_game_probs", return_value=0) as mock_publish, \
              patch("scripts.cache_builder._fs"):
             mock_load_data.return_value = (

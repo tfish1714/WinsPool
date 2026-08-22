@@ -30,8 +30,11 @@ SUMMARY_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/summar
 # Same scale as roster_value_service.py's _AVAILABILITY_WEIGHTS -- kept as a
 # separate copy deliberately (not imported) so this module has no dependency
 # on roster_value_service.py, and vice versa; both are wired together only
-# by the caller (cache_builder.py's --games mode).
-_AVAILABILITY_WEIGHTS: Dict[str, float] = {"Out": 0.0, "Doubtful": 0.15, "Questionable": 0.5}
+# by the caller (cache_builder.py's --resimulate mode).
+_AVAILABILITY_WEIGHTS: Dict[str, float] = {
+    "Out": 0.0, "Doubtful": 0.15, "Questionable": 0.5,
+    "Injured Reserve": 0.0, "Suspension": 0.0,
+}
 
 
 def _status_to_weight(status: str) -> float:
@@ -148,5 +151,18 @@ def get_espn_injury_overrides(
             gsis_id = crosswalk.get(row["espn_id"])
             if not gsis_id:
                 continue
-            overrides[(week, gsis_id)] = _status_to_weight(row["status"])
+            # An ESPN override always wins precedence over nflverse's own
+            # weekly grade in compute_roster_value() -- an unrecognized
+            # status here must NOT default to 1.0 (full go) via
+            # _status_to_weight()'s general-purpose fallback, or a status
+            # like "Injured Reserve"/"Suspension" that isn't in
+            # _AVAILABILITY_WEIGHTS would silently override a player
+            # nflverse correctly grades as Out with a false "fully
+            # available" signal. Skip entirely so the nflverse-derived
+            # grade (or its own 1.0 default if not on that report either)
+            # is used instead.
+            weight = _AVAILABILITY_WEIGHTS.get(row["status"])
+            if weight is None:
+                continue
+            overrides[(week, gsis_id)] = weight
     return overrides

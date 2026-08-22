@@ -265,6 +265,29 @@ class NNProjectionEngine:
         col_idx = {c: i for i, c in enumerate(NN_FC)}
         static_feats = {}
 
+        # Roster value carries forward from the latest week actually present in
+        # self._roster_value_cache (nflverse's weekly_rosters only has data
+        # through the CURRENT week, so an exact (season, week, team) lookup for
+        # any future week would always miss -- discarding this feature entirely
+        # for the rest of the season instead of just using the most recent real
+        # value). Falls back to the flat prior-season _team_profiles average
+        # (hp/ap) only when a team has NO roster-value data at all.
+        _rv_weeks_by_team: Dict[str, list] = {}
+        for (rv_season, rv_week, rv_team) in self._roster_value_cache:
+            if rv_season == self._season:
+                _rv_weeks_by_team.setdefault(rv_team, []).append(rv_week)
+        for _weeks in _rv_weeks_by_team.values():
+            _weeks.sort()
+
+        def _lookup_roster_value(team: str, wk: int) -> dict:
+            weeks = _rv_weeks_by_team.get(team)
+            if not weeks:
+                return {}
+            usable = [w for w in weeks if w <= wk]
+            if not usable:
+                return {}
+            return self._roster_value_cache.get((self._season, usable[-1], team), {})
+
         # Precompute profile z-scores once — used inside the per-game loop to override
         # 5 quality features. Models are now trained on these z-scores so the scale is correct.
         _pp_z: dict = {}
@@ -371,26 +394,35 @@ class NNProjectionEngine:
             # and injuries actually move this season-simulation's per-game
             # prediction (see
             # docs/superpowers/specs/2026-08-22-injury-aware-roster-value-design.md,
-            # Part B0). roster_talent_delta is intentionally untouched here --
-            # it's a separate, performance-grade-based feature computed in
+            # Part B0). _lookup_roster_value() carries the latest available
+            # week's data forward for weeks beyond what compute_roster_value()
+            # covers (nflverse's weekly_rosters only has data through the
+            # current week), and falls back to the flat hp/ap profile average
+            # when a team has no roster-value entry at all. roster_talent_delta
+            # is intentionally untouched here -- it's a separate,
+            # performance-grade-based feature computed in
             # build_master_feature_table(), not part of compute_roster_value()'s
             # output.
-            h_rv = self._roster_value_cache.get((self._season, int(wk), ht), {})
-            a_rv = self._roster_value_cache.get((self._season, int(wk), at), {})
+            h_rv = _lookup_roster_value(ht, int(wk))
+            a_rv = _lookup_roster_value(at, int(wk))
             feat[col_idx["roster_talent_delta"]]     = (
                 float(hp.get("roster_talent_delta", 0.0)) - float(ap.get("roster_talent_delta", 0.0))
             )
             feat[col_idx["off_roster_value_delta"]]  = float(
-                h_rv.get("off_roster_value", 0.0) - a_rv.get("off_roster_value", 0.0)
+                h_rv.get("off_roster_value", hp.get("off_roster_value_delta", 0.0))
+                - a_rv.get("off_roster_value", ap.get("off_roster_value_delta", 0.0))
             )
             feat[col_idx["def_roster_value_delta"]]  = float(
-                h_rv.get("def_roster_value", 0.0) - a_rv.get("def_roster_value", 0.0)
+                h_rv.get("def_roster_value", hp.get("def_roster_value_delta", 0.0))
+                - a_rv.get("def_roster_value", ap.get("def_roster_value_delta", 0.0))
             )
             feat[col_idx["st_value_delta"]]          = float(
-                h_rv.get("st_value", 0.0) - a_rv.get("st_value", 0.0)
+                h_rv.get("st_value", hp.get("st_value_delta", 0.0))
+                - a_rv.get("st_value", ap.get("st_value_delta", 0.0))
             )
             feat[col_idx["qb_resilience_delta"]]     = float(
-                h_rv.get("qb_resilience", 0.0) - a_rv.get("qb_resilience", 0.0)
+                h_rv.get("qb_resilience", hp.get("qb_resilience_delta", 0.0))
+                - a_rv.get("qb_resilience", ap.get("qb_resilience_delta", 0.0))
             )
 
             # Override 5 features with profile z-scores — formulas match build_master_feature_table()

@@ -58,10 +58,24 @@ PREDICT_LEAD_MINUTES = 60
 # earlier than -60min (e.g. anchored to the -90min inactive-list deadline
 # instead), the routine predict run would simply overwrite its published
 # predictions 10 minutes later with no ESPN overrides, defeating the whole
-# point. NOT yet validated against a measured runtime of --resimulate
-# (Task 6) in production: before relying on this in-season, time a real
-# invocation (see Step 9 below) and adjust this constant if it runs longer
-# than the margin allows.
+# point.
+#
+# This is NOT a cheap operation, despite --resimulate sounding like a narrow
+# per-game repredict. Real cost drivers, in order incurred:
+#   1. Cold Cloud Run Job container start.
+#   2. A full rawdata resync (_sync_rawdata(), up to a 300s subprocess
+#      timeout) -- the enqueued Cloud Task's containerOverrides.args
+#      REPLACES the job's configured args entirely, so --skip-sync is never
+#      passed here (unlike a local/manual invocation).
+#   3. engine.initialize(year), which runs build_master_feature_table() across
+#      SIX seasons (min_season=2020..year-1) plus compute_roster_value() --
+#      simulate_season() being scoped to one season does NOT make
+#      initialize() itself cheap; it runs before simulate_season() either way.
+#   4. The Monte Carlo simulate_season() call itself (RESIMULATE_N_SIMS).
+# NOT yet validated against a measured runtime of --resimulate (Task 6) in
+# production: before relying on this in-season, time a real invocation (see
+# Step 9 below) and adjust this constant if it runs longer than the margin
+# allows. 20 is an unvalidated placeholder, not a measured value.
 RESIMULATE_LEAD_MINUTES = 20
 
 # NFL gametime is published in US/Eastern per nflverse convention. Use a
@@ -149,6 +163,17 @@ def enqueue_task(tasks_client, run_at: datetime, job_name: str, job_args: list =
     # remaining clusters never get scheduled) and fire a false failure
     # alert on every ordinary retry -- worse than having no dedup at all.
     task_id = f"{job_name}-{run_at.strftime('%Y%m%dT%H%M')}"
+    if job_args:
+        # Disambiguate from the routine (no-args) task at the same
+        # job_name/timestamp -- both the routine predict task and the
+        # resimulate task target job_name="winspool-predict-daily", so two
+        # DIFFERENT kickoff clusters exactly 40 minutes apart could
+        # otherwise collide (cluster A's routine-predict slot at
+        # kickoff_A-60 landing on the same minute as cluster B's resimulate
+        # slot at kickoff_B-20, when kickoff_B = kickoff_A + 40min). Without
+        # this, the AlreadyExists handler below would silently treat the
+        # second as a duplicate and skip it.
+        task_id += "-resim"
     task_name = (
         f"projects/{GCP_PROJECT}/locations/{GCP_REGION}/"
         f"queues/{GCP_TASKS_QUEUE}/tasks/{task_id}"

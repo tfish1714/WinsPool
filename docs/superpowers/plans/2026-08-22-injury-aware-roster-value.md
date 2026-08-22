@@ -1724,7 +1724,7 @@ Once this task is deployed (or runnable locally against real `rawdata/`), time a
 time python scripts/cache_builder.py --resimulate <a_real_game_id> --skip-sync
 ```
 
-If the measured wall-clock time plus a safety margin (at least 2x measured, to account for cold model loads on Cloud Run) exceeds `RESIMULATE_LEAD_MINUTES` (70) minutes, increase the constant in `scripts/schedule_kickoffs.py` accordingly and re-run this task's tests to confirm they still pass (they assert behavior, not the exact constant value).
+If the measured wall-clock time plus a safety margin (at least 2x measured, to account for cold model loads on Cloud Run) exceeds `RESIMULATE_LEAD_MINUTES` (20) minutes, increase the constant in `scripts/schedule_kickoffs.py` accordingly and re-run this task's tests to confirm they still pass (they assert behavior, not the exact constant value).
 
 - [ ] **Step 10: Commit**
 

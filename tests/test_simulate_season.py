@@ -482,9 +482,11 @@ class TestWeekAwareRosterValue:
         assert feat[col_idx["qb_resilience_delta"]]    == pytest.approx(0.7)
 
     def test_precompute_static_features_ignores_other_weeks(self, mock_engine):
-        """A cache entry for a DIFFERENT week than the game being featured must
-        not leak in -- this is what makes the blend actually week-aware instead
-        of just season-aware."""
+        """A cache entry for a LATER week than the game being featured must not
+        leak in -- carry-forward only looks at weeks <= the target week, never
+        later weeks, so this stays a miss (falls back to the team-profile
+        default of 0.0 here since _team_profiles has no override), not a
+        future value applied retroactively."""
         from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
         mock_engine._season = 2025
         mock_engine._roster_value_cache = {
@@ -499,8 +501,9 @@ class TestWeekAwareRosterValue:
 
     def test_precompute_static_features_defaults_to_zero_when_cache_empty(self, mock_engine):
         """Graceful degradation: an empty/missing roster-value cache (e.g.
-        compute_roster_value() failed) must not crash -- deltas fall back to 0.0,
-        same as every other hp.get(col, 0.0) default in this method."""
+        compute_roster_value() failed) AND no _team_profiles fallback value
+        must not crash -- deltas fall back to 0.0, same as every other
+        hp.get(col, 0.0) default in this method."""
         from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
         mock_engine._season = 2025
         mock_engine._roster_value_cache = {}
@@ -510,6 +513,52 @@ class TestWeekAwareRosterValue:
         static_feats = mock_engine._precompute_static_features(schedule)
         col_idx = {c: i for i, c in enumerate(NN_FC)}
         assert static_feats["W03_STRONG_WEAK"][col_idx["off_roster_value_delta"]] == pytest.approx(0.0)
+
+    def test_precompute_static_features_falls_back_to_team_profiles_when_cache_empty(self, mock_engine):
+        """When _roster_value_cache has NO entry at all for a team (not just no
+        entry for this week), the OLD prior-season _team_profiles average
+        (off_roster_value_delta etc.) must be used instead of silently
+        zeroing the feature out."""
+        from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+        mock_engine._season = 2025
+        mock_engine._roster_value_cache = {}
+        mock_engine._team_profiles.loc[
+            mock_engine._team_profiles["team"] == "STRONG", "off_roster_value_delta"
+        ] = 3.0
+        mock_engine._team_profiles.loc[
+            mock_engine._team_profiles["team"] == "WEAK", "off_roster_value_delta"
+        ] = -1.0
+        schedule = pd.DataFrame([
+            {"home_team": "STRONG", "away_team": "WEAK", "week": 3, "game_type": "REG"},
+        ])
+        static_feats = mock_engine._precompute_static_features(schedule)
+        col_idx = {c: i for i, c in enumerate(NN_FC)}
+        assert static_feats["W03_STRONG_WEAK"][col_idx["off_roster_value_delta"]] == pytest.approx(4.0)
+
+    def test_precompute_static_features_carries_forward_latest_week(self, mock_engine):
+        """The cache only has an entry through the current week (nflverse's
+        weekly_rosters never has future weeks) -- predicting a LATER week for
+        that team must carry forward the latest week <= the target week
+        rather than treat it as a miss and zero the feature out."""
+        from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+        mock_engine._season = 2025
+        mock_engine._roster_value_cache = {
+            (2025, 3, "STRONG"): {"off_roster_value": 2.0, "def_roster_value": 1.0,
+                                   "st_value": 0.5, "qb_resilience": 0.9},
+            (2025, 3, "WEAK"):   {"off_roster_value": -2.0, "def_roster_value": -1.0,
+                                   "st_value": -0.5, "qb_resilience": 0.2},
+        }
+        schedule = pd.DataFrame([
+            {"home_team": "STRONG", "away_team": "WEAK", "week": 9, "game_type": "REG"},
+        ])
+        static_feats = mock_engine._precompute_static_features(schedule)
+        feat = static_feats["W09_STRONG_WEAK"]
+        col_idx = {c: i for i, c in enumerate(NN_FC)}
+
+        assert feat[col_idx["off_roster_value_delta"]] == pytest.approx(4.0)
+        assert feat[col_idx["def_roster_value_delta"]] == pytest.approx(2.0)
+        assert feat[col_idx["st_value_delta"]]         == pytest.approx(1.0)
+        assert feat[col_idx["qb_resilience_delta"]]    == pytest.approx(0.7)
 
     def test_roster_talent_delta_still_uses_team_profiles_not_roster_value_cache(self, mock_engine):
         """roster_talent_delta is a separate, performance-grade-based feature

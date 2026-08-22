@@ -200,3 +200,61 @@ class TestGetEspnInjuryOverrides:
             result = get_espn_injury_overrides([("WAS", "KC")], 2025, 3, tmp_path)
 
         assert result == {}
+
+    def test_unrecognized_status_is_skipped_not_defaulted_to_full_go(self, tmp_path):
+        """An ESPN override wins precedence over nflverse's own weekly grade
+        in compute_roster_value(), so an unrecognized status (e.g. one ESPN
+        hasn't standardized, like "Day-To-Day") must NOT silently become a
+        false 1.0 full-go signal -- the player should be absent from the
+        overrides dict entirely, letting the nflverse-derived grade apply."""
+        d = tmp_path / "weekly_rosters"
+        d.mkdir(parents=True)
+        pd.DataFrame([
+            {"season": 2025, "week": 3, "gsis_id": "G1", "espn_id": "E1"},
+        ]).to_csv(d / "roster_weekly_2025.csv", index=False)
+
+        fake_scoreboard = {"events": [{
+            "id": "401555", "competitions": [{"competitors": [
+                {"homeAway": "home", "team": {"abbreviation": "WSH"}},
+                {"homeAway": "away", "team": {"abbreviation": "KC"}},
+            ]}],
+        }]}
+        fake_summary = {"injuries": [{"injuries": [
+            {"athlete": {"id": "E1"}, "status": "Day-To-Day"},
+        ]}]}
+
+        with patch("services.espn_injury_service.fetch_espn_scores", return_value=fake_scoreboard), \
+             patch("services.espn_injury_service.requests.get") as mock_get:
+            mock_get.return_value.ok = True
+            mock_get.return_value.json.return_value = fake_summary
+            result = get_espn_injury_overrides([("WAS", "KC")], 2025, 3, tmp_path)
+
+        assert result == {}
+        assert (3, "G1") not in result
+
+    def test_injured_reserve_and_suspension_map_to_zero(self, tmp_path):
+        d = tmp_path / "weekly_rosters"
+        d.mkdir(parents=True)
+        pd.DataFrame([
+            {"season": 2025, "week": 3, "gsis_id": "G1", "espn_id": "E1"},
+            {"season": 2025, "week": 3, "gsis_id": "G2", "espn_id": "E2"},
+        ]).to_csv(d / "roster_weekly_2025.csv", index=False)
+
+        fake_scoreboard = {"events": [{
+            "id": "401555", "competitions": [{"competitors": [
+                {"homeAway": "home", "team": {"abbreviation": "WSH"}},
+                {"homeAway": "away", "team": {"abbreviation": "KC"}},
+            ]}],
+        }]}
+        fake_summary = {"injuries": [{"injuries": [
+            {"athlete": {"id": "E1"}, "status": "Injured Reserve"},
+            {"athlete": {"id": "E2"}, "status": "Suspension"},
+        ]}]}
+
+        with patch("services.espn_injury_service.fetch_espn_scores", return_value=fake_scoreboard), \
+             patch("services.espn_injury_service.requests.get") as mock_get:
+            mock_get.return_value.ok = True
+            mock_get.return_value.json.return_value = fake_summary
+            result = get_espn_injury_overrides([("WAS", "KC")], 2025, 3, tmp_path)
+
+        assert result == {(3, "G1"): 0.0, (3, "G2"): 0.0}
