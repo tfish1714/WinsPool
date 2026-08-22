@@ -457,3 +457,152 @@ class TestProjectPortfolioWinsBatching:
         call_args = mock_engine.svc.model.predict.call_args
         X_passed = call_args[0][0]
         assert X_passed.shape[0] == n - 1
+
+
+class TestWeekAwareRosterValue:
+    def test_precompute_static_features_uses_week_specific_cache(self, mock_engine):
+        from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+        mock_engine._season = 2025
+        mock_engine._roster_value_cache = {
+            (2025, 3, "STRONG"): {"off_roster_value": 2.0, "def_roster_value": 1.0,
+                                   "st_value": 0.5, "qb_resilience": 0.9},
+            (2025, 3, "WEAK"):   {"off_roster_value": -2.0, "def_roster_value": -1.0,
+                                   "st_value": -0.5, "qb_resilience": 0.2},
+        }
+        schedule = pd.DataFrame([
+            {"home_team": "STRONG", "away_team": "WEAK", "week": 3, "game_type": "REG"},
+        ])
+        static_feats = mock_engine._precompute_static_features(schedule)
+        feat = static_feats["W03_STRONG_WEAK"]
+        col_idx = {c: i for i, c in enumerate(NN_FC)}
+
+        assert feat[col_idx["off_roster_value_delta"]] == pytest.approx(4.0)
+        assert feat[col_idx["def_roster_value_delta"]] == pytest.approx(2.0)
+        assert feat[col_idx["st_value_delta"]]         == pytest.approx(1.0)
+        assert feat[col_idx["qb_resilience_delta"]]    == pytest.approx(0.7)
+
+    def test_precompute_static_features_ignores_other_weeks(self, mock_engine):
+        """A cache entry for a DIFFERENT week than the game being featured must
+        not leak in -- this is what makes the blend actually week-aware instead
+        of just season-aware."""
+        from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+        mock_engine._season = 2025
+        mock_engine._roster_value_cache = {
+            (2025, 9, "STRONG"): {"off_roster_value": 99.0},  # week 9, not week 3
+        }
+        schedule = pd.DataFrame([
+            {"home_team": "STRONG", "away_team": "WEAK", "week": 3, "game_type": "REG"},
+        ])
+        static_feats = mock_engine._precompute_static_features(schedule)
+        col_idx = {c: i for i, c in enumerate(NN_FC)}
+        assert static_feats["W03_STRONG_WEAK"][col_idx["off_roster_value_delta"]] == pytest.approx(0.0)
+
+    def test_precompute_static_features_defaults_to_zero_when_cache_empty(self, mock_engine):
+        """Graceful degradation: an empty/missing roster-value cache (e.g.
+        compute_roster_value() failed) must not crash -- deltas fall back to 0.0,
+        same as every other hp.get(col, 0.0) default in this method."""
+        from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+        mock_engine._season = 2025
+        mock_engine._roster_value_cache = {}
+        schedule = pd.DataFrame([
+            {"home_team": "STRONG", "away_team": "WEAK", "week": 3, "game_type": "REG"},
+        ])
+        static_feats = mock_engine._precompute_static_features(schedule)
+        col_idx = {c: i for i, c in enumerate(NN_FC)}
+        assert static_feats["W03_STRONG_WEAK"][col_idx["off_roster_value_delta"]] == pytest.approx(0.0)
+
+    def test_roster_talent_delta_still_uses_team_profiles_not_roster_value_cache(self, mock_engine):
+        """roster_talent_delta is a separate, performance-grade-based feature
+        computed in build_master_feature_table() -- NOT part of
+        compute_roster_value()'s output. It must keep reading from
+        _team_profiles, unaffected by this task."""
+        from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+        mock_engine._season = 2025
+        mock_engine._roster_value_cache = {}
+        mock_engine._team_profiles.loc[
+            mock_engine._team_profiles["team"] == "STRONG", "roster_talent_delta"
+        ] = 5.0
+        schedule = pd.DataFrame([
+            {"home_team": "STRONG", "away_team": "WEAK", "week": 3, "game_type": "REG"},
+        ])
+        static_feats = mock_engine._precompute_static_features(schedule)
+        col_idx = {c: i for i, c in enumerate(NN_FC)}
+        assert static_feats["W03_STRONG_WEAK"][col_idx["roster_talent_delta"]] == pytest.approx(5.0)
+
+
+class TestInitializeBuildsRosterValueCache:
+    def test_initialize_computes_and_threads_espn_overrides(self):
+        from unittest.mock import patch
+        import pandas as pd
+        from services.nn_projection_engine import NNProjectionEngine, RAWDATA_DIR
+
+        with patch("services.nn_projection_engine.NNPredictionService"), \
+             patch("services.nn_projection_engine.XGBPredictionService"), \
+             patch("services.nn_projection_engine.LRPredictionService"):
+            engine = NNProjectionEngine()
+
+        captured = {}
+
+        def fake_compute_rv(season, rawdata_dir, espn_overrides=None):
+            captured["args"] = (season, rawdata_dir, espn_overrides)
+            return {(2025, 1, "KC"): {"off_roster_value": 1.0}}
+
+        overrides = {(1, "QB1"): 0.0}
+        with patch("services.nn_projection_engine.build_master_feature_table",
+                   return_value=pd.DataFrame()), \
+             patch.object(engine, "_build_team_profiles",
+                         return_value=pd.DataFrame(columns=["team"])), \
+             patch("services.roster_value_service.compute_roster_value",
+                   side_effect=fake_compute_rv):
+            engine.initialize(2025, espn_overrides=overrides)
+
+        assert captured["args"] == (2025, RAWDATA_DIR, overrides)
+        assert engine._roster_value_cache == {(2025, 1, "KC"): {"off_roster_value": 1.0}}
+        assert engine._season == 2025
+
+    def test_initialize_defaults_espn_overrides_to_none(self):
+        """Existing callers that don't pass espn_overrides must be unaffected."""
+        from unittest.mock import patch
+        import pandas as pd
+        from services.nn_projection_engine import NNProjectionEngine
+
+        with patch("services.nn_projection_engine.NNPredictionService"), \
+             patch("services.nn_projection_engine.XGBPredictionService"), \
+             patch("services.nn_projection_engine.LRPredictionService"):
+            engine = NNProjectionEngine()
+
+        captured = {}
+
+        def fake_compute_rv(season, rawdata_dir, espn_overrides=None):
+            captured["espn_overrides"] = espn_overrides
+            return {}
+
+        with patch("services.nn_projection_engine.build_master_feature_table",
+                   return_value=pd.DataFrame()), \
+             patch.object(engine, "_build_team_profiles",
+                         return_value=pd.DataFrame(columns=["team"])), \
+             patch("services.roster_value_service.compute_roster_value",
+                   side_effect=fake_compute_rv):
+            engine.initialize(2025)
+
+        assert captured["espn_overrides"] is None
+
+    def test_initialize_degrades_gracefully_when_compute_roster_value_fails(self):
+        from unittest.mock import patch
+        import pandas as pd
+        from services.nn_projection_engine import NNProjectionEngine
+
+        with patch("services.nn_projection_engine.NNPredictionService"), \
+             patch("services.nn_projection_engine.XGBPredictionService"), \
+             patch("services.nn_projection_engine.LRPredictionService"):
+            engine = NNProjectionEngine()
+
+        with patch("services.nn_projection_engine.build_master_feature_table",
+                   return_value=pd.DataFrame()), \
+             patch.object(engine, "_build_team_profiles",
+                         return_value=pd.DataFrame(columns=["team"])), \
+             patch("services.roster_value_service.compute_roster_value",
+                   side_effect=Exception("rawdata unavailable")):
+            engine.initialize(2025)  # must not raise
+
+        assert engine._roster_value_cache == {}

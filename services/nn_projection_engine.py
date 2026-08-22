@@ -7,7 +7,7 @@ and exposes a clean API for cache_builder.py and the FastAPI backend.
 import logging
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from services.constants import (
     UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT,
     PROB_CLIP_MIN, PROB_CLIP_MAX, ELO_TO_SPREAD, SPREAD_TO_PROB_SCALE,
@@ -55,20 +55,47 @@ class NNProjectionEngine:
         # default preserves prior behavior for every existing caller.
         self.nn_calibrator = nn_calibrator
         self._team_profiles = pd.DataFrame()
+        self._season: Optional[int] = None
+        self._roster_value_cache: Dict[Tuple[int, int, str], dict] = {}
         self._preseason_profiles: dict = {}  # {team: {off_pass_epa, off_rush_epa, ...}}
         # Legacy attributes kept as empty defaults so _precompute_static_features fallback
         # doesn't AttributeError on older code paths
         self._preseason_roster: dict = {}
         self._preseason_norm: tuple | None = None
 
-    def initialize(self, season: int):
+    def initialize(self, season: int, espn_overrides: Optional[Dict[Tuple[int, str], float]] = None):
         """Pre-compute the feature profiles required for predictions.
 
         Args:
             season: The target NFL season (e.g. 2026).
+            espn_overrides: Optional {(week, gsis_id): availability_weight} from
+                services.espn_injury_service, applied on top of this season's
+                own nflverse-graded weekly injury report (see
+                services/roster_value_service.py) when building the per-week
+                roster-value cache below.
         """
+        self._season = season
         feature_table = build_master_feature_table(min_season=2020, max_season=season - 1)
         self._team_profiles = self._build_team_profiles(feature_table, season - 1)
+
+        # Week-aware roster value for the TARGET season itself (not the
+        # prior-season feature_table above) -- compute_roster_value() already
+        # blends prior-season into current-season per player as games
+        # accumulate, and (since Part A) grades that blend by real injury
+        # severity. _precompute_static_features() looks this up per
+        # (week, team) instead of the flat prior-season _team_profiles
+        # average, which is what actually lets in-season form and injuries
+        # move a season-simulation prediction (see
+        # docs/superpowers/specs/2026-08-22-injury-aware-roster-value-design.md,
+        # Part B0).
+        try:
+            from services.roster_value_service import compute_roster_value
+            self._roster_value_cache = compute_roster_value(
+                season, RAWDATA_DIR, espn_overrides=espn_overrides,
+            )
+        except Exception as exc:
+            logger.warning("Week-aware roster value unavailable for %d: %s", season, exc)
+            self._roster_value_cache = {}
 
         snap_path = RAWDATA_DIR / "snap_counts" / f"snap_counts_{season}.csv"
         snap_empty = not snap_path.exists() or pd.read_csv(snap_path, nrows=1).empty
@@ -336,14 +363,35 @@ class NNProjectionEngine:
                     float(hp.get("trench_score", 0.0)) - float(ap.get("trench_score", 0.0))
                 )
 
-            # Roster value deltas (home-centric signed features from prior season)
+            # Roster value: week-aware per-team lookup from
+            # roster_value_service.compute_roster_value() (already alpha-blended
+            # prior->current per player and, since Part A, injury-graded) instead
+            # of the flat prior-season _team_profiles average used everywhere
+            # else in this method -- this is what lets a team's in-season form
+            # and injuries actually move this season-simulation's per-game
+            # prediction (see
+            # docs/superpowers/specs/2026-08-22-injury-aware-roster-value-design.md,
+            # Part B0). roster_talent_delta is intentionally untouched here --
+            # it's a separate, performance-grade-based feature computed in
+            # build_master_feature_table(), not part of compute_roster_value()'s
+            # output.
+            h_rv = self._roster_value_cache.get((self._season, int(wk), ht), {})
+            a_rv = self._roster_value_cache.get((self._season, int(wk), at), {})
             feat[col_idx["roster_talent_delta"]]     = (
                 float(hp.get("roster_talent_delta", 0.0)) - float(ap.get("roster_talent_delta", 0.0))
             )
-            feat[col_idx["off_roster_value_delta"]]  = float(hp.get("off_roster_value_delta", 0.0))
-            feat[col_idx["def_roster_value_delta"]]  = float(hp.get("def_roster_value_delta", 0.0))
-            feat[col_idx["st_value_delta"]]          = float(hp.get("st_value_delta", 0.0))
-            feat[col_idx["qb_resilience_delta"]]     = float(hp.get("qb_resilience_delta", 0.0))
+            feat[col_idx["off_roster_value_delta"]]  = float(
+                h_rv.get("off_roster_value", 0.0) - a_rv.get("off_roster_value", 0.0)
+            )
+            feat[col_idx["def_roster_value_delta"]]  = float(
+                h_rv.get("def_roster_value", 0.0) - a_rv.get("def_roster_value", 0.0)
+            )
+            feat[col_idx["st_value_delta"]]          = float(
+                h_rv.get("st_value", 0.0) - a_rv.get("st_value", 0.0)
+            )
+            feat[col_idx["qb_resilience_delta"]]     = float(
+                h_rv.get("qb_resilience", 0.0) - a_rv.get("qb_resilience", 0.0)
+            )
 
             # Override 5 features with profile z-scores — formulas match build_master_feature_table()
             if _pp_z and ht in _pp_z and at in _pp_z:
