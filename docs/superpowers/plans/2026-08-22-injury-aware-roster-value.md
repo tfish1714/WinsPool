@@ -93,15 +93,25 @@ class TestComputeRosterValueAvailabilityWeighting:
     holding everything else equal."""
 
     def _write_common_fixtures(self, tmp_path, season=2025, injured_status=None):
-        # Prior-season EPA: one strong QB, established via >= MIN_QB_ATTEMPTS.
+        # Two teams (KC, DEN), each with one strong QB established via
+        # >= MIN_QB_ATTEMPTS. TWO teams is required, not incidental: compute_roster_value()
+        # z-scores off_roster_value across all teams present for that week
+        # (services/roster_value_service.py::_zscore), and a single-team
+        # series has std=0 -- _zscore's own code returns a flat 0.0 for
+        # every team in that case, which would make this test's assertion
+        # vacuously true/false regardless of the injury weighting. DEN's
+        # QB2 is identical in every other respect and never injured, so it
+        # exists purely to give z-scoring something to differentiate KC
+        # against.
         prior = tmp_path / "stats_player"
         prior.mkdir(parents=True, exist_ok=True)
         rows = []
-        for wk in range(1, 18):
-            rows.append({
-                "player_id": "QB1", "position": "QB", "season_type": "REG", "week": wk,
-                "passing_epa": 5.0, "attempts": 30,
-            })
+        for pid, epa in [("QB1", 5.0), ("QB2", 3.0)]:
+            for wk in range(1, 18):
+                rows.append({
+                    "player_id": pid, "position": "QB", "season_type": "REG", "week": wk,
+                    "passing_epa": epa, "attempts": 30,
+                })
         pd.DataFrame(rows).to_csv(prior / f"stats_player_week_{season - 1}.csv", index=False)
         pd.DataFrame(columns=["player_id", "position", "season_type", "week",
                                "passing_epa", "attempts"]).to_csv(
@@ -109,10 +119,16 @@ class TestComputeRosterValueAvailabilityWeighting:
 
         rosters = tmp_path / "weekly_rosters"
         rosters.mkdir(parents=True, exist_ok=True)
-        roster_rows = [{
-            "season": season, "week": wk, "team": "KC", "gsis_id": "QB1",
-            "position": "QB", "status": "ACT", "birth_date": "1995-01-01",
-        } for wk in range(1, 5)]
+        roster_rows = []
+        for wk in range(1, 5):
+            roster_rows.append({
+                "season": season, "week": wk, "team": "KC", "gsis_id": "QB1",
+                "position": "QB", "status": "ACT", "birth_date": "1995-01-01",
+            })
+            roster_rows.append({
+                "season": season, "week": wk, "team": "DEN", "gsis_id": "QB2",
+                "position": "QB", "status": "ACT", "birth_date": "1995-01-01",
+            })
         pd.DataFrame(roster_rows).to_csv(rosters / f"roster_weekly_{season}.csv", index=False)
 
         if injured_status:
@@ -274,15 +290,18 @@ git commit -m "feat: grade roster-value availability by injury report status, no
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `tests/test_nn_feature_engine.py`:
+Add to `tests/test_nn_feature_engine.py`. Reuses the existing
+`_make_minimal_feature_table_inputs(tmp_path)` helper already defined in
+this file (around line 207 — writes minimal `stats_team`/`schedules`/
+`elo_computed.csv` fixtures and returns the `tmp_path` root to pass as
+`rawdata_dir`) — do not invent a new fixture helper:
 
 ```python
-def test_build_master_feature_table_threads_espn_overrides(monkeypatch):
+def test_build_master_feature_table_threads_espn_overrides(tmp_path, monkeypatch):
     """espn_overrides must reach compute_roster_value() unchanged -- this is
     a plumbing test, not a behavior test (Task 1 already covers the actual
     override-precedence behavior inside compute_roster_value())."""
-    from unittest.mock import MagicMock
-    import services.nn_feature_engine as fe
+    from services.nn_feature_engine import build_master_feature_table
 
     captured = {}
 
@@ -294,21 +313,14 @@ def test_build_master_feature_table_threads_espn_overrides(monkeypatch):
         "services.roster_value_service.compute_roster_value", fake_compute_rv
     )
 
-    sched = MagicMock()
-    # Minimal stand-in: only exercise the roster-value block by calling the
-    # real function requires a full schedule; instead call compute_roster_value's
-    # import site directly by invoking build_master_feature_table with a
-    # tiny real schedule fixture already used elsewhere in this test file
-    # (see existing `_minimal_schedule_fixture` helper below in this file).
+    rd = _make_minimal_feature_table_inputs(tmp_path)
     overrides = {(3, "QB1"): 0.0}
-    fe.build_master_feature_table(
-        rawdata_dir=str(FIXTURES_DIR), min_season=2024, max_season=2024,
+    build_master_feature_table(
+        rawdata_dir=str(rd), min_season=2024, max_season=2024,
         espn_overrides=overrides,
     )
     assert captured["espn_overrides"] == overrides
 ```
-
-Note for the implementer: check the top of `tests/test_nn_feature_engine.py` for the existing fixture/rawdata-dir convention this file already uses for other `build_master_feature_table()` tests (there should be at least one, since the function is exercised elsewhere) and reuse the same `FIXTURES_DIR`/schedule setup rather than inventing a new one — copy the exact pattern an existing passing test in that file already uses to build a minimal `min_season=max_season` schedule, since `build_master_feature_table()` raises `ValueError("No schedule data found.")` on an empty schedule.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1182,7 +1194,8 @@ Update `main()`'s enqueue loop:
 
 ```python
         client = tasks_v2.CloudTasksClient()
-        for kickoff, game_ids in compute_kickoff_clusters_with_games(games, season, week):
+        clusters_with_games = compute_kickoff_clusters_with_games(games, season, week)
+        for kickoff, game_ids in clusters_with_games:
             enqueue_task(client, kickoff - timedelta(minutes=SYNC_LEAD_MINUTES), "winspool-sync-daily")
             enqueue_task(client, kickoff - timedelta(minutes=PREDICT_LEAD_MINUTES), "winspool-predict-daily")
             enqueue_task(
@@ -1190,10 +1203,10 @@ Update `main()`'s enqueue loop:
                 job_args=["--games", ",".join(str(g) for g in game_ids)],
             )
 
-        print(f"Enqueued {len(compute_kickoff_clusters(games, season, week))} kickoff cluster(s) x 3 tasks for {season} week {week}.")
+        print(f"Enqueued {len(clusters_with_games)} kickoff cluster(s) x 3 tasks for {season} week {week}.")
 ```
 
-(`compute_kickoff_clusters()` itself is unchanged and still used by the print statement above for the cluster count — no need to remove it, since `compute_kickoff_clusters_with_games()` is a superset used only where the game_ids are actually needed.)
+(`compute_kickoff_clusters()` itself is unchanged — kept as-is for any other caller — but `main()`'s loop now uses `compute_kickoff_clusters_with_games()` exclusively, including for the final count, rather than computing the clustering twice.)
 
 - [ ] **Step 4: Run tests to verify they pass**
 
