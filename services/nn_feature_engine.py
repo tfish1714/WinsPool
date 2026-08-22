@@ -10,7 +10,7 @@ import glob
 import logging
 import warnings
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -1817,6 +1817,7 @@ def build_master_feature_table(
     rawdata_dir: Optional[str] = None,
     min_season: int = 2006,
     max_season: int = 2025,
+    espn_overrides: Optional[Dict[Tuple[int, str], float]] = None,
 ) -> pd.DataFrame:
     """Assemble the full 26-feature ML training dataset from rawdata CSVs.
 
@@ -2189,7 +2190,7 @@ def build_master_feature_table(
         rv_cache: dict = {}
         for _season in sorted(sched["season"].unique()):
             try:
-                rv_cache.update(_compute_rv(int(_season), rd))
+                rv_cache.update(_compute_rv(int(_season), rd, espn_overrides=espn_overrides))
             except Exception as _e:
                 logger.debug("roster_value skipped for %d: %s", _season, _e)
 

@@ -552,3 +552,28 @@ def test_aux_metadata_columns_in_output(tmp_path):
                 "home_trench_score", "away_trench_score",
                 "home_margin_roll", "away_margin_roll"]:
         assert col in df.columns, f"Missing aux column: {col}"
+
+
+def test_build_master_feature_table_threads_espn_overrides(tmp_path, monkeypatch):
+    """espn_overrides must reach compute_roster_value() unchanged -- this is
+    a plumbing test, not a behavior test (Task 1 already covers the actual
+    override-precedence behavior inside compute_roster_value())."""
+    from services.nn_feature_engine import build_master_feature_table
+
+    captured = {}
+
+    def fake_compute_rv(season, rd, espn_overrides=None):
+        captured["espn_overrides"] = espn_overrides
+        return {}
+
+    monkeypatch.setattr(
+        "services.roster_value_service.compute_roster_value", fake_compute_rv
+    )
+
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+    overrides = {(3, "QB1"): 0.0}
+    build_master_feature_table(
+        rawdata_dir=str(rd), min_season=2024, max_season=2024,
+        espn_overrides=overrides,
+    )
+    assert captured["espn_overrides"] == overrides
