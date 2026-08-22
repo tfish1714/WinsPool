@@ -55,16 +55,15 @@ class TestComputeRosterValueAvailabilityWeighting:
     holding everything else equal."""
 
     def _write_common_fixtures(self, tmp_path, season=2025, injured_status=None):
-        # Two teams (KC, DEN), each with one strong QB established via
-        # >= MIN_QB_ATTEMPTS. TWO teams is required, not incidental: compute_roster_value()
-        # z-scores off_roster_value across all teams present for that week
-        # (services/roster_value_service.py::_zscore), and a single-team
-        # series has std=0 -- _zscore's own code returns a flat 0.0 for
-        # every team in that case, which would make this test's assertion
-        # vacuously true/false regardless of the injury weighting. DEN's
-        # QB2 is identical in every other respect and never injured, so it
-        # exists purely to give z-scoring something to differentiate KC
-        # against.
+        # Three teams (KC, DEN, PHI), each with one QB established via >= MIN_QB_ATTEMPTS.
+        # KC uses QB1 (EPA 5.0), DEN uses QB2 (EPA 3.0), PHI uses QB3 (EPA 4.0).
+        # Multiple teams are required because compute_roster_value() z-scores off_roster_value
+        # across all teams for each week (services/roster_value_service.py::_zscore).
+        # With 3 teams, the injury adjustment creates a stronger, clearer z-score signal
+        # (healthy KC ≈+1.22, injured KC ≈-1.37) than 2 teams would provide, making the
+        # test assertions more robust and less prone to numerical flukes. DEN and PHI are
+        # never injured, providing stable reference points against which KC's injury penalty
+        # is differentiated.
         prior = tmp_path / "stats_player"
         prior.mkdir(parents=True, exist_ok=True)
         rows = []
