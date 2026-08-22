@@ -5,10 +5,12 @@ upcoming week's actual gameday/gametime, computes distinct kickoff-time
 clusters, and enqueues 3 Cloud Tasks per cluster:
   - winspool-sync-daily    at (kickoff - 75 min)
   - winspool-predict-daily at (kickoff - 60 min)
-  - winspool-predict-daily at (kickoff - 70 min), with its container args
+  - winspool-predict-daily at (kickoff - 20 min), with its container args
     overridden to `--resimulate <game_ids>` (Task 6) -- a scoped ESPN
     injury check + re-simulate for just that cluster's games, reusing the
-    existing winspool-predict-daily job/image rather than a new one.
+    existing winspool-predict-daily job/image rather than a new one. Runs
+    AFTER the routine predict run above so it is the last word before
+    kickoff, not overwritten by it.
 
 Cloud Tasks (not Cloud Scheduler) is used because it supports a specific
 one-off future execution timestamp per task, whereas Cloud Scheduler is
@@ -49,14 +51,18 @@ GCP_SCHEDULER_SERVICE_ACCOUNT = os.environ.get("GCP_SCHEDULER_SERVICE_ACCOUNT")
 
 SYNC_LEAD_MINUTES = 75
 PREDICT_LEAD_MINUTES = 60
-# How close to kickoff the ESPN check + re-simulate runs. Anchored to the
-# NFL's official inactive-list deadline (kickoff-90min, league rule) -- this
-# leaves 20 minutes of margin after that deadline before this task fires.
-# NOT yet validated against a measured runtime of --resimulate (Task 6) in
-# production: before relying on this in-season, time a real invocation (see
-# Step 9 below) and adjust this constant if it runs longer than the margin
-# allows.
-RESIMULATE_LEAD_MINUTES = 70
+# How close to kickoff the ESPN check + re-simulate runs. Must fire AFTER the
+# routine PREDICT_LEAD_MINUTES=60 predict run, not before it -- the whole
+# point of this task is to be the last, freshest word before kickoff, using
+# a narrower/later ESPN check than the routine run could. If this fired
+# earlier than -60min (e.g. anchored to the -90min inactive-list deadline
+# instead), the routine predict run would simply overwrite its published
+# predictions 10 minutes later with no ESPN overrides, defeating the whole
+# point. NOT yet validated against a measured runtime of --resimulate
+# (Task 6) in production: before relying on this in-season, time a real
+# invocation (see Step 9 below) and adjust this constant if it runs longer
+# than the margin allows.
+RESIMULATE_LEAD_MINUTES = 20
 
 # NFL gametime is published in US/Eastern per nflverse convention. Use a
 # proper DST-aware zone -- clocks fall back to EST (UTC-5) the first Sunday

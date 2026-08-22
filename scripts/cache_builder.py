@@ -499,8 +499,11 @@ def main():
         n = _publish_game_probs(game_ids, games, year, sim.get("game_probs", {}))
         print(f"[cache_builder] --resimulate: published {n} prediction(s).")
 
-        db = _fs.client()
-        db.collection("metadata").document("cache_control").set({"last_update": time.time()})
+        try:
+            db = _fs.client()
+            db.collection("metadata").document("cache_control").set({"last_update": time.time()})
+        except Exception as e:
+            print(f"  [err] Failed to signal cache invalidation: {e}")
         return
 
     available_years = get_available_years(draft_results)
