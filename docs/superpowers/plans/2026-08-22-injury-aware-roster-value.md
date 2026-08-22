@@ -748,24 +748,544 @@ git commit -m "feat: add ESPN per-game injury signal service"
 
 ---
 
-### Task 4: Scoped `--games` repredict mode in `cache_builder.py`
+### Task 4: Week-aware roster value in `NNProjectionEngine`
+
+**Files:**
+- Modify: `services/nn_projection_engine.py`
+- Test: `tests/test_simulate_season.py`
+
+**Interfaces:**
+- Consumes: `compute_roster_value(target_season, rawdata_dir, espn_overrides=None) -> Dict[Tuple[int,int,str], dict]` (Task 1, returns `{(season, week, team): {off_roster_value, def_roster_value, st_value, qb_resilience}}`).
+- Produces: `NNProjectionEngine.initialize(season: int, espn_overrides: Optional[Dict[Tuple[int, str], float]] = None)` — new optional 2nd parameter. New instance attributes `self._season: Optional[int]` and `self._roster_value_cache: Dict[Tuple[int, int, str], dict]`, consumed internally by `_precompute_static_features()`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `tests/test_simulate_season.py` (reuses the existing `mock_engine` fixture already in that file):
+
+```python
+class TestWeekAwareRosterValue:
+    def test_precompute_static_features_uses_week_specific_cache(self, mock_engine):
+        from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+        mock_engine._season = 2025
+        mock_engine._roster_value_cache = {
+            (2025, 3, "STRONG"): {"off_roster_value": 2.0, "def_roster_value": 1.0,
+                                   "st_value": 0.5, "qb_resilience": 0.9},
+            (2025, 3, "WEAK"):   {"off_roster_value": -2.0, "def_roster_value": -1.0,
+                                   "st_value": -0.5, "qb_resilience": 0.2},
+        }
+        schedule = pd.DataFrame([
+            {"home_team": "STRONG", "away_team": "WEAK", "week": 3, "game_type": "REG"},
+        ])
+        static_feats = mock_engine._precompute_static_features(schedule)
+        feat = static_feats["W03_STRONG_WEAK"]
+        col_idx = {c: i for i, c in enumerate(NN_FC)}
+
+        assert feat[col_idx["off_roster_value_delta"]] == pytest.approx(4.0)
+        assert feat[col_idx["def_roster_value_delta"]] == pytest.approx(2.0)
+        assert feat[col_idx["st_value_delta"]]         == pytest.approx(1.0)
+        assert feat[col_idx["qb_resilience_delta"]]    == pytest.approx(0.7)
+
+    def test_precompute_static_features_ignores_other_weeks(self, mock_engine):
+        """A cache entry for a DIFFERENT week than the game being featured must
+        not leak in -- this is what makes the blend actually week-aware instead
+        of just season-aware."""
+        from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+        mock_engine._season = 2025
+        mock_engine._roster_value_cache = {
+            (2025, 9, "STRONG"): {"off_roster_value": 99.0},  # week 9, not week 3
+        }
+        schedule = pd.DataFrame([
+            {"home_team": "STRONG", "away_team": "WEAK", "week": 3, "game_type": "REG"},
+        ])
+        static_feats = mock_engine._precompute_static_features(schedule)
+        col_idx = {c: i for i, c in enumerate(NN_FC)}
+        assert static_feats["W03_STRONG_WEAK"][col_idx["off_roster_value_delta"]] == pytest.approx(0.0)
+
+    def test_precompute_static_features_defaults_to_zero_when_cache_empty(self, mock_engine):
+        """Graceful degradation: an empty/missing roster-value cache (e.g.
+        compute_roster_value() failed) must not crash -- deltas fall back to 0.0,
+        same as every other hp.get(col, 0.0) default in this method."""
+        from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+        mock_engine._season = 2025
+        mock_engine._roster_value_cache = {}
+        schedule = pd.DataFrame([
+            {"home_team": "STRONG", "away_team": "WEAK", "week": 3, "game_type": "REG"},
+        ])
+        static_feats = mock_engine._precompute_static_features(schedule)
+        col_idx = {c: i for i, c in enumerate(NN_FC)}
+        assert static_feats["W03_STRONG_WEAK"][col_idx["off_roster_value_delta"]] == pytest.approx(0.0)
+
+    def test_roster_talent_delta_still_uses_team_profiles_not_roster_value_cache(self, mock_engine):
+        """roster_talent_delta is a separate, performance-grade-based feature
+        computed in build_master_feature_table() -- NOT part of
+        compute_roster_value()'s output. It must keep reading from
+        _team_profiles, unaffected by this task."""
+        from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+        mock_engine._season = 2025
+        mock_engine._roster_value_cache = {}
+        mock_engine._team_profiles.loc[
+            mock_engine._team_profiles["team"] == "STRONG", "roster_talent_delta"
+        ] = 5.0
+        schedule = pd.DataFrame([
+            {"home_team": "STRONG", "away_team": "WEAK", "week": 3, "game_type": "REG"},
+        ])
+        static_feats = mock_engine._precompute_static_features(schedule)
+        col_idx = {c: i for i, c in enumerate(NN_FC)}
+        assert static_feats["W03_STRONG_WEAK"][col_idx["roster_talent_delta"]] == pytest.approx(5.0)
+
+
+class TestInitializeBuildsRosterValueCache:
+    def test_initialize_computes_and_threads_espn_overrides(self):
+        from unittest.mock import patch
+        import pandas as pd
+        from services.nn_projection_engine import NNProjectionEngine, RAWDATA_DIR
+
+        with patch("services.nn_projection_engine.NNPredictionService"), \
+             patch("services.nn_projection_engine.XGBPredictionService"), \
+             patch("services.nn_projection_engine.LRPredictionService"):
+            engine = NNProjectionEngine()
+
+        captured = {}
+
+        def fake_compute_rv(season, rawdata_dir, espn_overrides=None):
+            captured["args"] = (season, rawdata_dir, espn_overrides)
+            return {(2025, 1, "KC"): {"off_roster_value": 1.0}}
+
+        overrides = {(1, "QB1"): 0.0}
+        with patch("services.nn_projection_engine.build_master_feature_table",
+                   return_value=pd.DataFrame()), \
+             patch.object(engine, "_build_team_profiles",
+                         return_value=pd.DataFrame(columns=["team"])), \
+             patch("services.roster_value_service.compute_roster_value",
+                   side_effect=fake_compute_rv):
+            engine.initialize(2025, espn_overrides=overrides)
+
+        assert captured["args"] == (2025, RAWDATA_DIR, overrides)
+        assert engine._roster_value_cache == {(2025, 1, "KC"): {"off_roster_value": 1.0}}
+        assert engine._season == 2025
+
+    def test_initialize_defaults_espn_overrides_to_none(self):
+        """Existing callers that don't pass espn_overrides must be unaffected."""
+        from unittest.mock import patch
+        import pandas as pd
+        from services.nn_projection_engine import NNProjectionEngine
+
+        with patch("services.nn_projection_engine.NNPredictionService"), \
+             patch("services.nn_projection_engine.XGBPredictionService"), \
+             patch("services.nn_projection_engine.LRPredictionService"):
+            engine = NNProjectionEngine()
+
+        captured = {}
+
+        def fake_compute_rv(season, rawdata_dir, espn_overrides=None):
+            captured["espn_overrides"] = espn_overrides
+            return {}
+
+        with patch("services.nn_projection_engine.build_master_feature_table",
+                   return_value=pd.DataFrame()), \
+             patch.object(engine, "_build_team_profiles",
+                         return_value=pd.DataFrame(columns=["team"])), \
+             patch("services.roster_value_service.compute_roster_value",
+                   side_effect=fake_compute_rv):
+            engine.initialize(2025)
+
+        assert captured["espn_overrides"] is None
+
+    def test_initialize_degrades_gracefully_when_compute_roster_value_fails(self):
+        from unittest.mock import patch
+        import pandas as pd
+        from services.nn_projection_engine import NNProjectionEngine
+
+        with patch("services.nn_projection_engine.NNPredictionService"), \
+             patch("services.nn_projection_engine.XGBPredictionService"), \
+             patch("services.nn_projection_engine.LRPredictionService"):
+            engine = NNProjectionEngine()
+
+        with patch("services.nn_projection_engine.build_master_feature_table",
+                   return_value=pd.DataFrame()), \
+             patch.object(engine, "_build_team_profiles",
+                         return_value=pd.DataFrame(columns=["team"])), \
+             patch("services.roster_value_service.compute_roster_value",
+                   side_effect=Exception("rawdata unavailable")):
+            engine.initialize(2025)  # must not raise
+
+        assert engine._roster_value_cache == {}
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `pytest tests/test_simulate_season.py::TestWeekAwareRosterValue tests/test_simulate_season.py::TestInitializeBuildsRosterValueCache -v`
+Expected: FAIL — `_roster_value_cache`/`_season` don't exist yet; `initialize()` doesn't accept `espn_overrides`.
+
+- [ ] **Step 3: Implement**
+
+In `services/nn_projection_engine.py`, add `Tuple` to the typing import:
+
+```python
+from typing import Dict, List, Optional, Tuple
+```
+
+In `__init__`, add two new default attributes right after `self._team_profiles = pd.DataFrame()`:
+
+```python
+        self._team_profiles = pd.DataFrame()
+        self._season: Optional[int] = None
+        self._roster_value_cache: Dict[Tuple[int, int, str], dict] = {}
+```
+
+Change `initialize()`'s signature and add the roster-value cache computation:
+
+```python
+    def initialize(self, season: int, espn_overrides: Optional[Dict[Tuple[int, str], float]] = None):
+        """Pre-compute the feature profiles required for predictions.
+
+        Args:
+            season: The target NFL season (e.g. 2026).
+            espn_overrides: Optional {(week, gsis_id): availability_weight} from
+                services.espn_injury_service, applied on top of this season's
+                own nflverse-graded weekly injury report (see
+                services/roster_value_service.py) when building the per-week
+                roster-value cache below.
+        """
+        self._season = season
+        feature_table = build_master_feature_table(min_season=2020, max_season=season - 1)
+        self._team_profiles = self._build_team_profiles(feature_table, season - 1)
+
+        # Week-aware roster value for the TARGET season itself (not the
+        # prior-season feature_table above) -- compute_roster_value() already
+        # blends prior-season into current-season per player as games
+        # accumulate, and (since Part A) grades that blend by real injury
+        # severity. _precompute_static_features() looks this up per
+        # (week, team) instead of the flat prior-season _team_profiles
+        # average, which is what actually lets in-season form and injuries
+        # move a season-simulation prediction (see
+        # docs/superpowers/specs/2026-08-22-injury-aware-roster-value-design.md,
+        # Part B0).
+        try:
+            from services.roster_value_service import compute_roster_value
+            self._roster_value_cache = compute_roster_value(
+                season, RAWDATA_DIR, espn_overrides=espn_overrides,
+            )
+        except Exception as exc:
+            logger.warning("Week-aware roster value unavailable for %d: %s", season, exc)
+            self._roster_value_cache = {}
+
+        snap_path = RAWDATA_DIR / "snap_counts" / f"snap_counts_{season}.csv"
+        snap_empty = not snap_path.exists() or pd.read_csv(snap_path, nrows=1).empty
+        if snap_empty:
+            try:
+                self._preseason_profiles = compute_preseason_player_profiles(season, RAWDATA_DIR)
+                if self._preseason_profiles:
+                    logger.info(
+                        "Preseason player profiles built for %d teams (season %d)",
+                        len(self._preseason_profiles), season,
+                    )
+            except Exception as exc:
+                logger.warning("Preseason player profile build failed: %s", exc)
+                self._preseason_profiles = {}
+```
+
+In `_precompute_static_features()`, replace the "Roster value deltas" block (the 5 lines starting `feat[col_idx["roster_talent_delta"]] = (` through `feat[col_idx["qb_resilience_delta"]] = float(hp.get("qb_resilience_delta", 0.0))`) with:
+
+```python
+            # Roster value: week-aware per-team lookup from
+            # roster_value_service.compute_roster_value() (already alpha-blended
+            # prior->current per player and, since Part A, injury-graded) instead
+            # of the flat prior-season _team_profiles average used everywhere
+            # else in this method -- this is what lets a team's in-season form
+            # and injuries actually move this season-simulation's per-game
+            # prediction (see
+            # docs/superpowers/specs/2026-08-22-injury-aware-roster-value-design.md,
+            # Part B0). roster_talent_delta is intentionally untouched here --
+            # it's a separate, performance-grade-based feature computed in
+            # build_master_feature_table(), not part of compute_roster_value()'s
+            # output.
+            h_rv = self._roster_value_cache.get((self._season, int(wk), ht), {})
+            a_rv = self._roster_value_cache.get((self._season, int(wk), at), {})
+            feat[col_idx["roster_talent_delta"]]     = (
+                float(hp.get("roster_talent_delta", 0.0)) - float(ap.get("roster_talent_delta", 0.0))
+            )
+            feat[col_idx["off_roster_value_delta"]]  = float(
+                h_rv.get("off_roster_value", 0.0) - a_rv.get("off_roster_value", 0.0)
+            )
+            feat[col_idx["def_roster_value_delta"]]  = float(
+                h_rv.get("def_roster_value", 0.0) - a_rv.get("def_roster_value", 0.0)
+            )
+            feat[col_idx["st_value_delta"]]          = float(
+                h_rv.get("st_value", 0.0) - a_rv.get("st_value", 0.0)
+            )
+            feat[col_idx["qb_resilience_delta"]]     = float(
+                h_rv.get("qb_resilience", 0.0) - a_rv.get("qb_resilience", 0.0)
+            )
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `pytest tests/test_simulate_season.py -v`
+Expected: PASS — all tests in the file, including the new `TestWeekAwareRosterValue`/`TestInitializeBuildsRosterValueCache` classes and every pre-existing test (the `_pp_z` preseason-profile override block, which runs only when `_preseason_profiles` is populated, is untouched by this change).
+
+- [ ] **Step 5: Run the broader NN projection test suite to check for regressions**
+
+Run: `pytest tests/test_nn_projection_engine.py tests/test_simulate_season.py -v`
+Expected: PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add services/nn_projection_engine.py tests/test_simulate_season.py
+git commit -m "feat: make simulate_season's roster-value features week-aware and injury-gradeable"
+```
+
+---
+
+### Task 5: Wire `cache_builder.py`'s upcoming-game prediction to `simulate_season()`
 
 **Files:**
 - Modify: `scripts/cache_builder.py`
 - Test: `tests/test_cache_builder.py`
 
 **Interfaces:**
-- Consumes: `build_master_feature_table(..., espn_overrides=...)` from Task 2, `get_game_predictions`/`merge_thin_game_predictions`/`write_game_predictions` (existing, `services/cache_service.py`).
-- Produces: `_publish_games(game_ids: list[str], games: pd.DataFrame, year: int, pred_lookup: dict) -> int` — returns count of predictions published; a new `--games` CLI arg on `main()`.
+- Consumes: `NNProjectionEngine.simulate_season(schedule_df, n_sims, completed_results) -> {"team_stats": ..., "game_probs": {game_key: {mean_prob, model_spread, home_team, away_team, week}}}` (existing, unmodified signature — Task 4 changed its internals, not its interface).
+- Produces: `_build_completed_results(games: pd.DataFrame, year: int) -> dict` — `{game_key: margin}`, reused by Task 6.
 
 - [ ] **Step 1: Write the failing tests**
+
+Add to `tests/test_cache_builder.py` (add `from unittest.mock import patch, MagicMock` at the top if not already present — it already is, per the existing `@patch` decorators):
+
+```python
+class TestBuildCompletedResults:
+    def test_extracts_completed_reg_games_only(self):
+        from scripts.cache_builder import _build_completed_results
+        games = pd.DataFrame([
+            {"season": 2026, "week": 3, "game_type": "REG", "home_team": "WAS",
+             "away_team": "KC", "result": 3.0},
+            {"season": 2026, "week": 4, "game_type": "REG", "home_team": "SF",
+             "away_team": "LAC", "result": None},
+            {"season": 2026, "week": 3, "game_type": "POST", "home_team": "DAL",
+             "away_team": "NYG", "result": -7.0},
+        ])
+        result = _build_completed_results(games, 2026)
+        assert result == {"W03_WAS_KC": 3.0}
+
+    def test_filters_to_requested_season(self):
+        from scripts.cache_builder import _build_completed_results
+        games = pd.DataFrame([
+            {"season": 2025, "week": 3, "game_type": "REG", "home_team": "WAS",
+             "away_team": "KC", "result": 3.0},
+            {"season": 2026, "week": 3, "game_type": "REG", "home_team": "SF",
+             "away_team": "LAC", "result": -7.0},
+        ])
+        result = _build_completed_results(games, 2026)
+        assert result == {"W03_SF_LAC": -7.0}
+
+
+class TestApplyPredictionsFallback:
+    def test_unplayed_game_uses_simulate_season_not_batch_method(self):
+        from scripts.cache_builder import _apply_predictions
+        schedule = pd.DataFrame([
+            {"home_team": "WAS", "away_team": "KC", "week": 3, "result": None,
+             "spread_line": -2.5},
+        ])
+        fallback_engine = MagicMock()
+        fallback_engine.simulate_season.return_value = {
+            "game_probs": {
+                "W03_WAS_KC": {"mean_prob": 0.62, "model_spread": -3.0,
+                               "home_team": "WAS", "away_team": "KC", "week": 3},
+            },
+            "team_stats": {},
+        }
+        out = _apply_predictions(schedule, 2026, {}, fallback_engine=fallback_engine)
+
+        fallback_engine.simulate_season.assert_called_once()
+        fallback_engine.game_win_probabilities_batch.assert_not_called()
+        assert out.iloc[0]["pred_winner"] == "WAS"
+        assert out.iloc[0]["pred_prob"] == 0.62
+
+    def test_completed_game_never_touches_fallback_engine(self):
+        from scripts.cache_builder import _apply_predictions
+        schedule = pd.DataFrame([
+            {"home_team": "WAS", "away_team": "KC", "week": 3, "result": 3.0},
+        ])
+        pred_lookup = {(2026, 3, "WAS", "KC"): {
+            "pred_winner": "WAS", "pred_su_conf": 70.0,
+            "pred_ats_pick": "WAS", "pred_prob": 0.7,
+        }}
+        fallback_engine = MagicMock()
+        out = _apply_predictions(schedule, 2026, pred_lookup, fallback_engine=fallback_engine)
+        fallback_engine.simulate_season.assert_not_called()
+        assert out.iloc[0]["pred_winner"] == "WAS"
+
+    def test_simulate_season_failure_leaves_predictions_none_not_raises(self):
+        from scripts.cache_builder import _apply_predictions
+        schedule = pd.DataFrame([
+            {"home_team": "WAS", "away_team": "KC", "week": 3, "result": None},
+        ])
+        fallback_engine = MagicMock()
+        fallback_engine.simulate_season.side_effect = Exception("model unavailable")
+        out = _apply_predictions(schedule, 2026, {}, fallback_engine=fallback_engine)
+        assert out.iloc[0]["pred_winner"] is None
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `pytest tests/test_cache_builder.py::TestBuildCompletedResults tests/test_cache_builder.py::TestApplyPredictionsFallback -v`
+Expected: FAIL — `_build_completed_results` doesn't exist; `_apply_predictions` still calls `game_win_probabilities_batch`.
+
+- [ ] **Step 3: Implement**
+
+In `scripts/cache_builder.py`, add near `_build_pred_lookup`:
+
+```python
+SIMULATE_SEASON_N_SIMS = 5000
+
+
+def _build_completed_results(games: pd.DataFrame, year: int) -> dict:
+    """{game_key: margin} for every completed REG game in `year` -- the shape
+    NNProjectionEngine.simulate_season() expects for its completed_results
+    parameter. Reused by the --resimulate mode (Task 6)."""
+    completed = {}
+    yr_games = games[games["season"] == year] if "season" in games.columns else games
+    for _, row in yr_games.iterrows():
+        res = row.get("result")
+        if pd.notna(res) and res != UNDRAFTED_SENTINEL and row.get("game_type") == "REG":
+            ht = _normalize_team(str(row.get("home_team", "") or ""))
+            at = _normalize_team(str(row.get("away_team", "") or ""))
+            wk = row.get("week")
+            if ht and at and wk is not None:
+                completed[f"W{int(wk):02d}_{ht}_{at}"] = float(res)
+    return completed
+```
+
+Replace `_apply_predictions()`'s fallback branch (from `fallback_idx, fallback_pairs, fallback_spreads = [], [], []` through the end of the `if fallback_pairs:` block) with:
+
+```python
+def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
+                       fallback_engine=None) -> pd.DataFrame:
+    """Inject ML predictions into every row of schedule_df.
+
+    For games found in pred_lookup (feature-table predictions), uses those.
+    For unplayed games not in pred_lookup, falls back to fallback_engine's
+    NNProjectionEngine.simulate_season() -- run ONCE across every unplayed row
+    (not per-row), seeded with completed_results from this schedule's own
+    real scores so the state feeding each future week's prediction has
+    already absorbed every real result up to that point. Completed games
+    with no feature data get None. If simulate_season() itself fails, every
+    pending row gets None rather than being retried individually -- a
+    systemic model/scaler failure isn't going to resolve itself on the next
+    row.
+    """
+    n = len(schedule_df)
+    pred_winners: list = [None] * n
+    pred_confs: list = [None] * n
+    pred_ats: list = [None] * n
+    pred_probs: list = [None] * n
+
+    unplayed_idx: list = []
+
+    for i, (_, row) in enumerate(schedule_df.iterrows()):
+        ht = _normalize_team(str(row.get('home_team', '') or ''))
+        at = _normalize_team(str(row.get('away_team', '') or ''))
+        wk = row.get('week')
+
+        pred = pred_lookup.get((year, int(wk), ht, at)) if (ht and at and wk is not None) else None
+
+        if pred:
+            pred_winners[i] = pred['pred_winner']
+            pred_confs[i]   = pred['pred_su_conf']
+            pred_ats[i]     = pred['pred_ats_pick']
+            pred_probs[i]   = pred['pred_prob']
+            continue
+
+        # Not in feature table — unplayed future game, queue for simulate_season()
+        result = row.get('result')
+        is_unplayed = pd.isna(result) or result == UNDRAFTED_SENTINEL
+        if is_unplayed and ht and at and fallback_engine:
+            unplayed_idx.append(i)
+
+    if unplayed_idx and fallback_engine:
+        try:
+            completed_results = _build_completed_results(schedule_df, year)
+            sim = fallback_engine.simulate_season(
+                schedule_df, n_sims=SIMULATE_SEASON_N_SIMS, completed_results=completed_results,
+            )
+            game_probs = sim.get("game_probs", {})
+        except Exception:
+            game_probs = {}
+
+        for i in unplayed_idx:
+            row = schedule_df.iloc[i]
+            ht = _normalize_team(str(row.get('home_team', '') or ''))
+            at = _normalize_team(str(row.get('away_team', '') or ''))
+            wk = row.get('week')
+            if not (ht and at and wk is not None):
+                continue
+            key = f"W{int(wk):02d}_{ht}_{at}"
+            gp = game_probs.get(key)
+            if not gp:
+                continue
+            hp = gp['mean_prob']
+            ms = gp['model_spread']
+            winner = ht if hp >= 0.5 else at
+            conf = round(max(hp, 1.0 - hp) * 100, 1)
+            spread = row.get('spread_line')
+            ats = winner
+            if pd.notna(spread):
+                try:
+                    sl_val = float(spread)
+                    ats = ht if ms > sl_val else at
+                except (ValueError, TypeError):
+                    pass
+            pred_winners[i] = winner
+            pred_confs[i]   = conf
+            pred_ats[i]     = ats
+            pred_probs[i]   = round(hp, 4)
+
+    out = schedule_df.copy()
+    out['pred_winner']  = pred_winners
+    out['pred_su_conf'] = pred_confs
+    out['pred_ats_pick'] = pred_ats
+    out['pred_prob']    = pred_probs
+    return out
+```
+
+`build_year()`'s call site (`fallback_engine = _get_engine() if year >= current_year else None`, then `_apply_predictions(schedule_df, year, pred_lookup, fallback_engine=fallback_engine)`) is unchanged — only `_apply_predictions()`'s internals change.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `pytest tests/test_cache_builder.py -v`
+Expected: PASS
+
+- [ ] **Step 5: Run the full cache_builder test suite to check for regressions**
+
+Run: `pytest tests/test_cache_builder.py -v`
+Expected: PASS — the completed-game path (`pred_lookup` hits) is untouched code.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add scripts/cache_builder.py tests/test_cache_builder.py
+git commit -m "feat: wire cache_builder's upcoming-game fallback to simulate_season + real results"
+```
+
+---
+
+### Task 6: ESPN-aware re-simulate mode + `schedule_kickoffs.py` trigger
+
+**Files:**
+- Modify: `scripts/cache_builder.py`
+- Modify: `scripts/schedule_kickoffs.py`
+- Test: `tests/test_cache_builder.py`
+- Test: `tests/test_schedule_kickoffs.py`
+
+**Interfaces:**
+- Consumes: `get_espn_injury_overrides(target_games, season, week, rawdata_dir)` (Task 3), `NNProjectionEngine.initialize(season, espn_overrides=...)` and `.simulate_season(...)` (Task 4), `_build_completed_results(games, year)` (Task 5).
+- Produces: `_publish_game_probs(game_ids: list, games: pd.DataFrame, year: int, game_probs: dict) -> int`; a new `--resimulate <comma-separated-game-ids>` CLI arg on `cache_builder.py`'s `main()`; `enqueue_task(tasks_client, run_at, job_name, job_args=None)` (existing function, gains a 4th optional parameter); `compute_kickoff_clusters_with_games(games, season, week) -> list[tuple[datetime, list]]` (new).
+
+- [ ] **Step 1: Write the failing tests for `cache_builder.py`**
 
 Add to `tests/test_cache_builder.py`:
 
 ```python
-import pandas as pd
-
-
 def _games_df():
     return pd.DataFrame([
         {"game_id": "2026_03_KC_WAS", "season": 2026, "week": 3,
@@ -775,19 +1295,19 @@ def _games_df():
     ])
 
 
-class TestPublishGames:
+class TestPublishGameProbs:
     def test_publishes_only_requested_game(self):
-        from scripts.cache_builder import _publish_games
+        from scripts.cache_builder import _publish_game_probs
 
-        pred_lookup = {
-            (2026, 3, "WAS", "KC"): {
-                "pred_winner": "KC", "pred_su_conf": 62.0,
-                "pred_ats_pick": "KC", "pred_prob": 0.62,
-            },
+        game_probs = {
+            "W03_WAS_KC": {"mean_prob": 0.62, "model_spread": -3.0,
+                           "home_team": "WAS", "away_team": "KC", "week": 3},
+            "W03_LAC_SF": {"mean_prob": 0.55, "model_spread": -1.0,
+                           "home_team": "LAC", "away_team": "SF", "week": 3},
         }
         with patch("scripts.cache_builder.get_game_predictions", return_value={}), \
              patch("scripts.cache_builder.write_game_predictions") as mock_write:
-            n = _publish_games(["2026_03_KC_WAS"], _games_df(), 2026, pred_lookup)
+            n = _publish_game_probs(["2026_03_KC_WAS"], _games_df(), 2026, game_probs)
 
         assert n == 1
         mock_write.assert_called_once()
@@ -797,151 +1317,166 @@ class TestPublishGames:
         assert "W03_LAC_SF" not in merged  # the other game was never touched
 
     def test_preserves_existing_richer_fields_for_untouched_games(self):
-        from scripts.cache_builder import _publish_games
+        from scripts.cache_builder import _publish_game_probs
 
         existing = {"W03_LAC_SF": {"model_spread": -3.5, "edge_vs_vegas": 1.2}}
-        pred_lookup = {
-            (2026, 3, "WAS", "KC"): {
-                "pred_winner": "KC", "pred_su_conf": 62.0,
-                "pred_ats_pick": "KC", "pred_prob": 0.62,
-            },
+        game_probs = {
+            "W03_WAS_KC": {"mean_prob": 0.62, "model_spread": -3.0,
+                           "home_team": "WAS", "away_team": "KC", "week": 3},
         }
         with patch("scripts.cache_builder.get_game_predictions", return_value=existing), \
              patch("scripts.cache_builder.write_game_predictions") as mock_write:
-            _publish_games(["2026_03_KC_WAS"], _games_df(), 2026, pred_lookup)
+            _publish_game_probs(["2026_03_KC_WAS"], _games_df(), 2026, game_probs)
 
         _year, merged = mock_write.call_args[0]
         assert merged["W03_LAC_SF"] == existing["W03_LAC_SF"]
 
     def test_no_matching_game_id_returns_zero(self):
-        from scripts.cache_builder import _publish_games
+        from scripts.cache_builder import _publish_game_probs
         with patch("scripts.cache_builder.write_game_predictions") as mock_write:
-            n = _publish_games(["nonexistent"], _games_df(), 2026, {})
+            n = _publish_game_probs(["nonexistent"], _games_df(), 2026, {})
         assert n == 0
         mock_write.assert_not_called()
 
-    def test_no_prediction_available_for_requested_game_returns_zero(self):
-        from scripts.cache_builder import _publish_games
+    def test_no_game_probs_entry_for_requested_game_returns_zero(self):
+        from scripts.cache_builder import _publish_game_probs
         with patch("scripts.cache_builder.get_game_predictions", return_value={}), \
              patch("scripts.cache_builder.write_game_predictions") as mock_write:
-            n = _publish_games(["2026_03_KC_WAS"], _games_df(), 2026, {})
+            n = _publish_game_probs(["2026_03_KC_WAS"], _games_df(), 2026, {})
         assert n == 0
         mock_write.assert_not_called()
 
 
-class TestGamesModeWiring:
-    def test_games_flag_skips_full_multi_year_build(self, monkeypatch):
-        """--games must not call build_year() (the full standings/analytics
-        rebuild) at all -- only the scoped publish path."""
+class TestResimulateModeWiring:
+    def test_resimulate_flag_skips_full_multi_year_build(self, monkeypatch):
+        """--resimulate must not call build_year() (the full standings/analytics
+        rebuild) at all -- only the scoped ESPN-check + re-simulate + publish path."""
         import sys
         from scripts.cache_builder import main
 
-        monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--games", "2026_03_KC_WAS", "--skip-sync"])
+        monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--resimulate", "2026_03_KC_WAS", "--skip-sync"])
         with patch("scripts.cache_builder.load_data") as mock_load_data, \
              patch("scripts.cache_builder.build_year") as mock_build_year, \
-             patch("scripts.cache_builder.NNPredictionService"), \
-             patch("scripts.cache_builder.XGBPredictionService"), \
-             patch("scripts.cache_builder.LRPredictionService"), \
-             patch("scripts.cache_builder.build_master_feature_table", return_value=pd.DataFrame()), \
-             patch("scripts.cache_builder._build_pred_lookup", return_value={}), \
-             patch("scripts.cache_builder._publish_games", return_value=0) as mock_publish, \
+             patch("scripts.cache_builder.NNProjectionEngine") as mock_engine_cls, \
+             patch("scripts.cache_builder._publish_game_probs", return_value=0) as mock_publish, \
              patch("scripts.cache_builder._fs"):
             mock_load_data.return_value = (
                 pd.DataFrame(), pd.DataFrame(), _games_df(), pd.DataFrame(),
                 pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
             )
+            mock_engine_cls.return_value.simulate_season.return_value = {"game_probs": {}}
             main()
 
         mock_build_year.assert_not_called()
+        mock_engine_cls.return_value.initialize.assert_called_once()
         mock_publish.assert_called_once()
 
-    def test_games_flag_scopes_feature_table_to_one_season(self, monkeypatch):
+    def test_resimulate_flag_fetches_espn_overrides_and_passes_to_initialize(self, monkeypatch):
         import sys
         from scripts.cache_builder import main
 
-        monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--games", "2026_03_KC_WAS", "--skip-sync"])
+        monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--resimulate", "2026_03_KC_WAS", "--skip-sync"])
         with patch("scripts.cache_builder.load_data") as mock_load_data, \
              patch("scripts.cache_builder.build_year"), \
-             patch("scripts.cache_builder.NNPredictionService"), \
-             patch("scripts.cache_builder.XGBPredictionService"), \
-             patch("scripts.cache_builder.LRPredictionService"), \
-             patch("scripts.cache_builder.build_master_feature_table", return_value=pd.DataFrame()) as mock_bmft, \
-             patch("scripts.cache_builder._build_pred_lookup", return_value={}), \
-             patch("scripts.cache_builder._publish_games", return_value=1), \
+             patch("scripts.cache_builder.NNProjectionEngine") as mock_engine_cls, \
+             patch("services.espn_injury_service.get_espn_injury_overrides",
+                   return_value={(3, "QB1"): 0.0}) as mock_espn, \
+             patch("scripts.cache_builder._publish_game_probs", return_value=1), \
              patch("scripts.cache_builder._fs"):
             mock_load_data.return_value = (
                 pd.DataFrame(), pd.DataFrame(), _games_df(), pd.DataFrame(),
                 pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
             )
+            mock_engine_cls.return_value.simulate_season.return_value = {"game_probs": {}}
             main()
 
-        _args, kwargs = mock_bmft.call_args
-        assert kwargs["min_season"] == 2026
-        assert kwargs["max_season"] == 2026
-```
+        mock_espn.assert_called_once()
+        init_kwargs = mock_engine_cls.return_value.initialize.call_args.kwargs
+        assert init_kwargs["espn_overrides"] == {(3, "QB1"): 0.0}
 
-Add `from unittest.mock import patch` to the top of `tests/test_cache_builder.py` if not already imported (it already is, per the existing `@patch` decorators — confirm before adding a duplicate import).
+    def test_resimulate_flag_espn_failure_still_publishes(self, monkeypatch):
+        """ESPN fetch failing must not abort the re-simulate -- it just proceeds
+        with no overrides, matching the established graceful-degradation pattern."""
+        import sys
+        from scripts.cache_builder import main
+
+        monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--resimulate", "2026_03_KC_WAS", "--skip-sync"])
+        with patch("scripts.cache_builder.load_data") as mock_load_data, \
+             patch("scripts.cache_builder.build_year"), \
+             patch("scripts.cache_builder.NNProjectionEngine") as mock_engine_cls, \
+             patch("services.espn_injury_service.get_espn_injury_overrides",
+                   side_effect=Exception("ESPN down")), \
+             patch("scripts.cache_builder._publish_game_probs", return_value=1) as mock_publish, \
+             patch("scripts.cache_builder._fs"):
+            mock_load_data.return_value = (
+                pd.DataFrame(), pd.DataFrame(), _games_df(), pd.DataFrame(),
+                pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+            )
+            mock_engine_cls.return_value.simulate_season.return_value = {"game_probs": {}}
+            main()  # must not raise
+
+        mock_publish.assert_called_once()
+```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pytest tests/test_cache_builder.py -v`
-Expected: FAIL — `_publish_games` does not exist; `main()` has no `--games` argument.
+Run: `pytest tests/test_cache_builder.py::TestPublishGameProbs tests/test_cache_builder.py::TestResimulateModeWiring -v`
+Expected: FAIL — `_publish_game_probs` doesn't exist; `main()` has no `--resimulate` argument; `NNProjectionEngine` isn't imported into `cache_builder.py` yet.
 
-- [ ] **Step 3: Implement `_publish_games()` and the `--games` mode**
+- [ ] **Step 3: Implement the `cache_builder.py` side**
 
-In `scripts/cache_builder.py`, add `RAWDATA_DIR` to the existing `nn_feature_engine` import:
+`NNProjectionEngine` is already imported at module level (`from services.nn_projection_engine import NNProjectionEngine`, used by `_get_engine()` inside `build_year()`) — no new import needed.
 
-```python
-from services.nn_feature_engine import (
-    build_master_feature_table, FEATURE_COLUMNS, _normalize_team, RAWDATA_DIR,
-)
-```
-
-Add near `_build_pred_lookup` (same section of the file):
+Add near `_build_completed_results`:
 
 ```python
-def _publish_games(game_ids: list, games: pd.DataFrame, year: int, pred_lookup: dict) -> int:
-    """Scoped publish: apply predictions to just game_ids and write only
-    those rows into game_predictions, without touching wins_pool_standings/
-    player_winlossmatrix/weekbyweek/prediction_snapshot or the
-    analytics_cache schedule_enriched blob (unread by any live route -- see
-    docs/superpowers/specs/2026-08-22-injury-aware-roster-value-design.md).
+RESIMULATE_N_SIMS = 2000
+
+
+def _publish_game_probs(game_ids: list, games: pd.DataFrame, year: int, game_probs: dict) -> int:
+    """Publish only game_ids' entries from a simulate_season() game_probs_out
+    dict into game_predictions, via the same merge-preserving path
+    build_year() already uses -- every other stored game (including richer
+    fields like model_spread/edge_vs_vegas the merge preserves) is untouched.
     """
     target = games[games["game_id"].astype(str).isin(game_ids)].copy()
     if target.empty:
-        print(f"[cache_builder] --games: no matching rows for {game_ids}")
+        print(f"[cache_builder] --resimulate: no matching rows for {game_ids}")
         return 0
 
-    pred_winners, pred_confs, pred_ats, pred_probs = [], [], [], []
+    pmap = {}
     for _, row in target.iterrows():
         ht = _normalize_team(str(row.get('home_team', '') or ''))
         at = _normalize_team(str(row.get('away_team', '') or ''))
         wk = row.get('week')
-        pred = pred_lookup.get((year, int(wk), ht, at)) if (ht and at and wk is not None) else None
-        pred_winners.append(pred['pred_winner'] if pred else None)
-        pred_confs.append(pred['pred_su_conf'] if pred else None)
-        pred_ats.append(pred['pred_ats_pick'] if pred else None)
-        pred_probs.append(pred['pred_prob'] if pred else None)
-
-    target['pred_winner'] = pred_winners
-    target['pred_su_conf'] = pred_confs
-    target['pred_ats_pick'] = pred_ats
-    target['pred_prob'] = pred_probs
-
-    pmap = {}
-    for _, r in target.dropna(subset=['pred_winner']).iterrows():
-        ht = _normalize_team(str(r.get('home_team', '') or ''))
-        at = _normalize_team(str(r.get('away_team', '') or ''))
-        wk = r.get('week')
-        pmap[f"W{int(wk):02d}_{ht}_{at}"] = {
-            'pred_prob':     r.get('pred_prob'),
-            'pred_winner':   r.get('pred_winner'),
-            'pred_su_conf':  r.get('pred_su_conf'),
-            'pred_ats_pick': r.get('pred_ats_pick'),
+        if not (ht and at and wk is not None):
+            continue
+        key = f"W{int(wk):02d}_{ht}_{at}"
+        gp = game_probs.get(key)
+        if not gp:
+            continue
+        hp = gp['mean_prob']
+        ms = gp['model_spread']
+        winner = ht if hp >= 0.5 else at
+        conf = round(max(hp, 1.0 - hp) * 100, 1)
+        spread = row.get('spread_line')
+        ats = winner
+        if pd.notna(spread):
+            try:
+                sl_val = float(spread)
+                ats = ht if ms > sl_val else at
+            except (ValueError, TypeError):
+                pass
+        pmap[key] = {
+            'pred_prob':     round(hp, 4),
+            'pred_winner':   winner,
+            'pred_su_conf':  conf,
+            'pred_ats_pick': ats,
+            'model_spread':  ms,
         }
 
     if not pmap:
-        print("[cache_builder] --games: no predictions produced for requested games")
+        print("[cache_builder] --resimulate: no predictions produced for requested games")
         return 0
 
     existing = get_game_predictions(year)
@@ -950,30 +1485,28 @@ def _publish_games(game_ids: list, games: pd.DataFrame, year: int, pred_lookup: 
     return len(pmap)
 ```
 
-In `main()`, add the new argument and branch. Add to the `argparse` block:
+Add the CLI argument to `main()`'s `argparse` block:
 
 ```python
-    parser.add_argument('--games', type=str, default=None,
-                        help="Comma-separated game_ids to scope a cheap single-slate "
-                             "repredict to, instead of the full multi-year rebuild. "
-                             "Publishes only to game_predictions.")
+    parser.add_argument('--resimulate', type=str, default=None,
+                        help="Comma-separated game_ids to re-run simulate_season() for "
+                             "with a fresh ESPN injury check, publishing only those "
+                             "games' predictions. For the close-to-kickoff last-mile refresh.")
 ```
 
-After the existing `if not args.skip_sync:` block and the `standings, teams, games, ... = load_data()` line, insert the scoped branch before the normal `available_years`/full-build flow:
+Insert the new branch in `main()`, right after `standings, teams, games, players, draft_order, draft_results, draft_order_rules = load_data()` and before `available_years = get_available_years(draft_results)`:
 
 ```python
-    print("[cache_builder] Loading raw data from Firestore / local cache...")
-    standings, teams, games, players, draft_order, draft_results, draft_order_rules = load_data()
-
-    if args.games:
-        game_ids = [g.strip() for g in args.games.split(",") if g.strip()]
+    if args.resimulate:
+        game_ids = [g.strip() for g in args.resimulate.split(",") if g.strip()]
         target_rows = games[games["game_id"].astype(str).isin(game_ids)]
         if target_rows.empty:
-            print(f"[cache_builder] --games: no matching rows for {game_ids}; nothing to do")
+            print(f"[cache_builder] --resimulate: no matching rows for {game_ids}; nothing to do")
             return
 
         year = int(target_rows["season"].iloc[0])
         week = int(target_rows["week"].iloc[0])
+
         espn_overrides = {}
         try:
             from services.espn_injury_service import get_espn_injury_overrides
@@ -985,17 +1518,15 @@ After the existing `if not args.skip_sync:` block and the `standings, teams, gam
         except Exception as e:
             print(f"[cache_builder] ESPN override fetch failed (non-fatal): {e}")
 
-        print("[cache_builder] Loading ML models...")
-        nn_svc  = NNPredictionService();  nn_svc.load_model()
-        xgb_svc = XGBPredictionService(); xgb_svc.load_model()
-        lr_svc  = LRPredictionService();  lr_svc.load_model()
+        engine = NNProjectionEngine()
+        engine.initialize(year, espn_overrides=espn_overrides)
 
-        print(f"[cache_builder] Building feature table (scoped to {year})...")
-        ft = build_master_feature_table(min_season=year, max_season=year, espn_overrides=espn_overrides)
-        pred_lookup = _build_pred_lookup(ft, nn_svc, xgb_svc, lr_svc)
+        yr_games = games[games["season"] == year].copy()
+        completed_results = _build_completed_results(yr_games, year)
+        sim = engine.simulate_season(yr_games, n_sims=RESIMULATE_N_SIMS, completed_results=completed_results)
 
-        n = _publish_games(game_ids, games, year, pred_lookup)
-        print(f"[cache_builder] --games: published {n} prediction(s).")
+        n = _publish_game_probs(game_ids, games, year, sim.get("game_probs", {}))
+        print(f"[cache_builder] --resimulate: published {n} prediction(s).")
 
         db = _fs.client()
         db.collection("metadata").document("cache_control").set({"last_update": time.time()})
@@ -1004,38 +1535,12 @@ After the existing `if not args.skip_sync:` block and the `standings, teams, gam
     available_years = get_available_years(draft_results)
 ```
 
-(The rest of `main()` — the full multi-year build — is unchanged, and is skipped entirely by the early `return` above when `--games` is passed.)
-
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Run the `cache_builder.py` tests**
 
 Run: `pytest tests/test_cache_builder.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Run the full cache_builder test suite to check for regressions**
-
-Run: `pytest tests/test_cache_builder.py -v`
-Expected: PASS — the default (no `--games`) path through `main()` is untouched code, only the new early-return branch was added above it.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add scripts/cache_builder.py tests/test_cache_builder.py
-git commit -m "feat: add scoped --games repredict mode to cache_builder.py"
-```
-
----
-
-### Task 5: `schedule_kickoffs.py` — enqueue the scoped repredict close to kickoff
-
-**Files:**
-- Modify: `scripts/schedule_kickoffs.py`
-- Test: `tests/test_schedule_kickoffs.py`
-
-**Interfaces:**
-- Consumes: `compute_kickoff_clusters()`, `enqueue_task()` (existing, both modified here).
-- Produces: `enqueue_task(tasks_client, run_at, job_name, job_args=None)` — existing function gains a 4th optional parameter; `compute_kickoff_clusters_with_games(games, season, week) -> list[tuple[datetime, list[str]]]` — new function returning each kickoff cluster paired with its game_ids, needed so `main()` knows which `--games` value to pass per cluster.
-
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 5: Write the failing tests for `schedule_kickoffs.py`**
 
 Add to `tests/test_schedule_kickoffs.py`:
 
@@ -1059,17 +1564,17 @@ class TestEnqueueTaskWithOverrides:
         client.queue_path.return_value = "projects/test-project/locations/us-east1/queues/test-queue"
 
         enqueue_task(client, self._kickoff(), "winspool-predict-daily",
-                      job_args=["--games", "2026_03_KC_WAS"])
+                      job_args=["--resimulate", "2026_03_KC_WAS"])
 
         task = client.create_task.call_args.kwargs["request"]["task"]
         assert "body" in task["http_request"]
         import json
         body = json.loads(task["http_request"]["body"])
-        assert body["overrides"]["containerOverrides"][0]["args"] == ["--games", "2026_03_KC_WAS"]
+        assert body["overrides"]["containerOverrides"][0]["args"] == ["--resimulate", "2026_03_KC_WAS"]
 
     def test_no_job_args_omits_body(self, monkeypatch):
-        """Existing sync/predict calls (no job_args) must be unaffected --
-        no body means the job runs with its normal configured command."""
+        """Existing sync/predict calls (no job_args) must be unaffected -- no
+        body means the job runs with its normal configured command."""
         from unittest.mock import MagicMock
         from scripts.schedule_kickoffs import enqueue_task
 
@@ -1106,25 +1611,25 @@ class TestComputeKickoffClustersWithGames:
         assert late == ["g3"]
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 6: Run tests to verify they fail**
 
 Run: `pytest tests/test_schedule_kickoffs.py -v`
 Expected: FAIL — `enqueue_task()` doesn't accept `job_args`; `compute_kickoff_clusters_with_games` doesn't exist.
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 7: Implement the `schedule_kickoffs.py` side**
 
-In `scripts/schedule_kickoffs.py`, add near `PREDICT_LEAD_MINUTES`:
+Add near `PREDICT_LEAD_MINUTES`:
 
 ```python
 PREDICT_LEAD_MINUTES = 60
-# How close to kickoff the ESPN check + scoped repredict runs. Anchored to
-# the NFL's official inactive-list deadline (kickoff-90min, league rule) --
-# this leaves 20 minutes of margin after that deadline before this task
-# fires. NOT yet validated against a measured runtime of the new --games
-# mode (Task 4) in production: before relying on this in-season, time a
-# real invocation (see Step 5 below) and adjust this constant if it runs
-# longer than the margin allows.
-REPREDICT_LEAD_MINUTES = 70
+# How close to kickoff the ESPN check + re-simulate runs. Anchored to the
+# NFL's official inactive-list deadline (kickoff-90min, league rule) -- this
+# leaves 20 minutes of margin after that deadline before this task fires.
+# NOT yet validated against a measured runtime of --resimulate (Task 6) in
+# production: before relying on this in-season, time a real invocation (see
+# Step 9 below) and adjust this constant if it runs longer than the margin
+# allows.
+RESIMULATE_LEAD_MINUTES = 70
 ```
 
 Add `compute_kickoff_clusters_with_games()` next to `compute_kickoff_clusters()`:
@@ -1132,7 +1637,7 @@ Add `compute_kickoff_clusters_with_games()` next to `compute_kickoff_clusters()`
 ```python
 def compute_kickoff_clusters_with_games(games: pd.DataFrame, season: int, week: int) -> list[tuple[datetime, list]]:
     """Same clustering as compute_kickoff_clusters(), but paired with each
-    cluster's game_ids so the caller knows what to pass to --games."""
+    cluster's game_ids so the caller knows what to pass to --resimulate."""
     wk = games[
         (games["season"] == season)
         & (games["week"] == week)
@@ -1172,10 +1677,10 @@ def enqueue_task(tasks_client, run_at: datetime, job_name: str, job_args: list =
         "oauth_token": {"service_account_email": GCP_SCHEDULER_SERVICE_ACCOUNT},
     }
     if job_args:
-        # Cloud Run Jobs Admin API's :run RunJobRequest body -- overrides
-        # the container's configured args for just this execution, so the
-        # scoped repredict can reuse winspool-predict-daily's existing job
-        # instead of provisioning a new one.
+        # Cloud Run Jobs Admin API's :run RunJobRequest body -- overrides the
+        # container's configured args for just this execution, so the
+        # re-simulate can reuse winspool-predict-daily's existing job instead
+        # of provisioning a new one.
         body = {"overrides": {"containerOverrides": [{"args": job_args}]}}
         http_request["body"] = json.dumps(body).encode("utf-8")
 
@@ -1199,40 +1704,38 @@ Update `main()`'s enqueue loop:
             enqueue_task(client, kickoff - timedelta(minutes=SYNC_LEAD_MINUTES), "winspool-sync-daily")
             enqueue_task(client, kickoff - timedelta(minutes=PREDICT_LEAD_MINUTES), "winspool-predict-daily")
             enqueue_task(
-                client, kickoff - timedelta(minutes=REPREDICT_LEAD_MINUTES), "winspool-predict-daily",
-                job_args=["--games", ",".join(str(g) for g in game_ids)],
+                client, kickoff - timedelta(minutes=RESIMULATE_LEAD_MINUTES), "winspool-predict-daily",
+                job_args=["--resimulate", ",".join(str(g) for g in game_ids)],
             )
 
         print(f"Enqueued {len(clusters_with_games)} kickoff cluster(s) x 3 tasks for {season} week {week}.")
 ```
 
-(`compute_kickoff_clusters()` itself is unchanged — kept as-is for any other caller — but `main()`'s loop now uses `compute_kickoff_clusters_with_games()` exclusively, including for the final count, rather than computing the clustering twice.)
-
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 8: Run tests to verify they pass**
 
 Run: `pytest tests/test_schedule_kickoffs.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Measure the scoped mode's real runtime and finalize `REPREDICT_LEAD_MINUTES`**
+- [ ] **Step 9: Measure the re-simulate mode's real runtime and finalize `RESIMULATE_LEAD_MINUTES`**
 
-Once Task 4 is deployed (or runnable locally against real `rawdata/`), time a real invocation:
+Once this task is deployed (or runnable locally against real `rawdata/`), time a real invocation:
 
 ```bash
-time python scripts/cache_builder.py --games <a_real_game_id> --skip-sync
+time python scripts/cache_builder.py --resimulate <a_real_game_id> --skip-sync
 ```
 
-If the measured wall-clock time plus a safety margin (at least 2x measured, to account for cold model loads on Cloud Run) exceeds `REPREDICT_LEAD_MINUTES` (70) minutes, increase the constant in `scripts/schedule_kickoffs.py` accordingly and re-run this plan's Step 4 to confirm tests still pass (they assert behavior, not the exact constant value, so they should be unaffected either way).
+If the measured wall-clock time plus a safety margin (at least 2x measured, to account for cold model loads on Cloud Run) exceeds `RESIMULATE_LEAD_MINUTES` (70) minutes, increase the constant in `scripts/schedule_kickoffs.py` accordingly and re-run this task's tests to confirm they still pass (they assert behavior, not the exact constant value).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add scripts/schedule_kickoffs.py tests/test_schedule_kickoffs.py
-git commit -m "feat: enqueue scoped ESPN-aware repredict close to kickoff"
+git add scripts/cache_builder.py scripts/schedule_kickoffs.py tests/test_cache_builder.py tests/test_schedule_kickoffs.py
+git commit -m "feat: ESPN-aware re-simulate mode enqueued close to kickoff"
 ```
 
 ---
 
-### Task 6: Retrain NN v15 / XGB v9 / LR v7
+### Task 7: Retrain NN v15 / XGB v9 / LR v7
 
 **Files:**
 - No new files — runs existing training/evaluation scripts.
@@ -1304,6 +1807,7 @@ git commit -m "feat: retrain NN v15 + XGB v9 + LR v7 (graded injury weighting + 
 
 ## Self-Review Notes
 
-- **Spec coverage:** Part A → Task 1. Plumbing needed to make Part A's data reach the model → Task 2. Part B's ESPN signal → Task 3. Part B's scoped repredict + publish-through-existing-store → Task 4. Part B's trigger/timing → Task 5. Bundled retrain → Task 6. The spec's "related finding" (dead `analytics_cache` reads) and all non-goals are explicitly *not* tasks, matching the spec.
-- **Type consistency:** `espn_overrides`/`avail_mult` keyed as `Tuple[int, str]` (`(week, gsis_id)`) consistently across Task 1 (`_load_injury_report`, `compute_roster_value`), Task 2 (`build_master_feature_table`), and Task 3 (`get_espn_injury_overrides`'s return shape). `game_ids` are `list[str]` (nflverse `game_id` values) consistently across Task 4 and Task 5.
-- **No placeholders:** `REPREDICT_LEAD_MINUTES`'s value (70) is a real, reasoned default (kickoff−90min official deadline + 20min margin), not a TBD — Task 5 Step 5 makes tuning it an explicit, concrete follow-up action rather than leaving it unset.
+- **Spec coverage:** Part A → Task 1. Plumbing needed to make Part A's data reach the model → Task 2. Part B's ESPN signal → Task 3. Part B0 (the discovered prerequisite — week-aware roster value inside `NNProjectionEngine`) → Task 4. Part B0's daily-job wiring (`simulate_season()` + real results replacing the static fallback) → Task 5. Part B's ESPN-aware re-simulate + trigger/timing → Task 6. Bundled retrain → Task 7. The spec's "related finding" (dead `analytics_cache` reads) and all non-goals are explicitly *not* tasks, matching the spec.
+- **Revision history:** Tasks 4-7 were rewritten after Task 4's original design (a scoped `--games` feature-table repredict) was reviewed and found unable to work — `build_master_feature_table()` unconditionally drops unplayed games, so that design could never repredict the very games Part B exists to serve. The original Task 4 commit was reverted (`git revert`, preserved in history) rather than force-edited in place. See the spec's "Part B0" section for the full trace.
+- **Type consistency:** `espn_overrides`/`avail_mult` keyed as `Tuple[int, str]` (`(week, gsis_id)`) consistently across Task 1 (`_load_injury_report`, `compute_roster_value`), Task 2 (`build_master_feature_table`), Task 3 (`get_espn_injury_overrides`'s return shape), and Task 4 (`NNProjectionEngine.initialize`). The roster-value cache is keyed `Tuple[int, int, str]` (`(season, week, team)`) consistently between Task 1's `compute_roster_value()` return shape and Task 4's `_precompute_static_features()` lookup. `game_ids` are `list[str]` (nflverse `game_id` values) consistently across Task 6. `game_probs`/`game_probs_out` entries (`{mean_prob, model_spread, home_team, away_team, week}`) are used identically by Task 5's `_apply_predictions()` and Task 6's `_publish_game_probs()`.
+- **No placeholders:** `RESIMULATE_LEAD_MINUTES`'s value (70) is a real, reasoned default (kickoff−90min official deadline + 20min margin), not a TBD — Task 6 Step 9 makes tuning it an explicit, concrete follow-up action rather than leaving it unset. `SIMULATE_SEASON_N_SIMS` (5000, Task 5) and `RESIMULATE_N_SIMS` (2000, Task 6) are both real, functioning defaults with a stated rationale (daily-job thoroughness vs. last-mile refresh speed), not guesses left for later.
