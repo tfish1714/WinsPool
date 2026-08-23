@@ -208,6 +208,85 @@ def _project_fold_season(fold_year, nn_svc, xgb_svc, lr_svc):
     return model_wins, used_preseason_profiles
 
 
+def _project_fold_in_season(fold_year, nn_svc, xgb_svc, lr_svc, n_sims: int = 2000) -> list:
+    """Walk fold_year week by week, feeding in only real results from weeks
+    STRICTLY before the current one, calling the exact production mechanism
+    (NNProjectionEngine.simulate_season() + completed_results) fresh at each
+    week boundary -- unlike _project_fold_season(), which always simulates
+    the whole season from scratch with completed_results=None (pure
+    preseason projection, never exercises the in-season blending path
+    cache_builder.py's daily job actually uses). Returns one row per week
+    actually scored (a bye/cancelled week with no playable games is
+    skipped, not zero-filled).
+
+    The feature table itself is NOT rebuilt per week -- only completed_results
+    changes; simulate_season() is what's re-run at each step.
+    """
+    from services.nn_projection_engine import NNProjectionEngine
+    from scripts.daily_nfl_sync import load_games
+    from scripts.cache_builder import _build_completed_results
+    from services.nn_feature_engine import _normalize_team
+
+    engine = NNProjectionEngine(nn_svc=nn_svc, xgb_svc=xgb_svc, lr_svc=lr_svc)
+    engine.initialize(fold_year)
+
+    all_games = load_games()
+    yr_games = all_games[
+        (all_games["season"] == fold_year) & (all_games["game_type"] == "REG")
+    ].copy()
+    yr_games["home_team"] = yr_games["home_team"].apply(_normalize_team)
+    yr_games["away_team"] = yr_games["away_team"].apply(_normalize_team)
+
+    schedule = yr_games[["season", "week", "home_team", "away_team"]].copy()
+
+    rows = []
+    for week in sorted(int(w) for w in yr_games["week"].dropna().unique()):
+        # Only results from weeks strictly before this one are "known" at
+        # this point in the walk -- this is what makes each week's score
+        # genuinely out-of-sample, not just out-of-training-set.
+        prior_games = yr_games[yr_games["week"] < week]
+        completed_results = _build_completed_results(prior_games, fold_year)
+
+        sim = engine.simulate_season(schedule, n_sims=n_sims, completed_results=completed_results)
+        game_probs = sim.get("game_probs", {})
+
+        week_games = yr_games[yr_games["week"] == week]
+        n_games = 0
+        n_correct = 0
+        for _, row in week_games.iterrows():
+            res = row.get("result")
+            if pd.isna(res):
+                continue  # game not actually played (bye week padding, cancellation)
+            key = f"W{week:02d}_{row['home_team']}_{row['away_team']}"
+            gp = game_probs.get(key)
+            if not gp:
+                continue
+            n_games += 1
+            pred_home_win = gp["mean_prob"] >= 0.5
+            actual_home_win = float(res) > 0
+            if pred_home_win == actual_home_win:
+                n_correct += 1
+
+        if n_games == 0:
+            continue
+        rows.append({
+            "fold_year": fold_year,
+            "week": week,
+            "games": n_games,
+            "correct": n_correct,
+            "accuracy_pct": round(100 * n_correct / n_games, 1),
+        })
+
+    return rows
+
+
+def run_fold_in_season(fold_year, artifacts_dir, force: bool = False, n_sims: int = 2000) -> dict:
+    feature_table = build_master_feature_table(min_season=2006, max_season=fold_year - 1)
+    nn_svc, xgb_svc, lr_svc = _get_or_train_fold_models(fold_year, artifacts_dir, feature_table, force)
+    rows = _project_fold_in_season(fold_year, nn_svc, xgb_svc, lr_svc, n_sims=n_sims)
+    return {"rows": rows}
+
+
 def _actual_wins(fold_year):
     from services.db_service import get_collection_df
     df = get_collection_df("nfl_standings", filters=[("season", "==", fold_year)])
@@ -288,13 +367,75 @@ def _print_summary(report_df):
               "historical folds could exercise).")
 
 
+def _run_in_season_mode(args):
+    """--mode in_season: walk each fold week-by-week with real completed_results,
+    scoring the actual production mechanism instead of a pure preseason simulation.
+    Separate report file, separate (simpler) summary -- doesn't touch the
+    existing preseason-mode report or its consensus-comparison metrics.
+    """
+    from scripts.daily_nfl_sync import load_games
+
+    games = load_games()
+    first_fold_games = games[
+        (games["season"] == args.seasons[0]) & (games["game_type"] == "REG") & games["result"].notna()
+    ]
+    if first_fold_games.empty:
+        print(f"ERROR: no completed REG games found for season {args.seasons[0]} in rawdata/schedules/games.csv.")
+        print("Run scripts/sync_nflverse_data.py first.")
+        sys.exit(1)
+
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    all_rows = []
+    for fold_year in range(args.seasons[0], args.seasons[1] + 1):
+        print(f"\n{'=' * 60}\n  In-Season Fold {fold_year} (n_sims={args.n_sims})\n{'=' * 60}")
+        try:
+            result = run_fold_in_season(fold_year, ARTIFACTS_DIR, force=args.force, n_sims=args.n_sims)
+        except Exception:
+            logger.exception("In-season fold %d failed", fold_year)
+            continue
+        for row in result["rows"]:
+            print(f"  Week {row['week']:>2} | {row['correct']}/{row['games']} correct ({row['accuracy_pct']}%)")
+        all_rows.extend(result["rows"])
+
+        report_df = pd.DataFrame(all_rows)
+        report_df.to_csv(REPORTS_DIR / "walk_forward_in_season_validation.csv", index=False)
+
+    if not all_rows:
+        print("\nNo in-season folds completed successfully.")
+        return
+
+    report_df = pd.DataFrame(all_rows)
+    print(f"\n{'=' * 60}\n  In-Season Walk-Forward Summary\n{'=' * 60}")
+    print(f"  {'Fold':<8}{'Accuracy':<12}{'Games':<8}")
+    for fold_year, grp in report_df.groupby("fold_year"):
+        acc = 100 * grp["correct"].sum() / grp["games"].sum()
+        print(f"  {fold_year:<8}{acc:<12.1f}{grp['games'].sum():<8}")
+    overall_acc = 100 * report_df["correct"].sum() / report_df["games"].sum()
+    print(f"  {'ALL':<8}{overall_acc:<12.1f}{report_df['games'].sum():<8}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Walk-forward validation harness")
     parser.add_argument("--seasons", type=int, nargs=2, default=[FOLD_START_DEFAULT, FOLD_END_DEFAULT],
                          metavar=("START", "END"))
     parser.add_argument("--force", action="store_true",
                          help="Retrain fold models even if cached artifacts exist")
+    parser.add_argument("--mode", choices=["preseason", "in_season"], default="preseason",
+                         help="'preseason' (default): existing pure-simulation-vs-consensus "
+                              "comparison. 'in_season': walk each fold week-by-week with real "
+                              "completed_results, scoring the actual production mechanism "
+                              "(cache_builder.py's daily-job path) instead.")
+    parser.add_argument("--n-sims", type=int, default=2000,
+                         help="Monte Carlo trials per simulate_season() call in --mode in_season "
+                              "(default 2000 -- ~1pp win-probability SE, cheap enough for 18 calls/fold; "
+                              "ignored in --mode preseason, which keeps its own internal 10,000).")
     args = parser.parse_args()
+
+    if args.mode == "in_season":
+        _run_in_season_mode(args)
+        return
 
     # Preflight: a misconfigured environment (e.g. USE_LOCAL_DATA unset with no
     # reachable Firestore credentials) makes every fold "succeed" with zero rows,

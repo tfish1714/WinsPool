@@ -337,3 +337,156 @@ class TestMainLoop:
 
         with pytest.raises(SystemExit):
             wfv.main()
+
+
+class TestProjectFoldInSeason:
+    """_project_fold_in_season() walks a fold season week-by-week, calling
+    simulate_season() with only strictly-prior-week results known at each
+    step -- unlike _project_fold_season(), which always simulates blind
+    (completed_results=None) and never exercises the in-season blending
+    path cache_builder.py's daily job actually uses."""
+
+    def _games_df(self):
+        return pd.DataFrame([
+            {"season": 2024, "week": 1, "game_type": "REG", "home_team": "KC",
+             "away_team": "BUF", "result": 3.0},
+            {"season": 2024, "week": 2, "game_type": "REG", "home_team": "KC",
+             "away_team": "DEN", "result": -7.0},
+            {"season": 2024, "week": 3, "game_type": "REG", "home_team": "KC",
+             "away_team": "LAC", "result": 10.0},
+        ])
+
+    def test_completed_results_only_includes_strictly_prior_weeks(self, monkeypatch):
+        """The whole point of this function: at week 3, week 1 and 2's real
+        results must be known, but week 3's own result must NOT be -- that's
+        what makes each week's score genuinely out-of-sample."""
+        import scripts.walk_forward_validate as wfv
+
+        captured_completed_results = []
+
+        class FakeEngine:
+            def __init__(self, nn_svc=None, xgb_svc=None, lr_svc=None):
+                pass
+
+            def initialize(self, fold_year):
+                pass
+
+            def simulate_season(self, schedule, n_sims=2000, completed_results=None):
+                captured_completed_results.append(dict(completed_results or {}))
+                return {"game_probs": {}}
+
+        monkeypatch.setattr("services.nn_projection_engine.NNProjectionEngine", FakeEngine)
+        monkeypatch.setattr("scripts.daily_nfl_sync.load_games", lambda: self._games_df())
+
+        wfv._project_fold_in_season(2024, "nn", "xgb", "lr", n_sims=2000)
+
+        # One simulate_season() call per week (3 weeks).
+        assert len(captured_completed_results) == 3
+        assert captured_completed_results[0] == {}  # week 1: nothing known yet
+        assert list(captured_completed_results[1].keys()) == ["W01_KC_BUF"]  # week 2: only week 1 known
+        assert set(captured_completed_results[2].keys()) == {"W01_KC_BUF", "W02_KC_DEN"}  # week 3: weeks 1-2 known, not week 3 itself
+
+    def test_scores_predictions_against_actual_outcomes(self, monkeypatch):
+        import scripts.walk_forward_validate as wfv
+
+        class FakeEngine:
+            def __init__(self, nn_svc=None, xgb_svc=None, lr_svc=None):
+                pass
+
+            def initialize(self, fold_year):
+                pass
+
+            def simulate_season(self, schedule, n_sims=2000, completed_results=None):
+                # Predict KC (home) wins every game with high confidence.
+                return {"game_probs": {
+                    "W01_KC_BUF": {"mean_prob": 0.7, "model_spread": 3.0},
+                    "W02_KC_DEN": {"mean_prob": 0.7, "model_spread": 3.0},
+                    "W03_KC_LAC": {"mean_prob": 0.7, "model_spread": 3.0},
+                }}
+
+        monkeypatch.setattr("services.nn_projection_engine.NNProjectionEngine", FakeEngine)
+        monkeypatch.setattr("scripts.daily_nfl_sync.load_games", lambda: self._games_df())
+
+        rows = wfv._project_fold_in_season(2024, "nn", "xgb", "lr", n_sims=2000)
+
+        by_week = {r["week"]: r for r in rows}
+        # Week 1: result=3.0 (home win) -- predicted home win -- correct.
+        assert by_week[1]["correct"] == 1 and by_week[1]["games"] == 1
+        # Week 2: result=-7.0 (away win) -- predicted home win -- wrong.
+        assert by_week[2]["correct"] == 0 and by_week[2]["games"] == 1
+        # Week 3: result=10.0 (home win) -- predicted home win -- correct.
+        assert by_week[3]["correct"] == 1 and by_week[3]["games"] == 1
+
+    def test_skips_games_missing_from_game_probs(self, monkeypatch):
+        """A game simulate_season() didn't return a prediction for (e.g. a
+        team mismatch) must be skipped, not counted as wrong."""
+        import scripts.walk_forward_validate as wfv
+
+        class FakeEngine:
+            def __init__(self, nn_svc=None, xgb_svc=None, lr_svc=None):
+                pass
+
+            def initialize(self, fold_year):
+                pass
+
+            def simulate_season(self, schedule, n_sims=2000, completed_results=None):
+                return {"game_probs": {}}  # nothing predicted for any game
+
+        monkeypatch.setattr("services.nn_projection_engine.NNProjectionEngine", FakeEngine)
+        monkeypatch.setattr("scripts.daily_nfl_sync.load_games", lambda: self._games_df())
+
+        rows = wfv._project_fold_in_season(2024, "nn", "xgb", "lr", n_sims=2000)
+        assert rows == []  # every week had zero scoreable games -- no rows at all
+
+    def test_skips_unplayed_games_without_a_result(self, monkeypatch):
+        import scripts.walk_forward_validate as wfv
+
+        games = pd.DataFrame([
+            {"season": 2024, "week": 1, "game_type": "REG", "home_team": "KC",
+             "away_team": "BUF", "result": 3.0},
+            {"season": 2024, "week": 1, "game_type": "REG", "home_team": "SF",
+             "away_team": "LAR", "result": None},  # not yet played
+        ])
+
+        class FakeEngine:
+            def __init__(self, nn_svc=None, xgb_svc=None, lr_svc=None):
+                pass
+
+            def initialize(self, fold_year):
+                pass
+
+            def simulate_season(self, schedule, n_sims=2000, completed_results=None):
+                return {"game_probs": {
+                    "W01_KC_BUF": {"mean_prob": 0.7, "model_spread": 3.0},
+                    "W01_SF_LAR": {"mean_prob": 0.6, "model_spread": 1.0},
+                }}
+
+        monkeypatch.setattr("services.nn_projection_engine.NNProjectionEngine", FakeEngine)
+        monkeypatch.setattr("scripts.daily_nfl_sync.load_games", lambda: games)
+
+        rows = wfv._project_fold_in_season(2024, "nn", "xgb", "lr", n_sims=2000)
+        assert len(rows) == 1
+        assert rows[0]["games"] == 1  # only the played game counted
+
+
+class TestRunFoldInSeason:
+    def test_wires_feature_table_and_fold_models_into_projection(self, monkeypatch, tmp_path):
+        import scripts.walk_forward_validate as wfv
+
+        monkeypatch.setattr(wfv, "build_master_feature_table",
+                             lambda **k: pd.DataFrame({"season": [2020], "week": [1]}))
+        monkeypatch.setattr(wfv, "_get_or_train_fold_models",
+                             lambda *a, **k: ("fake_nn", "fake_xgb", "fake_lr"))
+
+        captured = {}
+
+        def fake_project(fold_year, nn_svc, xgb_svc, lr_svc, n_sims=2000):
+            captured["args"] = (fold_year, nn_svc, xgb_svc, lr_svc, n_sims)
+            return [{"fold_year": fold_year, "week": 1, "games": 10, "correct": 6, "accuracy_pct": 60.0}]
+
+        monkeypatch.setattr(wfv, "_project_fold_in_season", fake_project)
+
+        result = wfv.run_fold_in_season(2024, tmp_path, n_sims=500)
+
+        assert captured["args"] == (2024, "fake_nn", "fake_xgb", "fake_lr", 500)
+        assert result["rows"][0]["accuracy_pct"] == 60.0
