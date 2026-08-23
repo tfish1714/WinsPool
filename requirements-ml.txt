@@ -29,6 +29,17 @@ tensorflow==2.21.0
 # 3.13). Pin to the version verified to load the current models.
 keras==3.13.2
 
-scikit-learn>=1.3.0
+# Pinned: same class of bug as the keras pin above, actually hit in
+# production -- LR's StandardScaler/LogisticRegressionCV are pickled objects,
+# and scikit-learn's own docs warn against unpickling across versions. An
+# unbounded floor let a Docker rebuild resolve scikit-learn 1.9.0 (latest at
+# build time) against models/lr_v7*.pkl, which was trained locally under
+# 1.8.0 (this session). It didn't fail to load -- it unpickled with an
+# InconsistentVersionWarning and silently produced degraded predictions
+# (win probabilities compressed toward ~0.5 across every 2026 game), caught
+# by comparing the deployed winspool-predict-daily job's output against a
+# local run on identical code/weights/data. Pin to the version verified to
+# match the currently-trained models.
+scikit-learn==1.8.0
 xgboost>=3.2.0
 scipy>=1.10.0
