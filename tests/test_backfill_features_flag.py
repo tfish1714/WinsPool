@@ -47,9 +47,15 @@ def _make_fake_ft(feature_columns):
     )
 
 
-def test_features_flag_calls_write_prediction_features():
+def test_features_flag_calls_write_prediction_features(tmp_path, monkeypatch):
     """When --features is passed, write_prediction_features is called once per season."""
     from services.nn_feature_engine import FEATURE_COLUMNS
+
+    # main()'s local-file branch writes directly to a hardcoded relative
+    # ".local_db" path (bypassing the mocked write_game_predictions) -- chdir
+    # into a scratch dir so this test can't clobber the real project's
+    # .local_db/game_predictions_2025.json.
+    monkeypatch.chdir(tmp_path)
 
     nn, xgb_svc, lr = _make_mocks(len(FEATURE_COLUMNS))
     fake_ft = _make_fake_ft(FEATURE_COLUMNS)
@@ -88,9 +94,13 @@ def test_features_flag_calls_write_prediction_features():
     assert mock_wpf.called, "write_prediction_features should be called when --features is passed"
 
 
-def test_no_features_flag_skips_write():
+def test_no_features_flag_skips_write(tmp_path, monkeypatch):
     """Without --features, write_prediction_features is NOT called."""
     from services.nn_feature_engine import FEATURE_COLUMNS
+
+    # See test_features_flag_calls_write_prediction_features for why this chdir
+    # is required -- main()'s local-file write isn't covered by the mocks below.
+    monkeypatch.chdir(tmp_path)
 
     nn, xgb_svc, lr = _make_mocks(len(FEATURE_COLUMNS))
     fake_ft = _make_fake_ft(FEATURE_COLUMNS)
