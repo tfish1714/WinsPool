@@ -590,5 +590,75 @@
       "train_samples": 4927
     },
     "trained_at": "2026-06-05T03:10:12.145706+00:00"
+  },
+  "v9": {
+    "model_path": "models/xgb_v9.json",
+    "scaler_path": "models/xgb_v9_scaler.pkl",
+    "feature_columns": [
+      "elo_diff",
+      "elo_confidence",
+      "pass_epa_matchup",
+      "rush_epa_matchup",
+      "early_down_matchup",
+      "turnover_margin_rolling",
+      "net_success_rate",
+      "point_diff_advantage",
+      "market_implied_team_total",
+      "passing_difficulty_index",
+      "rest_advantage",
+      "net_travel_disadvantage",
+      "trench_dominance_metric",
+      "qb_pressure_advantage",
+      "def_pressure_diff",
+      "home_qb_injury_flag",
+      "away_qb_injury_flag",
+      "roster_talent_delta",
+      "off_roster_value_delta",
+      "def_roster_value_delta",
+      "st_value_delta",
+      "qb_resilience_delta",
+      "home_field_advantage",
+      "div_game_flag",
+      "surface_type",
+      "playoff_flag",
+      "week"
+    ],
+    "n_features": 27,
+    "metrics": {
+      "train_accuracy": 0.675010175010175,
+      "train_logloss": 0.5967613124675467,
+      "train_brier": 0.20520858466625214,
+      "train_r2": 0.16844314336776733,
+      "n_estimators_used": 236,
+      "test_accuracy": 0.5208333333333334,
+      "test_logloss": 0.7199202129858687,
+      "test_brier": 0.2622309923171997,
+      "test_r2": -0.04892385005950928,
+      "test_auc": 0.5381944444444444,
+      "season_r2": 0.6481826305389404,
+      "season_mae": 1.5648529529571533,
+      "season_n": 160
+    },
+    "params": {
+      "n_estimators": 1000,
+      "learning_rate": 0.02,
+      "max_depth": 3,
+      "subsample": 0.7,
+      "colsample_bytree": 0.6,
+      "min_child_weight": 20,
+      "gamma": 1.0,
+      "reg_alpha": 0.5,
+      "reg_lambda": 2.0,
+      "objective": "binary:logistic",
+      "eval_metric": "logloss",
+      "random_state": 42,
+      "n_jobs": -1
+    },
+    "training_params": {
+      "min_season": 2006,
+      "max_season": 2025,
+      "train_samples": 4927
+    },
+    "trained_at": "2026-08-22T22:38:16.265571+00:00"
   }
 }
