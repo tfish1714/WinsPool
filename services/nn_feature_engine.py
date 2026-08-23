@@ -1181,6 +1181,35 @@ def _preseason_defense(
     return result
 
 
+# Generic/ambiguous old-schema depth_position codes that don't appear anywhere
+# in _OFF_OL_POS/_DEF_DL_POS/_DEF_LB_POS/_DEF_CB_POS/_DEF_S_POS. Real 2001-2024
+# depth_charts data is a genuine mix of conventions across teams/seasons/weeks:
+# many rows already use the granular side-specific codes those sets expect
+# (LDE, RDE, SLB, WLB, ...), but many other rows -- from data entry that used a
+# coarser convention -- use one of these generic codes instead, and without
+# this mapping those rows are silently dropped by the builders' exact-match
+# .isin() filters (verified: only 21% of 2023 week-1 DL-labeled rows and 17%
+# of LB-labeled rows matched the specific sets before this map existed, which
+# zeroed out dl_perf for roughly half of all 32 teams in both 2023 and 2024).
+# Mapped onto ONE canonical specific code each -- not a 1:1 scheme translation,
+# just "closest bucket for scoring purposes". "S" (ambiguous FS/SS) maps to
+# FS as an arbitrary-but-documented choice; teams that already use the
+# SS/FS-specific convention are unaffected since those codes are untouched by
+# this map (see the "only a KEY in this map" rule in _normalize_depth_chart).
+_GENERIC_POS_MAP = {
+    # Defensive line
+    "DE": "LDE", "RE": "RDE", "LE": "LDE", "EDGE": "LDE",
+    "DT": "LDT", "DL": "LDT", "N": "NT",
+    # Linebacker
+    "LB": "MLB", "ILB": "MLB", "MIKE": "MLB",
+    "OLB": "WLB", "WILL": "WLB", "LOLB": "WLB",
+    "SAM": "SLB", "ROLB": "SLB", "RUSH": "WLB",
+    # Corner / Safety
+    "CB": "LCB", "NCB": "NB", "NKL": "NB",
+    "S": "FS",
+}
+
+
 def _normalize_depth_chart(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize either nflverse depth_charts schema to the shared shape
     _preseason_offense()/_preseason_defense() expect: team, player_name,
@@ -1193,19 +1222,42 @@ def _normalize_depth_chart(df: pd.DataFrame) -> pd.DataFrame:
     fixtures) passes through as-is.
 
     Old schema (2001-2024): club_code, full_name, depth_position, depth_team,
-    week, game_type. No "latest" timestamp exists -- use week 1 REG instead,
-    the earliest chart of the season and the correct preseason analog (a
-    later week would leak in-season info into what's supposed to be a
-    preseason-only estimate).
+    week, game_type. No "latest" timestamp exists -- use each team's own
+    earliest available REG week instead of a hard global week==1 filter: two
+    real seasons (2001 BAL, 2017 MIA/TB -- the latter's week 1 was postponed
+    by Hurricane Irma) have teams with zero week-1 REG rows, and a global
+    week==1 filter would silently return only 30/32 teams for those seasons.
+    A per-team earliest week preserves the "earliest chart of the season, no
+    in-season-form leakage" intent (a later week would leak in-season info
+    into what's supposed to be a preseason-only estimate) while not dropping
+    teams whose earliest available chart happens to be week 2+.
+
+    Generic/ambiguous position codes (see _GENERIC_POS_MAP) are remapped onto
+    the nearest specific code the builders recognize; rows already using a
+    specific code are left untouched. Rows are also deduped to one per
+    gsis_id (first occurrence kept), matching the new-schema branch's dedup
+    intent -- old-schema data sometimes double-lists a player at two depth
+    slots (e.g. an OL lineman at both LG and C), which would otherwise
+    double-count in ol_av (a sum, not an average).
+
+    Note: raw ol_av magnitudes differ by up to ~40% between the two schema
+    eras (different snap-count conventions feeding _ol_snap_score) -- harmless
+    since every dimension is z-scored per-season downstream, but worth knowing
+    if you ever compare raw ol_av across eras directly.
     """
     if "club_code" in df.columns:
-        df = df[(df["week"] == 1) & (df["game_type"] == "REG")].copy()
+        df = df[df["game_type"] == "REG"].copy()
+        earliest_week = df.groupby("club_code")["week"].transform("min")
+        df = df[df["week"] == earliest_week].copy()
         df = df.rename(columns={
             "club_code": "team",
             "full_name": "player_name",
             "depth_position": "pos_abb",
             "depth_team": "pos_rank",
         })
+        df["pos_abb"] = df["pos_abb"].apply(lambda p: _GENERIC_POS_MAP.get(p, p))
+        if "gsis_id" in df.columns:
+            df = df.drop_duplicates(subset=["gsis_id"], keep="first")
     elif "dt" in df.columns and "gsis_id" in df.columns:
         df = (
             df
@@ -1238,6 +1290,18 @@ def compute_preseason_player_profiles(target_season: int, rawdata_dir) -> dict:
     depth_chart = pd.read_csv(dc_path,     low_memory=False)
 
     depth_chart = _normalize_depth_chart(depth_chart)
+
+    _REQUIRED_DC_COLS = {"team", "pos_abb", "pos_rank", "player_name", "gsis_id"}
+    missing_dc_cols = _REQUIRED_DC_COLS - set(depth_chart.columns)
+    if missing_dc_cols:
+        raise ValueError(
+            f"depth_charts_{target_season}.csv matches neither known nflverse "
+            "depth_charts schema (old: club_code/depth_position/depth_team/"
+            "full_name/week/game_type; new: dt/team/pos_abb/pos_rank/"
+            "player_name/gsis_id) nor an already-normalized shape -- missing "
+            f"expected column(s): {sorted(missing_dc_cols)}. "
+            "_normalize_depth_chart() likely needs a branch for this schema."
+        )
 
     depth_chart["team"] = depth_chart["team"].apply(_normalize_team)
     if "team" in roster.columns:
@@ -1297,6 +1361,39 @@ def compute_preseason_player_profiles(target_season: int, rawdata_dir) -> dict:
         mu = float(np.mean(vals))
         for team in raw:
             raw[team][dim] = float(raw[team][dim] - mu)
+
+    # Data-quality check: log (never raise, never block the return) a warning
+    # when the output looks like a systematic parsing/matching failure rather
+    # than real football variance -- the mechanical equivalent of skimming
+    # rank_position_groups.py output for plausibility, which is what actually
+    # caught the original depth_charts schema-compat bug (an unmapped generic
+    # position-code convention zeroed out dl_perf for roughly half of all 32
+    # teams in both 2023 and 2024, with no crash or exception anywhere).
+    n_teams = len(raw)
+    if n_teams < 32:
+        logger.warning(
+            "compute_preseason_player_profiles(%s): only %d/32 teams present "
+            "in result -- one or more teams missing entirely from the "
+            "depth-chart/roster inputs (expected for pre-2002 seasons with "
+            "fewer than 32 franchises; otherwise investigate).",
+            target_season, n_teams,
+        )
+    # 25%: a handful of teams legitimately at exactly 0.0 (a genuinely average
+    # unit, or one team missing prior-season advstats) is normal noise; a
+    # quarter or more of all teams landing at exactly 0.0 on the same
+    # dimension is the fingerprint of a systematic matching failure -- that's
+    # roughly what the pre-fix Finding 1 state looked like (15-16/32 teams).
+    for dim in ("dl_perf", "def_pass_epa", "def_rush_epa"):
+        zero_count = sum(1 for v in raw.values() if v[dim] == 0.0)
+        if n_teams and zero_count / n_teams > 0.25:
+            logger.warning(
+                "compute_preseason_player_profiles(%s): %d/%d teams (%.0f%%) "
+                "have %s == 0.0 -- likely a depth-chart position-code "
+                "matching failure (e.g. an unmapped schema convention "
+                "silently dropping rows), not real football signal.",
+                target_season, zero_count, n_teams,
+                100.0 * zero_count / n_teams, dim,
+            )
 
     return raw
 

@@ -64,6 +64,88 @@ class TestNormalizeDepthChart:
         assert len(result) == 1
         assert result.iloc[0]["pos_abb"] == "\n    "
 
+    def test_old_schema_generic_position_codes_remapped_to_specific(self):
+        """Generic old-schema depth_position codes (DE, DT, LB, OLB, CB, S,
+        etc.) must be remapped onto a specific code _DEF_DL_POS/_DEF_LB_POS/
+        _DEF_CB_POS/_DEF_S_POS recognizes -- real 2023/2024 data shows the
+        majority of defensive rows use these generic codes, and without this
+        remap they're silently dropped by the builders' exact-match .isin()
+        filters (verified: this zeroed out dl_perf for 15-16/32 teams)."""
+        from services.nn_feature_engine import _normalize_depth_chart
+        df = pd.DataFrame([
+            {"club_code": "AAA", "week": 1, "game_type": "REG", "depth_team": 1,
+             "full_name": "Generic DE", "gsis_id": "00-0100", "depth_position": "DE"},
+            {"club_code": "AAA", "week": 1, "game_type": "REG", "depth_team": 1,
+             "full_name": "Generic OLB", "gsis_id": "00-0101", "depth_position": "OLB"},
+            {"club_code": "AAA", "week": 1, "game_type": "REG", "depth_team": 1,
+             "full_name": "Generic CB", "gsis_id": "00-0102", "depth_position": "CB"},
+            {"club_code": "AAA", "week": 1, "game_type": "REG", "depth_team": 1,
+             "full_name": "Generic S", "gsis_id": "00-0103", "depth_position": "S"},
+        ])
+        result = _normalize_depth_chart(df).set_index("gsis_id")
+        assert result.loc["00-0100", "pos_abb"] == "LDE"
+        assert result.loc["00-0101", "pos_abb"] == "WLB"
+        assert result.loc["00-0102", "pos_abb"] == "LCB"
+        assert result.loc["00-0103", "pos_abb"] == "FS"
+
+    def test_old_schema_specific_codes_not_overwritten_by_generic_map(self):
+        """A row already using a specific code (e.g. RDE) must not be
+        touched, even though its generic sibling (DE) is a map key -- the
+        specific code is strictly more precise and must win."""
+        from services.nn_feature_engine import _normalize_depth_chart
+        df = pd.DataFrame([
+            {"club_code": "AAA", "week": 1, "game_type": "REG", "depth_team": 1,
+             "full_name": "Specific RDE", "gsis_id": "00-0110", "depth_position": "RDE"},
+        ])
+        result = _normalize_depth_chart(df)
+        assert result.iloc[0]["pos_abb"] == "RDE"
+
+    def test_old_schema_falls_back_to_teams_own_earliest_week_when_no_week1(self):
+        """A global week==1 filter silently drops any team with zero week-1
+        REG rows -- real data: 2001 BAL has none (starts at week 2), and 2017
+        MIA/TB have none (Hurricane Irma postponed their week-1 game). Such a
+        team must still appear, using its own earliest available REG week
+        instead of being dropped from the result entirely."""
+        from services.nn_feature_engine import _normalize_depth_chart
+        df = pd.DataFrame([
+            # AAA: normal team, has a week-1 chart
+            {"club_code": "AAA", "week": 1, "game_type": "REG", "depth_team": 1,
+             "full_name": "AAA Week1 QB", "gsis_id": "00-0001", "depth_position": "QB"},
+            {"club_code": "AAA", "week": 2, "game_type": "REG", "depth_team": 1,
+             "full_name": "AAA Week2 QB", "gsis_id": "00-0002", "depth_position": "QB"},
+            # BAL: postponed/missing week 1 -- earliest REG chart is week 2
+            {"club_code": "BAL", "week": 2, "game_type": "REG", "depth_team": 1,
+             "full_name": "BAL Week2 QB", "gsis_id": "00-0003", "depth_position": "QB"},
+            {"club_code": "BAL", "week": 3, "game_type": "REG", "depth_team": 1,
+             "full_name": "BAL Week3 QB", "gsis_id": "00-0004", "depth_position": "QB"},
+        ])
+        result = _normalize_depth_chart(df)
+        teams = set(result["team"])
+        assert teams == {"AAA", "BAL"}, f"BAL should not be dropped, got teams={teams}"
+
+        aaa_row = result[result["team"] == "AAA"].iloc[0]
+        assert aaa_row["player_name"] == "AAA Week1 QB"  # AAA still uses week 1
+
+        bal_row = result[result["team"] == "BAL"].iloc[0]
+        assert bal_row["player_name"] == "BAL Week2 QB"  # BAL falls back to its own earliest (week 2)
+        assert len(result[result["team"] == "BAL"]) == 1  # only the earliest week's rows, not both
+
+    def test_old_schema_dedups_by_gsis_id(self):
+        """Old-schema data sometimes double-lists a player at two depth
+        slots in the same week (e.g. an OL lineman at both LG and C) --
+        real 2023 data shows 47 such rows. Without a dedup, that player's
+        contribution to a summed metric like ol_av gets double-counted."""
+        from services.nn_feature_engine import _normalize_depth_chart
+        df = pd.DataFrame([
+            {"club_code": "AAA", "week": 1, "game_type": "REG", "depth_team": 1,
+             "full_name": "Two Slot Guy", "gsis_id": "00-0200", "depth_position": "LG"},
+            {"club_code": "AAA", "week": 1, "game_type": "REG", "depth_team": 2,
+             "full_name": "Two Slot Guy", "gsis_id": "00-0200", "depth_position": "C"},
+        ])
+        result = _normalize_depth_chart(df)
+        assert len(result) == 1
+        assert result.iloc[0]["pos_abb"] == "LG"  # first occurrence kept
+
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -494,6 +576,24 @@ class TestComputePreseasonPlayerProfiles:
         result = compute_preseason_player_profiles(2026, tmp_path)
         assert result == {}
 
+    def test_unrecognized_depth_chart_schema_raises_clear_error(self, tmp_path):
+        """A depth_charts file matching neither the old schema (club_code
+        marker), the new schema (dt+gsis_id markers), nor the already-
+        normalized shape (team/pos_abb/pos_rank/player_name/gsis_id) must
+        fail with a clear message naming the missing column(s) -- not the
+        opaque bare KeyError('team') this check exists to prevent."""
+        from services.nn_feature_engine import compute_preseason_player_profiles
+
+        (tmp_path / "depth_charts").mkdir(exist_ok=True)
+        pd.DataFrame([{"some_other_col": "x", "yet_another": "y"}]).to_csv(
+            tmp_path / "depth_charts" / "depth_charts_2026.csv", index=False)
+
+        (tmp_path / "rosters").mkdir(exist_ok=True)
+        _fake_roster().to_csv(tmp_path / "rosters" / "roster_2026.csv", index=False)
+
+        with pytest.raises(ValueError, match="missing expected column"):
+            compute_preseason_player_profiles(2026, tmp_path)
+
 
 class TestComputePreseasonPlayerProfilesOldSchema:
     """Same coverage as TestComputePreseasonPlayerProfiles but with the
@@ -570,6 +670,123 @@ class TestComputePreseasonPlayerProfilesOldSchema:
         # which has no player_epa match and would pull qb_tier toward the
         # rookie-discount default if it leaked in.
         assert result["AAA"]["qb_tier"] == pytest.approx(0.20, abs=0.01)
+
+    def test_team_missing_week1_still_appears_via_own_earliest_week(self, tmp_path):
+        """End-to-end version of the _normalize_depth_chart-level test: a
+        team with zero week-1 REG rows (real examples: 2001 BAL, 2017
+        MIA/TB) must still come out of compute_preseason_player_profiles
+        with a real, non-default profile -- not be silently dropped, and not
+        fall back to the all-zero default (which would also corrupt every
+        other team's z-scored mean/std downstream in nn_projection_engine)."""
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        self._write_files(tmp_path)
+
+        # BBB needs its OWN player (distinct gsis_id) -- reusing AAA's player
+        # for BBB would get dropped by the Finding-4 cross-team gsis_id dedup
+        # (a player can't legitimately be on two teams' charts at once), which
+        # would defeat this test's purpose.
+        stats_path = tmp_path / "stats_player" / "stats_player_regpost_2022.csv"
+        stats = pd.read_csv(stats_path)
+        bbb_qb_stats = pd.DataFrame([{
+            "player_id": "00-0777", "player_display_name": "BBB QB",
+            "position": "QB", "recent_team": "BBB", "season_type": "REG", "season": 2022,
+            "passing_epa": 40.0, "rushing_epa": 0.0, "receiving_epa": 0.0,
+            "attempts": 400, "carries": 0, "targets": 0,
+        }])
+        pd.concat([stats, bbb_qb_stats], ignore_index=True).to_csv(stats_path, index=False)
+
+        raw_path = tmp_path / "depth_charts" / "depth_charts_2023.csv"
+        raw = pd.read_csv(raw_path)
+        # BBB's only depth-chart rows start at week 2 -- no week-1 snapshot
+        # exists for BBB at all (mirrors 2001 BAL / 2017 MIA-TB).
+        bbb_week2 = pd.DataFrame([{
+            "club_code": "BBB", "week": 2, "game_type": "REG", "depth_team": 1,
+            "full_name": "BBB QB", "gsis_id": "00-0777", "depth_position": "QB",
+        }])
+        pd.concat([raw, bbb_week2], ignore_index=True).to_csv(raw_path, index=False)
+
+        result = compute_preseason_player_profiles(2023, tmp_path)
+        assert "BBB" in result
+        # 40.0 EPA / 400 attempts = 0.10 EPA/attempt -- proves BBB's week-2
+        # row was actually used and matched to real player EPA, not defaulted.
+        assert result["BBB"]["qb_tier"] == pytest.approx(0.10, abs=0.01)
+
+
+class TestComputePreseasonPlayerProfilesDataQualityWarnings:
+    """Covers the Finding 2 mechanical data-quality check: a logger.warning
+    (never a raise) when the output looks like a systematic depth-chart
+    matching failure rather than real football variance -- the check that
+    would have caught the original schema-compat bug (dl_perf == 0.0 for
+    15-16/32 teams) without requiring a human to skim script output."""
+
+    def _write_files(self, tmp_path, dc_df, season=2023):
+        prior = season - 1
+        (tmp_path / "stats_player").mkdir(exist_ok=True)
+        _fake_player_stats().to_csv(
+            tmp_path / "stats_player" / f"stats_player_regpost_{prior}.csv", index=False)
+
+        (tmp_path / "depth_charts").mkdir(exist_ok=True)
+        dc_df.to_csv(tmp_path / "depth_charts" / f"depth_charts_{season}.csv", index=False)
+
+        (tmp_path / "rosters").mkdir(exist_ok=True)
+        pd.concat([_fake_roster(), _fake_def_roster()], ignore_index=True).to_csv(
+            tmp_path / "rosters" / f"roster_{season}.csv", index=False)
+
+        (tmp_path / "pfr_advstats").mkdir(exist_ok=True)
+        _fake_def_advstats().to_csv(
+            tmp_path / "pfr_advstats" / f"advstats_week_def_{prior}.csv", index=False)
+
+        (tmp_path / "snap_counts").mkdir(exist_ok=True)
+        pd.concat([_fake_snap_counts(), _fake_def_snap_counts()], ignore_index=True).to_csv(
+            tmp_path / "snap_counts" / f"snap_counts_{prior}.csv", index=False)
+
+    def test_warns_when_team_count_below_32(self, tmp_path, caplog):
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        dc = _fake_depth_chart_old_schema(week=1, game_type="REG")  # AAA only
+        self._write_files(tmp_path, dc)
+
+        with caplog.at_level("WARNING", logger="services.nn_feature_engine"):
+            result = compute_preseason_player_profiles(2023, tmp_path)
+
+        assert "AAA" in result
+        assert any("1/32 teams" in r.message for r in caplog.records)
+
+    def test_warns_when_over_25pct_teams_have_zero_dl_perf(self, tmp_path, caplog):
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        full_dc = _fake_depth_chart_old_schema(week=1, game_type="REG")  # AAA, real defense
+        # 3 more teams with a QB slot only -- no DL/LB/CB rows at all, so
+        # dl_perf stays exactly 0.0 for each (3/4 = 75% > 25% threshold).
+        empty_defense_rows = pd.DataFrame([
+            {"club_code": team, "week": 1, "game_type": "REG", "depth_team": 1,
+             "full_name": f"{team} QB", "gsis_id": gid, "depth_position": "QB"}
+            for team, gid in [("BBB", "10-0001"), ("CCC", "10-0002"), ("DDD", "10-0003")]
+        ])
+        dc = pd.concat([full_dc, empty_defense_rows], ignore_index=True)
+        self._write_files(tmp_path, dc)
+
+        with caplog.at_level("WARNING", logger="services.nn_feature_engine"):
+            result = compute_preseason_player_profiles(2023, tmp_path)
+
+        assert result["BBB"]["dl_perf"] == 0.0
+        assert result["CCC"]["dl_perf"] == 0.0
+        assert result["DDD"]["dl_perf"] == 0.0
+        assert any(
+            "dl_perf == 0.0" in r.message and "matching failure" in r.message
+            for r in caplog.records
+        )
+
+    def test_no_zero_dim_warning_when_defense_data_is_healthy(self, tmp_path, caplog):
+        """Sanity check: the healthy single-team fixture (real DL/LB/CB
+        production) must NOT trip the zero-dim warning -- only the <32-teams
+        one, which is expected/harmless for this 1-team fixture."""
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        dc = _fake_depth_chart_old_schema(week=1, game_type="REG")
+        self._write_files(tmp_path, dc)
+
+        with caplog.at_level("WARNING", logger="services.nn_feature_engine"):
+            compute_preseason_player_profiles(2023, tmp_path)
+
+        assert not any("dl_perf == 0.0" in r.message for r in caplog.records)
 
 
 class TestNNProjectionEngineInitialize:
