@@ -1181,6 +1181,40 @@ def _preseason_defense(
     return result
 
 
+def _normalize_depth_chart(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize either nflverse depth_charts schema to the shared shape
+    _preseason_offense()/_preseason_defense() expect: team, player_name,
+    gsis_id, pos_abb, pos_rank.
+
+    New schema (2025+): dt, team, player_name, pos_abb, pos_rank -- already
+    match. Dedup to the latest dt snapshot per player (this is the same
+    logic compute_preseason_player_profiles() used to do inline; moved here
+    unchanged). A DataFrame with no dt column (e.g. already-normalized test
+    fixtures) passes through as-is.
+
+    Old schema (2001-2024): club_code, full_name, depth_position, depth_team,
+    week, game_type. No "latest" timestamp exists -- use week 1 REG instead,
+    the earliest chart of the season and the correct preseason analog (a
+    later week would leak in-season info into what's supposed to be a
+    preseason-only estimate).
+    """
+    if "club_code" in df.columns:
+        df = df[(df["week"] == 1) & (df["game_type"] == "REG")].copy()
+        df = df.rename(columns={
+            "club_code": "team",
+            "full_name": "player_name",
+            "depth_position": "pos_abb",
+            "depth_team": "pos_rank",
+        })
+    elif "dt" in df.columns and "gsis_id" in df.columns:
+        df = (
+            df
+            .sort_values("dt")
+            .drop_duplicates(subset=["gsis_id"], keep="last")
+        )
+    return df
+
+
 def compute_preseason_player_profiles(target_season: int, rawdata_dir) -> dict:
     """Build per-team EPA quality estimates from projected roster + prior-season player stats.
 
@@ -1203,14 +1237,7 @@ def compute_preseason_player_profiles(target_season: int, rawdata_dir) -> dict:
     roster      = pd.read_csv(roster_path, low_memory=False)
     depth_chart = pd.read_csv(dc_path,     low_memory=False)
 
-    # Keep only the latest depth-chart snapshot per player (dt = daily timestamp).
-    # This ensures traded players appear on their current team, not their old one.
-    if "dt" in depth_chart.columns and "gsis_id" in depth_chart.columns:
-        depth_chart = (
-            depth_chart
-            .sort_values("dt")
-            .drop_duplicates(subset=["gsis_id"], keep="last")
-        )
+    depth_chart = _normalize_depth_chart(depth_chart)
 
     depth_chart["team"] = depth_chart["team"].apply(_normalize_team)
     if "team" in roster.columns:

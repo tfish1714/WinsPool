@@ -5,6 +5,66 @@ import pytest
 from pathlib import Path
 
 
+# ── _normalize_depth_chart tests ──────────────────────────────────────────────
+
+class TestNormalizeDepthChart:
+    def test_old_schema_filters_to_week1_reg_and_renames_columns(self):
+        from services.nn_feature_engine import _normalize_depth_chart
+        df = pd.DataFrame([
+            {"club_code": "AAA", "week": 1, "game_type": "REG", "depth_team": 1,
+             "full_name": "QB Alpha", "gsis_id": "00-0001", "depth_position": "QB"},
+            {"club_code": "AAA", "week": 2, "game_type": "REG", "depth_team": 1,
+             "full_name": "QB Alpha", "gsis_id": "00-0001", "depth_position": "QB"},
+            {"club_code": "AAA", "week": 1, "game_type": "WC", "depth_team": 1,
+             "full_name": "QB Alpha", "gsis_id": "00-0001", "depth_position": "QB"},
+        ])
+        result = _normalize_depth_chart(df)
+        assert len(result) == 1
+        assert set(result.columns) >= {"team", "player_name", "pos_abb", "pos_rank", "gsis_id"}
+        row = result.iloc[0]
+        assert row["team"] == "AAA"
+        assert row["player_name"] == "QB Alpha"
+        assert row["pos_abb"] == "QB"
+        assert row["pos_rank"] == 1
+
+    def test_new_schema_dedups_to_latest_dt(self):
+        from services.nn_feature_engine import _normalize_depth_chart
+        df = pd.DataFrame([
+            {"dt": "2026-01-01T00:00:00Z", "team": "AAA", "player_name": "QB Alpha",
+             "gsis_id": "00-0001", "pos_abb": "QB", "pos_rank": 2},
+            {"dt": "2026-03-01T00:00:00Z", "team": "AAA", "player_name": "QB Alpha",
+             "gsis_id": "00-0001", "pos_abb": "QB", "pos_rank": 1},
+        ])
+        result = _normalize_depth_chart(df)
+        assert len(result) == 1
+        assert result.iloc[0]["pos_rank"] == 1  # the later dt snapshot wins
+
+    def test_new_schema_without_dt_passes_through_unchanged(self):
+        from services.nn_feature_engine import _normalize_depth_chart
+        df = pd.DataFrame([
+            {"team": "AAA", "player_name": "QB Alpha", "gsis_id": "00-0001",
+             "pos_abb": "QB", "pos_rank": 1},
+        ])
+        result = _normalize_depth_chart(df)
+        pd.testing.assert_frame_equal(
+            result.reset_index(drop=True), df.reset_index(drop=True)
+        )
+
+    def test_old_schema_junk_position_codes_survive_the_rename(self):
+        """Junk depth_position values (whitespace-only, typos) rename to
+        pos_abb like any other value -- they simply won't match any of the
+        specific position-code filters downstream (_OFF_OL_POS, _DEF_DL_POS,
+        etc.), same as today. No special-casing needed here."""
+        from services.nn_feature_engine import _normalize_depth_chart
+        df = pd.DataFrame([
+            {"club_code": "AAA", "week": 1, "game_type": "REG", "depth_team": 3,
+             "full_name": "Scrub Guy", "gsis_id": "00-0099", "depth_position": "\n    "},
+        ])
+        result = _normalize_depth_chart(df)
+        assert len(result) == 1
+        assert result.iloc[0]["pos_abb"] == "\n    "
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def _fake_player_stats() -> pd.DataFrame:
@@ -370,6 +430,20 @@ class TestPreseasonDefense:
         assert result["A"]["dl_perf"] == pytest.approx(0.0, abs=0.1)
 
 
+def _fake_depth_chart_old_schema(week=1, game_type="REG") -> pd.DataFrame:
+    """Same players as _fake_depth_chart()+_fake_def_depth_chart(), in the
+    pre-2025 nflverse depth_charts schema (club_code/depth_position/depth_team)."""
+    combined = pd.concat([_fake_depth_chart(), _fake_def_depth_chart()], ignore_index=True)
+    return pd.DataFrame([
+        {
+            "club_code": row["team"], "week": week, "game_type": game_type,
+            "depth_team": row["pos_rank"], "full_name": row["player_name"],
+            "gsis_id": row["gsis_id"], "depth_position": row["pos_abb"],
+        }
+        for _, row in combined.iterrows()
+    ])
+
+
 class TestComputePreseasonPlayerProfiles:
     def _write_files(self, tmp_path, season=2026):
         prior = season - 1
@@ -419,6 +493,83 @@ class TestComputePreseasonPlayerProfiles:
         from services.nn_feature_engine import compute_preseason_player_profiles
         result = compute_preseason_player_profiles(2026, tmp_path)
         assert result == {}
+
+
+class TestComputePreseasonPlayerProfilesOldSchema:
+    """Same coverage as TestComputePreseasonPlayerProfiles but with the
+    pre-2025 nflverse depth_charts schema (club_code/depth_position/depth_team)
+    -- proves compute_preseason_player_profiles() works for 2001-2024 data,
+    not just 2025+."""
+
+    def _write_files(self, tmp_path, season=2023):
+        prior = season - 1
+        (tmp_path / "stats_player").mkdir(exist_ok=True)
+        _fake_player_stats().to_csv(
+            tmp_path / "stats_player" / f"stats_player_regpost_{prior}.csv", index=False)
+
+        (tmp_path / "depth_charts").mkdir(exist_ok=True)
+        _fake_depth_chart_old_schema(week=1, game_type="REG").to_csv(
+            tmp_path / "depth_charts" / f"depth_charts_{season}.csv", index=False)
+
+        (tmp_path / "rosters").mkdir(exist_ok=True)
+        pd.concat([_fake_roster(), _fake_def_roster()], ignore_index=True).to_csv(
+            tmp_path / "rosters" / f"roster_{season}.csv", index=False)
+
+        (tmp_path / "pfr_advstats").mkdir(exist_ok=True)
+        _fake_def_advstats().to_csv(
+            tmp_path / "pfr_advstats" / f"advstats_week_def_{prior}.csv", index=False)
+
+        (tmp_path / "snap_counts").mkdir(exist_ok=True)
+        pd.concat([_fake_snap_counts(), _fake_def_snap_counts()], ignore_index=True).to_csv(
+            tmp_path / "snap_counts" / f"snap_counts_{prior}.csv", index=False)
+
+    def test_returns_dict_with_teams(self, tmp_path):
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        self._write_files(tmp_path)
+        result = compute_preseason_player_profiles(2023, tmp_path)
+        assert isinstance(result, dict)
+        assert "AAA" in result
+
+    def test_all_required_keys_present(self, tmp_path):
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        self._write_files(tmp_path)
+        result = compute_preseason_player_profiles(2023, tmp_path)
+        for key in ("off_pass_epa", "off_rush_epa", "def_pass_epa",
+                    "def_rush_epa", "ol_av", "dl_perf", "qb_tier"):
+            assert key in result["AAA"], f"Missing: {key}"
+
+    def test_qb_tier_matches_new_schema_equivalent(self, tmp_path):
+        """Same fixture data, same expected qb_tier as the new-schema
+        test_qb_tier_matches_qb_pass_epa_rate (pass_epa_rate = 0.20) --
+        proves the old-schema path produces numerically equivalent output,
+        not just a non-crashing one."""
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        self._write_files(tmp_path)
+        result = compute_preseason_player_profiles(2023, tmp_path)
+        assert result["AAA"]["qb_tier"] == pytest.approx(0.20, abs=0.01)
+
+    def test_only_week1_snapshot_used_not_later_weeks(self, tmp_path):
+        """A later-week depth chart entry for a different (e.g. injury-
+        replacement) player at the same slot must not leak into the
+        preseason estimate -- proves the week==1 REG filter is doing real
+        work, not just happening to match because it's the only week in the
+        fixture."""
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        self._write_files(tmp_path)
+
+        raw_path = tmp_path / "depth_charts" / "depth_charts_2023.csv"
+        raw = pd.read_csv(raw_path)
+        week2_bad_qb = pd.DataFrame([{
+            "club_code": "AAA", "week": 2, "game_type": "REG", "depth_team": 1,
+            "full_name": "Backup QB", "gsis_id": "99-9999", "depth_position": "QB",
+        }])
+        pd.concat([raw, week2_bad_qb], ignore_index=True).to_csv(raw_path, index=False)
+
+        result = compute_preseason_player_profiles(2023, tmp_path)
+        # Still QB Alpha's rate (0.20) -- not contaminated by the week-2 entry,
+        # which has no player_epa match and would pull qb_tier toward the
+        # rookie-discount default if it leaked in.
+        assert result["AAA"]["qb_tier"] == pytest.approx(0.20, abs=0.01)
 
 
 class TestNNProjectionEngineInitialize:
