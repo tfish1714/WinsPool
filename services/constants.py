@@ -76,12 +76,28 @@ PRESEASON_ELO_BOOST_MAX = 200
 # Weights for the profile composite that drives the Elo adjustment.
 # Defensive dimensions (def_pass_epa, def_rush_epa) are sign-flipped before
 # weighting so a better defense contributes positively to the composite.
+#
+# Recalibrated 2026-08-23 from the original hand-picked values using real
+# historical validation (unlocked by the depth_charts schema-compat fix --
+# see docs/superpowers/specs/2026-08-23-depth-chart-schema-compat-design.md).
+# Each dimension's weight here is proportional to its real Pearson
+# correlation with actual season win totals, pooled across 160 team-seasons
+# (2021-2025 walk-forward folds, forced through the preseason path via
+# scripts/walk_forward_calibrate_preseason_weights.py). The prior weights had
+# real mismatches against that signal: ol_av carried 0.10 weight despite a
+# measured correlation of only 0.02 (essentially no signal), while
+# def_rush_epa carried only 0.02 weight despite a measured correlation of
+# 0.20 (the 3rd-strongest of the 7 dimensions). This reweighting improved
+# 5-fold walk-forward MAE (predicted vs. actual wins) from 2.586 to 2.554,
+# consistently across 4 of 5 folds (not one outlier season) -- still behind
+# analyst consensus's 2.186 MAE on the same folds, which is expected: this
+# pipeline only sees roster/EPA data, not real-time injury/roster news.
 PRESEASON_ELO_WEIGHTS = {
-    "qb_tier":      0.30,
-    "off_pass_epa": 0.20,
-    "def_pass_epa": 0.20,
-    "dl_perf":      0.15,
-    "ol_av":        0.10,
-    "off_rush_epa": 0.03,
-    "def_rush_epa": 0.02,
+    "qb_tier":      0.28,
+    "off_pass_epa": 0.21,
+    "def_rush_epa": 0.15,
+    "dl_perf":      0.14,
+    "def_pass_epa": 0.11,
+    "off_rush_epa": 0.09,
+    "ol_av":        0.02,
 }

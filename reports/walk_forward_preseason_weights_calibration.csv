@@ -1,0 +1,8 @@
+dim,current_weight,corr_with_actual_wins,n
+qb_tier,0.3,0.3744,160
+off_pass_epa,0.2,0.2756,160
+def_rush_epa,0.02,0.1983,160
+dl_perf,0.15,0.1908,160
+def_pass_epa,0.2,0.1533,160
+off_rush_epa,0.03,0.1273,160
+ol_av,0.1,0.0218,160
