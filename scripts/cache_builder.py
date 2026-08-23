@@ -458,6 +458,35 @@ def _sync_rawdata() -> None:
               f"{result.stderr.strip()[:500]}")
 
 
+def _years_to_build(available_years: list, games: pd.DataFrame) -> list:
+    """Years this job should process for the full-sweep (no --year) case.
+
+    get_available_years() -- used elsewhere in the app for season pickers,
+    draft pages, etc. -- only returns seasons with a real draft_results row,
+    so a season with no draft yet (e.g. next year, during its preseason
+    window) is invisible to it. That left game_predictions for that season
+    unmaintained by this daily job entirely: it only ever got refreshed by a
+    manual backfill_schedule_predictions.py run, never automatically.
+
+    Extends available_years with the season right after the most recent
+    drafted one, but only when real schedule data for it already exists
+    (nflverse publishes next season's schedule well before the season
+    starts) -- otherwise there's nothing to predict yet and no reason to add
+    it. build_year()'s other four analytics (wins_pool_standings,
+    player_winlossmatrix, weekbyweek, prediction_snapshot's player_projections)
+    already degrade gracefully to empty output for a season with no
+    draft_results (each wrapped in its own try/except) -- only
+    schedule_enriched's game_predictions write is what this is actually for.
+    """
+    current_year = max(available_years) if available_years else 2024
+    next_year = current_year + 1
+    if (not games.empty and "season" in games.columns
+            and next_year not in available_years
+            and next_year in games["season"].values):
+        return available_years + [next_year]
+    return available_years
+
+
 def main():
     parser = argparse.ArgumentParser(description="Pre-compute analytics into cache")
     parser.add_argument('--year', type=int, default=None, help="Only rebuild this year")
@@ -522,7 +551,7 @@ def main():
     available_years = get_available_years(draft_results)
     current_year = max(available_years) if available_years else 2024
 
-    years_to_build = [args.year] if args.year else available_years
+    years_to_build = [args.year] if args.year else _years_to_build(available_years, games)
     print(f"[cache_builder] Years to process: {years_to_build}")
 
     # Build ML ensemble prediction lookup once for all years

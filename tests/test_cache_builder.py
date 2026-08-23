@@ -74,6 +74,81 @@ class TestMainSyncWiring:
         mock_sync.assert_not_called()
 
 
+class TestYearsToBuild:
+    def test_adds_next_year_when_schedule_data_exists(self):
+        from scripts.cache_builder import _years_to_build
+        games = pd.DataFrame([{"season": 2025, "week": 1}, {"season": 2026, "week": 1}])
+        result = _years_to_build([2024, 2025], games)
+        assert result == [2024, 2025, 2026]
+
+    def test_does_not_add_next_year_without_schedule_data(self):
+        from scripts.cache_builder import _years_to_build
+        games = pd.DataFrame([{"season": 2025, "week": 1}])
+        result = _years_to_build([2024, 2025], games)
+        assert result == [2024, 2025]
+
+    def test_does_not_duplicate_if_next_year_already_drafted(self):
+        from scripts.cache_builder import _years_to_build
+        games = pd.DataFrame([{"season": 2025, "week": 1}, {"season": 2026, "week": 1}])
+        result = _years_to_build([2024, 2025, 2026], games)
+        assert result == [2024, 2025, 2026]
+
+    def test_handles_empty_available_years(self):
+        from scripts.cache_builder import _years_to_build
+        games = pd.DataFrame([{"season": 2024, "week": 1}, {"season": 2025, "week": 1}])
+        result = _years_to_build([], games)
+        assert result == [2025]  # current_year fallback 2024, next_year 2025
+
+    def test_handles_empty_games(self):
+        from scripts.cache_builder import _years_to_build
+        result = _years_to_build([2024, 2025], pd.DataFrame())
+        assert result == [2024, 2025]
+
+
+class TestYearsToBuildWiring:
+    @patch("scripts.cache_builder.build_year")
+    @patch("scripts.cache_builder.NNPredictionService", side_effect=RuntimeError("skip model load in test"))
+    @patch("scripts.cache_builder.get_available_years", return_value=[2024, 2025])
+    @patch("scripts.cache_builder.load_data")
+    @patch("scripts.cache_builder._sync_rawdata")
+    def test_main_includes_next_year_with_schedule_data(
+        self, mock_sync, mock_load, mock_avail, mock_nn, mock_build_year, monkeypatch,
+    ):
+        games = pd.DataFrame([
+            {"season": 2025, "week": 1, "game_id": "a"},
+            {"season": 2026, "week": 1, "game_id": "b"},
+        ])
+        mock_load.return_value = (
+            pd.DataFrame(), pd.DataFrame(), games, pd.DataFrame(),
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+        )
+        monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--skip-sync"])
+        main()
+        years_called = [call.args[6] for call in mock_build_year.call_args_list]
+        assert years_called == [2024, 2025, 2026]
+
+    @patch("scripts.cache_builder.build_year")
+    @patch("scripts.cache_builder.NNPredictionService", side_effect=RuntimeError("skip model load in test"))
+    @patch("scripts.cache_builder.get_available_years", return_value=[2024, 2025])
+    @patch("scripts.cache_builder.load_data")
+    @patch("scripts.cache_builder._sync_rawdata")
+    def test_explicit_year_arg_bypasses_next_year_logic(
+        self, mock_sync, mock_load, mock_avail, mock_nn, mock_build_year, monkeypatch,
+    ):
+        games = pd.DataFrame([
+            {"season": 2025, "week": 1, "game_id": "a"},
+            {"season": 2026, "week": 1, "game_id": "b"},
+        ])
+        mock_load.return_value = (
+            pd.DataFrame(), pd.DataFrame(), games, pd.DataFrame(),
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+        )
+        monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--year", "2024", "--skip-sync"])
+        main()
+        years_called = [call.args[6] for call in mock_build_year.call_args_list]
+        assert years_called == [2024]
+
+
 class TestBuildCompletedResults:
     def test_extracts_completed_reg_games_only(self):
         from scripts.cache_builder import _build_completed_results
