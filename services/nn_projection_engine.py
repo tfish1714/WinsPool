@@ -57,6 +57,7 @@ class NNProjectionEngine:
         self._team_profiles = pd.DataFrame()
         self._season: Optional[int] = None
         self._roster_value_cache: Dict[Tuple[int, int, str], dict] = {}
+        self._rv_weeks_by_team: Dict[str, list] = {}
         self._preseason_profiles: dict = {}  # {team: {off_pass_epa, off_rush_epa, ...}}
         # Legacy attributes kept as empty defaults so _precompute_static_features fallback
         # doesn't AttributeError on older code paths
@@ -96,6 +97,8 @@ class NNProjectionEngine:
         except Exception as exc:
             logger.warning("Week-aware roster value unavailable for %d: %s", season, exc)
             self._roster_value_cache = {}
+
+        self._build_rv_weeks_by_team()
 
         snap_path = RAWDATA_DIR / "snap_counts" / f"snap_counts_{season}.csv"
         snap_empty = not snap_path.exists() or pd.read_csv(snap_path, nrows=1).empty
@@ -248,6 +251,39 @@ class NNProjectionEngine:
 
         return state_template, team_list, team_idx
 
+    def _build_rv_weeks_by_team(self) -> None:
+        """(Re)derive self._rv_weeks_by_team from the current
+        self._roster_value_cache. Called from initialize() and again at the
+        top of _precompute_static_features() so both a normal initialize() ->
+        simulate_season() call and tests/callers that set
+        _roster_value_cache directly (bypassing initialize()) stay correct."""
+        self._rv_weeks_by_team = {}
+        for (rv_season, rv_week, rv_team) in self._roster_value_cache:
+            if rv_season == self._season:
+                self._rv_weeks_by_team.setdefault(rv_team, []).append(rv_week)
+        for _weeks in self._rv_weeks_by_team.values():
+            _weeks.sort()
+
+    def lookup_roster_value(self, team: str, week: int) -> dict:
+        """Week-aware roster-value lookup, carrying forward the latest week
+        actually present in self._roster_value_cache (nflverse's weekly_rosters
+        only has data through the current week, so an exact (season, week,
+        team) lookup for any future week would always miss). Returns {} if the
+        team has no roster-value data at all -- callers should fall back to
+        the flat prior-season _team_profiles average in that case.
+
+        Public so callers outside this class (e.g. backfill_schedule_predictions.py's
+        explain-modal payload) can report the same value that actually fed the
+        model, instead of a separate approximation.
+        """
+        weeks = self._rv_weeks_by_team.get(team)
+        if not weeks:
+            return {}
+        usable = [w for w in weeks if w <= week]
+        if not usable:
+            return {}
+        return self._roster_value_cache.get((self._season, usable[-1], team), {})
+
     def _precompute_static_features(self, schedule_df: pd.DataFrame) -> dict:
         """Build the time-invariant portion of the feature vector for each game.
 
@@ -270,23 +306,9 @@ class NNProjectionEngine:
         # through the CURRENT week, so an exact (season, week, team) lookup for
         # any future week would always miss -- discarding this feature entirely
         # for the rest of the season instead of just using the most recent real
-        # value). Falls back to the flat prior-season _team_profiles average
-        # (hp/ap) only when a team has NO roster-value data at all.
-        _rv_weeks_by_team: Dict[str, list] = {}
-        for (rv_season, rv_week, rv_team) in self._roster_value_cache:
-            if rv_season == self._season:
-                _rv_weeks_by_team.setdefault(rv_team, []).append(rv_week)
-        for _weeks in _rv_weeks_by_team.values():
-            _weeks.sort()
-
-        def _lookup_roster_value(team: str, wk: int) -> dict:
-            weeks = _rv_weeks_by_team.get(team)
-            if not weeks:
-                return {}
-            usable = [w for w in weeks if w <= wk]
-            if not usable:
-                return {}
-            return self._roster_value_cache.get((self._season, usable[-1], team), {})
+        # value). Rebuilt here (not just in initialize()) so a caller that sets
+        # _roster_value_cache directly still gets correct carry-forward.
+        self._build_rv_weeks_by_team()
 
         # Precompute profile z-scores once — used inside the per-game loop to override
         # 5 quality features. Models are now trained on these z-scores so the scale is correct.
@@ -403,8 +425,8 @@ class NNProjectionEngine:
             # performance-grade-based feature computed in
             # build_master_feature_table(), not part of compute_roster_value()'s
             # output.
-            h_rv = _lookup_roster_value(ht, int(wk))
-            a_rv = _lookup_roster_value(at, int(wk))
+            h_rv = self.lookup_roster_value(ht, int(wk))
+            a_rv = self.lookup_roster_value(at, int(wk))
             feat[col_idx["roster_talent_delta"]]     = (
                 float(hp.get("roster_talent_delta", 0.0)) - float(ap.get("roster_talent_delta", 0.0))
             )

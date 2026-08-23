@@ -92,9 +92,32 @@ def _build_predictions_map(year: int, ft_lookup: dict,
                     key = f"W{int(wk):02d}_{ht}_{at}"
                     completed_results[key] = float(row["result"])
 
+    # Skip the MC simulation entirely when every scheduled game for this year
+    # already has a locked feature-table prediction -- its output would be
+    # thrown away anyway (see the `if key in played_keys: continue` below).
+    # This matters because NNProjectionEngine.initialize() always calls
+    # build_master_feature_table(min_season=2020, max_season=year-1), which is
+    # an invalid empty range for any year <= 2020 -- for fully-completed
+    # historical seasons that just burns time and logs noisy
+    # "roster_value_service unavailable" / "Preseason player profile build
+    # failed" warnings for a simulation whose result is discarded regardless.
+    needs_simulation = False
+    if not schedule_df.empty:
+        for _, row in schedule_df.iterrows():
+            wk = row.get("week")
+            if wk is None or pd.isna(wk):
+                continue
+            ht = _normalize_team(str(row.get("home_team", "") or ""))
+            at = _normalize_team(str(row.get("away_team", "") or ""))
+            if not ht or not at:
+                continue
+            if f"W{int(wk):02d}_{ht}_{at}" not in played_keys:
+                needs_simulation = True
+                break
+
     # Run dynamic MC simulation for all games (completed apply deterministically,
     # future games simulate forward from rebuilt team state)
-    if not schedule_df.empty:
+    if needs_simulation:
         engine = NNProjectionEngine()  # already imported at top of file
         engine.initialize(year)
         profile_dict = {row["team"]: row.to_dict() for _, row in engine._team_profiles.iterrows()}
@@ -149,6 +172,18 @@ def _build_predictions_map(year: int, ft_lookup: dict,
             trench_val       = round(_pf(h_prof, "trench_score") - _pf(a_prof, "trench_score"), 1)
             point_diff_val   = round(_pf(h_prof, "margin_roll") - _pf(a_prof, "margin_roll"), 2)
 
+            # Week-aware roster value (same source simulate_season() actually
+            # fed the model -- see NNProjectionEngine.lookup_roster_value())
+            # instead of the flat prior-season profile average used above.
+            h_rv = engine.lookup_roster_value(ht, int(wk))
+            a_rv = engine.lookup_roster_value(at, int(wk))
+            off_roster_val = round(
+                _pf(h_rv, "off_roster_value") - _pf(a_rv, "off_roster_value"), 3
+            )
+            def_roster_val = round(
+                _pf(h_rv, "def_roster_value") - _pf(a_rv, "def_roster_value"), 3
+            )
+
             result[key] = {
                 "pred_prob":     round(hp, 4),
                 "pred_winner":   winner,
@@ -174,8 +209,8 @@ def _build_predictions_map(year: int, ft_lookup: dict,
                     "rest_advantage":       0.0,
                     "travel_disadvantage":  0.0,
                     "trench_dominance":     trench_val,
-                    "off_roster_value":     0.0,
-                    "def_roster_value":     0.0,
+                    "off_roster_value":     off_roster_val,
+                    "def_roster_value":     def_roster_val,
                     "source": "mc_simulation (10000 trials)",
                 },
             }

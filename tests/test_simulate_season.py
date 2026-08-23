@@ -579,6 +579,45 @@ class TestWeekAwareRosterValue:
         assert static_feats["W03_STRONG_WEAK"][col_idx["roster_talent_delta"]] == pytest.approx(5.0)
 
 
+class TestPublicLookupRosterValue:
+    """lookup_roster_value() is the public entry point backfill_schedule_predictions.py
+    uses to report the same value that actually fed the model, instead of a
+    separate hardcoded/approximated number."""
+
+    def test_carries_forward_latest_week(self, mock_engine):
+        mock_engine._season = 2025
+        mock_engine._roster_value_cache = {
+            (2025, 3, "STRONG"): {"off_roster_value": 2.0, "def_roster_value": 1.0},
+        }
+        mock_engine._build_rv_weeks_by_team()
+
+        assert mock_engine.lookup_roster_value("STRONG", 3) == {
+            "off_roster_value": 2.0, "def_roster_value": 1.0,
+        }
+        # Week 9 has no exact entry -- carries forward week 3's value.
+        assert mock_engine.lookup_roster_value("STRONG", 9) == {
+            "off_roster_value": 2.0, "def_roster_value": 1.0,
+        }
+
+    def test_returns_empty_before_first_available_week(self, mock_engine):
+        mock_engine._season = 2025
+        mock_engine._roster_value_cache = {
+            (2025, 5, "STRONG"): {"off_roster_value": 2.0},
+        }
+        mock_engine._build_rv_weeks_by_team()
+
+        assert mock_engine.lookup_roster_value("STRONG", 3) == {}
+
+    def test_returns_empty_for_unknown_team(self, mock_engine):
+        mock_engine._season = 2025
+        mock_engine._roster_value_cache = {
+            (2025, 3, "STRONG"): {"off_roster_value": 2.0},
+        }
+        mock_engine._build_rv_weeks_by_team()
+
+        assert mock_engine.lookup_roster_value("GHOST", 3) == {}
+
+
 class TestInitializeBuildsRosterValueCache:
     def test_initialize_computes_and_threads_espn_overrides(self):
         from unittest.mock import patch
