@@ -65,6 +65,8 @@ python scripts/refresh_preseason.py --season 2026 --check-freshness   # Prefligh
 python scripts/rank_position_groups.py --season 2026                  # Rank all 32 teams (CSV) on each preseason Elo-boost input dimension
 python scripts/rank_position_groups.py --season 2026 --team ATL       # One team's dimension breakdown, sorted by weighted contribution
 python scripts/rank_position_groups.py --season 2026 --dim dl_perf    # All 32 teams ranked on a single dimension
+python scripts/walk_forward_calibrate_preseason_weights.py                     # Validate PRESEASON_ELO_WEIGHTS against real historical outcomes (5 cached walk-forward folds, no retraining)
+python scripts/walk_forward_calibrate_preseason_weights.py --weights '{...}'   # Score a candidate weight set against the same folds
 ```
 
 ### Tests
