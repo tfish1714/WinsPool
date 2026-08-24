@@ -150,11 +150,17 @@ class TestYearsToBuildWiring:
 
 
 class TestPreseasonPredictionsWiring:
+    @patch("scripts.cache_builder.live_scores.sync_live_scores_to_df")
     @patch("scripts.cache_builder.set_preseason_predictions")
     @patch("scripts.cache_builder.NNProjectionEngine")
-    def test_writes_unlocked_for_current_season(self, mock_engine_cls, mock_set):
+    def test_writes_unlocked_for_current_season(self, mock_engine_cls, mock_set, mock_sync_live):
         from scripts.cache_builder import build_year
         import pandas as pd
+
+        # year == current_year triggers a real ESPN live-score sync inside
+        # build_year() unless this is mocked -- keep this test hermetic (no
+        # network I/O) by passing games through unchanged.
+        mock_sync_live.side_effect = lambda g: g
 
         fake_engine = MagicMock()
         fake_engine.get_team_win_projections.return_value = {
@@ -231,6 +237,8 @@ class TestPreseasonPredictionsWiring:
 
         mock_set.assert_not_called()
 
+    @patch("scripts.cache_builder.build_master_feature_table")
+    @patch("scripts.cache_builder._build_pred_lookup")
     @patch("scripts.cache_builder.load_data")
     @patch("scripts.cache_builder.get_available_years", return_value=[2024, 2025])
     @patch("scripts.cache_builder.NNPredictionService")
@@ -240,7 +248,7 @@ class TestPreseasonPredictionsWiring:
     @patch("scripts.cache_builder._sync_rawdata")
     def test_main_threads_model_version_string(
         self, mock_sync, mock_build_year, mock_lr_cls, mock_xgb_cls, mock_nn_cls,
-        mock_avail, mock_load, monkeypatch,
+        mock_avail, mock_load, mock_pred_lookup, mock_feature_table, monkeypatch,
     ):
         from scripts.cache_builder import main
         import pandas as pd
@@ -249,6 +257,12 @@ class TestPreseasonPredictionsWiring:
         mock_nn_cls.return_value = MagicMock(loaded_version="v15")
         mock_xgb_cls.return_value = MagicMock(loaded_version="v9")
         mock_lr_cls.return_value = MagicMock(loaded_version="v7")
+
+        # Prevent main() from doing real feature-engineering I/O over on-disk
+        # rawdata/ CSVs -- only the model_version string threading is under
+        # test here, not the feature table build itself.
+        mock_feature_table.return_value = pd.DataFrame()
+        mock_pred_lookup.return_value = {}
 
         games = pd.DataFrame([{"season": 2025, "week": 1, "game_id": "a"}])
         mock_load.return_value = (
