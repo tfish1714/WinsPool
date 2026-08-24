@@ -1,0 +1,54 @@
+<h2>Draft Room + Chat — Two Parts</h2>
+<p class="subtitle">Both are fully spec'd. Which should we tackle first?</p>
+
+<div class="options">
+  <div class="option" data-choice="draft-first" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Draft Room redesign first</h3>
+      <p>New layout + shame timer, then upgrade chat second</p>
+      <ul style="margin:8px 0 0;padding-left:1.2em;font-size:0.85em;opacity:0.8">
+        <li>Shame timer (count-up, 4 escalation tiers)</li>
+        <li>Pick queue with per-pick times + slow-picker flags</li>
+        <li>Two-column split: queue left, teams right</li>
+        <li>Avg / slowest pick stats footer</li>
+        <li>"LIVE · N connected" status pill</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="option" data-choice="chat-first" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Chat overlay upgrade first</h3>
+      <p>Full-height side panel, FAB, reactions — then draft room</p>
+      <ul style="margin:8px 0 0;padding-left:1.2em;font-size:0.85em;opacity:0.8">
+        <li>392px full-height panel, slides off-screen to FAB</li>
+        <li>Rich message bubbles (avatars, own-message tint, @mentions)</li>
+        <li>Emoji reactions with toggle / count</li>
+        <li>Typing indicator</li>
+        <li>Auto-grow composer (Enter=send, Shift+Enter=newline)</li>
+        <li>System events woven into the message timeline</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="option" data-choice="both" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Both together, one plan</h3>
+      <p>Single implementation pass covering the full redesign</p>
+      <ul style="margin:8px 0 0;padding-left:1.2em;font-size:0.85em;opacity:0.8">
+        <li>More to review at once, but cohesive result</li>
+        <li>Shared tokens/styles done once</li>
+        <li>Riskier — bigger diff to debug if something breaks</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px;padding:14px 18px;background:rgba(255,255,255,0.04);border-radius:8px;border:1px solid rgba(255,255,255,0.08)">
+  <p style="margin:0;font-size:0.85em;opacity:0.7">
+    <strong>Note:</strong> The design files are high-fidelity prototypes — exact colors, spacing, and interactions are already fully specified. Implementation is mostly a translation job from the prototype into the app's Jinja2/vanilla-JS system.
+  </p>
+</div>

@@ -625,7 +625,8 @@ def set_preseason_predictions(season: int, projections: dict, model_version: str
 
     existing_locked = set()
     if not force:
-        for doc in db.collection("preseason_predictions").where("season", "==", season).stream():
+        from google.cloud.firestore_v1.base_query import FieldFilter
+        for doc in db.collection("preseason_predictions").where(filter=FieldFilter("season", "==", season)).stream():
             data = doc.to_dict()
             if data.get("locked"):
                 existing_locked.add(data.get("team"))
