@@ -47,3 +47,6 @@ reports/
 
 # Design Files
 design/
+
+# Superpowers skill scratch space (brainstorm sessions, SDD workspaces) -- never source
+.superpowers/
