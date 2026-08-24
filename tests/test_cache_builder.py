@@ -149,6 +149,119 @@ class TestYearsToBuildWiring:
         assert years_called == [2024]
 
 
+class TestPreseasonPredictionsWiring:
+    @patch("scripts.cache_builder.set_preseason_predictions")
+    @patch("scripts.cache_builder.NNProjectionEngine")
+    def test_writes_unlocked_for_current_season(self, mock_engine_cls, mock_set):
+        from scripts.cache_builder import build_year
+        import pandas as pd
+
+        fake_engine = MagicMock()
+        fake_engine.get_team_win_projections.return_value = {
+            "KC": {"projected_wins": 11.0, "mean_wins": 10.8, "std_dev": 1.95,
+                   "floor": 7.0, "p25": 9.0, "p75": 12.0, "ceiling": 14.0},
+        }
+        mock_engine_cls.return_value = fake_engine
+
+        games = pd.DataFrame([
+            {"season": 2026, "week": 1, "home_team": "KC", "away_team": "TEN",
+             "result": None, "game_type": "REG"},
+        ])
+        build_year(
+            standings=pd.DataFrame(), games=games, players=pd.DataFrame(),
+            draft_order=pd.DataFrame(), draft_results=pd.DataFrame(),
+            draft_order_rules=pd.DataFrame(), year=2026, current_year=2026,
+            all_games=games, force=False, pred_lookup={},
+            model_version="nn_v15+xgb_v9+lr_v7",
+        )
+
+        mock_set.assert_called_once()
+        call_kwargs = mock_set.call_args.kwargs
+        assert call_kwargs["locked"] is False
+        assert call_kwargs["model_version"] == "nn_v15+xgb_v9+lr_v7"
+        assert call_kwargs["force"] is False
+
+    @patch("scripts.cache_builder.set_preseason_predictions")
+    @patch("scripts.cache_builder.NNProjectionEngine")
+    def test_writes_locked_for_past_season(self, mock_engine_cls, mock_set):
+        from scripts.cache_builder import build_year
+        import pandas as pd
+
+        fake_engine = MagicMock()
+        fake_engine.get_team_win_projections.return_value = {
+            "KC": {"projected_wins": 11.0, "mean_wins": 10.8, "std_dev": 1.95,
+                   "floor": 7.0, "p25": 9.0, "p75": 12.0, "ceiling": 14.0},
+        }
+        mock_engine_cls.return_value = fake_engine
+
+        games = pd.DataFrame([
+            {"season": 2024, "week": 18, "home_team": "KC", "away_team": "TEN",
+             "result": 7.0, "game_type": "REG"},
+        ])
+        build_year(
+            standings=pd.DataFrame(), games=games, players=pd.DataFrame(),
+            draft_order=pd.DataFrame(), draft_results=pd.DataFrame(),
+            draft_order_rules=pd.DataFrame(), year=2024, current_year=2026,
+            all_games=games, force=False, pred_lookup={},
+            model_version="nn_v15+xgb_v9+lr_v7",
+        )
+
+        mock_set.assert_called_once()
+        assert mock_set.call_args.kwargs["locked"] is True
+
+    @patch("scripts.cache_builder.set_preseason_predictions")
+    @patch("scripts.cache_builder.NNProjectionEngine")
+    def test_skips_write_when_model_version_none(self, mock_engine_cls, mock_set):
+        """model_version=None signals model loading failed this run (mirrors
+        pred_lookup={} for game_predictions) -- must not attempt the write."""
+        from scripts.cache_builder import build_year
+        import pandas as pd
+
+        games = pd.DataFrame([
+            {"season": 2026, "week": 1, "home_team": "KC", "away_team": "TEN",
+             "result": None, "game_type": "REG"},
+        ])
+        build_year(
+            standings=pd.DataFrame(), games=games, players=pd.DataFrame(),
+            draft_order=pd.DataFrame(), draft_results=pd.DataFrame(),
+            draft_order_rules=pd.DataFrame(), year=2026, current_year=2026,
+            all_games=games, force=False, pred_lookup={},
+            model_version=None,
+        )
+
+        mock_set.assert_not_called()
+
+    @patch("scripts.cache_builder.load_data")
+    @patch("scripts.cache_builder.get_available_years", return_value=[2024, 2025])
+    @patch("scripts.cache_builder.NNPredictionService")
+    @patch("scripts.cache_builder.XGBPredictionService")
+    @patch("scripts.cache_builder.LRPredictionService")
+    @patch("scripts.cache_builder.build_year")
+    @patch("scripts.cache_builder._sync_rawdata")
+    def test_main_threads_model_version_string(
+        self, mock_sync, mock_build_year, mock_lr_cls, mock_xgb_cls, mock_nn_cls,
+        mock_avail, mock_load, monkeypatch,
+    ):
+        from scripts.cache_builder import main
+        import pandas as pd
+        import sys
+
+        mock_nn_cls.return_value = MagicMock(loaded_version="v15")
+        mock_xgb_cls.return_value = MagicMock(loaded_version="v9")
+        mock_lr_cls.return_value = MagicMock(loaded_version="v7")
+
+        games = pd.DataFrame([{"season": 2025, "week": 1, "game_id": "a"}])
+        mock_load.return_value = (
+            pd.DataFrame(), pd.DataFrame(), games, pd.DataFrame(),
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+        )
+        monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--skip-sync"])
+        main()
+
+        for call in mock_build_year.call_args_list:
+            assert call.kwargs.get("model_version") == "nn_v15+xgb_v9+lr_v7"
+
+
 class TestBuildCompletedResults:
     def test_extracts_completed_reg_games_only(self):
         from scripts.cache_builder import _build_completed_results

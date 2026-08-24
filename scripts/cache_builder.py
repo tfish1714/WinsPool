@@ -42,6 +42,7 @@ import numpy as np
 import pandas as pd
 
 from services.data_service import load_data, get_available_years, get_latest_week_for_year
+from services.db_service import set_preseason_predictions
 from services.cache_service import (
     write_cache, is_cache_final, write_game_predictions,
     get_game_predictions, merge_thin_game_predictions,
@@ -258,7 +259,8 @@ def week_is_complete(games, year: int, week: int) -> bool:
 
 def build_year(standings, games, players, draft_order, draft_results,
                draft_order_rules, year: int, current_year: int,
-               all_games=None, force: bool = False, pred_lookup: dict = None):
+               all_games=None, force: bool = False, pred_lookup: dict = None,
+               model_version: str = None):
     print(f"\n[cache_builder] Building year {year}...")
 
     # Use full multi-season games for Elo history (falls back to year-filtered)
@@ -429,6 +431,26 @@ def build_year(standings, games, players, draft_order, draft_results,
         except Exception as e:
             print(f"  [err]  {analytic}: {e}")
 
+    # --- Preseason predictions (full-season win totals for the draft) ---
+    # model_version is None when this run's model loading failed (see main()'s
+    # except branch) -- mirrors pred_lookup={} silently skipping game_predictions
+    # for the same reason, rather than writing under an unknown model version.
+    if model_version:
+        try:
+            engine = _get_engine()
+            yr_games = full_games[full_games['season'] == year].copy() if not full_games.empty else pd.DataFrame()
+            if not yr_games.empty:
+                yr_games = yr_games.drop_duplicates(subset=['week', 'home_team', 'away_team'])
+            full_projections = engine.get_team_win_projections(yr_games, n_sims=5000)
+            if full_projections:
+                n = set_preseason_predictions(
+                    year, full_projections, model_version=model_version,
+                    locked=final_flag, force=force,
+                )
+                print(f"  [ok]   preseason_predictions year={year} ({n} teams written)")
+        except Exception as e:
+            print(f"  [err]  preseason_predictions: {e}")
+
 
 SCRIPTS_DIR = pathlib.Path(__file__).parent
 
@@ -561,6 +583,8 @@ def main():
         xgb_svc = XGBPredictionService(); xgb_svc.load_model()
         lr_svc  = LRPredictionService();  lr_svc.load_model()
 
+        model_version = f"nn_{nn_svc.loaded_version}+xgb_{xgb_svc.loaded_version}+lr_{lr_svc.loaded_version}"
+
         min_ft = min(years_to_build)
         max_ft = max(years_to_build)
         print(f"[cache_builder] Building feature table ({min_ft}-{max_ft})...")
@@ -570,6 +594,7 @@ def main():
     except Exception as e:
         print(f"[cache_builder] WARNING: ML models unavailable ({e}). Predictions will be skipped.")
         pred_lookup = {}
+        model_version = None
 
     for year in years_to_build:
         # Filter data to just this year to avoid large cross-season merges
@@ -577,7 +602,8 @@ def main():
         yr_games = games[games['season'] == year].copy() if not games.empty else games
         build_year(yr_standings, yr_games, players, draft_order, draft_results,
                    draft_order_rules, year, current_year, all_games=games,
-                   force=args.force, pred_lookup=pred_lookup)
+                   force=args.force, pred_lookup=pred_lookup,
+                   model_version=model_version)
 
     # Signal web server to invalidate in-memory cache
     print("\n[cache_builder] Signaling global cache invalidation...")
