@@ -45,13 +45,27 @@ log = logging.getLogger(__name__)
 NFLVERSE_RELEASES = "https://api.github.com/repos/nflverse/nflverse-data/releases/tags/{tag}"
 STALE_AFTER_DAYS = 30
 
-# (release tag, filename template) required by the preseason profile builder.
+# (release tag, filename template, subdir, season_offset) required by the
+# preseason profile builder. season_offset is added to the target season
+# before filling {season} -- depth_charts/rosters/weekly_rosters/snap_counts/
+# injuries are read for the target season itself, but
+# compute_preseason_player_profiles() reads pfr_advstats and stats_player for
+# the PRIOR season (services/nn_feature_engine.py: adv_def_path/_load_player_epa
+# both use target_season - 1), so those two need offset=-1 or this check would
+# watch freshness of a file the builder never actually opens.
+#
+# pfr_advstats and stats_player were missing from this list entirely until
+# this fix -- which is exactly how the pfr_advanced->pfr_advstats tag typo in
+# sync_nflverse_data.py went undetected by this freshness preflight for as
+# long as it did.
 REQUIRED_ASSETS = [
-    ("depth_charts", "depth_charts_{season}.csv", "depth_charts"),
-    ("rosters", "roster_{season}.csv", "rosters"),
-    ("weekly_rosters", "roster_weekly_{season}.csv", "weekly_rosters"),
-    ("snap_counts", "snap_counts_{season}.csv", "snap_counts"),
-    ("injuries", "injuries_{season}.csv", "injuries"),
+    ("depth_charts", "depth_charts_{season}.csv", "depth_charts", 0),
+    ("rosters", "roster_{season}.csv", "rosters", 0),
+    ("weekly_rosters", "roster_weekly_{season}.csv", "weekly_rosters", 0),
+    ("snap_counts", "snap_counts_{season}.csv", "snap_counts", 0),
+    ("injuries", "injuries_{season}.csv", "injuries", 0),
+    ("pfr_advstats", "advstats_week_def_{season}.csv", "pfr_advstats", -1),
+    ("stats_player", "stats_player_week_{season}.csv", "stats_player", -1),
 ]
 
 STEPS = [
@@ -146,8 +160,8 @@ def depth_chart_max_dt(path: pathlib.Path):
 def run_freshness_preflight(season: int) -> None:
     log.info("-" * 60)
     log.info("Data freshness preflight")
-    for tag, template, subdir in REQUIRED_ASSETS:
-        filename = template.format(season=season)
+    for tag, template, subdir, season_offset in REQUIRED_ASSETS:
+        filename = template.format(season=season + season_offset)
         local = RAWDATA / subdir / filename
         res = check_asset_freshness(tag, filename, local)
         log.info("  %-16s %-28s remote=%s local=%s [%s]",

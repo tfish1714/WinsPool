@@ -95,8 +95,14 @@ RELEASES = {
     },
 
     # PFR advanced weekly stats (pressure rate, hurry rate, drop %, bad throw %)
-    # nflverse only has this from 2018 onward
-    "pfr_advanced": {
+    # nflverse only has this from 2018 onward.
+    # The release tag is "pfr_advstats" (verified against
+    # https://github.com/nflverse/nflverse-data/releases) -- this entry's key
+    # was "pfr_advanced" for an unknown amount of time, which 404s on every
+    # download (the dict key is used directly as the URL's release tag, see
+    # BASE_URL usage below), silently degrading every downstream reader of
+    # rawdata/pfr_advstats/*.csv to whatever stale copy was already on disk.
+    "pfr_advstats": {
         "files": [
             ("advstats_week_pass_{year}.csv", "pfr_advstats/advstats_week_pass_{year}.csv"),
             ("advstats_week_def_{year}.csv",  "pfr_advstats/advstats_week_def_{year}.csv"),
@@ -105,6 +111,23 @@ RELEASES = {
         ],
         "year_specific": True,
         "min_year": 2018,
+        "priority": 2,
+    },
+
+    # Per-player season/week stats -- feeds compute_preseason_player_profiles()'s
+    # off_pass_epa/off_rush_epa/qb_tier (services/nn_feature_engine.py::_load_player_epa)
+    # and roster_value_service.py's week-aware roster value (5 call sites reading
+    # stats_player_week_{year}.csv). Was never in this RELEASES dict at all --
+    # both readers degraded silently to empty data (nn_feature_engine.py logs
+    # nothing when the file is simply absent; roster_value_service.py logs
+    # "no weekly roster data for {year}" per season, easy to miss in a job's logs).
+    "stats_player": {
+        "files": [
+            ("stats_player_reg_{year}.csv",     "stats_player/stats_player_reg_{year}.csv"),
+            ("stats_player_regpost_{year}.csv", "stats_player/stats_player_regpost_{year}.csv"),
+            ("stats_player_week_{year}.csv",    "stats_player/stats_player_week_{year}.csv"),
+        ],
+        "year_specific": True,
         "priority": 2,
     },
 
