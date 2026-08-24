@@ -431,8 +431,23 @@ def main():
     elif args.season:
         seasons = [args.season]
     else:
-        # Default: current season + previous (to catch any late updates)
-        seasons = [CURRENT_SEASON - 1, CURRENT_SEASON]
+        # Default: current season + previous (to catch any late updates), PLUS
+        # the upcoming season. CURRENT_SEASON is deliberately gated to
+        # September (the month real games start) -- correct for anything that
+        # needs completed game results (Elo, quarter scores), but rosters/
+        # depth_charts/injuries/weekly_rosters/snap_counts/stats_player/
+        # pfr_advstats for the season ABOUT to start are published by
+        # nflverse well before Week 1 (free agency in March, minicamps in
+        # May, training camp/roster cutdowns in August) and are exactly what
+        # winspool-predict-daily's cache_builder.py needs to build that
+        # season's preseason player profiles -- compute_preseason_player_profiles()
+        # returns {} outright if that season's roster/depth_chart files are
+        # missing. Without +1 here, this job's default (no-args) sync call
+        # never even attempts CURRENT_SEASON+1's files from ~January through
+        # August, silently degrading every preseason projection for the
+        # entire draft window. A too-early attempt at a season nflverse
+        # hasn't published yet just 404s per-file, non-fatally.
+        seasons = [CURRENT_SEASON - 1, CURRENT_SEASON, CURRENT_SEASON + 1]
 
     start = time.time()
     print("=" * 65)
