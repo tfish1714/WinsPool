@@ -597,3 +597,60 @@ def set_consensus_projections(season: int, rows: list) -> int:
     logger.info("Wrote %d consensus rows for %s.", count, season)
     signal_data_update()
     return count
+
+
+def set_preseason_predictions(season: int, projections: dict, model_version: str,
+                               locked: bool, force: bool = False) -> int:
+    """Write preseason_predictions docs for a season, respecting per-team locks.
+
+    A team's existing doc is skipped (not overwritten) when it's already
+    locked=True and force=False -- this preserves "what we predicted before a
+    completed season started" once that season is over, the same protection
+    game_predictions' locked flag and analytics_cache's is_cache_final() gate
+    already give every other prediction store in this app. locked=True is
+    stamped on every doc this call DOES write, set to the `locked` param
+    (callers pass whatever final_flag they've already computed for the
+    season).
+
+    projections: {team: {projected_wins, mean_wins, std_dev, floor, p25,
+    p75, ceiling}} -- see NNProjectionEngine.get_team_win_projections().
+
+    Returns the number of docs actually written (skipped-due-to-lock docs
+    don't count).
+    """
+    db = get_db()
+    if db is None:
+        logger.warning("No database connection; preseason predictions not written.")
+        return 0
+
+    existing_locked = set()
+    if not force:
+        for doc in db.collection("preseason_predictions").where("season", "==", season).stream():
+            data = doc.to_dict()
+            if data.get("locked"):
+                existing_locked.add(data.get("team"))
+
+    batch = db.batch()
+    written = 0
+    for team, stats in projections.items():
+        if team in existing_locked:
+            continue
+        ref = db.collection("preseason_predictions").document(f"{season}_{team}")
+        batch.set(ref, {
+            "season": season,
+            "team": team,
+            **stats,
+            "model_version": model_version,
+            "generated_at": time.time(),
+            "locked": locked,
+        })
+        written += 1
+        if written % 400 == 0:
+            batch.commit()
+            batch = db.batch()
+    if written % 400 != 0:
+        batch.commit()
+
+    if written:
+        signal_data_update()
+    return written

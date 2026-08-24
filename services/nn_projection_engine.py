@@ -906,6 +906,33 @@ class NNProjectionEngine:
             for team, stats in result.get("team_stats", {}).items()
         }
 
+    def get_team_win_projections(self, schedule_df: pd.DataFrame, n_sims: int = 5000) -> Dict[str, dict]:
+        """Full-stats sibling of get_team_projected_wins() -- same simulate_season()
+        call, but preserves mean/std_dev/percentiles instead of collapsing to
+        median only. Used to populate preseason_predictions
+        (services/db_service.py::set_preseason_predictions()) from the daily
+        automated job instead of the manual scripts/predict_season.py path.
+
+        Returns {team: {projected_wins, mean_wins, std_dev, floor, p25, p75,
+        ceiling}}, field names matching scripts/predict_season.py's existing
+        mapping exactly (projected_wins=median, floor=p5, ceiling=p95).
+        """
+        if schedule_df.empty:
+            return {}
+        result = self.simulate_season(schedule_df, n_sims=n_sims)
+        out = {}
+        for team, stats in result.get("team_stats", {}).items():
+            out[team] = {
+                "projected_wins": round(float(stats["median_wins"]), 1),
+                "mean_wins":       round(float(stats["mean_wins"]), 1),
+                "std_dev":         round(float(stats["std_dev"]), 2),
+                "floor":           round(float(stats["p5"]), 1),
+                "p25":             round(float(stats["p25"]), 1),
+                "p75":             round(float(stats["p75"]), 1),
+                "ceiling":         round(float(stats["p95"]), 1),
+            }
+        return out
+
     def project_portfolio_wins(
         self, team_ids: List[str], schedule_df: pd.DataFrame, n_sims: int = 500
     ) -> dict:

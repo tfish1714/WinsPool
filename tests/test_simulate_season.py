@@ -694,3 +694,46 @@ class TestInitializeBuildsRosterValueCache:
             engine.initialize(2025)  # must not raise
 
         assert engine._roster_value_cache == {}
+
+
+class TestGetTeamWinProjections:
+    def test_maps_full_stats_from_simulate_season(self, mock_engine):
+        mock_engine.simulate_season = lambda *a, **k: {
+            "team_stats": {
+                "KC": {"median_wins": 11.0, "mean_wins": 10.8, "std_dev": 1.95,
+                       "p5": 7.0, "p25": 9.0, "p75": 12.0, "p95": 14.0},
+                "TEN": {"median_wins": 5.0, "mean_wins": 5.3, "std_dev": 2.1,
+                        "p5": 2.0, "p25": 4.0, "p75": 7.0, "p95": 9.0},
+            }
+        }
+        import pandas as pd
+        schedule = pd.DataFrame([{"home_team": "KC", "away_team": "TEN", "week": 1}])
+        result = mock_engine.get_team_win_projections(schedule)
+
+        assert result["KC"] == {
+            "projected_wins": 11.0, "mean_wins": 10.8, "std_dev": 1.95,
+            "floor": 7.0, "p25": 9.0, "p75": 12.0, "ceiling": 14.0,
+        }
+        assert result["TEN"] == {
+            "projected_wins": 5.0, "mean_wins": 5.3, "std_dev": 2.1,
+            "floor": 2.0, "p25": 4.0, "p75": 7.0, "ceiling": 9.0,
+        }
+
+    def test_empty_schedule_returns_empty_dict_without_simulating(self, mock_engine):
+        import pandas as pd
+        called = []
+        mock_engine.simulate_season = lambda *a, **k: called.append(1) or {}
+        result = mock_engine.get_team_win_projections(pd.DataFrame())
+        assert result == {}
+        assert called == []
+
+    def test_passes_through_n_sims(self, mock_engine):
+        import pandas as pd
+        captured = {}
+        def fake_simulate(schedule_df, n_sims=5000):
+            captured["n_sims"] = n_sims
+            return {"team_stats": {}}
+        mock_engine.simulate_season = fake_simulate
+        schedule = pd.DataFrame([{"home_team": "KC", "away_team": "TEN", "week": 1}])
+        mock_engine.get_team_win_projections(schedule, n_sims=1234)
+        assert captured["n_sims"] == 1234

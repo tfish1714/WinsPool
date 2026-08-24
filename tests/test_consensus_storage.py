@@ -125,3 +125,203 @@ def test_get_preseason_predictions_mean_wins_nan_falls_back_to_projected_wins(mo
 
     populated_season = data_service.get_preseason_predictions(2026)
     assert populated_season["BUF"]["mean_wins"] == 10.25  # real value, not the fallback
+
+
+def test_set_preseason_predictions_writes_full_stats(monkeypatch):
+    written = {}
+
+    class FakeDoc:
+        def __init__(self, doc_id):
+            self.doc_id = doc_id
+
+    class FakeBatch:
+        def set(self, ref, payload):
+            written[ref.doc_id] = payload
+
+        def commit(self):
+            pass
+
+    class FakeCollection:
+        def __init__(self):
+            self._docs = []
+
+        def document(self, doc_id):
+            return FakeDoc(doc_id)
+
+        def where(self, *a, **k):
+            return self
+
+        def stream(self):
+            return iter(self._docs)
+
+    class FakeDB:
+        def __init__(self):
+            self.collections = {}
+
+        def collection(self, name):
+            return self.collections.setdefault(name, FakeCollection())
+
+        def batch(self):
+            return FakeBatch()
+
+    import services.db_service as db_service
+    fake_db = FakeDB()
+    monkeypatch.setattr(db_service, "get_db", lambda: fake_db)
+    signaled = []
+    monkeypatch.setattr(db_service, "signal_data_update", lambda: signaled.append(True))
+
+    count = db_service.set_preseason_predictions(
+        2026,
+        {"KC": {"projected_wins": 11.0, "mean_wins": 10.8, "std_dev": 1.95,
+                "floor": 7.0, "p25": 9.0, "p75": 12.0, "ceiling": 14.0}},
+        model_version="nn_v15+xgb_v9+lr_v7", locked=False,
+    )
+
+    assert count == 1
+    payload = written["2026_KC"]
+    assert payload["season"] == 2026
+    assert payload["team"] == "KC"
+    assert payload["projected_wins"] == 11.0
+    assert payload["model_version"] == "nn_v15+xgb_v9+lr_v7"
+    assert payload["locked"] is False
+    assert "generated_at" in payload
+    assert signaled == [True]
+
+
+def test_set_preseason_predictions_skips_locked_team_without_force(monkeypatch):
+    written = {}
+
+    class FakeDoc:
+        def __init__(self, doc_id):
+            self.doc_id = doc_id
+
+    class FakeBatch:
+        def set(self, ref, payload):
+            written[ref.doc_id] = payload
+
+        def commit(self):
+            pass
+
+    class FakeExistingDoc:
+        def __init__(self, data):
+            self._data = data
+
+        def to_dict(self):
+            return self._data
+
+    class FakeCollection:
+        def __init__(self, existing_docs):
+            self._existing = existing_docs
+
+        def document(self, doc_id):
+            return FakeDoc(doc_id)
+
+        def where(self, *a, **k):
+            return self
+
+        def stream(self):
+            return iter(self._existing)
+
+    class FakeDB:
+        def __init__(self, existing_docs):
+            self._existing = existing_docs
+
+        def collection(self, name):
+            return FakeCollection(self._existing)
+
+        def batch(self):
+            return FakeBatch()
+
+    import services.db_service as db_service
+    existing = [FakeExistingDoc({"season": 2026, "team": "KC", "locked": True})]
+    monkeypatch.setattr(db_service, "get_db", lambda: FakeDB(existing))
+    monkeypatch.setattr(db_service, "signal_data_update", lambda: None)
+
+    count = db_service.set_preseason_predictions(
+        2026,
+        {
+            "KC":  {"projected_wins": 11.0, "mean_wins": 10.8, "std_dev": 1.95,
+                    "floor": 7.0, "p25": 9.0, "p75": 12.0, "ceiling": 14.0},
+            "TEN": {"projected_wins": 5.0, "mean_wins": 5.3, "std_dev": 2.1,
+                    "floor": 2.0, "p25": 4.0, "p75": 7.0, "ceiling": 9.0},
+        },
+        model_version="nn_v15+xgb_v9+lr_v7", locked=True,
+    )
+
+    # KC is locked and force=False (default) -- skipped. TEN has no existing
+    # doc -- written.
+    assert count == 1
+    assert "2026_KC" not in written
+    assert written["2026_TEN"]["team"] == "TEN"
+
+
+def test_set_preseason_predictions_force_overwrites_locked(monkeypatch):
+    written = {}
+
+    class FakeDoc:
+        def __init__(self, doc_id):
+            self.doc_id = doc_id
+
+    class FakeBatch:
+        def set(self, ref, payload):
+            written[ref.doc_id] = payload
+
+        def commit(self):
+            pass
+
+    class FakeExistingDoc:
+        def __init__(self, data):
+            self._data = data
+
+        def to_dict(self):
+            return self._data
+
+    class FakeCollection:
+        def __init__(self, existing_docs):
+            self._existing = existing_docs
+
+        def document(self, doc_id):
+            return FakeDoc(doc_id)
+
+        def where(self, *a, **k):
+            return self
+
+        def stream(self):
+            return iter(self._existing)
+
+    class FakeDB:
+        def __init__(self, existing_docs):
+            self._existing = existing_docs
+
+        def collection(self, name):
+            return FakeCollection(self._existing)
+
+        def batch(self):
+            return FakeBatch()
+
+    import services.db_service as db_service
+    existing = [FakeExistingDoc({"season": 2026, "team": "KC", "locked": True})]
+    monkeypatch.setattr(db_service, "get_db", lambda: FakeDB(existing))
+    monkeypatch.setattr(db_service, "signal_data_update", lambda: None)
+
+    count = db_service.set_preseason_predictions(
+        2026,
+        {"KC": {"projected_wins": 12.0, "mean_wins": 11.5, "std_dev": 1.8,
+                "floor": 8.0, "p25": 10.0, "p75": 13.0, "ceiling": 15.0}},
+        model_version="nn_v15+xgb_v9+lr_v7", locked=True, force=True,
+    )
+
+    assert count == 1
+    assert written["2026_KC"]["projected_wins"] == 12.0
+
+
+def test_set_preseason_predictions_no_db_returns_zero(monkeypatch):
+    import services.db_service as db_service
+    monkeypatch.setattr(db_service, "get_db", lambda: None)
+
+    count = db_service.set_preseason_predictions(
+        2026, {"KC": {"projected_wins": 11.0}},
+        model_version="nn_v15+xgb_v9+lr_v7", locked=False,
+    )
+
+    assert count == 0
