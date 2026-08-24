@@ -52,7 +52,7 @@ def test_main_success_does_not_alert(mock_main, mock_alert):
 class TestSyncRawdata:
     @patch("scripts.cache_builder.subprocess.run")
     def test_success_prints_no_warning(self, mock_run, capsys):
-        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        mock_run.return_value = MagicMock(returncode=0, stdout="  Sync complete\n  Downloaded: 3 files", stderr="")
         _sync_rawdata()
         assert "[warn]" not in capsys.readouterr().out
 
@@ -60,9 +60,28 @@ class TestSyncRawdata:
     def test_failure_is_non_fatal(self, mock_run, capsys):
         """Must not raise -- a sync failure shouldn't abort the whole job;
         any resulting missing-file error surfaces naturally downstream."""
-        mock_run.return_value = MagicMock(returncode=1, stderr="404 not found")
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="404 not found")
         _sync_rawdata()  # should not raise
         assert "[warn]" in capsys.readouterr().out
+
+    @patch("scripts.cache_builder.subprocess.run")
+    def test_success_still_prints_stdout_summary(self, mock_run, capsys):
+        """A successful sync (exit 0) previously left NO trace in this job's
+        own logs at all -- capture_output swallows the subprocess's stdout,
+        and the old code only ever printed anything on a non-zero exit. That
+        made it impossible to tell, from Cloud Logging alone, whether a given
+        release/year (e.g. weekly_rosters for the current season) was
+        actually downloaded, skipped as already up to date, or never
+        attempted -- must always surface at least the summary tail."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="[weekly_rosters]\n  >> roster_weekly_2026.csv\n\n  Sync complete (12.3s)\n  Downloaded: 5 files\n  Up-to-date: 2 releases skipped\n  Failed:     0 files",
+            stderr="",
+        )
+        _sync_rawdata()
+        out = capsys.readouterr().out
+        assert "Downloaded: 5 files" in out
+        assert "Failed:     0 files" in out
 
 
 class TestMainSyncWiring:

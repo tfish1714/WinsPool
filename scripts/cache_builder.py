@@ -487,6 +487,19 @@ def _sync_rawdata() -> None:
         capture_output=True, text=True, timeout=300,
         cwd=str(SCRIPTS_DIR.parent),
     )
+    # sync_nflverse_data.py prints a per-tag download/skip/fail report and a
+    # final summary -- capture_output means none of that reaches this job's
+    # own stdout (what Cloud Logging actually captures) unless we print it
+    # ourselves. Previously this only happened on a non-zero exit, which
+    # meant a run where every attempted download succeeded (exit 0) left NO
+    # trace of what was actually synced -- impossible to tell, from the logs
+    # alone, whether a given file was fetched, already up to date, or simply
+    # never attempted (e.g. dropped by a priority/min_year filter). Always
+    # print the summary tail; keep the full stderr only for actual failures.
+    stdout_tail = result.stdout.strip().splitlines()[-20:]
+    print("[cache_builder] nflverse sync summary:")
+    for line in stdout_tail:
+        print(f"  {line}")
     if result.returncode != 0:
         print(f"[warn] sync_nflverse_data.py exited non-zero (non-fatal): "
               f"{result.stderr.strip()[:500]}")
