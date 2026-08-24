@@ -435,7 +435,15 @@ def build_year(standings, games, players, draft_order, draft_results,
     # model_version is None when this run's model loading failed (see main()'s
     # except branch) -- mirrors pred_lookup={} silently skipping game_predictions
     # for the same reason, rather than writing under an unknown model version.
-    if model_version:
+    # Also gated to year >= current_year (or --force): every other analytic
+    # block above skips already-finalized past seasons via is_past_season/
+    # is_cache_final, but the historical preseason_predictions docs (written
+    # only by predict_season.py, which never set a `locked` field at all)
+    # read back as unlocked -- without this gate, an unscoped daily run over
+    # ~12 years would silently regenerate and lock every completed season's
+    # projections with the current model, corrupting the admin model-vs-
+    # consensus page, the draft recap, and history views.
+    if model_version and (year >= current_year or force):
         try:
             engine = _get_engine()
             yr_games = full_games[full_games['season'] == year].copy() if not full_games.empty else pd.DataFrame()
@@ -447,7 +455,11 @@ def build_year(standings, games, players, draft_order, draft_results,
                     year, full_projections, model_version=model_version,
                     locked=final_flag, force=force,
                 )
-                print(f"  [ok]   preseason_predictions year={year} ({n} teams written)")
+                if n > 0:
+                    print(f"  [ok]   preseason_predictions year={year} ({n} teams written)")
+                else:
+                    print(f"  [warn] preseason_predictions year={year}: 0 teams written "
+                          f"(check DB connection / all teams locked)")
         except Exception as e:
             print(f"  [err]  preseason_predictions: {e}")
 

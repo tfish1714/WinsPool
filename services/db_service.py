@@ -617,6 +617,17 @@ def set_preseason_predictions(season: int, projections: dict, model_version: str
 
     Returns the number of docs actually written (skipped-due-to-lock docs
     don't count).
+
+    Single-writer assumption: the read-then-write pattern here (query
+    existing locked docs, then batch-write) is not transactional. A second
+    concurrent call for the same season could theoretically interleave
+    between the read and the write and lose a lock. This is currently safe
+    because nothing in this codebase runs this function concurrently for the
+    same season (cache_builder.py's winspool-predict-daily job and a manual
+    predict_season.py/backfill run are never expected to overlap), and the
+    batch write itself is atomic (well under Firestore's 400-doc batch cap
+    for a single season's ~32 teams). If a concurrent caller is ever
+    introduced, this needs a transaction instead.
     """
     db = get_db()
     if db is None:
@@ -638,7 +649,7 @@ def set_preseason_predictions(season: int, projections: dict, model_version: str
             continue
         ref = db.collection("preseason_predictions").document(f"{season}_{team}")
         batch.set(ref, {
-            "season": season,
+            "season": int(season),
             "team": team,
             **stats,
             "model_version": model_version,

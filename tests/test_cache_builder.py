@@ -9,8 +9,17 @@ import pytest
 # present. That file is gitignored and isn't guaranteed to exist in every dev/
 # CI checkout (e.g. an isolated git worktree), so fake an already-initialized
 # app just for the duration of the import to skip that guard. Restored
-# immediately after import; nothing in these tests exercises real Firestore
-# calls since main() is always mocked.
+# immediately after import.
+#
+# Firestore/cache-touching note: most tests here mock `main()` or `build_year()`
+# entirely, so nothing real is exercised. The exception is
+# TestPreseasonPredictionsWiring's tests that call `build_year()` directly
+# (not `main()`) -- those run all five real analytic blocks inside
+# `build_year()`, including `write_cache()`/`is_cache_final()`, which would
+# otherwise write to the developer's actual local `.local_db/analytics/`
+# cache as a side effect. Those tests patch `write_cache`/`is_cache_final`
+# explicitly to prevent that; every Firestore call within them
+# (`set_preseason_predictions`, `NNProjectionEngine`) is also mocked.
 import firebase_admin as _firebase_admin
 with patch.object(_firebase_admin, "_apps", {"__test__": object()}), \
      patch("firebase_admin.firestore.client"):
@@ -150,10 +159,14 @@ class TestYearsToBuildWiring:
 
 
 class TestPreseasonPredictionsWiring:
+    @patch("scripts.cache_builder.is_cache_final", return_value=False)
+    @patch("scripts.cache_builder.write_cache")
     @patch("scripts.cache_builder.live_scores.sync_live_scores_to_df")
     @patch("scripts.cache_builder.set_preseason_predictions")
     @patch("scripts.cache_builder.NNProjectionEngine")
-    def test_writes_unlocked_for_current_season(self, mock_engine_cls, mock_set, mock_sync_live):
+    def test_writes_unlocked_for_current_season(
+        self, mock_engine_cls, mock_set, mock_sync_live, mock_write_cache, mock_is_final,
+    ):
         from scripts.cache_builder import build_year
         import pandas as pd
 
@@ -187,9 +200,23 @@ class TestPreseasonPredictionsWiring:
         assert call_kwargs["model_version"] == "nn_v15+xgb_v9+lr_v7"
         assert call_kwargs["force"] is False
 
+    # NOTE: this test used to assert that a past season gets written WITH
+    # locked=True. That premise was wrong -- see the critical fix in
+    # build_year(): a completed past season must not be written AT ALL
+    # (set_preseason_predictions must never even be called for it), because
+    # the existing historical preseason_predictions docs (written only by
+    # predict_season.py, which never set a `locked` field) would otherwise
+    # read back as unlocked and get silently regenerated/overwritten by
+    # every unscoped daily run. See test_skips_write_for_past_season_even_
+    # with_no_locked_field_in_existing_docs below for the real-world scenario
+    # this protects against.
+    @patch("scripts.cache_builder.is_cache_final", return_value=False)
+    @patch("scripts.cache_builder.write_cache")
     @patch("scripts.cache_builder.set_preseason_predictions")
     @patch("scripts.cache_builder.NNProjectionEngine")
-    def test_writes_locked_for_past_season(self, mock_engine_cls, mock_set):
+    def test_writes_locked_for_past_season(
+        self, mock_engine_cls, mock_set, mock_write_cache, mock_is_final,
+    ):
         from scripts.cache_builder import build_year
         import pandas as pd
 
@@ -212,12 +239,93 @@ class TestPreseasonPredictionsWiring:
             model_version="nn_v15+xgb_v9+lr_v7",
         )
 
-        mock_set.assert_called_once()
-        assert mock_set.call_args.kwargs["locked"] is True
+        # A completed past season (year < current_year, force=False) must
+        # never be written -- the write block is gated off entirely.
+        mock_set.assert_not_called()
 
+    @patch("scripts.cache_builder.is_cache_final", return_value=False)
+    @patch("scripts.cache_builder.write_cache")
     @patch("scripts.cache_builder.set_preseason_predictions")
     @patch("scripts.cache_builder.NNProjectionEngine")
-    def test_skips_write_when_model_version_none(self, mock_engine_cls, mock_set):
+    def test_skips_write_for_past_season_even_with_no_locked_field_in_existing_docs(
+        self, mock_engine_cls, mock_set, mock_write_cache, mock_is_final,
+    ):
+        """The real-world bug scenario: every historical preseason_predictions
+        doc was written by predict_season.py, which never sets a `locked`
+        field at all -- so set_preseason_predictions()'s per-team lock check
+        (`data.get("locked")`) would read every one of those docs as
+        unlocked. Without the year >= current_year (or force) gate in
+        build_year(), an unscoped daily run would silently regenerate and
+        permanently lock every completed historical season's projections
+        with whatever model happens to be current that day. The fix is to
+        never even call set_preseason_predictions() for a past season, which
+        this test verifies directly -- it doesn't matter what shape the
+        existing docs are in, because the call never happens."""
+        from scripts.cache_builder import build_year
+        import pandas as pd
+
+        fake_engine = MagicMock()
+        fake_engine.get_team_win_projections.return_value = {
+            "KC": {"projected_wins": 11.0, "mean_wins": 10.8, "std_dev": 1.95,
+                   "floor": 7.0, "p25": 9.0, "p75": 12.0, "ceiling": 14.0},
+        }
+        mock_engine_cls.return_value = fake_engine
+
+        games = pd.DataFrame([
+            {"season": 2024, "week": 18, "home_team": "KC", "away_team": "TEN",
+             "result": 7.0, "game_type": "REG"},
+        ])
+        build_year(
+            standings=pd.DataFrame(), games=games, players=pd.DataFrame(),
+            draft_order=pd.DataFrame(), draft_results=pd.DataFrame(),
+            draft_order_rules=pd.DataFrame(), year=2024, current_year=2026,
+            all_games=games, force=False, pred_lookup={},
+            model_version="nn_v15+xgb_v9+lr_v7",
+        )
+
+        mock_set.assert_not_called()
+
+    @patch("scripts.cache_builder.is_cache_final", return_value=False)
+    @patch("scripts.cache_builder.write_cache")
+    @patch("scripts.cache_builder.set_preseason_predictions")
+    @patch("scripts.cache_builder.NNProjectionEngine")
+    def test_force_allows_writing_past_season(
+        self, mock_engine_cls, mock_set, mock_write_cache, mock_is_final,
+    ):
+        """--force is the intentional manual-override escape hatch: it must
+        still allow writing (and relocking) an already-completed season."""
+        from scripts.cache_builder import build_year
+        import pandas as pd
+
+        fake_engine = MagicMock()
+        fake_engine.get_team_win_projections.return_value = {
+            "KC": {"projected_wins": 11.0, "mean_wins": 10.8, "std_dev": 1.95,
+                   "floor": 7.0, "p25": 9.0, "p75": 12.0, "ceiling": 14.0},
+        }
+        mock_engine_cls.return_value = fake_engine
+
+        games = pd.DataFrame([
+            {"season": 2024, "week": 18, "home_team": "KC", "away_team": "TEN",
+             "result": 7.0, "game_type": "REG"},
+        ])
+        build_year(
+            standings=pd.DataFrame(), games=games, players=pd.DataFrame(),
+            draft_order=pd.DataFrame(), draft_results=pd.DataFrame(),
+            draft_order_rules=pd.DataFrame(), year=2024, current_year=2026,
+            all_games=games, force=True, pred_lookup={},
+            model_version="nn_v15+xgb_v9+lr_v7",
+        )
+
+        mock_set.assert_called_once()
+        assert mock_set.call_args.kwargs["force"] is True
+
+    @patch("scripts.cache_builder.is_cache_final", return_value=False)
+    @patch("scripts.cache_builder.write_cache")
+    @patch("scripts.cache_builder.set_preseason_predictions")
+    @patch("scripts.cache_builder.NNProjectionEngine")
+    def test_skips_write_when_model_version_none(
+        self, mock_engine_cls, mock_set, mock_write_cache, mock_is_final,
+    ):
         """model_version=None signals model loading failed this run (mirrors
         pred_lookup={} for game_predictions) -- must not attempt the write."""
         from scripts.cache_builder import build_year
@@ -272,6 +380,10 @@ class TestPreseasonPredictionsWiring:
         monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--skip-sync"])
         main()
 
+        # available_years=[2024, 2025] and games only has season=2025 data (no
+        # 2026 schedule rows), so _years_to_build() does not extend the range
+        # -- build_year() must be called exactly once per year in [2024, 2025].
+        assert mock_build_year.call_count == 2
         for call in mock_build_year.call_args_list:
             assert call.kwargs.get("model_version") == "nn_v15+xgb_v9+lr_v7"
 
