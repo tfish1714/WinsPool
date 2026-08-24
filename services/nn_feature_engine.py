@@ -1802,16 +1802,40 @@ def _load_elo(rd: Path) -> pd.DataFrame:
 
     Computed by scripts/compute_elo.py using the Reddit methodology
     (K=12, HFA=15, MoV multiplier, optional quarter-by-quarter updates).
-    Falls back to an empty DataFrame if the file doesn't exist.
+
+    Falls back to the Firestore elo_history collection when the CSV is
+    absent -- winspool-predict-daily's cache_builder.py calls into this
+    same feature engine at runtime inside a stateless Cloud Run Job
+    container that never has rawdata/elo_computed.csv (it's a different,
+    separate job -- winspool-sync-daily -- that runs compute_elo.py and
+    writes it, and Cloud Run Jobs share no filesystem between executions).
+    That same sync-daily run already pushes the identical per-game rows to
+    Firestore's elo_history/{season} collection (compute_elo.py --firestore,
+    ~15 min before predict-daily runs), so this is real, fresh data already
+    sitting one Firestore read away -- not a synthetic substitute. Falls
+    back further to an empty DataFrame (Elo features default to 1500.0)
+    only if elo_history is also unavailable, e.g. local dev with neither
+    the CSV nor Firestore configured.
 
     Returns columns: season, week, home_team, away_team, home_elo_pre, away_elo_pre
     """
     p = rd / "elo_computed.csv"
     if not p.exists():
-        logger.warning("elo_computed.csv not found — Elo features will be 1500.0")
-        return pd.DataFrame()
-
-    df = _read_csv_safe(str(p))
+        from services.cache_service import get_all_elo_history
+        rows = get_all_elo_history()
+        if rows:
+            logger.info(
+                "elo_computed.csv not found — using %d rows from Firestore elo_history instead",
+                len(rows),
+            )
+            df = pd.DataFrame(rows)
+        else:
+            logger.warning(
+                "elo_computed.csv not found and elo_history is empty — Elo features will be 1500.0"
+            )
+            return pd.DataFrame()
+    else:
+        df = _read_csv_safe(str(p))
     df["season"] = pd.to_numeric(df["season"], errors="coerce")
     df["week"] = pd.to_numeric(df["week"], errors="coerce")
     df["home_team"] = df["home_team"].apply(_normalize_team)

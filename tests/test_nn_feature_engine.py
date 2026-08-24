@@ -552,3 +552,64 @@ def test_aux_metadata_columns_in_output(tmp_path):
                 "home_trench_score", "away_trench_score",
                 "home_margin_roll", "away_margin_roll"]:
         assert col in df.columns, f"Missing aux column: {col}"
+
+
+# ---------------------------------------------------------------------------
+# _load_elo: Firestore elo_history fallback (winspool-predict-daily's
+# container never has rawdata/elo_computed.csv -- see services/nn_feature_engine.py)
+# ---------------------------------------------------------------------------
+
+def test_load_elo_uses_csv_when_present(tmp_path):
+    """The local CSV, when present, is used as-is -- no Firestore fallback."""
+    from unittest.mock import patch
+    from services.nn_feature_engine import _load_elo
+
+    csv_rows = pd.DataFrame([
+        {"season": 2025, "week": 1, "home_team": "KC", "away_team": "BUF",
+         "home_elo_pre": 1600.0, "away_elo_pre": 1550.0},
+    ])
+    csv_rows.to_csv(tmp_path / "elo_computed.csv", index=False)
+
+    with patch("services.cache_service.get_all_elo_history") as mock_fs:
+        df = _load_elo(tmp_path)
+        mock_fs.assert_not_called()
+
+    assert len(df) == 1
+    assert df.iloc[0]["home_elo_pre"] == 1600.0
+
+
+def test_load_elo_falls_back_to_firestore_when_csv_missing(tmp_path):
+    """No local CSV (winspool-predict-daily's actual runtime condition) --
+    fall back to the Firestore elo_history collection instead of defaulting
+    every team to a flat 1500.0."""
+    from unittest.mock import patch
+    from services.nn_feature_engine import _load_elo
+
+    firestore_rows = [
+        {"season": 2025, "week": 1, "home_team": "KC", "away_team": "BUF",
+         "home_elo_pre": 1620.0, "away_elo_pre": 1480.0},
+        {"season": 2025, "week": 2, "home_team": "SF", "away_team": "LA",
+         "home_elo_pre": 1590.0, "away_elo_pre": 1510.0},
+    ]
+
+    with patch("services.cache_service.get_all_elo_history", return_value=firestore_rows) as mock_fs:
+        df = _load_elo(tmp_path)  # tmp_path has no elo_computed.csv
+        mock_fs.assert_called_once()
+
+    assert len(df) == 2
+    assert set(df.columns) >= {"season", "week", "home_team", "away_team", "home_elo_pre", "away_elo_pre"}
+    assert float(df.iloc[0]["home_elo_pre"]) == 1620.0
+    assert float(df.iloc[1]["away_elo_pre"]) == 1510.0
+
+
+def test_load_elo_empty_when_csv_and_firestore_both_missing(tmp_path):
+    """Preserves the original degrade-gracefully behavior (flat 1500.0
+    upstream) when neither the CSV nor elo_history has anything -- e.g. a
+    local dev machine with USE_LOCAL_DATA and no local elo_history cache."""
+    from unittest.mock import patch
+    from services.nn_feature_engine import _load_elo
+
+    with patch("services.cache_service.get_all_elo_history", return_value=[]):
+        df = _load_elo(tmp_path)
+
+    assert df.empty
