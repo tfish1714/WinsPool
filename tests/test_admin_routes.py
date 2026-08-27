@@ -23,6 +23,13 @@ client = TestClient(app)
 
 # ── /api/admin/new_season ─────────────────────────────────────────────────────
 
+FAKE_PLAYERS_DF = pd.DataFrame([
+    {"playerId": 1, "fullName": "Alice Anderson", "email": "alice@x.com"},
+    {"playerId": 2, "fullName": "Bob Brown", "email": "bob@x.com"},
+    {"playerId": 3, "fullName": "Carol Chen", "email": ""},  # no email on file
+])
+
+
 class TestNewSeason:
     def test_happy_path_calls_add_draft_order_and_rule(self, admin_token):
         """Happy path: 200 + add_draft_order called once per player."""
@@ -30,6 +37,10 @@ class TestNewSeason:
         with patch("routes.admin_routes.add_draft_order") as mock_order, \
              patch("routes.admin_routes.add_draft_rule") as mock_rule, \
              patch("routes.admin_routes.get_collection_df") as mock_df, \
+             patch("routes.admin_routes.load_data", return_value=(
+                 None, None, None, FAKE_PLAYERS_DF, None, None, None
+             )), \
+             patch("routes.admin_routes.email_service.send_draft_order_email") as mock_email, \
              patch("routes.admin_routes.wipe_draft_cache"):
             # First call: draft_order (empty → no existing season)
             # Second call: draft_order_rules (empty → no rules to copy)
@@ -46,6 +57,34 @@ class TestNewSeason:
         # Verify the correct season is passed to add_draft_order
         first_call_args = mock_order.call_args_list[0][0]
         assert first_call_args[0] == 2099
+        mock_email.assert_called_once()
+
+    def test_sends_draft_order_email_to_all_players(self, admin_token):
+        """One group email is sent with the full ordered list; missing-email players are skipped as recipients."""
+        with patch("routes.admin_routes.add_draft_order"), \
+             patch("routes.admin_routes.add_draft_rule"), \
+             patch("routes.admin_routes.get_collection_df", return_value=pd.DataFrame()), \
+             patch("routes.admin_routes.load_data", return_value=(
+                 None, None, None, FAKE_PLAYERS_DF, None, None, None
+             )), \
+             patch("routes.admin_routes.email_service.send_draft_order_email") as mock_email, \
+             patch("routes.admin_routes.wipe_draft_cache"), \
+             patch("routes.admin_routes.random.shuffle", lambda x: None):  # keep order deterministic
+            resp = client.post(
+                "/api/admin/new_season",
+                json={"season": 2099, "playerIds": [1, 2, 3]},
+                headers={"Authorization": admin_token},
+            )
+        assert resp.status_code == 200
+        mock_email.assert_called_once()
+        emails_arg, season_arg, ordered_arg = mock_email.call_args[0]
+        assert season_arg == 2099
+        assert emails_arg == ["alice@x.com", "bob@x.com"]  # Carol has no email on file
+        assert ordered_arg == [
+            {"position": 1, "name": "Alice Anderson"},
+            {"position": 2, "name": "Bob Brown"},
+            {"position": 3, "name": "Carol Chen"},
+        ]
 
     def test_requires_admin_role(self, auth_token):
         """Non-admin token is rejected with 401 or 403."""
@@ -106,6 +145,10 @@ class TestNewSeason:
                  pd.DataFrame(),       # draft_order check → empty (season doesn't exist)
                  existing_rules,        # draft_order_rules → has prior rules
              ]), \
+             patch("routes.admin_routes.load_data", return_value=(
+                 None, None, None, FAKE_PLAYERS_DF, None, None, None
+             )), \
+             patch("routes.admin_routes.email_service.send_draft_order_email"), \
              patch("routes.admin_routes.wipe_draft_cache"):
             resp = client.post(
                 "/api/admin/new_season",

@@ -24,6 +24,31 @@ def send_weekly_recap_email(to_emails: list, subject: str, html_content: str) ->
     return all(_send(email, subject, html_content) for email in to_emails)
 
 
+def send_draft_order_email(to_emails: list, season: int, ordered_players: list) -> bool:
+    """Announce a new season's draft order to the whole group in a single email.
+
+    ordered_players: list of {"position": int, "name": str} in draft order.
+    One Resend call with every recipient in `to` (not one send per player) --
+    the point is a group-visible, everyone-sees-the-same-list announcement for
+    draft-order transparency. Reply-To is ALERT_EMAIL (the admin's own address),
+    not the Resend default sender.
+    """
+    if not to_emails:
+        logger.warning("No recipient emails for %s draft order announcement — not sent.", season)
+        return False
+
+    rows = "".join(
+        f"<li>Pick {p['position']}: {html.escape(p['name'])}</li>"
+        for p in ordered_players
+    )
+    html_body = f"""
+    <p>The draft order for the {season} Wins Pool season has been set:</p>
+    <ol>{rows}</ol>
+    """
+    reply_to = os.getenv("ALERT_EMAIL")
+    return _send_multi(to_emails, f"{season} Wins Pool Draft Order", html_body, reply_to=reply_to)
+
+
 def send_alert_email(subject: str, message: str) -> bool:
     """Send a job-failure alert to the address in ALERT_EMAIL. Returns False (no-op) if unconfigured.
 
@@ -91,4 +116,31 @@ def _send(to_email: str, subject: str, html: str, reply_to: str = None) -> bool:
         return True
     except Exception as e:
         logger.error("Error sending email to %s: %s", to_email, e)
+        return False
+
+
+def _send_multi(to_emails: list, subject: str, html: str, reply_to: str = None) -> bool:
+    """Send one transactional email to multiple recipients (all in `to`) via Resend."""
+    api_key = os.getenv("RESEND_API_KEY")
+    if not api_key:
+        logger.error("RESEND_API_KEY not set — email not sent.")
+        return False
+
+    resend.api_key = api_key
+    from_email = os.getenv("FROM_EMAIL", "onboarding@resend.dev")
+
+    payload = {
+        "from": from_email,
+        "to": to_emails,
+        "subject": subject,
+        "html": html,
+    }
+    if reply_to:
+        payload["reply_to"] = [reply_to]
+
+    try:
+        resend.Emails.send(payload)
+        return True
+    except Exception as e:
+        logger.error("Error sending email to %s: %s", to_emails, e)
         return False

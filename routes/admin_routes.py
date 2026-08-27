@@ -71,7 +71,25 @@ async def create_new_season(body: NewSeasonRequest, _: dict = Depends(require_ad
                     add_draft_rule(season, int(r["draftOrder"]), int(r["pickOne"]), int(r["pickTwo"]), int(r["pickThree"]))
 
         wipe_draft_cache()
-        return JSONResponse(content={"message": f"Draft order for {season} created successfully with {len(player_ids)} players."})
+
+        _, _, _, players_df, _, _, _ = load_data()
+        ordered_players = []
+        recipient_emails = []
+        for idx, pid in enumerate(player_ids):
+            player = players_df[players_df["playerId"].astype(int) == int(pid)]
+            if player.empty:
+                continue
+            p = player.iloc[0]
+            ordered_players.append({"position": idx + 1, "name": str(p.get("fullName", ""))})
+            email = str(p.get("email", "")) if pd.notna(p.get("email")) else ""
+            if email:
+                recipient_emails.append(email)
+        email_service.send_draft_order_email(recipient_emails, season, ordered_players)
+
+        return JSONResponse(content={
+            "message": f"Draft order for {season} created successfully with {len(player_ids)} players. "
+                       f"Draft order notification sent to {len(recipient_emails)} players."
+        })
     except Exception as e:
         logger.exception("Unhandled error in admin endpoint")
         return server_error()
