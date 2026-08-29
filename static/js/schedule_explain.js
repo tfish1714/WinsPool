@@ -354,9 +354,23 @@ async function handleExplainClick(btn) {
         const resp = await fetch(url, {
             headers: token ? { 'Authorization': `Bearer ${token}` } : {}
         });
+        if (resp.status === 401) {
+            content.innerHTML = `
+                <p style="color:var(--accent-red);">Your session has expired. Please log in again.</p>
+                <button id="pred-explain-relogin" style="margin-top:8px; padding:6px 14px; border-radius:6px; border:1px solid var(--glass-border); background:none; color:var(--text-primary); cursor:pointer;">Log in again</button>`;
+            document.getElementById('pred-explain-relogin').addEventListener('click', () => {
+                AuthService.clearCredentials();
+                window.location.reload();
+            });
+            return;
+        }
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
-            content.innerHTML = `<p style="color:var(--accent-red);">${err.error || 'No prediction stored for this game yet.'}</p>`;
+            let errMsg = err.error;
+            if (!errMsg && err.detail) {
+                errMsg = Array.isArray(err.detail) ? err.detail[0].msg : err.detail;
+            }
+            content.innerHTML = `<p style="color:var(--accent-red);">${errMsg || 'No prediction stored for this game yet.'}</p>`;
             return;
         }
         const data = await resp.json();
