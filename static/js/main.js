@@ -1,6 +1,6 @@
 import { ApiService } from './api.js';
 import { AuthService } from './auth_service.js';
-import { UiRenderer } from './ui_renderer.js?v=4';
+import { UiRenderer } from './ui_renderer.js?v=5';
 import { WebSocketService } from './websocket_service.js';
 import { initChat, loadHistory, appendMessage } from './chat.js';
 
@@ -315,12 +315,54 @@ class App {
 
         this.ws.connect();
         this.setupDraftListeners();
+        this.initOnboarding();
 
         try {
             this.draftSummary = await ApiService.generateRecap('latest', 'latest');
         } catch (e) {
             console.warn('[App] Draft summary unavailable', e);
         }
+    }
+
+    // --- Onboarding (first-time banner + rules drawer) ---
+
+    initOnboarding() {
+        const banner = document.getElementById('onboarding-banner');
+        const helpBtn = document.getElementById('rules-help-btn');
+        const learnBtn = document.getElementById('onboarding-learn-btn');
+        const dismissBtn = document.getElementById('onboarding-dismiss-btn');
+        const drawer = document.getElementById('rules-drawer');
+        const overlay = document.getElementById('rules-drawer-overlay');
+        const closeBtn = document.getElementById('rules-drawer-close');
+        if (!banner || !drawer || !overlay) return;
+
+        const seenKey = `nfl_wins_onboarding_seen_${this.user.playerId || 'anon'}`;
+        const hasSeen = () => { try { return localStorage.getItem(seenKey) === 'true'; } catch (e) { return false; } };
+        const markSeen = () => { try { localStorage.setItem(seenKey, 'true'); } catch (e) { /* ignore */ } };
+
+        if (!hasSeen()) banner.classList.remove('hidden');
+
+        const dismissBanner = () => { banner.classList.add('hidden'); markSeen(); };
+        const openDrawer = () => { drawer.classList.add('open'); overlay.classList.add('open'); };
+        const closeDrawer = () => { drawer.classList.remove('open'); overlay.classList.remove('open'); };
+
+        dismissBtn?.addEventListener('click', dismissBanner);
+        learnBtn?.addEventListener('click', () => { dismissBanner(); openDrawer(); });
+        helpBtn?.addEventListener('click', openDrawer);
+        closeBtn?.addEventListener('click', closeDrawer);
+        overlay.addEventListener('click', closeDrawer);
+    }
+
+    // Briefly highlights the pick-queue row for a pick that just completed,
+    // so a board update landing while you're looking at the page is noticeable.
+    flashCompletedPick(prevActivePick, activePick) {
+        if (prevActivePick == null || activePick == null || activePick <= prevActivePick) return;
+        const completedPick = activePick - 1;
+        const row = document.querySelector(`#pick-queue [data-pick-num="${completedPick}"]`);
+        if (!row) return;
+        row.classList.remove('pick-flash');
+        void row.offsetWidth; // reflow, so re-adding the class restarts the animation
+        row.classList.add('pick-flash');
     }
 
 
@@ -374,8 +416,11 @@ class App {
 
     handleWsMessage(msg) {
         if (msg.type === 'state') {
+            const prevActivePick = this.lastDraftState?.active_pick;
+            const sameSeason = this.lastDraftState?.season === msg.payload.season;
             this.lastDraftState = msg.payload; // Store for preview checks
             this.renderDraftState(msg.payload);
+            if (sameSeason) this.flashCompletedPick(prevActivePick, msg.payload.active_pick);
         } else if (msg.type === 'config_changed') {
             if (typeof msg.draft_active === 'boolean' && msg.draft_active !== this.draftActive) {
                 this.draftActive = msg.draft_active;

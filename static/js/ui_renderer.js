@@ -314,7 +314,7 @@ export const UiRenderer = {
             }
 
             return `
-                <div class="q-row" style="
+                <div class="q-row" data-pick-num="${item.pick}" style="
                     opacity:${isPast ? 0.6 : 1};
                     background:${isActive ? 'rgba(255,255,255,0.025)' : 'transparent'};
                     border-color:${isActive ? 'var(--line-strong)' : 'var(--line)'}">

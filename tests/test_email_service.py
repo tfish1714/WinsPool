@@ -104,3 +104,39 @@ def test_send_draft_order_email_no_recipients(mock_getenv, mock_send):
 
     assert result is False
     mock_send.assert_not_called()
+
+
+@patch("services.email_service.resend.Emails.send")
+@patch("services.email_service.os.getenv")
+def test_send_draft_order_email_includes_draft_room_link(mock_getenv, mock_send):
+    """Body links to /draft?season=<season>, built from APP_BASE_URL, for each season."""
+    def getenv_side_effect(key, default=None):
+        return {
+            "RESEND_API_KEY": "re_test_key",
+            "APP_BASE_URL": "https://winspool.example.com",
+        }.get(key, default)
+    mock_getenv.side_effect = getenv_side_effect
+    mock_send.return_value = {"id": "draft123"}
+
+    send_draft_order_email(["alice@x.com"], 2031, [{"position": 1, "name": "Alice"}])
+    first_call_html = mock_send.call_args[0][0]["html"]
+    assert 'href="https://winspool.example.com/draft?season=2031"' in first_call_html
+
+    send_draft_order_email(["alice@x.com"], 2032, [{"position": 1, "name": "Alice"}])
+    second_call_html = mock_send.call_args[0][0]["html"]
+    assert 'href="https://winspool.example.com/draft?season=2032"' in second_call_html
+
+
+@patch("services.email_service.resend.Emails.send")
+@patch("services.email_service.os.getenv")
+def test_send_draft_order_email_link_defaults_to_localhost(mock_getenv, mock_send):
+    """Falls back to http://localhost:8000 when APP_BASE_URL is unset (local dev)."""
+    def getenv_side_effect(key, default=None):
+        return {"RESEND_API_KEY": "re_test_key"}.get(key, default)
+    mock_getenv.side_effect = getenv_side_effect
+    mock_send.return_value = {"id": "draft123"}
+
+    send_draft_order_email(["alice@x.com"], 2099, [{"position": 1, "name": "Alice"}])
+
+    call_params = mock_send.call_args[0][0]
+    assert 'href="http://localhost:8000/draft?season=2099"' in call_params["html"]

@@ -17,6 +17,13 @@ if ($PROJECT_ID -eq "YOUR_PROJECT_ID") {
     exit 1
 }
 
+# APP_BASE_URL is read from the shell, not hardcoded here, so the deployed
+# service URL never appears in a git diff of this script.
+if (-not $env:APP_BASE_URL) {
+    Write-Host "[ERROR] `$env:APP_BASE_URL is not set. Run:  `$env:APP_BASE_URL = 'https://your-service-url'  then re-run this script." -ForegroundColor Red
+    exit 1
+}
+
 Write-Host "[BUILD] Building Docker Image for project $PROJECT_ID..." -ForegroundColor Cyan
 gcloud builds submit --tag $IMAGE_TAG
 
@@ -28,10 +35,10 @@ gcloud run deploy winspool `
     --allow-unauthenticated `
     --set-env-vars "USE_LOCAL_DATA=False" `
     --set-env-vars "DEBUG_PAGE_LOAD=False" `
+    --set-env-vars "APP_BASE_URL=$env:APP_BASE_URL" `
     --set-env-vars "SMTP_SERVER=smtp.gmail.com" `
     --set-env-vars "SMTP_PORT=587" `
     --set-env-vars "SMTP_USER=your_email@gmail.com" `
-    --set-env-vars "FROM_EMAIL=your_email@gmail.com" `
     --set-secrets "FIREBASE_CREDENTIALS=FIREBASE_CREDENTIALS:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,SMTP_PASSWORD=SMTP_PASSWORD:latest,JWT_SECRET=JWT_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest"
 
 if ($LASTEXITCODE -eq 0) {

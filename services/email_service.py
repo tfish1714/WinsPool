@@ -9,6 +9,16 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
+def _app_base_url() -> str:
+    """Base URL for links embedded in outbound emails.
+
+    Defaults to local dev; production sets APP_BASE_URL to the deployed
+    Cloud Run URL (see DEPLOY.md). Trailing slash stripped so callers can
+    always append a leading-slash path without a double slash.
+    """
+    return os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")
+
+
 def send_mfa_code_email(to_email: str, code: str) -> bool:
     """Send a 6-digit MFA verification code to a single recipient."""
     html = f"""
@@ -41,9 +51,11 @@ def send_draft_order_email(to_emails: list, season: int, ordered_players: list) 
         f"<li>Pick {p['position']}: {html.escape(p['name'])}</li>"
         for p in ordered_players
     )
+    draft_room_url = f"{_app_base_url()}/draft?season={season}"
     html_body = f"""
     <p>The draft order for the {season} Wins Pool season has been set:</p>
     <ol>{rows}</ol>
+    <p><a href="{draft_room_url}">Go to the draft room</a></p>
     """
     reply_to = os.getenv("ALERT_EMAIL")
     return _send_multi(to_emails, f"{season} Wins Pool Draft Order", html_body, reply_to=reply_to)

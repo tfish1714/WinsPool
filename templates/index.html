@@ -20,8 +20,18 @@
             <span id="live-pill" class="mono-pill">
                 <span id="current-pick-status">Connecting…</span>
             </span>
+            <button id="rules-help-btn" class="rules-help-btn" aria-label="How the draft works" title="How the draft works">?</button>
         </div>
     </header>
+
+    <!-- Onboarding Banner (first-time only, dismissible) -->
+    <div id="onboarding-banner" class="onboarding-banner hidden">
+        <span class="onboarding-banner-text">👋 First time? Here's how the draft works →</span>
+        <div class="onboarding-banner-actions">
+            <button id="onboarding-learn-btn" class="onboarding-banner-link">Learn more</button>
+            <button id="onboarding-dismiss-btn" class="onboarding-banner-close" aria-label="Dismiss">×</button>
+        </div>
+    </div>
 
     <!-- Draft Board -->
     <main class="dashboard" id="dashboard-main" style="display: none;">
@@ -110,6 +120,37 @@
         </div>
     </div>
 </div>
+
+<!-- Rules Drawer (first-time onboarding content, reopenable via the ? button) -->
+<div class="rules-drawer-overlay" id="rules-drawer-overlay"></div>
+<aside class="rules-drawer" id="rules-drawer">
+    <div class="rules-drawer__header">
+        <span class="rules-drawer__title">How the draft works</span>
+        <button class="rules-drawer__close" id="rules-drawer-close" aria-label="Close"><i data-lucide="x"></i></button>
+    </div>
+    <div class="rules-drawer__body">
+        <section class="rules-drawer__section">
+            <h3>Draft flow</h3>
+            <p>Players pick in the order shown in the pick queue. Click a team in the grid to preview it, then hit
+                <strong>Confirm Pick</strong> to lock it in — nothing is drafted on a single click.
+                Once your pick lands, the board and pick queue update instantly for everyone; no refresh needed.</p>
+            <p>The clock card shows how long the current picker has been thinking, with the label shifting
+                (<em>On the clock → Taking it in… → getting restless → holding up the draft</em>) the longer it runs.</p>
+        </section>
+        <section class="rules-drawer__section">
+            <h3>Chat</h3>
+            <p>The chat panel in the bottom-right is shared and live for the whole room — everyone in the draft sees
+                every message. Click the header to collapse it; a badge shows how many messages you've missed while
+                collapsed.</p>
+        </section>
+        <section class="rules-drawer__section">
+            <h3>Chat icons</h3>
+            <p><strong>🏈</strong> posts the current list of still-available teams into chat, so you don't have to
+                scroll the grid to check. <strong>−</strong> / <strong>+</strong> collapses and expands the chat
+                panel.</p>
+        </section>
+    </div>
+</aside>
 {% endblock %}
 
 {% block scripts %}

@@ -1844,6 +1844,204 @@ tr:hover {
     }
 }
 
+/* =============================================================
+   Draft Room Onboarding (banner, help button, rules drawer)
+   ============================================================= */
+
+.rules-help-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    color: var(--ink-2);
+    font: 700 12px/1 'JetBrains Mono', monospace;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.2s, color 0.2s;
+}
+
+.rules-help-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--ink);
+}
+
+.onboarding-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 0 16px;
+    padding: 10px 14px;
+    background: var(--leader-soft);
+    border: 1px solid rgba(201, 162, 74, 0.35);
+    border-radius: 10px;
+    font-size: 0.85rem;
+    color: var(--ink);
+}
+
+.onboarding-banner.hidden {
+    display: none;
+}
+
+.onboarding-banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.onboarding-banner-link {
+    background: none;
+    border: 1px solid var(--accent-gold);
+    color: var(--accent-gold);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.onboarding-banner-link:hover {
+    background: rgba(201, 162, 74, 0.15);
+}
+
+.onboarding-banner-close {
+    background: none;
+    border: none;
+    color: var(--ink-2);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 6px;
+}
+
+.onboarding-banner-close:hover {
+    color: var(--ink);
+}
+
+.rules-drawer-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    z-index: 9998;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.rules-drawer-overlay.open {
+    display: block;
+    opacity: 1;
+}
+
+.rules-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 340px;
+    max-width: 90vw;
+    background: var(--bg-elev);
+    border-left: 1px solid var(--line-strong);
+    z-index: 9999;
+    transform: translateX(100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.rules-drawer.open {
+    transform: translateX(0);
+}
+
+.rules-drawer__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 1.25rem 1rem;
+    border-bottom: 1px solid var(--line-strong);
+}
+
+.rules-drawer__title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--ink);
+}
+
+.rules-drawer__close {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    transition: background 0.2s;
+    flex-shrink: 0;
+}
+
+.rules-drawer__close:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.rules-drawer__body {
+    padding: 0.5rem 1.25rem 1.5rem;
+}
+
+.rules-drawer__section {
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.rules-drawer__section:last-child {
+    border-bottom: none;
+}
+
+.rules-drawer__section h3 {
+    margin: 0 0 8px;
+    font-size: 0.95rem;
+    color: var(--accent-gold);
+}
+
+.rules-drawer__section p {
+    margin: 0 0 8px;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    color: var(--ink-2);
+}
+
+.rules-drawer__section p:last-child {
+    margin-bottom: 0;
+}
+
+@media (max-width: 480px) {
+    .onboarding-banner {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
+
+/* Pick queue row flash — briefly highlights a row when its pick just landed */
+.q-row.pick-flash {
+    animation: pickFlash 1.2s ease-out;
+}
+
+@keyframes pickFlash {
+    0%   { background: rgba(201, 162, 74, 0.35); }
+    100% { background: transparent; }
+}
+
 /* =====================================================
    Responsive Standings: Desktop Table + Mobile Cards
    ===================================================== */

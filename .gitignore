@@ -50,3 +50,17 @@ design/
 
 # Superpowers skill scratch space (brainstorm sessions, SDD workspaces) -- never source
 .superpowers/
+
+# Graphify knowledge graph -- regenerable cache/tool state, not source.
+# graph.json itself (and GRAPH_REPORT.md/manifest.json) stay trackable --
+# .gitattributes sets a merge driver for graph.json, which only matters if
+# it's actually committed.
+graphify-out/cache/
+graphify-out/.obsidian/
+graphify-out/obsidian/
+graphify-out/.graphify_*
+graphify-out/cost.json
+graphify-out/graph.html
+
+# Stray Obsidian vault (personal notes, not app source)
+WinsPool/

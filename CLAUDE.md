@@ -112,6 +112,7 @@ GEMINI_API_KEY=...          # For recap generation
 SMTP_SERVER/PORT/USER/...   # Legacy email delivery (optional; Resend is now the primary path)
 RESEND_API_KEY=...          # Resend API key — primary email provider (alerts, recaps, MFA codes)
 FROM_EMAIL=...              # Resend sender address (default onboarding@resend.dev — no domain verified yet)
+APP_BASE_URL=...            # Base URL for links embedded in outbound emails (default http://localhost:8000; prod uses the Cloud Run service URL)
 ALERT_EMAIL=...             # Recipient for send_alert_email() job-failure alerts — set on all 4 scheduled Cloud Run Jobs
 MAX_RETRIES=...             # Must match the job's own --max-retries, or alerting fails open (see Scheduled Jobs)
 GCP_PROJECT/GCP_REGION=...           # Used by schedule_kickoffs.py to target the right Cloud Run Jobs Admin API
@@ -400,3 +401,13 @@ to match, or alerting silently reverts to "fail open" (always sends).
 
 See **Scheduled Jobs** (under Architecture, above) for the full set of
 Cloud Scheduler/Cloud Tasks triggers running in production.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
