@@ -219,11 +219,19 @@ PICK_FAKE_STATE = {
 
 @pytest.fixture
 def ws_pick_client():
-    """TestClient with a complete PICK_FAKE_STATE (includes draft_ready, available_teams, draft_board)."""
+    """TestClient with a complete PICK_FAKE_STATE (includes draft_ready, available_teams, draft_board).
+
+    Defaults draft_active=True so these tests exercise their own specific
+    guard (turn order, team availability, etc.) rather than depending on
+    whatever the real local config_settings.json happens to hold at the
+    time -- tests that specifically want draft_active=False override this
+    with their own nested patch.
+    """
     with patch("routes.draft_routes.load_draft_state", return_value=PICK_FAKE_STATE), \
          patch("routes.draft_routes.save_pick") as mock_save, \
          patch("routes.draft_routes.undo_pick"), \
          patch("routes.draft_routes.reset_pick"), \
+         patch("routes.draft_routes.get_config_settings", return_value={"draft_active": True}), \
          patch("services.db_service.get_player_by_id", side_effect=_REAUTH_OK):
         from main import app
         yield TestClient(app), mock_save
@@ -272,6 +280,39 @@ class TestWebSocketPick:
                 msg = ws.receive_json()
         assert msg["type"] == "error"
         assert "complete" in msg["message"].lower()
+
+    def test_pick_blocked_for_non_admin_when_draft_not_active(self, ws_pick_client):
+        """Non-admin whose turn it is still gets rejected while draft_active is False."""
+        client, _ = ws_pick_client
+        # Pick 3 now belongs to player 2 (non-admin) so this isolates the
+        # draft_active gate from the separate "not your turn" check.
+        own_turn_state = {
+            **PICK_FAKE_STATE,
+            "draft_board": [
+                {"pick": 1, "playerId": 1, "playerName": "Admin User"},
+                {"pick": 2, "playerId": 1, "playerName": "Admin User"},
+                {"pick": 3, "playerId": 2, "playerName": "Regular Player"},
+            ],
+        }
+        with patch("routes.draft_routes.load_draft_state", return_value=own_turn_state), \
+             patch("routes.draft_routes.get_config_settings", return_value={"draft_active": False}):
+            with client.websocket_connect("/ws") as ws:
+                self._verify_as(ws, player_id=2)
+                ws.send_json({"action": "pick", "team": "KC"})
+                msg = ws.receive_json()
+        assert msg["type"] == "error"
+        assert "hasn't opened" in msg["message"].lower()
+
+    def test_admin_can_pick_when_draft_not_active(self, ws_pick_client):
+        """Admins are exempt from the draft_active gate (setup/testing before opening)."""
+        client, mock_save = ws_pick_client
+        with patch("routes.draft_routes.get_config_settings", return_value={"draft_active": False}):
+            with client.websocket_connect("/ws") as ws:
+                self._verify_as(ws, player_id=1)  # pick 3 belongs to player 1 (admin)
+                ws.send_json({"action": "pick", "team": "KC"})
+                msg = ws.receive_json()
+        assert msg["type"] == "state"
+        mock_save.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

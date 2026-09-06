@@ -564,6 +564,17 @@ class App {
             roundLabel.textContent = `/round ${round}`;
         }
 
+        // Draft not yet opened by the admin (draft_active toggle) -- everyone but
+        // admins sees this instead of the normal clock, regardless of draft_ready.
+        if (!this.draftActive && this.user.role !== 'admin') {
+            card.style.borderColor = 'var(--line-strong)';
+            card.innerHTML = `
+                <div style="grid-column:1/-1;text-align:center;padding:8px 0;color:var(--ink-2);font-size:15px;">
+                    The draft hasn't opened yet — check back soon!
+                </div>`;
+            return;
+        }
+
         // Not yet ready
         if (!state.draft_ready) {
             card.style.borderColor = 'var(--line-strong)';

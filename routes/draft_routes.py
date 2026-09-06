@@ -14,7 +14,7 @@ from services.data_service import (
     load_data, get_available_years, get_draft_years, get_active_season,
 )
 from services.draft_service import load_draft_state, save_pick, undo_pick, reset_pick, strip_admin_only_fields
-from services.db_service import get_collection_df, add_draft_order, add_draft_rule
+from services.db_service import get_collection_df, add_draft_order, add_draft_rule, get_config_settings
 from services.chat_service import post_system_message, post_chat_message, get_recent_messages
 import services.analysis_service as analysis
 from services.constants import DRAFT_ROUNDS
@@ -678,6 +678,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Resolve admin status from the authenticated socket identity only
                 admin_player = _get_authenticated_admin(socket_player_id, state["all_players"])
                 is_admin = admin_player is not None
+
+                if not is_admin and get_config_settings().get("draft_active") is not True:
+                    await websocket.send_json({"type": "error", "message": "The draft hasn't opened yet — check back soon!"})
+                    continue
 
                 if socket_player_id != target_pid_int and not is_admin:
                     await websocket.send_json({"type": "error", "message": "It is not your turn to pick!"})
