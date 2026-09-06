@@ -17,12 +17,38 @@ if ($PROJECT_ID -eq "YOUR_PROJECT_ID") {
     exit 1
 }
 
-# APP_BASE_URL is read from the shell, not hardcoded here, so the deployed
-# service URL never appears in a git diff of this script.
-if (-not $env:APP_BASE_URL) {
-    Write-Host "[ERROR] `$env:APP_BASE_URL is not set. Run:  `$env:APP_BASE_URL = 'https://your-service-url'  then re-run this script." -ForegroundColor Red
+# Personal/deployment-specific values (site URL, sender/alert addresses) are
+# read from .env (gitignored), not hardcoded here, so they never appear in a
+# git diff of this script. A shell $env:<NAME>, if already set, takes
+# priority over .env.
+function Get-DotEnvValue([string]$Name) {
+    $shellValue = [Environment]::GetEnvironmentVariable($Name)
+    if ($shellValue) { return $shellValue }
+    if (Test-Path .env) {
+        $envLine = Get-Content .env | Where-Object { $_ -match "^\s*$Name\s*=" } | Select-Object -Last 1
+        if ($envLine) { return ($envLine -split '=', 2)[1].Trim().Trim('"').Trim("'") }
+    }
+    return $null
+}
+
+$appBaseUrl = Get-DotEnvValue "APP_BASE_URL"
+if (-not $appBaseUrl) {
+    Write-Host "[ERROR] APP_BASE_URL is not set. Add  APP_BASE_URL=https://your-service-url  to .env (or set `$env:APP_BASE_URL for this session) and re-run." -ForegroundColor Red
     exit 1
 }
+$fromEmail = Get-DotEnvValue "FROM_EMAIL"     # optional -- code falls back to onboarding@resend.dev
+$alertEmail = Get-DotEnvValue "ALERT_EMAIL"   # optional -- omits Reply-To on the draft-order email if unset
+
+$envVars = @(
+    "USE_LOCAL_DATA=False",
+    "DEBUG_PAGE_LOAD=False",
+    "APP_BASE_URL=$appBaseUrl",
+    "SMTP_SERVER=smtp.gmail.com",
+    "SMTP_PORT=587",
+    "SMTP_USER=your_email@gmail.com"
+)
+if ($fromEmail) { $envVars += "FROM_EMAIL=$fromEmail" }
+if ($alertEmail) { $envVars += "ALERT_EMAIL=$alertEmail" }
 
 Write-Host "[BUILD] Building Docker Image for project $PROJECT_ID..." -ForegroundColor Cyan
 gcloud builds submit --tag $IMAGE_TAG
@@ -33,12 +59,7 @@ gcloud run deploy winspool `
     --platform managed `
     --region us-east1 `
     --allow-unauthenticated `
-    --set-env-vars "USE_LOCAL_DATA=False" `
-    --set-env-vars "DEBUG_PAGE_LOAD=False" `
-    --set-env-vars "APP_BASE_URL=$env:APP_BASE_URL" `
-    --set-env-vars "SMTP_SERVER=smtp.gmail.com" `
-    --set-env-vars "SMTP_PORT=587" `
-    --set-env-vars "SMTP_USER=your_email@gmail.com" `
+    --set-env-vars ($envVars -join ",") `
     --set-secrets "FIREBASE_CREDENTIALS=FIREBASE_CREDENTIALS:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,SMTP_PASSWORD=SMTP_PASSWORD:latest,JWT_SECRET=JWT_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest"
 
 if ($LASTEXITCODE -eq 0) {
