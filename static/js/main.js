@@ -815,7 +815,13 @@ class App {
                     body: JSON.stringify({ email, password: pass, confirm_password: confirmPass })
                 });
                 data = await resp.json();
-                if (resp.status !== 200) throw new Error(data.error || 'Setup failed');
+                if (resp.status !== 200) {
+                    // Show the real reason (validation error, or a backend
+                    // failure's own message) instead of falling through to the
+                    // generic catch-all below, which used to swallow it.
+                    this.showAuthError(data.error || 'Setup failed. Please try again.');
+                    return;
+                }
                 data.status = 'success'; // Treat successful setup as immediate login
             } else {
                 data = await AuthService.login(email, pass);
@@ -830,6 +836,9 @@ class App {
                 this.showAuthError(data.error || 'Login failed');
             }
         } catch (e) {
+            // Reached only for a true network/parse failure (fetch itself
+            // threw) -- a normal non-200 response with a JSON body is handled
+            // above with its real error message, not this generic fallback.
             console.error('[App] Login failed', e);
             this.showAuthError('Connection error. Try again.');
         }

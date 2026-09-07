@@ -27,6 +27,31 @@ router = APIRouter(prefix="/api")
 _IS_PROD = os.environ.get("ENVIRONMENT", "development").lower() == "production"
 
 
+def _player_role(player: dict) -> str:
+    """Player role, defaulting to "user" for anything but a real role string.
+
+    player dicts come from a pandas row via .to_dict() (services.db_service),
+    which includes every DataFrame column for every row -- a player whose
+    Firestore doc never had a `role` field comes back with role=float('nan'),
+    not a missing key. player.get("role", "user") silently fails on that: the
+    key IS present, so the default never applies, and nan is truthy in Python
+    (bool(float('nan')) is True) so `or "user"` doesn't catch it either. A nan
+    role then crashes json.dumps (Starlette's JSONResponse sets allow_nan=False)
+    the moment it's serialized into a login/profile/MFA response.
+    """
+    role = player.get("role")
+    if isinstance(role, str) and role:
+        return role
+    logger.warning(
+        "Player %s has no valid role field (got %r) -- defaulting to 'user'. "
+        "The admin panel's Edit Player doesn't expose role, so this needs a "
+        "direct Firestore edit (players/%s, set role to 'user' or 'admin') "
+        "or it'll keep silently defaulting on every login.",
+        player.get("playerId", "?"), role, player.get("playerId", "?"),
+    )
+    return "user"
+
+
 def _set_session_cookie(response: JSONResponse, token: str) -> JSONResponse:
     """Attach the session_token httpOnly cookie to a JSONResponse."""
     response.set_cookie(
@@ -111,7 +136,7 @@ async def set_password(body: SetPasswordRequest):
             "must_change_password": False,
         })
 
-        role = player.get("role", "user")
+        role = _player_role(player)
         token = create_token(int(player["playerId"]), role)
         resp = JSONResponse(content={
             "status": "success",
@@ -192,7 +217,7 @@ async def login(body: LoginRequest):
         reset_fields["last_login"] = time.time()
         update_player_profile(str(player["playerId"]), reset_fields)
 
-        role = player.get("role", "user")
+        role = _player_role(player)
         token = create_token(int(player["playerId"]), role)
         resp = JSONResponse(content={
             "status": "success",
@@ -229,7 +254,7 @@ async def get_profile(_auth: dict = Depends(require_auth)):
         "fullName": player.get("fullName"),
         "nickName": player.get("nickName"),
         "email": player.get("email"),
-        "role": player.get("role", "user"),
+        "role": _player_role(player),
         "mfa_enabled": bool(player.get("mfa_enabled"))
     }
 
@@ -310,7 +335,7 @@ async def verify_mfa(body: MfaVerifyRequest):
 
         update_player_profile(pid, {"mfa_token": None, "mfa_expiry": 0, "last_login": time.time()})
 
-        role = player.get("role", "user")
+        role = _player_role(player)
         token = create_token(int(pid), role)
         resp = JSONResponse(content={
             "status": "success",

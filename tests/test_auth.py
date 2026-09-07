@@ -31,6 +31,44 @@ def test_api_login_payload_consistency():
     assert response.status_code == 401
     assert "error" in response.json()
 
+def test_login_succeeds_when_role_field_is_missing():
+    """Reproduces a prod 500: get_player_by_email() returns match.iloc[0].to_dict(),
+    which includes every DataFrame column for every row -- a player whose Firestore
+    doc never had a `role` field comes back with role=nan (a float), not a missing
+    key. player.get("role", "user") only substitutes the default for a MISSING key,
+    not a present-but-nan one, so `role` stayed nan and blew up json.dumps
+    (Starlette's JSONResponse sets allow_nan=False) with
+    "ValueError: Out of range float values are not JSON compliant".
+    """
+    fake_player = {
+        "playerId": 11,
+        "email": "test@example.com",
+        "password_hash": "some_hash",
+        "fullName": "Test User",
+        "nickName": "Testy",
+        "mfa_enabled": False,
+        "must_change_password": False,
+        "lockout_until": None,
+        "failed_login_attempts": 0,
+        "role": float("nan"),  # matches match.iloc[0].to_dict() for a role-less row
+    }
+
+    with patch("routes.auth_routes.get_player_by_email", return_value=fake_player), \
+         patch("routes.auth_routes.verify_password", return_value=True), \
+         patch("routes.auth_routes._is_legacy_sha256", return_value=False), \
+         patch("routes.auth_routes.update_player_profile"):
+
+        # Isolated client, not the shared module-level `client` -- a successful
+        # login sets a session_token cookie, which would otherwise persist on
+        # the shared client's cookie jar and leak into later tests in this file.
+        resp = TestClient(app).post("/api/login", json={"email": "test@example.com", "password": "Test1234!"})
+
+    assert resp.status_code == 200, f"Login failed: {resp.text}"
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["role"] == "user"
+
+
 def test_api_admin_unauthorized():
     """Verify that admin endpoints reject requests without admin role."""
     response = client.get("/api/admin/players?playerId=non_admin_id")
