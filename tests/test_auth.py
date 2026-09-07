@@ -69,6 +69,41 @@ def test_login_succeeds_when_role_field_is_missing():
     assert body["role"] == "user"
 
 
+def test_login_succeeds_when_must_change_password_and_mfa_enabled_are_nan():
+    """Reproduces a real prod incident: the admin's own account had
+    must_change_password=nan (same to_dict() root cause as the role bug
+    above). `if player.get("must_change_password"):` is a bare truthiness
+    check, and bool(float('nan')) is True in Python -- so a normal login
+    was incorrectly routed into the forced-password-change branch, which
+    returns {"status": "must_change_password", ...} with no `error` field.
+    The frontend's else-branch then showed the literal fallback string
+    'Login failed', matching exactly what was reported.
+    """
+    fake_player = {
+        "playerId": 1,
+        "email": "test@example.com",
+        "password_hash": "some_hash",
+        "fullName": "Test User",
+        "nickName": "Testy",
+        "role": "admin",
+        "must_change_password": float("nan"),
+        "mfa_enabled": float("nan"),
+        "lockout_until": None,
+        "failed_login_attempts": 0,
+    }
+
+    with patch("routes.auth_routes.get_player_by_email", return_value=fake_player), \
+         patch("routes.auth_routes.verify_password", return_value=True), \
+         patch("routes.auth_routes._is_legacy_sha256", return_value=False), \
+         patch("routes.auth_routes.update_player_profile"):
+
+        resp = TestClient(app).post("/api/login", json={"email": "test@example.com", "password": "Test1234!"})
+
+    assert resp.status_code == 200, f"Login failed: {resp.text}"
+    body = resp.json()
+    assert body["status"] == "success", f"Expected clean success, got: {body}"
+
+
 def test_api_admin_unauthorized():
     """Verify that admin endpoints reject requests without admin role."""
     response = client.get("/api/admin/players?playerId=non_admin_id")

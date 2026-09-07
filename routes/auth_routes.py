@@ -189,7 +189,13 @@ async def login(body: LoginRequest):
         if _is_legacy_sha256(stored_hash):
             reset_fields["password_hash"] = get_password_hash(password)
 
-        if player.get("must_change_password"):
+        # `is True`, not bare truthiness: these fields come from the same
+        # pandas .to_dict() as role (see _player_role above), and an unset
+        # Firestore field arrives as float('nan') -- which is truthy in
+        # Python -- not a missing key. A plain `if player.get(...)` treats
+        # nan as "yes, force this", incorrectly routing a normal login into
+        # must-change-password/MFA. Only an explicit True should trigger these.
+        if player.get("must_change_password") is True:
             update_player_profile(str(player["playerId"]), reset_fields)
             return JSONResponse(content={
                 "status": "must_change_password",
@@ -197,7 +203,7 @@ async def login(body: LoginRequest):
                 "message": "You must change your temporary password before continuing."
             })
 
-        if player.get("mfa_enabled"):
+        if player.get("mfa_enabled") is True:
             update_player_profile(str(player["playerId"]), reset_fields)
             mfa_code = "".join([str(secrets.randbelow(10)) for _ in range(6)])
             mfa_token_hash = hashlib.sha256(mfa_code.encode()).hexdigest()
@@ -255,7 +261,7 @@ async def get_profile(_auth: dict = Depends(require_auth)):
         "nickName": player.get("nickName"),
         "email": player.get("email"),
         "role": _player_role(player),
-        "mfa_enabled": bool(player.get("mfa_enabled"))
+        "mfa_enabled": player.get("mfa_enabled") is True
     }
 
 
