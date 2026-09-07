@@ -56,16 +56,16 @@ class CreatePlayerRequest(BaseModel):
 
 
 class UpdatePlayerRequest(BaseModel):
-    targetPlayerId: str
+    targetPlayerId: int
     fields: Dict[str, Any] = {}
 
 
 class TargetPlayerRequest(BaseModel):
-    targetPlayerId: str
+    targetPlayerId: int
 
 
 class SetTempPasswordRequest(BaseModel):
-    targetPlayerId: str
+    targetPlayerId: int
     tempPassword: str
 
 
