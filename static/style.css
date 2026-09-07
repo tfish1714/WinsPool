@@ -3886,6 +3886,11 @@ table.wp-data-table tbody td:last-child {
     transition: background 100ms;
 }
 .nav-ap-logout:hover { background: rgba(255,255,255,0.1); color: var(--ink); }
+.nav-ap-version {
+    margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line);
+    font: 500 10px/1.4 'JetBrains Mono', monospace; color: var(--ink-3);
+    letter-spacing: 0.02em;
+}
 
 /* Mobile header */
 .nav-mobile-header {

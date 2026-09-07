@@ -387,11 +387,15 @@ async def push_subscribe(request: Request, _auth: dict = Depends(require_auth)):
 def get_config():
     """Returns app config. Public — all users need draft_active on page load."""
     from services.db_service import get_config_settings
+    version = {
+        "app_version": os.environ.get("APP_VERSION", "dev"),
+        "app_deployed_at": os.environ.get("APP_DEPLOYED_AT", ""),
+    }
     try:
-        return JSONResponse(content=get_config_settings())
+        return JSONResponse(content={**get_config_settings(), **version})
     except Exception:
         logger.exception("get_config error")
-        return JSONResponse(content={"draft_active": False})
+        return JSONResponse(content={"draft_active": False, **version})
 
 
 @router.post("/admin/config/settings")

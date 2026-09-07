@@ -39,10 +39,17 @@ if (-not $appBaseUrl) {
 $fromEmail = Get-DotEnvValue "FROM_EMAIL"     # optional -- code falls back to onboarding@resend.dev
 $alertEmail = Get-DotEnvValue "ALERT_EMAIL"   # optional -- omits Reply-To on the draft-order email if unset
 
+# Version info shown in the nav avatar popover (see main.js renderVersionInfo)
+# -- computed fresh every deploy, never hand-maintained.
+$gitSha = (git rev-parse --short HEAD).Trim()
+$deployedAt = (Get-Date).ToUniversalTime().ToString("o")
+
 $envVars = @(
     "USE_LOCAL_DATA=False",
     "DEBUG_PAGE_LOAD=False",
     "APP_BASE_URL=$appBaseUrl",
+    "APP_VERSION=$gitSha",
+    "APP_DEPLOYED_AT=$deployedAt",
     "SMTP_SERVER=smtp.gmail.com",
     "SMTP_PORT=587",
     "SMTP_USER=your_email@gmail.com"

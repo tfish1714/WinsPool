@@ -8,7 +8,7 @@
     <!-- Use the primary glassmorphism design system -->
     <link rel="icon" href="/static/fishbone.png" type="image/png">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@500;700&family=Newsreader:ital,opsz,wght@1,12,500;0,12,500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=24">
+    <link rel="stylesheet" href="/static/style.css?v=25">
     {% block head %}{% endblock %}
     <!-- Early Auth Detection to prevent flicker -->
     <script>
@@ -105,6 +105,7 @@
                     <div class="nav-ap-role" id="nav-ap-role"></div>
                     <div class="nav-drop-divider"></div>
                     <button class="nav-ap-logout" id="nav-ap-logout-btn">Logout</button>
+                    <div class="nav-ap-version" id="nav-ap-version"></div>
                 </div>
             </div>
         </div>
@@ -175,7 +176,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <script type="module" src="/static/js/main.js?v=5"></script>
+    <script type="module" src="/static/js/main.js?v=6"></script>
     <script src="/static/js/responsive.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {

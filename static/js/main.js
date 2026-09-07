@@ -80,6 +80,8 @@ class App {
                     this.mockDraftActive = freshMockDraftActive;
                     needsNavUpdate = true;
                 }
+
+                this.renderVersionInfo(cfg.app_version, cfg.app_deployed_at);
             }
 
             if (needsNavUpdate) {
@@ -89,6 +91,19 @@ class App {
         } catch (e) {
             console.warn('[App] Background sync failed', e);
         }
+    }
+
+    renderVersionInfo(version, deployedAt) {
+        const el = document.getElementById('nav-ap-version');
+        if (!el || !version) return;
+        let deployedText = '';
+        if (deployedAt) {
+            const d = new Date(deployedAt);
+            if (!isNaN(d)) {
+                deployedText = ` · ${d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`;
+            }
+        }
+        el.textContent = `v${version}${deployedText}`;
     }
 
     initGlobalUI() {
