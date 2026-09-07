@@ -180,10 +180,15 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
     
     available_seasons = sorted([int(s) for s in set(d_order['season'].dropna())], reverse=True)
 
-    # 7. Timer Sync
-    from services.db_service import get_metadata, save_metadata
+    # 7. Timer Sync -- only persisted once the draft is actually open
+    # (draft_active). Otherwise the very first page load after a season is
+    # created (e.g. an admin previewing the room, or a player clicking the
+    # announcement email early) would permanently stamp pick #1's start time
+    # days before the draft is meant to begin.
+    from services.db_service import get_metadata, save_metadata, get_config_settings
     pick_start_time = int(time.time())
-    if season and active_pick <= 30:
+    draft_is_open = get_config_settings().get("draft_active") is True
+    if draft_is_open and season and active_pick <= 30:
         meta_id = f"draft_timer_{season}"
         meta = get_metadata(meta_id) or {"picks": {}}
         picks = meta.get("picks", {})

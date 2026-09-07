@@ -31,6 +31,31 @@ def _local_append(season: int, data: dict) -> dict:
     return data
 
 
+def clear_chat_history(season: int) -> None:
+    """Delete every chat message for a season (Firestore subcollection + the
+    in-memory fallback). Called when an admin wipes/recreates a season --
+    delete_season_data() doesn't touch draft_chat since it isn't keyed by a
+    `season` field like draft_order/draft_results, so this has to be separate.
+    """
+    _local_chat.pop(season, None)
+    try:
+        db = get_db()
+    except Exception:
+        db = None
+    if db is None:
+        return
+    try:
+        docs = list(_messages_ref(season).stream())
+        if not docs:
+            return
+        batch = db.batch()
+        for doc in docs:
+            batch.delete(doc.reference)
+        batch.commit()
+    except Exception:
+        logger.exception("chat_service: failed to clear chat history for season %s", season)
+
+
 def post_system_message(season: int, text: str) -> dict | None:
     """Write a system event to draft_chat/{season}/messages. Returns the written doc or None."""
     data = {

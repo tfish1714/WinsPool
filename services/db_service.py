@@ -313,7 +313,11 @@ def delete_draft_results_for_season(season: int):
     clear_data_cache()
 
 def delete_season_data(season: int):
-    """Wipes draft_order, draft_order_rules, and draft_results for a season."""
+    """Wipes draft_order, draft_order_rules, draft_results, and the persisted
+    pick-timer metadata for a season. Chat history is cleared separately by
+    the caller (services.chat_service.clear_chat_history) -- it lives in a
+    Firestore subcollection keyed by season, not a `season` field like the
+    collections below, so it can't be wiped by the same loop."""
     db = get_db()
     for col in ["draft_order", "draft_order_rules", "draft_results"]:
         if db:
@@ -333,6 +337,7 @@ def delete_season_data(season: int):
             df = df[df["season"] != season]
             _save_df_to_local(col, df)
 
+    save_metadata(f"draft_timer_{season}", {"picks": {}})
     clear_data_cache()
     signal_data_update()
 

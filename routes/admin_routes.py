@@ -34,6 +34,7 @@ from services.constants import PASSWORD_COMPLEXITY_RE, UNDRAFTED_SENTINEL
 from services.draft_service import sanitize_state, wipe_draft_cache
 from services.session_service import require_admin
 import services.ai_service as ai_service
+import services.chat_service as chat_service
 import services.email_service as email_service
 import services.recap_service as recap_service
 
@@ -293,9 +294,10 @@ async def admin_set_temp_password(body: SetTempPasswordRequest, _: dict = Depend
 
 @router.post("/admin/delete_season")
 async def delete_season(body: SeasonRequest, _: dict = Depends(require_admin)):
-    """Wipe all draft data for a specific season."""
+    """Wipe all draft data for a specific season, including chat history and the pick timer."""
     try:
         delete_season_data(body.season)
+        chat_service.clear_chat_history(body.season)
         wipe_draft_cache()
         return JSONResponse(content={"message": f"Season {body.season} data wiped successfully."})
     except Exception as e:
