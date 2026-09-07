@@ -104,6 +104,36 @@ def test_login_succeeds_when_must_change_password_and_mfa_enabled_are_nan():
     assert body["status"] == "success", f"Expected clean success, got: {body}"
 
 
+def test_wrong_password_returns_401_when_failed_login_attempts_is_nan():
+    """Reproduces a real prod incident: a wrong-password attempt for a player
+    with failed_login_attempts=nan (same to_dict() root cause as the other
+    nan bugs above) crashed with "ValueError: cannot convert float NaN to
+    integer" at `int(player.get("failed_login_attempts", 0)) + 1` -- the
+    dict.get default never applies because the key IS present, just nan.
+    A normal wrong password must return a clean 401, not a 500.
+    """
+    fake_player = {
+        "playerId": 7,
+        "email": "test@example.com",
+        "password_hash": "some_hash",
+        "role": "user",
+        "failed_login_attempts": float("nan"),
+        "lockout_until": None,
+    }
+
+    with patch("routes.auth_routes.get_player_by_email", return_value=fake_player), \
+         patch("routes.auth_routes.verify_password", return_value=False), \
+         patch("routes.auth_routes.update_player_profile") as mock_update:
+
+        resp = TestClient(app).post("/api/login", json={"email": "test@example.com", "password": "WrongPassword1!"})
+
+    assert resp.status_code == 401, f"Expected clean 401, got: {resp.status_code} {resp.text}"
+    assert resp.json()["error"] == "Invalid email or password."
+    # Confirms it actually reached the increment logic (not skipped) and
+    # recovered to 1, not crashed
+    mock_update.assert_called_once_with("7", {"failed_login_attempts": 1})
+
+
 def test_api_admin_unauthorized():
     """Verify that admin endpoints reject requests without admin role."""
     response = client.get("/api/admin/players?playerId=non_admin_id")

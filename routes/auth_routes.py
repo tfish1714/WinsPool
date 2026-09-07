@@ -52,6 +52,21 @@ def _player_role(player: dict) -> str:
     return "user"
 
 
+def _int_field(player: dict, field: str, default: int = 0) -> int:
+    """Reads an int-ish player field, treating anything that isn't a real
+    number (nan included -- int(float('nan')) raises ValueError, not a
+    fallback) as `default`. Same root cause as _player_role above: an unset
+    Firestore field arrives via .to_dict() as float('nan'), not a missing
+    key, so `int(player.get(field, default))` blows up instead of using the
+    default the moment a wrong-password attempt tries to increment it.
+    """
+    value = player.get(field)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _set_session_cookie(response: JSONResponse, token: str) -> JSONResponse:
     """Attach the session_token httpOnly cookie to a JSONResponse."""
     response.set_cookie(
@@ -112,7 +127,7 @@ async def set_password(body: SetPasswordRequest):
             return JSONResponse(status_code=400, content={"error": "Account already claimed. Please log in."})
 
         def _record_setup_failure():
-            fails = int(player.get("failed_setup_attempts", 0)) + 1
+            fails = _int_field(player, "failed_setup_attempts") + 1
             lockout_ts = time.time() + 1800 if fails >= 5 else None
             increment_failed_setup_attempts(str(player["playerId"]), fails, lockout_ts)
             return fails >= 5
@@ -173,7 +188,7 @@ async def login(body: LoginRequest):
 
         is_valid = verify_password(password, player.get("password_hash"))
         if not is_valid:
-            fails = int(player.get("failed_login_attempts", 0)) + 1
+            fails = _int_field(player, "failed_login_attempts") + 1
             lockout_ts = time.time() + 1800 if fails >= 5 else None
             update_player_profile(str(player["playerId"]), {
                 "failed_login_attempts": fails,
