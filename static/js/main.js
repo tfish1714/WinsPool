@@ -1,7 +1,7 @@
 import { ApiService } from './api.js';
 import { AuthService } from './auth_service.js';
 import { UiRenderer } from './ui_renderer.js?v=5';
-import { WebSocketService } from './websocket_service.js';
+import { WebSocketService } from './websocket_service.js?v=1';
 import { initChat, loadHistory, appendMessage } from './chat.js';
 
 /**
@@ -22,7 +22,14 @@ class App {
             onMessage: (msg) => this.handleWsMessage(msg),
             onOpen: () => this.onWsOpen(),
             onClose: () => this.updateStatusBanner('Disconnected. Reconnecting...'),
-            onError: (err) => console.error('[WS] Error', err)
+            onError: (err) => console.error('[WS] Error', err),
+            // Only fires once reconnect attempts are truly exhausted (~90+
+            // min of retrying) -- until then the "Reconnecting..." banner
+            // above is accurate. Without this, that banner kept claiming to
+            // be retrying long after it had actually given up, so live
+            // updates (picks, chat, draft_active toggles) silently stopped
+            // with no indication anything was wrong.
+            onReconnectFailed: () => this.updateStatusBanner('Connection lost. Please refresh the page.'),
         });
     }
 

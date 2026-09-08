@@ -6,9 +6,20 @@
 export class WebSocketService {
     constructor(callbacks) {
         this.socket = null;
-        this.callbacks = callbacks; // { onMessage, onOpen, onClose, onError }
-        this.reconnectInterval = 3000;
-        this.maxReconnectAttempts = 5;
+        // { onMessage, onOpen, onClose, onError, onReconnectFailed }
+        // onReconnectFailed fires once, only after maxReconnectAttempts is
+        // truly exhausted -- lets the UI stop claiming "Reconnecting..."
+        // once that's no longer true (see main.js's onClose banner).
+        this.callbacks = callbacks;
+        this.baseReconnectInterval = 3000;
+        this.maxReconnectInterval = 30000; // exponential backoff, capped at 30s
+        // A live draft room can be open for hours; a 15s-then-give-up cap
+        // (the old maxReconnectAttempts=5 @ fixed 3s) meant any network blip
+        // longer than that -- laptop sleep, WiFi switch, brief signal loss --
+        // silently killed all live updates with zero user-visible warning
+        // until a manual refresh. 200 attempts at up to 30s apart spans
+        // ~90+ minutes before finally giving up.
+        this.maxReconnectAttempts = 200;
         this.reconnectCount = 0;
     }
 
@@ -45,10 +56,15 @@ export class WebSocketService {
     attemptReconnect() {
         if (this.reconnectCount < this.maxReconnectAttempts) {
             this.reconnectCount++;
-            console.log(`[WS] Reconnecting attempt ${this.reconnectCount}...`);
-            setTimeout(() => this.connect(), this.reconnectInterval);
+            const delay = Math.min(
+                this.baseReconnectInterval * Math.pow(1.5, this.reconnectCount - 1),
+                this.maxReconnectInterval
+            );
+            console.log(`[WS] Reconnecting attempt ${this.reconnectCount} in ${Math.round(delay / 1000)}s...`);
+            setTimeout(() => this.connect(), delay);
         } else {
             console.error('[WS] Max reconnect attempts reached');
+            if (this.callbacks.onReconnectFailed) this.callbacks.onReconnectFailed();
         }
     }
 
