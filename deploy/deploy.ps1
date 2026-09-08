@@ -77,11 +77,13 @@ Write-Host "[BUILD] Building Docker Image for project $PROJECT_ID..." -Foregroun
 gcloud builds submit --tag $IMAGE_TAG
 
 Write-Host "[DEPLOY] Deploying to Google Cloud Run..." -ForegroundColor Cyan
-gcloud run deploy winspool `
-    --image $IMAGE_TAG `
-    --platform managed `
-    --region us-east1 `
-    --allow-unauthenticated `
+# --timeout caps how long Cloud Run will keep ANY request open, including a
+# WebSocket connection -- the default is 300s, so the live draft room's /ws
+# connection was being force-closed by Cloud Run's own infrastructure every
+# 5 minutes regardless of activity or tab focus, not by anything in this
+# app's code. 3600 is Cloud Run's documented maximum (60 min); this doesn't
+# eliminate periodic reconnects, it just spaces them out ~12x further apart.
+    --timeout=3600 `
     --set-env-vars ($envVars -join ",") `
     --set-secrets "FIREBASE_CREDENTIALS=FIREBASE_CREDENTIALS:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,SMTP_PASSWORD=SMTP_PASSWORD:latest,JWT_SECRET=JWT_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest"
 
