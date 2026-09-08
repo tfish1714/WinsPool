@@ -39,6 +39,16 @@ if (-not $appBaseUrl) {
 $fromEmail = Get-DotEnvValue "FROM_EMAIL"     # optional -- code falls back to onboarding@resend.dev
 $alertEmail = Get-DotEnvValue "ALERT_EMAIL"   # optional -- omits Reply-To on the draft-order email if unset
 
+# Web Push (VAPID) -- optional, but silently no-ops end-to-end without all
+# three: services/push_service.py refuses to send with no VAPID_PUBLIC/PRIVATE_KEY,
+# and routes/draft_routes.py never even renders the <meta vapid-public-key>
+# tag that main.js's initPushNotifications() needs to ask the browser to
+# subscribe in the first place -- so a missing key here doesn't just break
+# sending, it means no one's browser ever prompts for push permission at all.
+$vapidPublicKey = Get-DotEnvValue "VAPID_PUBLIC_KEY"
+$vapidPrivateKey = Get-DotEnvValue "VAPID_PRIVATE_KEY"
+$vapidClaimsEmail = Get-DotEnvValue "VAPID_CLAIMS_EMAIL"
+
 # Version info shown in the nav avatar popover (see main.js renderVersionInfo)
 # -- computed fresh every deploy, never hand-maintained.
 $gitSha = (git rev-parse --short HEAD).Trim()
@@ -56,6 +66,12 @@ $envVars = @(
 )
 if ($fromEmail) { $envVars += "FROM_EMAIL=$fromEmail" }
 if ($alertEmail) { $envVars += "ALERT_EMAIL=$alertEmail" }
+if ($vapidPublicKey) { $envVars += "VAPID_PUBLIC_KEY=$vapidPublicKey" }
+if ($vapidPrivateKey) { $envVars += "VAPID_PRIVATE_KEY=$vapidPrivateKey" }
+if ($vapidClaimsEmail) { $envVars += "VAPID_CLAIMS_EMAIL=$vapidClaimsEmail" }
+if (-not ($vapidPublicKey -and $vapidPrivateKey)) {
+    Write-Host "[WARN] VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY not both set in .env -- push notifications will silently stay disabled on this deploy." -ForegroundColor Yellow
+}
 
 Write-Host "[BUILD] Building Docker Image for project $PROJECT_ID..." -ForegroundColor Cyan
 gcloud builds submit --tag $IMAGE_TAG
