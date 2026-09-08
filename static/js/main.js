@@ -793,6 +793,45 @@ class App {
 
         const authBtn = document.getElementById('auth-submit-btn');
         if (authBtn) authBtn.onclick = () => this.handleLogin();
+
+        const pwInput = document.getElementById('auth-password');
+        if (pwInput) pwInput.oninput = () => this.updatePasswordChecklist(pwInput.value);
+
+        const confirmInput = document.getElementById('auth-confirm-password');
+        if (confirmInput) confirmInput.oninput = () => this.updatePasswordMatchHint();
+    }
+
+    // Mirrors PASSWORD_COMPLEXITY_RE (services/constants.py) -- keep both in sync.
+    updatePasswordChecklist(password) {
+        const checks = {
+            'pw-req-length': password.length >= 12,
+            'pw-req-case': /[a-z]/.test(password) && /[A-Z]/.test(password),
+            'pw-req-number': /\d/.test(password),
+            'pw-req-symbol': /[^A-Za-z0-9]/.test(password),
+        };
+        for (const [id, met] of Object.entries(checks)) {
+            document.getElementById(id)?.classList.toggle('met', met);
+        }
+        this.updatePasswordMatchHint();
+    }
+
+    updatePasswordMatchHint() {
+        const hint = document.getElementById('pw-match-hint');
+        const confirmInput = document.getElementById('auth-confirm-password');
+        if (!hint || !confirmInput || confirmInput.classList.contains('hidden')) return;
+
+        const pw = document.getElementById('auth-password')?.value || '';
+        const confirm = confirmInput.value;
+        if (!confirm) {
+            hint.classList.add('hidden');
+            hint.classList.remove('match', 'mismatch');
+            return;
+        }
+        hint.classList.remove('hidden');
+        const matches = pw === confirm;
+        hint.classList.toggle('match', matches);
+        hint.classList.toggle('mismatch', !matches);
+        hint.textContent = matches ? '✓ Passwords match' : 'Passwords do not match';
     }
 
     async handleEmailBlur(email) {

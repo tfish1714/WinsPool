@@ -8,7 +8,7 @@
     <!-- Use the primary glassmorphism design system -->
     <link rel="icon" href="/static/fishbone.png" type="image/png">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@500;700&family=Newsreader:ital,opsz,wght@1,12,500;0,12,500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=25">
+    <link rel="stylesheet" href="/static/style.css?v=26">
     {% block head %}{% endblock %}
     <!-- Early Auth Detection to prevent flicker -->
     <script>
@@ -49,13 +49,12 @@
                             <input type="email" id="auth-email" class="admin-input" style="margin-bottom:18px;"
                                 placeholder="you@example.com">
 
-                            <div id="setup-requirements" class="hidden"
-                                style="display:none; font-size:0.8rem; color:var(--ink-3); margin-bottom:12px; text-align:left; border:1px solid var(--line); padding:10px 12px; border-radius:8px; line-height:1.7;">
-                                <strong style="color:var(--ink);">Requirements</strong><br />
-                                • Minimum 12 characters<br />
-                                • Uppercase &amp; Lowercase letters<br />
-                                • At least 1 number<br />
-                                • At least 1 symbol (@$!%*?&amp;_)
+                            <div id="setup-requirements" class="pw-requirements hidden">
+                                <strong style="color:var(--ink);">Requirements</strong>
+                                <div class="pw-req-item" id="pw-req-length"><span class="pw-req-dot"></span>Minimum 12 characters</div>
+                                <div class="pw-req-item" id="pw-req-case"><span class="pw-req-dot"></span>Uppercase &amp; lowercase letters</div>
+                                <div class="pw-req-item" id="pw-req-number"><span class="pw-req-dot"></span>At least 1 number</div>
+                                <div class="pw-req-item" id="pw-req-symbol"><span class="pw-req-dot"></span>At least 1 symbol (@$!%*?&amp;_)</div>
                             </div>
 
                             <label class="field-label" id="password-label">Password</label>
@@ -64,6 +63,7 @@
 
                             <input type="password" id="auth-confirm-password" class="admin-input hidden"
                                 style="display:none; margin-top:12px;" placeholder="Confirm Password">
+                            <div class="pw-match-hint hidden" id="pw-match-hint"></div>
 
                             <input type="text" id="auth-mfa-code" class="admin-input hidden"
                                 style="display:none; text-align:center; letter-spacing:0.5rem; font-size:1.5rem; font-weight:700; font-family:'JetBrains Mono',monospace;"
@@ -176,7 +176,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <script type="module" src="/static/js/main.js?v=6"></script>
+    <script type="module" src="/static/js/main.js?v=7"></script>
     <script src="/static/js/responsive.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
