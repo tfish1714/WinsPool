@@ -441,6 +441,12 @@ class App {
                 this.draftActive = msg.draft_active;
                 localStorage.setItem('nfl_wins_draft_active', String(msg.draft_active));
                 this._patchDraftNav();
+                // Someone already on /draft when the admin flips this toggle
+                // would otherwise be stuck showing the stale "hasn't opened
+                // yet" (or the normal clock) card until the next real pick
+                // triggers a fresh 'state' broadcast. Re-render immediately
+                // from the state we already have -- no server round-trip needed.
+                if (this.lastDraftState) this.updateShameTimer(this.lastDraftState);
             }
         } else if (msg.type === 'error') {
             alert(msg.message);
