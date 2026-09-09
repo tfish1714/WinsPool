@@ -498,8 +498,21 @@ def get_enriched_schedule(games, draft_results, players, season):
     final_merged['away_record'] = final_merged['away_team'].apply(lambda t: format_team_record(t, team_records))
     final_merged['home_record'] = final_merged['home_team'].apply(lambda t: format_team_record(t, team_records))
     
+    # Live-score fields are NaN whenever the live-score sync hasn't touched
+    # a game (the common case for most games most of the time) -- the
+    # blanket UNDRAFTED_SENTINEL fillna below is for draft-ownership columns
+    # and would otherwise turn that NaN into -1000, which is truthy, making
+    # every untouched game render as "live" with garbage clock/period text.
+    live_score_cols = [c for c in ('is_live', 'clock', 'period', 'possession') if c in final_merged.columns]
+    saved_live_scores = final_merged[live_score_cols].copy()
+
     final_merged = final_merged.fillna(UNDRAFTED_SENTINEL)
-    
+
+    for col in live_score_cols:
+        final_merged[col] = saved_live_scores[col]
+    if 'is_live' in live_score_cols:
+        final_merged['is_live'] = final_merged['is_live'].fillna(False)
+
     if is_debug:
         logger.debug("get_enriched_schedule processing took %.3fs", time.time() - start_op)
     return final_merged

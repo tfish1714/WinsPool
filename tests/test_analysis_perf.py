@@ -163,3 +163,37 @@ def test_get_enriched_schedule_attaches_player_names():
     assert len(result) == 1
     assert result.iloc[0]["fullName_away"] == "Alice"
     assert result.iloc[0]["fullName_home"] == "Bob"
+
+
+def test_get_enriched_schedule_non_live_games_stay_not_live():
+    """
+    A game the live-score sync has never touched has NaN is_live/clock/period.
+    The blanket UNDRAFTED_SENTINEL fillna must not turn that NaN is_live into
+    -1000 (truthy), which would make every untouched game render as "live"
+    with garbage "-1000" clock/period text.
+    """
+    from services.analysis_service import get_enriched_schedule
+
+    games = pd.DataFrame([{
+        "season": 2026, "week": 1, "game_type": "REG",
+        "away_team": "KC", "home_team": "SF",
+        "home_score": None, "away_score": None,
+        "result": None,
+        "gameday": "2026-09-08",
+        # Column exists (other games in prod have it populated) but this
+        # particular game has never been touched by the live-score sync.
+        "is_live": None, "clock": None, "period": None,
+    }])
+    draft_results = pd.DataFrame([
+        {"season": 2026, "team": "KC", "playerId": 1},
+        {"season": 2026, "team": "SF", "playerId": 2},
+    ])
+    players = pd.DataFrame([
+        {"playerId": 1, "fullName": "Alice"},
+        {"playerId": 2, "fullName": "Bob"},
+    ])
+
+    result = get_enriched_schedule(games, draft_results, players, 2026)
+
+    assert len(result) == 1
+    assert result.iloc[0]["is_live"] == False
