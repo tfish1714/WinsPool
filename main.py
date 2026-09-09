@@ -61,7 +61,7 @@ def _current_season_label():
     every page before any page-specific route handler runs.
     """
     bundle = load_data()
-    return get_active_season(bundle.games, bundle.draft_results)
+    return get_active_season(bundle.games, bundle.draft_results, bundle.draft_order_rules)
 
 for t in [standings_templates, history_templates, draft_templates, admin_templates]:
     t.env.globals['get_team_logo'] = get_team_logo
@@ -94,8 +94,8 @@ app.include_router(mock_draft_page_router)
 # ── Root redirect ─────────────────────────────────────────────────────────────
 @app.get("/")
 async def root_redirect():
-    _, _, games, _, _, draft_results, _ = load_data()
-    active = get_active_season(games, draft_results)
+    _, _, games, _, _, draft_results, rules = load_data()
+    active = get_active_season(games, draft_results, rules)
     return RedirectResponse(f"/wins-pool/{active}")
 
 

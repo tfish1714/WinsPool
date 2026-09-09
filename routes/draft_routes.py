@@ -105,8 +105,8 @@ async def serve_draft_board(request: Request):
 
 @router.get("/draft-results")
 async def draft_results_redirect():
-    _, _, games, _, _, draft_results, _ = load_data()
-    return RedirectResponse(f"/draft/{get_active_season(games)}")
+    _, _, games, _, _, draft_results, rules = load_data()
+    return RedirectResponse(f"/draft/{get_active_season(games, draft_results, rules)}")
 
 
 @router.get("/admin")
@@ -118,7 +118,7 @@ async def serve_admin(request: Request):
 
 @router.get("/draft/history")
 async def route_draft_history(request: Request):
-    standings, _, games, players, _, draft_results, _ = load_data()
+    standings, _, games, players, _, draft_results, rules = load_data()
 
     draft_df = pd.merge(draft_results, players, on="playerId", how="inner")
     merged = pd.merge(draft_df, standings[["team", "season", "wins"]], on=["team", "season"], how="left")
@@ -249,7 +249,7 @@ async def route_draft_history(request: Request):
         "sorted_teams": sorted_teams,
         "player_first_picks": player_first_picks,
         "team_first_picks": team_first_picks,
-        "current_year": get_active_season(games),
+        "current_year": get_active_season(games, draft_results, rules),
     })
 
 
@@ -480,7 +480,7 @@ async def route_draft_results_by_year(request: Request, year: int):
     return templates.TemplateResponse(request, "draft_results.html", {
         "data": merged.to_dict(orient="records"),
         "year": year,
-        "current_year": get_active_season(games),
+        "current_year": get_active_season(all_games, all_draft_results, rules),
         "available_years": get_draft_years(all_draft_results),
         "best_overall": best_overall,
         "worst_overall": worst_overall,

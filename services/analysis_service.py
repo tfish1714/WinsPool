@@ -10,7 +10,7 @@ try:
 except Exception:
     pass  # Option added in pandas 2.2; silently skip on older versions
 from typing import Dict, List, Any
-from services.constants import UNDRAFTED_SENTINEL, TIEBREAKER_SORT_COLS, DRAFT_ROUNDS
+from services.constants import UNDRAFTED_SENTINEL, TIEBREAKER_SORT_COLS, DRAFT_ROUNDS, TEAMS_PER_PLAYER
 from services.utils import filter_season
 
 logger = logging.getLogger(__name__)
@@ -516,8 +516,6 @@ def get_enriched_schedule(games, draft_results, players, season):
     if is_debug:
         logger.debug("get_enriched_schedule processing took %.3fs", time.time() - start_op)
     return final_merged
-
-TEAMS_PER_PLAYER = 3
 
 def get_draft_progress(draft_results: pd.DataFrame, rules: pd.DataFrame) -> tuple:
     """Return (picks_made, picks_expected) for already year-filtered draft_results/rules.

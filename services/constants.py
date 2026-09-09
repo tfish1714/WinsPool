@@ -54,6 +54,11 @@ DRAFT_ROUNDS = {
     3: (21, 30),
 }
 
+# Every player drafts exactly 3 teams. Used to compute a season's total
+# expected picks (len(draft_order_rules) * TEAMS_PER_PLAYER) for draft-progress
+# and draft-completion checks.
+TEAMS_PER_PLAYER = 3
+
 # Ordered sort columns for apply_tiebreakers().
 # TotalWins is primary; the six derived columns break ties in priority order.
 # All columns sort descending — more wins / better differential = higher rank.

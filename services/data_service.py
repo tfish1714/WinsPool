@@ -9,7 +9,7 @@ import time
 from typing import Tuple, Dict, Any, List, NamedTuple
 from services.db_service import get_collection_df
 from services.utils import get_team_logo_url
-from services.constants import UNDRAFTED_SENTINEL
+from services.constants import UNDRAFTED_SENTINEL, TEAMS_PER_PLAYER
 
 
 class DataBundle(NamedTuple):
@@ -257,21 +257,26 @@ def load_data_season(year: int):
     )
 
 
-def get_active_season(games: pd.DataFrame, draft_results: pd.DataFrame = None) -> int:
+def get_active_season(games: pd.DataFrame, draft_results: pd.DataFrame = None,
+                       rules: pd.DataFrame = None) -> int:
     """
     Returns the latest season that has completed game results.
     If draft_results is provided, only considers seasons that also have draft picks.
     This prevents future/post-season data (e.g. 2025 playoffs) from overriding a
     season where draft data hasn't been loaded yet.
+
+    If rules (draft_order_rules) is also provided, the result can advance past
+    the games-results season to a later one whose draft is fully complete --
+    the week between draft day and kickoff shouldn't leave every page pointed
+    at last season.
     """
     if games.empty or 'season' not in games.columns:
-        return 2024
-    if 'result' not in games.columns:
-        return int(games['season'].max())
-    has_results = games[games['result'].notna() & (games['result'] != UNDRAFTED_SENTINEL)]
-    if has_results.empty:
-        return 2024
-    active = int(has_results['season'].max())
+        active = 2024
+    elif 'result' not in games.columns:
+        active = int(games['season'].max())
+    else:
+        has_results = games[games['result'].notna() & (games['result'] != UNDRAFTED_SENTINEL)]
+        active = int(has_results['season'].max()) if not has_results.empty else 2024
 
     # If draft_results provided, cap to the latest season that has draft picks
     if draft_results is not None and not draft_results.empty and 'season' in draft_results.columns:
@@ -280,16 +285,35 @@ def get_active_season(games: pd.DataFrame, draft_results: pd.DataFrame = None) -
         while active > 2013 and active not in draft_seasons:
             active -= 1
 
+    # Advance forward to the latest season whose draft is fully complete, even
+    # with zero games played yet.
+    if (draft_results is not None and not draft_results.empty and rules is not None
+            and not rules.empty and 'season' in draft_results.columns and 'season' in rules.columns):
+        candidate_seasons = sorted(
+            s for s in draft_results['season'].dropna().astype(int).unique() if s > active
+        )
+        for season in candidate_seasons:
+            picks_made = len(draft_results[draft_results['season'] == season])
+            picks_expected = len(rules[rules['season'] == season]) * TEAMS_PER_PLAYER
+            if picks_expected > 0 and picks_made >= picks_expected:
+                active = season
+
     return active
 
-def get_available_years(draft_results: pd.DataFrame, games: pd.DataFrame = None) -> list:
-    """Returns seasons with draft data, capped at the active (game-result) season.
-    Use this for standings/schedule/race pages."""
+def get_available_years(draft_results: pd.DataFrame, games: pd.DataFrame = None,
+                         rules: pd.DataFrame = None) -> list:
+    """Returns seasons with draft data, capped at the active season.
+    Use this for standings/schedule/race pages.
+
+    Passing rules lets a season with a fully-completed draft (but zero games
+    played yet) appear in the dropdown without relying on a redirect having
+    already force-added it as the currently-viewed year.
+    """
     if draft_results.empty or 'season' not in draft_results.columns:
         return [2024]
     years = sorted(draft_results['season'].dropna().astype(int).unique().tolist())
     if games is not None and not games.empty:
-        active = get_active_season(games)
+        active = get_active_season(games, draft_results, rules)
         years = [y for y in years if y <= active]
     return years
 

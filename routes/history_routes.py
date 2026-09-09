@@ -17,8 +17,8 @@ templates = Jinja2Templates(directory="templates")
 
 @router.get("/history")
 async def overall_history(request: Request):
-    standings_master, _, all_games, players, _, all_draft_results, _ = load_data()
-    current_year = get_active_season(all_games)
+    standings_master, _, all_games, players, _, all_draft_results, rules = load_data()
+    current_year = get_active_season(all_games, all_draft_results, rules)
 
     player_stats: dict = {}
     season_records: list = []
@@ -54,7 +54,7 @@ async def overall_history(request: Request):
         drafted_worst["wins"] = 0
 
     # available_years derived once
-    available_years = get_available_years(all_draft_results, all_games)
+    available_years = get_available_years(all_draft_results, all_games, rules)
 
     for yr in available_years:
         try:
@@ -115,20 +115,20 @@ async def overall_history(request: Request):
 
 @router.get("/headtohead")
 async def headtohead_redirect():
-    _, _, games, _, _, draft_results, _ = load_data()
-    return RedirectResponse(f"/headtohead/{get_active_season(games, draft_results)}")
+    _, _, games, _, _, draft_results, rules = load_data()
+    return RedirectResponse(f"/headtohead/{get_active_season(games, draft_results, rules)}")
 
 
 @router.get("/headtohead/history")
 async def headtohead_history(request: Request):
     # Load Master Data once
     standings_master, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
-    current_year = get_active_season(all_games)
+    current_year = get_active_season(all_games, all_draft_results, rules)
 
     all_h2h = []
     all_schedules = []
 
-    available_years = get_available_years(all_draft_results, all_games)
+    available_years = get_available_years(all_draft_results, all_games, rules)
 
     for yr in available_years:
         try:
@@ -183,8 +183,8 @@ async def headtohead_by_year(request: Request, year: int):
     return templates.TemplateResponse(request, "headtohead.html", {
         "h2h_html": h2h_html,
         "year": year,
-        "current_year": get_active_season(games),
-        "available_years": get_available_years(all_draft_results, all_games),
+        "current_year": get_active_season(all_games, all_draft_results, rules),
+        "available_years": get_available_years(all_draft_results, all_games, rules),
     })
 
 
@@ -192,7 +192,7 @@ async def headtohead_by_year(request: Request, year: int):
 
 def _get_player_analytics_data(player_id: int) -> dict | None:
     """Load and compute analytics for one player. Returns None if player not found."""
-    standings_master, _, all_games, players, _, all_draft_results, _ = load_data()
+    standings_master, _, all_games, players, _, all_draft_results, rules = load_data()
     player_row = players[players["playerId"] == player_id] if not players.empty else pd.DataFrame()
     if player_row.empty:
         return None
@@ -203,7 +203,7 @@ def _get_player_analytics_data(player_id: int) -> dict | None:
     # Resolver, not get_preseason_predictions: these are historical seasons, whose
     # projections live in consensus_projections now.
     preseason_preds = {int(s): get_season_projection_legacy_shape(int(s)) for s in player_seasons}
-    active_season = get_active_season(all_games)
+    active_season = get_active_season(all_games, all_draft_results, rules)
     return analysis.get_player_analytics(
         player_id, all_draft_results, standings_master, players, preseason_preds,
         active_season=active_season,
