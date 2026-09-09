@@ -404,6 +404,15 @@ async def route_draft_results_by_year(request: Request, year: int):
             cumulative_fastest = {"player": fastest_name, "time": _format_pick_time(int(totals[fastest_name]))}
             cumulative_slowest = {"player": slowest_name, "time": _format_pick_time(int(totals[slowest_name]))}
 
+    # Per-pick time display for the All Picks table -- "-" for untimed picks
+    # (historical seasons with no time_taken_seconds data at all).
+    if "time_taken_seconds" in merged.columns:
+        merged["time_display"] = merged["time_taken_seconds"].apply(
+            lambda s: _format_pick_time(int(s)) if pd.notna(s) and s > 0 else "-"
+        )
+    else:
+        merged["time_display"] = "-"
+
     # Draft Value Calculus
     # Blends model and consensus, not get_preseason_predictions alone: this
     # page is mostly historical seasons, whose projections live in

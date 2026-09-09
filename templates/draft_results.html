@@ -122,6 +122,7 @@
                         <th style="text-align: center;">Value (Delta)</th>
                         <th style="text-align: center;">Win Rank</th>
                         <th style="text-align: center;">Pick Value</th>
+                        <th style="text-align: center;">Time</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -179,6 +180,10 @@
                             {% if row['pick_value'] is not none %}
                             {% if row['pick_value'] > 0 %}+{% endif %}{{ row['pick_value'] | int }}
                             {% else %}-{% endif %}
+                        </td>
+                        <td style="text-align: center; opacity: 0.8;">
+                            <span class="stacked-label">Time</span>
+                            {{ row['time_display'] }}
                         </td>
                     </tr>
                     {% endfor %}

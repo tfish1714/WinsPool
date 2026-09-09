@@ -121,3 +121,19 @@ def test_cumulative_cards_absent_when_no_pick_times_exist():
     ctx = _get_context(week1_complete=False, with_times=False)
     assert ctx["cumulative_fastest"] is None
     assert ctx["cumulative_slowest"] is None
+
+
+def test_all_picks_table_shows_formatted_time_per_row():
+    ctx = _get_context(week1_complete=False, with_times=True)
+    by_pick = {row["draftPick"]: row["time_display"] for row in ctx["data"]}
+    assert by_pick[1] == "30s"
+    assert by_pick[2] == "3m 20s"
+
+
+def test_all_picks_table_shows_dash_when_pick_untimed_or_no_time_data():
+    ctx = _get_context(week1_complete=False, with_times=True)
+    by_pick = {row["draftPick"]: row["time_display"] for row in ctx["data"]}
+    assert by_pick[4] == "-"  # Bob's second pick has no time in the fixture
+
+    ctx_no_times = _get_context(week1_complete=False, with_times=False)
+    assert all(row["time_display"] == "-" for row in ctx_no_times["data"])
