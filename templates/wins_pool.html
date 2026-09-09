@@ -28,6 +28,17 @@
             </div>
         </header>
 
+        {% if draft_pending %}
+        <div class="card-glass" style="padding: 2.5rem 1.5rem; text-align: center;">
+            <div class="eyebrow">Draft in progress</div>
+            <p style="margin-top: 0.5rem; font-size: 1.05rem;">
+                The {{ year }} Wins Pool standings aren't ready yet &mdash;
+                {{ draft_picks_made }} of {{ draft_picks_expected }} picks have been made.
+                Check back once the draft is complete.
+            </p>
+        </div>
+        {% else %}
+
         <!-- Weekly Progress Line Chart -->
         <div class="wp-chart-wrap">
             <canvas id="winsChart"></canvas>
@@ -199,6 +210,7 @@
         <div class="refresh-note">Data refreshed: {{ refreshTime }}</div>
         {% endif %}
 
+        {% endif %}
     </div>
 </main>
 

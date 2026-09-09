@@ -61,8 +61,15 @@ async def wins_pool_by_year(request: Request, year: int):
         standings = filter_season(all_st, year)
         games = filter_season(all_games, year)
         draft_results = filter_season(all_draft_results, year)
+        rules_year = filter_season(rules, year)
 
-        sorted_df = analysis.calculate_wins_pool_standings(standings, draft_results, players, year, games)
+        picks_made, picks_expected = analysis.get_draft_progress(draft_results, rules_year)
+        draft_pending = picks_expected > 0 and picks_made < picks_expected
+
+        sorted_df = (
+            pd.DataFrame() if draft_pending
+            else analysis.calculate_wins_pool_standings(standings, draft_results, players, year, games)
+        )
         current_year = get_active_season(games)
         available_years = get_available_years(all_draft_results, all_games)
         if year not in available_years:
@@ -90,6 +97,9 @@ async def wins_pool_by_year(request: Request, year: int):
                          .to_html(classes="wp-data-table", border=0)) if not h2h_df.empty else "",
             "current_week": latest_week,
             "latest_week": latest_week,
+            "draft_pending": draft_pending,
+            "draft_picks_made": picks_made,
+            "draft_picks_expected": picks_expected,
         })
     except Exception as e:
         logger.exception("Unhandled error rendering standings page")

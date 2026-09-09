@@ -371,14 +371,22 @@ def reshape_wins_pool_standings(df: pd.DataFrame) -> pd.DataFrame:
         include_groups=False,
     )
     if grouped.empty: return pd.DataFrame()
-    num_teams = len(grouped.iloc[0]) // 4
-    reshaped_df = pd.DataFrame(grouped.tolist(), index=grouped.index)
-    
+    # Mid-draft, players can have drafted different numbers of teams (some
+    # have picked twice, others only once) -- size columns off the longest
+    # group and pad shorter ones with NaN so the DataFrame isn't ragged.
+    num_teams = max(len(row) for row in grouped) // 4
+    padded_rows = [list(row) + [np.nan] * (num_teams * 4 - len(row)) for row in grouped]
+    reshaped_df = pd.DataFrame(padded_rows, index=grouped.index)
+
     reshaped_df.columns = [
         f'{label}{i//4+1}' for i, label in enumerate(['team', 'wins', 'ptDiff', 'global_record'] * num_teams)
     ]
     reshaped_df['TotalWins'] = reshaped_df[[f'wins{i+1}' for i in range(num_teams)]].sum(axis=1)
     reshaped_df = reshaped_df.reset_index()
+    team_cols = [c for c in reshaped_df.columns if c.startswith('team')]
+    record_cols = [c for c in reshaped_df.columns if c.startswith('global_record')]
+    reshaped_df[team_cols] = reshaped_df[team_cols].fillna('')
+    reshaped_df[record_cols] = reshaped_df[record_cols].fillna('0-0')
     reshaped_df.fillna(0, inplace=True)
     # Cast all numeric score/diff columns to int so they never display as floats
     for col in reshaped_df.columns:
@@ -403,17 +411,22 @@ def apply_tiebreakers(reshaped_df: pd.DataFrame) -> pd.DataFrame:
     preseason projected wins. All tiers sort descending.
     """
     if reshaped_df.empty: return reshaped_df
-    reshaped_df['Tiebreaker1_WorstTeamWins'] = reshaped_df[['wins1', 'wins2', 'wins3']].min(axis=1)
-    reshaped_df['Tiebreaker2_2ndWorstTeamWins'] = reshaped_df[['wins1', 'wins2', 'wins3']].apply(
-        lambda x: sorted(x)[1] if len(x) > 1 else 0, axis=1
-    )
-    reshaped_df['Tiebreaker3_BestTeamWins'] = reshaped_df[['wins1', 'wins2', 'wins3']].max(axis=1)
+    # Mid-draft, a player may not yet have all 3 team slots -- only tiebreak
+    # on the win/ptDiff columns that actually exist.
+    win_cols = [c for c in ('wins1', 'wins2', 'wins3') if c in reshaped_df.columns]
+    ptdiff_cols = [c for c in ('ptDiff1', 'ptDiff2', 'ptDiff3') if c in reshaped_df.columns]
 
-    reshaped_df['Tiebreaker4_WorstTeamPtDiff'] = reshaped_df[['ptDiff1', 'ptDiff2', 'ptDiff3']].min(axis=1)
-    reshaped_df['Tiebreaker5_2ndWorstTeamPtDiff'] = reshaped_df[['ptDiff1', 'ptDiff2', 'ptDiff3']].apply(
+    reshaped_df['Tiebreaker1_WorstTeamWins'] = reshaped_df[win_cols].min(axis=1)
+    reshaped_df['Tiebreaker2_2ndWorstTeamWins'] = reshaped_df[win_cols].apply(
         lambda x: sorted(x)[1] if len(x) > 1 else 0, axis=1
     )
-    reshaped_df['Tiebreaker6_BestTeamPtDiff'] = reshaped_df[['ptDiff1', 'ptDiff2', 'ptDiff3']].max(axis=1)
+    reshaped_df['Tiebreaker3_BestTeamWins'] = reshaped_df[win_cols].max(axis=1)
+
+    reshaped_df['Tiebreaker4_WorstTeamPtDiff'] = reshaped_df[ptdiff_cols].min(axis=1)
+    reshaped_df['Tiebreaker5_2ndWorstTeamPtDiff'] = reshaped_df[ptdiff_cols].apply(
+        lambda x: sorted(x)[1] if len(x) > 1 else 0, axis=1
+    )
+    reshaped_df['Tiebreaker6_BestTeamPtDiff'] = reshaped_df[ptdiff_cols].max(axis=1)
 
     sorted_df = reshaped_df.sort_values(
         TIEBREAKER_SORT_COLS,
@@ -490,6 +503,19 @@ def get_enriched_schedule(games, draft_results, players, season):
     if is_debug:
         logger.debug("get_enriched_schedule processing took %.3fs", time.time() - start_op)
     return final_merged
+
+TEAMS_PER_PLAYER = 3
+
+def get_draft_progress(draft_results: pd.DataFrame, rules: pd.DataFrame) -> tuple:
+    """Return (picks_made, picks_expected) for already year-filtered draft_results/rules.
+
+    picks_expected is 0 when the season has no draft_order_rules configured
+    (e.g. a season that predates the draft-order feature) -- callers should
+    treat that as "not applicable" rather than "pending".
+    """
+    picks_made = len(draft_results) if draft_results is not None else 0
+    picks_expected = (len(rules) if rules is not None else 0) * TEAMS_PER_PLAYER
+    return picks_made, picks_expected
 
 def calculate_wins_pool_standings(standings, draft_results, players, season, games=None):
     """Compute per-player cumulative win totals from game results and draft assignments.
