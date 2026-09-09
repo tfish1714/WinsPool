@@ -540,7 +540,7 @@ class App {
         UiRenderer.renderPickQueue(draft_board, active_pick, state.all_players, this.user.role);
 
         // Render Board
-        UiRenderer.renderDraftBoard(draft_board, active_pick, this.user.playerId, this.draftSummary, state.all_players ? state.all_players.length : 10, this.user.role, preseason_predictions);
+        UiRenderer.renderDraftBoard(draft_board, active_pick, this.user.playerId, this.draftSummary, draft_board && draft_board.length ? draft_board.length / 3 : 10, this.user.role, preseason_predictions);
 
         // Render Admin Portfolio
         if (this.user.role === 'admin') {
@@ -583,9 +583,13 @@ class App {
         }
 
         // Update round label in h1
+        // totalPlayers must come from the draft pool size (draft_board.length / 3
+        // teams-per-player), not all_players.length -- all_players is every
+        // registered account, which can outnumber this season's actual drafters
+        // and silently shift every pick into the wrong round.
         const roundLabel = document.getElementById('round-label');
-        if (roundLabel && all_players) {
-            const totalPlayers = all_players.length || 10;
+        if (roundLabel && draft_board) {
+            const totalPlayers = draft_board.length ? draft_board.length / 3 : 10;
             const round = active_pick <= (draft_board.length || 30)
                 ? Math.ceil(active_pick / totalPlayers)
                 : Math.ceil((draft_board.length || 30) / totalPlayers);
@@ -627,7 +631,7 @@ class App {
         if (!item) return;
 
         const totalPicks = draft_board.length;
-        const totalPlayers = (all_players || []).length || 10;
+        const totalPlayers = totalPicks ? totalPicks / 3 : 10;
         const round = Math.ceil(active_pick / totalPlayers);
 
         const TIERS = [

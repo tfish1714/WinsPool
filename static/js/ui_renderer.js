@@ -126,8 +126,11 @@ export const UiRenderer = {
                 const team = pick.team;
                 let baseWins = 0;
                 if (preseasonPredictions && preseasonPredictions[team]) {
+                    // mean_wins, not projected_wins: projected_wins is rounded to a
+                    // whole number for the draft board's team tags, but the portfolio
+                    // total should reflect the underlying blended precision.
                     baseWins = typeof preseasonPredictions[team] === 'object'
-                        ? parseFloat(preseasonPredictions[team].projected_wins)
+                        ? parseFloat(preseasonPredictions[team].mean_wins)
                         : parseFloat(preseasonPredictions[team]);
                 }
                 portfolios[pick.playerId].teams.push({ team, base: baseWins });
@@ -239,7 +242,11 @@ export const UiRenderer = {
         const footer    = document.getElementById('pick-queue-footer');
         if (!container) return;
 
-        const totalPlayers = (allPlayers || []).length || 10;
+        // Pool size must come from the draft itself (3 teams per player), not
+        // allPlayers.length -- that's every registered account, which can
+        // outnumber this season's actual drafters and shift every pick into
+        // the wrong round (e.g. "R2" for pick 21 instead of "R3").
+        const totalPlayers = (board || []).length ? board.length / 3 : 10;
         const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}`;
         const SLOW_SECS = 120;
         const _esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
