@@ -17,7 +17,7 @@ from services.draft_service import load_draft_state, save_pick, undo_pick, reset
 from services.db_service import get_collection_df, add_draft_order, add_draft_rule, get_config_settings
 from services.chat_service import post_system_message, post_chat_message, get_recent_messages
 import services.analysis_service as analysis
-from services.constants import DRAFT_ROUNDS
+from services.constants import DRAFT_ROUNDS, UNDRAFTED_SENTINEL
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -322,10 +322,23 @@ async def route_draft_results_by_year(request: Request, year: int):
         merged["win_rank"] = None
         merged["pick_value"] = None
 
+    # Win-based award cards (Best/Worst Overall, Best by Round) are meaningless
+    # before any games have been played -- every team is 0-0, so pick_value is
+    # just draft-slot-minus-tiebreak noise. Gate them on week 1 being fully
+    # complete; pick-time cards (quickest/slowest, computed below) aren't
+    # gated since they're meaningful right after the draft.
+    week1_games = games[games["week"] == 1] if "week" in games.columns else pd.DataFrame()
+    if "game_type" in week1_games.columns:
+        week1_games = week1_games[week1_games["game_type"] == "REG"]
+    week1_complete = (
+        not week1_games.empty and "result" in week1_games.columns
+        and week1_games["result"].apply(lambda r: pd.notna(r) and r != UNDRAFTED_SENTINEL).all()
+    )
+
     best_overall = None
     worst_overall = None
     best_by_round = {}
-    if not merged.empty:
+    if not merged.empty and week1_complete:
         # Best Overall: highest pick_value (best value relative to draft slot)
         best_value_sorted = merged.sort_values("pick_value", ascending=False)
         bv = best_value_sorted.iloc[0]
@@ -373,6 +386,23 @@ async def route_draft_results_by_year(request: Request, year: int):
                 "player": s_row.get("fullName", ""), "team": s_row.get("team", ""),
                 "time": _format_pick_time(int(s_row.get("time_taken_seconds", 0)))
             }
+
+    # Cumulative fastest/slowest: total time across however many of a
+    # player's picks are timed so far -- not gated on having all 3 in yet,
+    # since this is useful to look at live during the draft. Every player
+    # ends up with exactly 3 timed picks once the draft completes.
+    cumulative_fastest = None
+    cumulative_slowest = None
+    if "time_taken_seconds" in merged.columns:
+        totals = (
+            merged[merged["time_taken_seconds"] > 0]
+            .groupby("fullName")["time_taken_seconds"].sum()
+        )
+        if not totals.empty:
+            fastest_name = totals.idxmin()
+            slowest_name = totals.idxmax()
+            cumulative_fastest = {"player": fastest_name, "time": _format_pick_time(int(totals[fastest_name]))}
+            cumulative_slowest = {"player": slowest_name, "time": _format_pick_time(int(totals[slowest_name]))}
 
     # Draft Value Calculus
     # Blends model and consensus, not get_preseason_predictions alone: this
@@ -448,6 +478,8 @@ async def route_draft_results_by_year(request: Request, year: int):
         "best_by_round": best_by_round,
         "quickest": quickest,
         "slowest": slowest,
+        "cumulative_fastest": cumulative_fastest,
+        "cumulative_slowest": cumulative_slowest,
         "undrafted_teams": undrafted_teams,
         "winner_player_id": winner_player_id,
     })

@@ -24,7 +24,7 @@
         </header>
 
         <!-- Best Pick Badges -->
-        {% if best_overall or best_by_round %}
+        {% if best_overall or best_by_round or quickest or slowest or cumulative_fastest or cumulative_slowest %}
         <h3 class="section-title"><i data-lucide="bar-chart-2"></i> Draft Pick Analysis — {{ year }}</h3>
         <div class="best-picks-grid">
             {% if best_overall %}
@@ -88,6 +88,22 @@
                 <div class="best-pick-team">{{ slowest.team }}</div>
                 <div class="best-pick-detail"><i data-lucide="clock" style="width:12px;height:12px;"></i> {{
                     slowest.time }}</div>
+            </div>
+            {% endif %}
+            {% if cumulative_fastest %}
+            <div class="best-pick-card" style="border-top-color: var(--accent-green);">
+                <div class="best-pick-label"><i data-lucide="zap"></i> Fastest Total (3 Picks)</div>
+                <div class="best-pick-name">{{ cumulative_fastest.player }}</div>
+                <div class="best-pick-detail"><i data-lucide="clock" style="width:12px;height:12px;"></i> {{
+                    cumulative_fastest.time }}</div>
+            </div>
+            {% endif %}
+            {% if cumulative_slowest %}
+            <div class="best-pick-card" style="border-top-color: var(--accent-red);">
+                <div class="best-pick-label"><i data-lucide="snail"></i> Slowest Total (3 Picks)</div>
+                <div class="best-pick-name">{{ cumulative_slowest.player }}</div>
+                <div class="best-pick-detail"><i data-lucide="clock" style="width:12px;height:12px;"></i> {{
+                    cumulative_slowest.time }}</div>
             </div>
             {% endif %}
         </div>
