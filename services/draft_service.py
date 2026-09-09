@@ -4,7 +4,7 @@ import pandas as pd
 from typing import Dict, Any, List
 from services.db_service import get_collection_df, add_draft_result, update_player_cell, delete_draft_pick
 from services.data_service import (
-    get_season_projection_dual, get_season_projection_legacy_shape, get_team_schedule, load_data,
+    get_season_projection_blended, get_season_projection_dual, get_team_schedule, load_data,
 )
 import time
 
@@ -145,12 +145,12 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
     available_teams = sorted(list(set(all_nfl_teams) - picked_teams))
     
     # 5. Analytics & Predictions (STATIC for Draft)
-    # Resolves model output vs. analyst consensus per team and returns the
-    # legacy {"projected_wins", "mean_wins", "std_dev", "sources"} shape, which
-    # this dict must keep: it is sent verbatim to the frontend
+    # Inverse-variance blends model output and analyst consensus per team and
+    # returns the {"projected_wins", "mean_wins", "std_dev", "sources"} shape,
+    # which this dict must keep: it is sent verbatim to the frontend
     # (static/js/main.js, ui_renderer.js) and Jinja templates, which read
     # `.projected_wins` / `.std_dev` directly.
-    preseason_predictions = get_season_projection_legacy_shape(int(season))
+    preseason_predictions = get_season_projection_blended(int(season))
     # Admin-only, separate from preseason_predictions above: exposes model and
     # consensus numbers individually (instead of collapsed to one) for the
     # available-teams grid's per-team display and sort. preseason_predictions

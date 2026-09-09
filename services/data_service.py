@@ -490,6 +490,54 @@ def get_season_projection_dual(season: int) -> Dict[str, dict]:
         }
     return out
 
+def get_season_projection_blended(season: int) -> Dict[str, dict]:
+    """Per-team inverse-variance blend of model and analyst-consensus wins.
+
+    Unlike get_season_projection_legacy_shape() (model wins outright when it
+    exists, consensus is only a fallback), this actually combines both when
+    both exist: model.mean_wins and consensus.consensus_mean are weighted by
+    1/std_dev^2 each, so whichever source is more confident (tighter std_dev)
+    pulls the blend toward it. A team with only one source, or a source whose
+    std_dev is missing/non-positive (can't weight a zero-width distribution),
+    falls back to that one source outright.
+
+    Used by the draft room's running portfolio and the post-draft recap's
+    value calculus -- both want "our best combined read," not a hard model
+    vs. consensus resolver. Returns the same flat shape as
+    get_season_projection_legacy_shape(), and a team with only one source
+    available reports that source's own established values unchanged (a
+    model-only team keeps its own rounded projected_wins, not mean_wins) --
+    only a team with both sources gets an actual blended figure.
+    """
+    model = get_preseason_predictions(season)
+    consensus = get_consensus_projections(season)
+
+    out = {}
+    for team in set(model) | set(consensus):
+        m = model.get(team)
+        c = consensus.get(team)
+        m_std = m["std_dev"] if m else None
+        c_std = c["consensus_std"] if c else None
+
+        if m and c and m_std and c_std:
+            w_m, w_c = 1 / (m_std ** 2), 1 / (c_std ** 2)
+            blended = (m["mean_wins"] * w_m + c["consensus_mean"] * w_c) / (w_m + w_c)
+            out[team] = {
+                "projected_wins": round(blended),
+                "mean_wins": round(blended, 2),
+                "std_dev": round((1 / (w_m + w_c)) ** 0.5, 2),
+                "sources": c["sources"],
+            }
+        elif m:
+            out[team] = {"projected_wins": m["projected_wins"], "mean_wins": m["mean_wins"],
+                         "std_dev": round(m["std_dev"], 2) if m["std_dev"] is not None else 0,
+                         "sources": m["sources"]}
+        elif c:
+            out[team] = {"projected_wins": c["consensus_median"], "mean_wins": c["consensus_mean"],
+                         "std_dev": round(c["consensus_std"], 2) if c["consensus_std"] is not None else 0,
+                         "sources": c["sources"]}
+    return out
+
 def get_team_schedule(team: str, games_df: pd.DataFrame, season: int) -> List[str]:
     """Extracts a team's sequential 17-game schedule from the NFL Games dataframe."""
     schedule = []

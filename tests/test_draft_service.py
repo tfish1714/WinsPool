@@ -107,53 +107,55 @@ class TestLoadDraftStateSingleton:
 
 class TestPreseasonPredictionsShape:
 
-    @patch("services.data_service.get_season_projection")
-    def test_preseason_predictions_preserves_true_projected_wins(self, mock_get_season_projection):
+    @patch("services.data_service.get_consensus_projections")
+    @patch("services.data_service.get_preseason_predictions")
+    def test_preseason_predictions_preserves_true_projected_wins(
+        self, mock_get_preseason_predictions, mock_get_consensus_projections
+    ):
         """ui_renderer.js:195 renders `${pred.projected_wins}W` straight from this
-        payload. The resolver's "wins" field prefers the unrounded mean_wins (e.g.
-        6.7), but the payload must still surface the original rounded projected_wins
-        (e.g. 7.0) that `detail` carries -- substituting mean_wins here would silently
-        change what the live 2026 draft room displays.
+        payload. A team with only a model projection (no consensus row) must
+        keep the model's own rounded projected_wins (e.g. 7.0), not its
+        unrounded mean_wins (e.g. 6.7) -- substituting mean_wins here would
+        silently change what the live 2026 draft room displays.
 
-        Patched at the resolver rather than at draft_service's import so this still
-        exercises the shared adapter (get_season_projection_legacy_shape) that the
-        draft room, player profile and draft recap all now go through.
+        Patched at the resolver rather than at draft_service's import so this
+        still exercises the shared adapter (get_season_projection_blended)
+        that the draft room, player profile and draft recap all now go
+        through.
         """
-        mock_get_season_projection.return_value = {
+        mock_get_preseason_predictions.return_value = {
             "ARI": {
-                "wins": 6.7,
-                "source_type": "model",
-                "detail": {
-                    "projected_wins": 7.0,
-                    "mean_wins": 6.7,
-                    "std_dev": 2.6,
-                    "sources": {"model": "nn_xgb_lr_ensemble"},
-                },
+                "projected_wins": 7.0,
+                "mean_wins": 6.7,
+                "std_dev": 2.6,
+                "sources": {"model": "nn_xgb_lr_ensemble"},
             }
         }
+        mock_get_consensus_projections.return_value = {}
 
         state = load_draft_state(set(), year=2023)
 
         assert state["preseason_predictions"]["ARI"]["projected_wins"] == 7.0
 
-    @patch("services.data_service.get_season_projection")
-    def test_preseason_predictions_rounds_consensus_std_dev(self, mock_get_season_projection):
+    @patch("services.data_service.get_consensus_projections")
+    @patch("services.data_service.get_preseason_predictions")
+    def test_preseason_predictions_rounds_consensus_std_dev(
+        self, mock_get_preseason_predictions, mock_get_consensus_projections
+    ):
         """Consensus-sourced std_dev (consensus_std) is `float(np.std(vals))` from
         consensus_service.compute_derived -- unrounded, e.g. 1.1367210272875008.
         static/js/ui_renderer.js renders std_dev straight into the draft room with no
-        .toFixed(), so the adapter must round it to 2 decimals the same way
-        projected_wins already is, or historical (2017-2025) draft rooms show long
+        .toFixed(), so a team with only a consensus row (no model) must still have
+        it rounded to 2 decimals, or historical (2017-2025) draft rooms show long
         float tails like "8.5W ±1.1367210272875008" for undrafted teams.
         """
-        mock_get_season_projection.return_value = {
+        mock_get_preseason_predictions.return_value = {}
+        mock_get_consensus_projections.return_value = {
             "BUF": {
-                "wins": 10.4,
-                "source_type": "consensus",
-                "detail": {
-                    "consensus_mean": 10.4,
-                    "consensus_std": 1.1367210272875008,
-                    "sources": {"br": 10.0, "vegas_ou": 10.8},
-                },
+                "consensus_mean": 10.4,
+                "consensus_median": 10.5,
+                "consensus_std": 1.1367210272875008,
+                "sources": {"br": 10.0, "vegas_ou": 10.8},
             }
         }
 
