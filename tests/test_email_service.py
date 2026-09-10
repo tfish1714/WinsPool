@@ -140,3 +140,27 @@ def test_send_draft_order_email_link_defaults_to_localhost(mock_getenv, mock_sen
 
     call_params = mock_send.call_args[0][0]
     assert 'href="http://localhost:8000/draft?season=2099"' in call_params["html"]
+
+
+@patch("services.email_service.resend.Emails.send")
+def test_send_disabled_via_env_var_never_calls_resend(mock_send, monkeypatch):
+    """DISABLE_OUTBOUND_EMAIL=true short-circuits before any Resend call, even with a valid API key."""
+    monkeypatch.setenv("DISABLE_OUTBOUND_EMAIL", "true")
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+
+    result = send_weekly_recap_email(["user@x.com"], "Subject", "html")
+
+    assert result is True
+    mock_send.assert_not_called()
+
+
+@patch("services.email_service.resend.Emails.send")
+def test_send_multi_disabled_via_env_var_never_calls_resend(mock_send, monkeypatch):
+    """Same gate applies to the multi-recipient send path (send_draft_order_email)."""
+    monkeypatch.setenv("DISABLE_OUTBOUND_EMAIL", "true")
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+
+    result = send_draft_order_email(["a@x.com", "b@x.com"], 3000, [{"position": 1, "name": "Test"}])
+
+    assert result is True
+    mock_send.assert_not_called()
