@@ -197,8 +197,9 @@ class AdminApp {
 
     async fetchInitialData() {
         try {
+            const includeTest = document.getElementById('show-test-accounts-toggle')?.checked || false;
             const [players, { seasons }] = await Promise.all([
-                ApiService.fetchPlayers(this.playerId),
+                ApiService.fetchPlayers(this.playerId, includeTest),
                 ApiService.fetchSeasons(this.playerId)
             ]);
 
@@ -232,6 +233,9 @@ class AdminApp {
         document.getElementById('recap-preview-prompt-btn')?.addEventListener('click', () => this.previewRecapPrompt());
         document.getElementById('recap-generate-ai-btn')?.addEventListener('click', () => this.generateRecapAI());
         document.getElementById('recap-broadcast-btn')?.addEventListener('click', () => this.broadcastRecap());
+
+        // Test accounts toggle
+        document.getElementById('show-test-accounts-toggle')?.addEventListener('change', () => this.fetchInitialData());
     }
 
     /* ------------------------------------------------------------------

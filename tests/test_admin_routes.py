@@ -668,6 +668,32 @@ class TestFetchAdminPlayers:
         assert charlie["last_login"] is None
         assert "password_hash" not in charlie
 
+    def test_excludes_test_accounts_by_default(self, admin_token):
+        """is_test_account players are hidden unless include_test_accounts=true."""
+        fake_players = pd.DataFrame([
+            {"playerId": 1, "fullName": "Real Player", "nickName": "RP", "email": "real@test.com",
+             "cell": "", "role": "user", "password_hash": None, "must_change_password": False,
+             "last_login": None, "is_test_account": False},
+            {"playerId": 2, "fullName": "E2E Test 01", "nickName": "E2E01", "email": "e2e-01@winspool.internal",
+             "cell": "", "role": "admin", "password_hash": "$2b$12$hash", "must_change_password": False,
+             "last_login": None, "is_test_account": True},
+        ])
+
+        with patch("routes.admin_routes.load_data", return_value=(None, None, None, fake_players, None, None, None)):
+            resp = client.get("/api/admin/players", headers={"Authorization": admin_token})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert len(data) == 1
+            assert data[0]["playerId"] == 1
+
+            resp2 = client.get("/api/admin/players?include_test_accounts=true", headers={"Authorization": admin_token})
+            assert resp2.status_code == 200
+            data2 = resp2.json()
+            assert len(data2) == 2
+            assert {p["playerId"] for p in data2} == {1, 2}
+            e2e = next(p for p in data2 if p["playerId"] == 2)
+            assert e2e["is_test_account"] is True
+
 
 class TestGetSeasonMembers:
 
