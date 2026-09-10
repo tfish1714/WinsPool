@@ -11,6 +11,7 @@ Usage: python scripts/seed_e2e_test_players.py
 """
 import os
 import secrets
+import sys
 
 os.environ["USE_LOCAL_DATA"] = "False"
 
@@ -24,18 +25,46 @@ EMAIL_DOMAIN = "winspool.internal"
 
 
 def main():
+    # First pass: scan all 10 accounts to detect partial-failure reruns.
+    # If some exist and some don't, we must refuse to proceed with a new
+    # password to maintain the invariant that all 10 accounts share one.
+    existing_ids = []
+    missing_indices = []
+
+    for i in range(1, NUM_TEST_PLAYERS + 1):
+        email = f"e2e-test-{i:02d}@{EMAIL_DOMAIN}"
+        existing = get_player_by_email(email)
+        if existing:
+            existing_ids.append(int(existing["playerId"]))
+        else:
+            missing_indices.append(i)
+
+    # Partial-failure case: some exist, some don't.
+    # Refuse to proceed — new accounts would get a different password than existing ones.
+    if existing_ids and missing_indices:
+        print(
+            "ERROR: Partial failure detected. Some test accounts exist, but not all:\n"
+            f"  Existing: {len(existing_ids)} accounts (IDs: {existing_ids})\n"
+            f"  Missing: {len(missing_indices)} accounts (indices: {missing_indices})\n\n"
+            "To maintain password consistency across all 10 accounts, you must:\n"
+            "  Option A: Manually create the missing accounts with the SAME password\n"
+            "           as the existing ones (from .env's E2E_TEST_PLAYER_PASSWORD)\n"
+            "  Option B: Delete all 10 test accounts and re-run this script from scratch\n"
+        )
+        sys.exit(1)
+
+    # All accounts already exist: idempotent skip.
+    if existing_ids and not missing_indices:
+        print(f"All {NUM_TEST_PLAYERS} test accounts already exist. Nothing to do.")
+        return
+
+    # Fresh run: generate password and create all 10 accounts.
     password = secrets.token_urlsafe(16)
     password_hash = get_password_hash(password)
     created_ids = []
 
     for i in range(1, NUM_TEST_PLAYERS + 1):
         email = f"e2e-test-{i:02d}@{EMAIL_DOMAIN}"
-        existing = get_player_by_email(email)
-        if existing:
-            print(f"Skipping {email} — already exists (playerId={existing['playerId']})")
-            created_ids.append(int(existing["playerId"]))
-            continue
-
         role = "admin" if i == 1 else "user"
         player_id = add_player(
             full_name=f"E2E Test Player {i:02d}",
