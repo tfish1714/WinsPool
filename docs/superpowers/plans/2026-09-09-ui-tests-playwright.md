@@ -682,6 +682,13 @@ def test_admin_dashboard_loads(live_server, page, test_player_credentials):
 
     page.goto(f"{live_server}/admin")
     page.wait_for_selector("#signin-screen", state="hidden", timeout=10000)
+
+    # Players tab (data-tab="player-section") is the default-visible tab on
+    # load; #player-grid lives inside the Draft tab's section
+    # (id="draft-section", hidden by default) — must switch tabs first.
+    page.wait_for_selector("#player-section:not(.hidden)", timeout=10000)
+    page.click(".admin-tab-btn[data-tab='draft-section']")
+    page.wait_for_selector("#draft-section:not(.hidden)", timeout=5000)
     page.wait_for_selector("#player-grid", timeout=10000)
 
     assert "Internal Server Error" not in page.content()
@@ -814,6 +821,10 @@ def clean_season_3000(live_server, browser, test_player_credentials):
         page = context.new_page()
         _login(page, live_server, test_player_credentials[0])
         page.goto(f"{live_server}/admin")
+        # #delete-season-select lives inside the "Draft" tab's section
+        # (id="draft-section"), hidden by default behind the "Players" tab.
+        page.click(".admin-tab-btn[data-tab='draft-section']")
+        page.wait_for_selector("#draft-section:not(.hidden)", timeout=5000)
         page.wait_for_selector("#delete-season-select", timeout=10000)
         options = page.locator("#delete-season-select option").all_text_contents()
         if any(str(SEASON) in o for o in options):
@@ -833,6 +844,10 @@ def clean_season_3000(live_server, browser, test_player_credentials):
 ```python
 def _create_season_3000(page, live_server, test_player_credentials):
     page.goto(f"{live_server}/admin")
+    # #player-grid/#season-input/#generate-btn all live inside the "Draft"
+    # tab's section (id="draft-section"), hidden by default.
+    page.click(".admin-tab-btn[data-tab='draft-section']")
+    page.wait_for_selector("#draft-section:not(.hidden)", timeout=5000)
     page.wait_for_selector("#player-grid", timeout=10000)
 
     show_test = page.locator("#show-test-accounts-toggle")
@@ -856,6 +871,9 @@ def _activate_draft(page, live_server):
     initDraftActiveToggle), not a checkbox input — check aria-pressed,
     not is_checked()."""
     page.goto(f"{live_server}/admin")
+    # #draft-active-toggle also lives inside the "Draft" tab's section.
+    page.click(".admin-tab-btn[data-tab='draft-section']")
+    page.wait_for_selector("#draft-section:not(.hidden)", timeout=5000)
     page.wait_for_selector("#draft-active-toggle", timeout=10000)
     toggle = page.locator("#draft-active-toggle")
     page.wait_for_function(
