@@ -5,16 +5,22 @@ Launches a real `uvicorn main:app` subprocess against the developer's local
 tests drive the actual app through a real browser rather than mocking
 anything at the Python level.
 """
+import collections
 import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
 from playwright.sync_api import sync_playwright
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Cap on how many trailing lines of subprocess output we keep around for
+# startup-failure diagnostics (see the drain thread in live_server below).
+_OUTPUT_TAIL_LINES = 200
 
 
 def _free_port() -> int:
@@ -42,6 +48,26 @@ def live_server():
         stderr=subprocess.STDOUT,
     )
 
+    # Continuously drain proc.stdout in a background thread for the whole
+    # life of this session-scoped fixture. uvicorn defaults to access_log=True
+    # (one line per HTTP request), and an undrained pipe's small OS buffer
+    # (particularly on Windows) fills over a real test session; once the
+    # child's write() to stdout blocks, its single-process asyncio event loop
+    # stalls and every subsequent request hangs, not just logging. We keep
+    # only the trailing lines so the startup-failure branch below can still
+    # report something useful without an unbounded buffer.
+    output_tail = collections.deque(maxlen=_OUTPUT_TAIL_LINES)
+
+    def _drain_output():
+        try:
+            for raw_line in proc.stdout:
+                output_tail.append(raw_line.decode(errors="replace"))
+        except Exception:
+            pass
+
+    drain_thread = threading.Thread(target=_drain_output, daemon=True)
+    drain_thread.start()
+
     deadline = time.time() + 20
     ready = False
     while time.time() < deadline:
@@ -54,7 +80,11 @@ def live_server():
 
     if not ready:
         proc.terminate()
-        out = proc.stdout.read().decode(errors="replace") if proc.stdout else ""
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        out = "".join(output_tail)
         raise RuntimeError(f"live_server failed to start within 20s.\n{out}")
 
     yield base_url
