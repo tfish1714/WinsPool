@@ -10,8 +10,11 @@ individually).
 Usage: python scripts/seed_e2e_test_players.py
 """
 import os
+import pathlib
 import secrets
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 os.environ["USE_LOCAL_DATA"] = "False"
 
