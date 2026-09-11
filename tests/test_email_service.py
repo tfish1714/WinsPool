@@ -1,5 +1,8 @@
 from unittest.mock import patch, MagicMock
-from services.email_service import send_weekly_recap_email, send_mfa_code_email, send_alert_email, send_draft_order_email
+from services.email_service import (
+    send_weekly_recap_email, send_mfa_code_email, send_alert_email, send_draft_order_email,
+    send_on_the_clock_email,
+)
 
 
 @patch("services.email_service.resend.Emails.send")
@@ -140,3 +143,36 @@ def test_send_draft_order_email_link_defaults_to_localhost(mock_getenv, mock_sen
 
     call_params = mock_send.call_args[0][0]
     assert 'href="http://localhost:8000/draft?season=2099"' in call_params["html"]
+
+
+@patch("services.email_service.resend.Emails.send")
+@patch("services.email_service.os.getenv")
+def test_send_on_the_clock_email(mock_getenv, mock_send):
+    """Names the player and pick number, and links to the draft room."""
+    def getenv_side_effect(key, default=None):
+        return {
+            "RESEND_API_KEY": "re_test_key",
+            "APP_BASE_URL": "https://winspool.example.com",
+        }.get(key, default)
+    mock_getenv.side_effect = getenv_side_effect
+    mock_send.return_value = {"id": "clock123"}
+
+    result = send_on_the_clock_email("alice@x.com", "Alice", 2026, 14)
+
+    assert result is True
+    mock_send.assert_called_once()
+    call_params = mock_send.call_args[0][0]
+    assert call_params["to"] == ["alice@x.com"]
+    assert "14" in call_params["subject"]
+    assert "Alice" in call_params["html"]
+    assert 'href="https://winspool.example.com/draft?season=2026"' in call_params["html"]
+
+
+@patch("services.email_service.resend.Emails.send")
+@patch("services.email_service.os.getenv")
+def test_send_on_the_clock_email_aborts_on_missing_api_key(mock_getenv, mock_send):
+    """Returns False without sending when RESEND_API_KEY is absent."""
+    mock_getenv.side_effect = lambda key, default=None: default if key != "RESEND_API_KEY" else None
+    result = send_on_the_clock_email("alice@x.com", "Alice", 2026, 14)
+    assert result is False
+    mock_send.assert_not_called()

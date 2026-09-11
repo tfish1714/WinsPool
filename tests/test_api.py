@@ -86,3 +86,39 @@ def test_push_subscribe_service_failure_returns_500(monkeypatch):
             headers=headers,
         )
     assert response.status_code == 500
+
+
+# ── Post-launch hardening: push client-error reporting endpoint ─────────────
+
+
+def test_push_client_error_no_auth_returns_401():
+    """POST /api/push/client-error with no auth token must return 401."""
+    response = client.post("/api/push/client-error", json={"reason": "NotAllowedError: denied"})
+    assert response.status_code == 401
+
+
+def test_push_client_error_logs_and_returns_ok(monkeypatch, caplog):
+    """A reported client-side failure is logged server-side (previously only
+    a console.warn no one would ever see) and always returns ok."""
+    import logging
+    headers = _bearer(monkeypatch)
+    with caplog.at_level(logging.WARNING):
+        response = client.post(
+            "/api/push/client-error",
+            json={"reason": "NotAllowedError: permission denied"},
+            headers=headers,
+        )
+    assert response.status_code == 200
+    assert response.json().get("ok") is True
+    assert any("NotAllowedError: permission denied" in r.message for r in caplog.records)
+
+
+def test_push_client_error_malformed_body_still_returns_ok():
+    """A malformed/missing body must not fail the request -- this is a
+    best-effort log, not a critical path."""
+    headers = _bearer(None)
+    response = client.post("/api/push/client-error", content="not json", headers={
+        **headers, "Content-Type": "application/json",
+    })
+    assert response.status_code == 200
+    assert response.json().get("ok") is True

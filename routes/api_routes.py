@@ -383,6 +383,21 @@ async def push_subscribe(request: Request, _auth: dict = Depends(require_auth)):
         return server_error()
 
 
+@router.post("/push/client-error")
+async def push_client_error(request: Request, _auth: dict = Depends(require_auth)):
+    """Report a client-side push-subscription failure the browser only ever
+    logged to its own console -- so it lands somewhere observable instead.
+    Best-effort: never fails the request over a logging problem.
+    """
+    try:
+        body = await request.json()
+        reason = str(body.get("reason", ""))[:500]
+        logger.warning("push client-side subscription failed: %s", reason)
+    except Exception:
+        logger.exception("push_client_error: failed to log client report")
+    return JSONResponse(content={"ok": True})
+
+
 @router.get("/config/settings")
 def get_config():
     """Returns app config. Public — all users need draft_active on page load."""

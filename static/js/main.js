@@ -502,6 +502,17 @@ class App {
             });
         } catch (e) {
             console.warn('[Push] Subscription failed:', e);
+            // console.warn alone is invisible once the user closes devtools --
+            // report it server-side so it's actually observable in Cloud Logging.
+            const token = AuthService.getToken();
+            fetch('/api/push/client-error', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify({ reason: `${e?.name || 'Error'}: ${e?.message || e}` }),
+            }).catch(() => {});
         }
     }
 

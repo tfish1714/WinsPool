@@ -61,6 +61,20 @@ def send_draft_order_email(to_emails: list, season: int, ordered_players: list) 
     return _send_multi(to_emails, f"{season} Wins Pool Draft Order", html_body, reply_to=reply_to)
 
 
+def send_on_the_clock_email(to_email: str, player_name: str, season: int, pick_number: int) -> bool:
+    """Notify a player it's their turn to draft. Runs alongside the web push
+    send (draft_routes.py's _send_on_the_clock_email_sync), not as a fallback
+    only when push fails -- push reliability varies too much by browser/OS/
+    PWA-install-state to be the sole channel for a time-sensitive alert.
+    """
+    draft_room_url = f"{_app_base_url()}/draft?season={season}"
+    html_body = f"""
+    <p>{html.escape(player_name)}, you're on the clock for pick #{pick_number} in the {season} Wins Pool draft!</p>
+    <p><a href="{draft_room_url}">Go make your pick</a></p>
+    """
+    return _send(to_email, f"You're on the clock — Pick #{pick_number}", html_body)
+
+
 def send_alert_email(subject: str, message: str) -> bool:
     """Send a job-failure alert to the address in ALERT_EMAIL. Returns False (no-op) if unconfigured.
 

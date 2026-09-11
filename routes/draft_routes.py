@@ -14,7 +14,7 @@ from services.data_service import (
     load_data, get_available_years, get_draft_years, get_active_season,
 )
 from services.draft_service import load_draft_state, save_pick, undo_pick, reset_pick, strip_admin_only_fields
-from services.db_service import get_collection_df, add_draft_order, add_draft_rule, get_config_settings
+from services.db_service import get_collection_df, add_draft_order, add_draft_rule, get_config_settings, get_player_by_id
 from services.chat_service import post_system_message, post_chat_message, get_recent_messages
 import services.analysis_service as analysis
 from services.constants import DRAFT_ROUNDS, UNDRAFTED_SENTINEL
@@ -540,14 +540,25 @@ async def _broadcast_pick_messages(manager, old_state: dict, new_state: dict, te
                     "text": clock_msg["text"],
                     "timestamp": clock_msg["timestamp"],
                 })
-            # Fire-and-forget push notification — never block the WebSocket flow
+            # Fire-and-forget notifications — never block the WebSocket flow.
+            # Both channels run unconditionally (not push-then-email-fallback):
+            # push reliability varies too much by browser/OS/PWA-install-state
+            # to treat it as the primary channel.
             if next_pid is not None:
-                asyncio.get_running_loop().run_in_executor(
+                loop = asyncio.get_running_loop()
+                loop.run_in_executor(
                     None,
                     _send_push_sync,
                     next_pid,
                     "⏰ You're on the clock!",
                     f"Pick #{new_active} — open WinsPool to make your pick.",
+                )
+                loop.run_in_executor(
+                    None,
+                    _send_on_the_clock_email_sync,
+                    next_pid,
+                    season,
+                    new_active,
                 )
 
 
@@ -557,7 +568,29 @@ def _send_push_sync(player_id: int, title: str, body: str) -> None:
         from services.push_service import send_push_notification
         send_push_notification(player_id, title, body)
     except Exception:
-        pass
+        logger.exception("_send_push_sync: unexpected error sending push to player %s", player_id)
+
+
+def _send_on_the_clock_email_sync(player_id: int, season: int, pick_number: int) -> None:
+    """Synchronous wrapper for the on-the-clock fallback email — runs in
+    thread pool executor alongside the push send. Email doesn't have push's
+    browser/OS/PWA-install-state variance, so it runs unconditionally as a
+    second channel rather than only as a fallback when push fails.
+    """
+    try:
+        player = get_player_by_id(str(player_id))
+        if not player:
+            logger.info("_send_on_the_clock_email_sync: no player record for %s", player_id)
+            return
+        email = player.get("email")
+        if not email:
+            logger.info("_send_on_the_clock_email_sync: no email on file for player %s", player_id)
+            return
+        from services.email_service import send_on_the_clock_email
+        name = player.get("nickName") or player.get("fullName") or f"Player {player_id}"
+        send_on_the_clock_email(email, name, season, pick_number)
+    except Exception:
+        logger.exception("_send_on_the_clock_email_sync: unexpected error emailing player %s", player_id)
 
 
 @router.websocket("/ws")
