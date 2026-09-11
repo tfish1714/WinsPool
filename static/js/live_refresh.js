@@ -46,6 +46,11 @@
             statusEl.classList.toggle('status-live', status.live);
             statusEl.classList.toggle('status-final', status.final);
         }
+
+        const awayPossessionEl = card.querySelector('[data-role="away-possession"]');
+        const homePossessionEl = card.querySelector('[data-role="home-possession"]');
+        if (awayPossessionEl) awayPossessionEl.hidden = !(update.is_live && update.possession === 'away');
+        if (homePossessionEl) homePossessionEl.hidden = !(update.is_live && update.possession === 'home');
     }
 
     async function poll(year) {
