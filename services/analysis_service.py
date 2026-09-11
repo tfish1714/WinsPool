@@ -489,6 +489,9 @@ def get_enriched_schedule(games, draft_results, players, season):
     final_merged['gameday'] = pd.to_datetime(final_merged['gameday'], format='%Y-%m-%d', errors='coerce')
     final_merged['home_score'] = final_merged['home_score'].astype('Int64')
     final_merged['away_score'] = final_merged['away_score'].astype('Int64')
+    for col in ('live_home_score', 'live_away_score'):
+        if col in final_merged.columns:
+            final_merged[col] = final_merged[col].astype('Int64')
     
     # Sort chronologically by week and gameday
     final_merged = final_merged.sort_values(['week', 'gameday'], ascending=[True, True])
@@ -503,7 +506,7 @@ def get_enriched_schedule(games, draft_results, players, season):
     # blanket UNDRAFTED_SENTINEL fillna below is for draft-ownership columns
     # and would otherwise turn that NaN into -1000, which is truthy, making
     # every untouched game render as "live" with garbage clock/period text.
-    live_score_cols = [c for c in ('is_live', 'clock', 'period', 'possession') if c in final_merged.columns]
+    live_score_cols = [c for c in ('is_live', 'clock', 'period', 'possession', 'live_home_score', 'live_away_score') if c in final_merged.columns]
     saved_live_scores = final_merged[live_score_cols].copy()
 
     final_merged = final_merged.fillna(UNDRAFTED_SENTINEL)

@@ -46,3 +46,25 @@ def test_calculate_playoff_race_logic():
     # Bob max_wins is 1. TFish current is 2. Bob cannot catch TFish.
     catch_tfish_race = next(r for r in bob_record["race"] if r["target_player"] == "TFish")
     assert catch_tfish_race["can_pass"] is False
+
+
+def test_get_enriched_schedule_preserves_live_score_fields():
+    """live_home_score/live_away_score are NaN for the common case (game not
+    yet touched by the live-score sync); the blanket UNDRAFTED_SENTINEL
+    fillna must not clobber a real in-progress score with -1000."""
+    games = pd.DataFrame([{
+        "game_id": "2026_01_SF_LA", "season": 2026, "week": 1, "game_type": "REG",
+        "gameday": "2026-09-10", "home_team": "LA", "away_team": "SF",
+        "home_score": None, "away_score": None, "result": None,
+        "is_live": True, "clock": "4:18", "period": 3, "possession": "home",
+        "live_home_score": 7, "live_away_score": 17,
+    }])
+    draft_results = pd.DataFrame(columns=["season", "team", "playerId"])
+    players = pd.DataFrame(columns=["playerId", "fullName"])
+
+    sched = get_enriched_schedule(games, draft_results, players, 2026)
+
+    row = sched.iloc[0]
+    assert row["live_home_score"] == 7
+    assert row["live_away_score"] == 17
+    assert row["is_live"] == True

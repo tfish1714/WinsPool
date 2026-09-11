@@ -34,7 +34,10 @@ class TestOverlayEspnLiveFields:
         doc_ref = db.collection.return_value.document.return_value
         doc_ref.set.assert_called_once()
         written_data, kwargs = doc_ref.set.call_args
-        assert written_data[0] == {"is_live": True, "clock": "5:23", "period": 2, "possession": None}
+        assert written_data[0] == {
+            "is_live": True, "clock": "5:23", "period": 2, "possession": None,
+            "live_home_score": 10, "live_away_score": 7,
+        }
         assert kwargs["merge"] is True
 
     def test_halftime_game_is_treated_as_live(self):
@@ -52,7 +55,10 @@ class TestOverlayEspnLiveFields:
         doc_ref = db.collection.return_value.document.return_value
         doc_ref.set.assert_called_once()
         written_data, kwargs = doc_ref.set.call_args
-        assert written_data[0] == {"is_live": True, "clock": "Halftime", "period": 2, "possession": None}
+        assert written_data[0] == {
+            "is_live": True, "clock": "Halftime", "period": 2, "possession": None,
+            "live_home_score": 10, "live_away_score": 7,
+        }
         assert kwargs["merge"] is True
 
     def test_possession_field_is_written_through(self):
@@ -70,6 +76,24 @@ class TestOverlayEspnLiveFields:
         doc_ref = db.collection.return_value.document.return_value
         written_data, kwargs = doc_ref.set.call_args
         assert written_data[0]["possession"] == "away"
+
+    def test_live_score_is_written_to_display_only_fields(self):
+        """ESPN's in-game score must land in live_home_score/live_away_score,
+        never in home_score/away_score -- those drive win totals and must
+        only ever come from nflverse's authoritative data."""
+        db = MagicMock()
+        live_data = {
+            ("BUF", "KC"): {"home_score": 10, "away_score": 7, "status": "STATUS_IN_PROGRESS",
+                             "clock": "5:23", "period": 2},
+        }
+        overlay_espn_live_fields(db, _games_df(), live_data)
+
+        doc_ref = db.collection.return_value.document.return_value
+        written_data, _ = doc_ref.set.call_args
+        assert written_data[0]["live_home_score"] == 10
+        assert written_data[0]["live_away_score"] == 7
+        assert "home_score" not in written_data[0]
+        assert "away_score" not in written_data[0]
 
     def test_already_final_game_is_not_overwritten(self):
         """A game nflverse already marked final (has a non-null result) must not

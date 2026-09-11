@@ -20,9 +20,13 @@ Runs every 5 minutes, in-season (Sept 1 - Feb 10) only. Two parts:
    does not depend on ESPN.
 
 2. Best-effort (cosmetic only, must never affect wins or crash part 1):
-   fetch ESPN's live scoreboard and merge-write only is_live/clock/period
-   onto nfl_games documents that are NOT yet final per nflverse's own data --
-   this is the "don't clobber a final score" guard the old
+   fetch ESPN's live scoreboard and merge-write only is_live/clock/period/
+   live_home_score/live_away_score onto nfl_games documents that are NOT yet
+   final per nflverse's own data -- live_home_score/live_away_score are
+   deliberately separate fields from home_score/away_score (which come from
+   nflverse and drive win totals), so an in-game score shown on the schedule
+   page can never itself affect standings. This is the "don't clobber a
+   final score" guard the old
    sync_live_scores_to_df() docstring claimed but never actually
    implemented. Wrapped so any ESPN failure is silent-safe. ESPN's team
    abbreviations are normalized to nflverse's before matching (see
@@ -117,6 +121,11 @@ def overlay_espn_live_fields(db, games: pd.DataFrame, live_data: dict) -> int:
                 "clock": "Halftime" if espn_status == "STATUS_HALFTIME" else update.get("clock"),
                 "period": update.get("period"),
                 "possession": update.get("possession"),
+                # Display-only in-game score, kept separate from home_score/away_score
+                # (which come from nflverse and drive win totals) -- see module docstring
+                # part 2: ESPN data must never affect wins, only cosmetics.
+                "live_home_score": update.get("home_score"),
+                "live_away_score": update.get("away_score"),
             },
             merge=True,
         )

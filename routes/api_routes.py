@@ -301,6 +301,34 @@ def get_schedule(year: int, _auth: dict = Depends(require_auth)):
         return server_error()
 
 
+_LIVE_SCORE_COLS = [
+    "is_live", "clock", "period", "possession",
+    "live_home_score", "live_away_score", "home_score", "away_score", "result",
+]
+
+
+@router.get("/live-scores")
+def get_live_scores(year: int):
+    """Lightweight is_live/clock/period/score snapshot, keyed by game_id, for
+    the schedule page's client-side poll to patch in-progress games without a
+    full page reload. Public — same visibility as the schedule page itself
+    (no login wall on /schedule/{year}), unlike /api/schedule above.
+    """
+    try:
+        _, _, games, _, _, _, _ = load_data(year=year)
+        if games.empty or "game_id" not in games.columns:
+            return JSONResponse(content={})
+        cols = [c for c in _LIVE_SCORE_COLS if c in games.columns]
+        out = {
+            str(row["game_id"]): sanitize_state({c: row[c] for c in cols})
+            for _, row in games.iterrows()
+        }
+        return JSONResponse(content=out)
+    except Exception:
+        logger.exception("Unhandled error in /api/live-scores")
+        return server_error()
+
+
 @router.get("/player/{player_id}/analytics")
 def get_player_analytics_endpoint(
     player_id: int,

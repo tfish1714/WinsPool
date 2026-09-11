@@ -47,7 +47,7 @@
             {% set ns.last_date = current_date %}
             {% endif %}
 
-            <div class="game-card" data-week="{{ row['week'] }}">
+            <div class="game-card" data-week="{{ row['week'] }}" data-game-id="{{ row['game_id'] }}">
                 <div class="game-teams">
                     <!-- Away Team -->
                     <div
@@ -67,7 +67,8 @@
                                 }}
                             </span>
                         </div>
-                        <span class="score-text">{{ row['away_score'] if row['away_score'] not in (none, -1000) else '—'
+                        <span class="score-text" data-role="away-score">{{ row.get('live_away_score') if row.get('is_live') and row.get('live_away_score') not in (none, -1000)
+                            else (row['away_score'] if row['away_score'] not in (none, -1000) else '—')
                             }}</span>
                     </div>
                     <!-- Home Team -->
@@ -86,12 +87,13 @@
                                 }}
                             </span>
                         </div>
-                        <span class="score-text">{{ row['home_score'] if row['home_score'] not in (none, -1000) else '—'
+                        <span class="score-text" data-role="home-score">{{ row.get('live_home_score') if row.get('is_live') and row.get('live_home_score') not in (none, -1000)
+                            else (row['home_score'] if row['home_score'] not in (none, -1000) else '—')
                             }}</span>
                     </div>
                 </div>
                 <div class="game-info-aside">
-                    <span class="game-status-label {% if row['result'] is number and row['result'] != -1000 %}status-final{% elif row.get('is_live') %}status-live{% endif %}">
+                    <span class="game-status-label {% if row['result'] is number and row['result'] != -1000 %}status-final{% elif row.get('is_live') %}status-live{% endif %}" data-role="status">
                         {%- if row['result'] is number and row['result'] != -1000 -%}
                             Final
                         {%- elif row.get('is_live') -%}
@@ -178,6 +180,8 @@
 {% endblock %}
 
 {% block scripts %}
+<script>window.SCHEDULE_CONFIG = { year: {{ year }} };</script>
 <script src="/static/js/standings.js"></script>
+<script src="/static/js/live_refresh.js"></script>
 <script type="module" src="/static/js/schedule_explain.js"></script>
 {% endblock %}
