@@ -8,46 +8,95 @@ Selectors here were confirmed against the real rendered markup
   - Pick queue:            #mock-pick-queue
 There is no `.team-card`/`[data-team]`-on-a-card or `.pick-queue`/`#pick-queue`
 as the original brief guessed -- see task-6-report.md for details.
-"""
-import json
-import os
 
+/mock-draft is gated behind the `mock_draft_active` config flag (off by
+default locally) -- see routes/mock_draft_routes.py::_mock_draft_active.
+The `mock_draft_enabled` fixture below flips it on for the test via the
+real admin-UI toggle (#mock-draft-active-toggle in templates/admin.html,
+wired up by initMockDraftActiveToggle() in static/js/admin_main.js), the
+same way a human admin would, per the plan's global constraint that every
+browser-driven step goes through the real UI rather than shortcutting
+around it. That setup runs in a SEPARATE browser context that logs in as
+an admin test player -- the actual test's `page` fixture stays a fresh,
+unauthenticated session throughout, preserving the "login-free" intent of
+this smoke test.
+"""
 import pytest
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import expect
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONFIG_PATH = os.path.join(REPO_ROOT, ".local_db", "config_settings.json")
+ADMIN_DRAFT_TAB_SELECTOR = '.admin-tab-btn[data-tab="draft-section"]'
+MOCK_TOGGLE_SELECTOR = "#mock-draft-active-toggle"
 
 
 @pytest.fixture
-def mock_draft_enabled():
-    """Force the mock_draft_active config flag on for the test, then restore.
-
-    services.db_service.get_config_settings() re-reads .local_db/config_settings.json
-    from disk on every call (no in-process cache for this doc), so the running
-    live_server subprocess picks up this on-disk change on its very next request
-    -- no restart needed. Without this, /mock-draft renders its "not currently
-    available" branch (see routes/mock_draft_routes.py::_mock_draft_active) and
-    none of the page's JS/selectors exist at all.
+def mock_draft_enabled(live_server, browser, test_player_credentials):
+    """Ensure mock_draft_active is on for the test, then restore its original
+    state -- both transitions driven through the real admin toggle, not a
+    config-file or internal-function shortcut.
     """
-    original_text = None
-    if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH) as f:
-            original_text = f.read()
+    admin_creds = test_player_credentials[0]  # index 0 is always the admin, per conftest.py
+    context = browser.new_context()
+    admin_page = context.new_page()
 
-    current = json.loads(original_text) if original_text else {"draft_active": False, "mock_draft_active": False}
-    current["mock_draft_active"] = True
-    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(current, f)
+    admin_page.goto(f"{live_server}/admin")
+    admin_page.wait_for_selector("#signin-screen", state="visible")
+
+    # Read the true pre-test state via the same public GET the page itself
+    # calls -- reading over HTTP isn't a shortcut, only mutating state
+    # outside the real UI would be.
+    original_active = admin_page.evaluate(
+        "() => fetch('/api/config/settings').then(r => r.json())"
+    ).get("mock_draft_active") is True
+
+    admin_page.fill("#auth-email", admin_creds["email"])
+    admin_page.fill("#auth-password", admin_creds["password"])
+    admin_page.click("#auth-submit-btn")
+    admin_page.wait_for_selector("#signin-screen", state="hidden", timeout=10000)
+
+    admin_page.click(ADMIN_DRAFT_TAB_SELECTOR)
+    toggle = admin_page.locator(MOCK_TOGGLE_SELECTOR)
+    toggle.wait_for(state="visible", timeout=10000)
+    # initMockDraftActiveToggle() syncs the toggle's aria-pressed from the
+    # same GET above, asynchronously, right after page load -- wait for it
+    # to actually settle to the value we already know is true, so the
+    # click handler below (which reads aria-pressed itself to decide what
+    # to send) isn't racing against the toggle's own initial-state fetch.
+    expect(toggle).to_have_attribute(
+        "aria-pressed", "true" if original_active else "false", timeout=5000
+    )
+
+    def set_active(desired: bool):
+        # Real clicks occasionally get missed by expect_response's listener
+        # window when run right after another test's browser/page churn
+        # (observed once in the full tests_e2e/ suite, never in isolation) --
+        # retry the same real click rather than falling back to any shortcut.
+        # Each retry re-checks aria-pressed first in case a prior click's
+        # POST actually landed but we just missed the response event.
+        for attempt in range(3):
+            current = toggle.get_attribute("aria-pressed") == "true"
+            if current == desired:
+                return
+            try:
+                with admin_page.expect_response(
+                    lambda r: r.url.endswith("/api/admin/config/settings") and r.request.method == "POST",
+                    timeout=10000,
+                ) as resp_info:
+                    toggle.click()
+                assert resp_info.value.ok, f"POST /api/admin/config/settings failed: {resp_info.value.status}"
+                expect(toggle).to_have_attribute("aria-pressed", "true" if desired else "false", timeout=5000)
+                return
+            except PlaywrightTimeoutError:
+                if attempt == 2:
+                    raise
+        raise AssertionError("unreachable")
+
+    set_active(True)
 
     yield
 
-    if original_text is not None:
-        with open(CONFIG_PATH, "w") as f:
-            f.write(original_text)
-    else:
-        os.remove(CONFIG_PATH)
+    set_active(original_active)
+    context.close()
 
 
 @pytest.mark.parametrize("viewport", [
