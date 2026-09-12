@@ -41,8 +41,13 @@ Cover, at both a desktop width and the existing ~390px mobile breakpoint
 CLAUDE.md calls out:
 - Login flow (`/api/login`)
 - Standings / leaderboard page
-- Draft room: join, see state, make a pick (WebSocket-driven — needs a
-  running draft fixture)
+- Draft room: a full, real 10-player live draft (season 3000, real
+  WebSocket picks, real Admin Portal season creation) rather than a
+  synthetic shortcut — see
+  `docs/superpowers/plans/2026-09-09-ui-tests-playwright.md` Task 10 for
+  the full design and rationale (draft_routes.py hardcodes 10-player/
+  30-pick math, so a smaller synthetic draft wouldn't exercise the same
+  code path).
 - Mock draft (`/mock-draft`) — login-free, good candidate for a fast smoke
   test
 - Admin dashboard — smoke test only (loads, no 500)
