@@ -493,8 +493,13 @@ def get_enriched_schedule(games, draft_results, players, season):
         if col in final_merged.columns:
             final_merged[col] = final_merged[col].astype('Int64')
     
-    # Sort chronologically by week and gameday
-    final_merged = final_merged.sort_values(['week', 'gameday'], ascending=[True, True])
+    # Sort chronologically by week, gameday, and kickoff time. gameday alone only
+    # orders by calendar date, so same-day games (e.g. the 4pm and 8:20pm Sunday
+    # slots) fell back to merge order instead of actual kickoff order.
+    sort_cols = ['week', 'gameday']
+    if 'gametime' in final_merged.columns:
+        sort_cols.append('gametime')
+    final_merged = final_merged.sort_values(sort_cols, ascending=[True] * len(sort_cols), na_position='last')
     
     # Calculate Global Team Records using the shared vectorized utility
     team_records = compute_team_records(games, season)
