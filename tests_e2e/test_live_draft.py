@@ -470,7 +470,21 @@ def test_full_ten_player_live_draft(
             # a 1-hour TTL. So this asserts that the route renders season 3000
             # without a 500 and in one of its two legitimate shapes; it cannot
             # assert that the rendered progress matches `pick`.
-            wp_page.goto(f"{live_server}/wins-pool/{SEASON}")
+            wp_response = wp_page.goto(f"{live_server}/wins-pool/{SEASON}")
+            # The load-bearing 500 detector for THIS route is the status code,
+            # not the body. wins_pool_by_year() wraps itself in a try/except
+            # that returns server_error() — a JSONResponse with status 500 and
+            # body {"error": "An internal error occurred."} — so Starlette's
+            # default "Internal Server Error" page is never rendered here and
+            # the string check below is a no-op for this route. (It is kept as
+            # cheap defence in depth, and it *is* load-bearing for
+            # /draft-results and /draft/{year} further down, which have no
+            # try/except.) Do not drop this status assertion.
+            assert wp_response is not None and wp_response.status == 200, (
+                f"/wins-pool/{SEASON} returned HTTP "
+                f"{wp_response.status if wp_response else 'no response'} "
+                f"after pick #{pick}"
+            )
             wp_page.wait_for_selector("#signin-screen", state="hidden", timeout=15000)
             wp_page.wait_for_selector(".app-container", timeout=15000)
             wp_html = wp_page.content()
