@@ -273,6 +273,16 @@ def add_draft_result(season: int, draft_pick: int, player_id: int, team: str, ex
     results_df = pd.concat([results_df, pd.DataFrame([data])], ignore_index=True)
     _save_df_to_local("draft_results", results_df)
 
+    # KNOWN GAP (not fixed here — needs its own design pass; see
+    # docs/superpowers/specs/2026-09-12-cache-invalidation-gap-followup.md):
+    # clear_data_cache(season) only evicts the year-keyed cache entry
+    # (cache_service._DATA_CACHE[str(season)]). It does NOT evict the separate
+    # master 'all'-keyed entry, which is what every bare load_data() caller
+    # reads — /wins-pool/{year}, /draft-results and /draft/{year} among them.
+    # So on a long-running warm process (i.e. production), those pages can keep
+    # serving pre-pick data — up to "0 picks made" — until the 'all' entry's
+    # 1-hour TTL expires, even mid-live-draft. Discovered via
+    # tests_e2e/test_live_draft.py.
     clear_data_cache(season)
 
 def delete_draft_pick(season: int, draft_pick: int):
@@ -288,6 +298,12 @@ def delete_draft_pick(season: int, draft_pick: int):
         results_df = results_df[~((results_df["season"] == season) & (results_df["draftPick"] == draft_pick))]
         _save_df_to_local("draft_results", results_df)
 
+    # Same known gap as add_draft_result() above: this only evicts the
+    # year-keyed cache entry, never the master 'all'-keyed entry that
+    # load_data()-based routes (/wins-pool/{year}, /draft-results,
+    # /draft/{year}) actually read, so an undone pick can stay visible on those
+    # pages for up to the 1-hour TTL on a warm process. See
+    # docs/superpowers/specs/2026-09-12-cache-invalidation-gap-followup.md.
     clear_data_cache(season)
 
 def delete_draft_results_for_season(season: int):
