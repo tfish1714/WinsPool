@@ -69,10 +69,18 @@ def test_profile_wrong_current_password_is_rejected(live_server, page, test_play
     page.wait_for_selector("#profile-form", timeout=10000)
     page.wait_for_function("document.getElementById('email').value.length > 0", timeout=5000)
 
+    dialog_messages = []
+    page.once("dialog", lambda d: (dialog_messages.append(d.message), d.accept()))
     page.fill("#current-password", "definitely-the-wrong-password-123!")
-    page.once("dialog", lambda d: d.accept())  # alert("Error: Incorrect current password.")
     page.click("button:has-text('Save Profile Changes')")
     page.wait_for_timeout(1000)
+
+    # routes/auth_routes.py's update_profile returns 401 with
+    # {"error": "Incorrect current password."} for a wrong current password,
+    # and templates/profile.html's failure branch alerts "Error: " + result.error.
+    assert dialog_messages == ["Error: Incorrect current password."], (
+        f"Expected the wrong-password error alert, got: {dialog_messages!r}"
+    )
     # Page does not reload on error (only the success path calls window.location.reload()),
     # so the form should still be present/interactive.
     assert page.locator("#profile-form").count() == 1
