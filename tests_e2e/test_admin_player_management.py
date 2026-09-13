@@ -19,10 +19,13 @@ the original plan, which was checked against source but not run live):
    accounts" checkbox (`#show-test-accounts-toggle`) is checked. That
    checkbox itself lives in #draft-section (templates/admin.html), not
    #player-section, so a real click() on it fails Playwright's visibility
-   check whenever #player-section is the active tab. Rather than juggle tab
-   switches, `_refetch_players()` below drives the checkbox + its `change`
-   listener directly via page.evaluate(), which doesn't require the element
-   to be visible.
+   check whenever #player-section is the active tab. `_refetch_players()`
+   below switches to the Draft tab (a real click on its
+   `[data-tab="draft-section"]` button) to unhide the checkbox's container,
+   clicks the checkbox for real, then switches back to the Players tab
+   (`[data-tab="player-section"]`) -- tab switching only toggles a `hidden`
+   class (admin_main.js's setupTabHandlers()), so the Players-tab DOM/state
+   persists underneath the whole time.
 2. resetPlayerPassword() and setTempPassword() (admin_main.js) never call
    fetchInitialData() after their action completes -- unlike
    savePlayerEdit(), which does -- so a card's password-status badge is
@@ -37,14 +40,34 @@ NEW_PLAYER_EMAIL = "e2e-created-player@winspool.internal"
 def _refetch_players(page):
     """Force AdminApp.fetchInitialData() to re-run with the "Show test
     accounts" toggle checked -- see the module docstring's gaps 1 and 2.
-    Driven via evaluate() rather than page.check()/click() so it works
-    whether or not #draft-section (which owns the checkbox) is the
-    currently active tab.
+
+    The checkbox lives in #draft-section, not #player-section, so it isn't
+    visible while the Players tab is active. Switch to the Draft tab (real
+    click), toggle the box with real clicks (firing its native `change`
+    listener, which is what actually triggers fetchInitialData() --
+    admin_main.js line ~238), then switch back to the Players tab -- tab
+    switching only toggles a `hidden` class (admin_main.js's
+    setupTabHandlers()), so the Players-tab DOM/state persists underneath
+    the whole time.
+
+    This helper is called more than once per test (e.g. once before an
+    action, once after, to pick up a stale badge -- see gap 2), so the
+    checkbox may already be checked from a prior call. A `change` event
+    only fires on an actual state transition, so if it's already checked,
+    click it off first -- the final click that leaves it checked is then
+    guaranteed to fire `change` and trigger a fresh fetch every time,
+    rather than silently no-op on the second-and-later call.
     """
-    page.evaluate(
-        "() => { const el = document.getElementById('show-test-accounts-toggle'); "
-        "el.checked = true; el.dispatchEvent(new Event('change')); }"
-    )
+    page.click('[data-tab="draft-section"]')
+    page.wait_for_selector("#draft-section:not(.hidden)", timeout=5000)
+
+    checkbox = page.locator("#show-test-accounts-toggle")
+    if checkbox.is_checked():
+        checkbox.click()
+    checkbox.click()
+
+    page.click('[data-tab="player-section"]')
+    page.wait_for_selector("#player-section:not(.hidden)", timeout=5000)
     page.wait_for_timeout(500)
 
 
