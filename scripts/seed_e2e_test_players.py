@@ -79,6 +79,38 @@ def main():
         created_ids.append(player_id)
         print(f"Created {email} — playerId={player_id}, role={role}")
 
+    # Dedicated single-purpose accounts for tests_e2e/test_account_claim.py,
+    # test_mfa.py, test_lockout.py, and test_forced_password_change.py.
+    # Each owns exactly one lifecycle state so those tests never depend on
+    # execution order or share mutable state with each other or with the
+    # 10 drafting accounts above.
+    lifecycle_accounts = [
+        ("e2e-test-11-claim", "E2E Claim Test", False),   # no password_hash: claim-flow target
+        ("e2e-test-12-mfa", "E2E MFA Test", True),         # gets a real password below
+        ("e2e-test-13-lockout", "E2E Lockout Test", True),
+        ("e2e-test-14-tempword", "E2E Tempword Test", True),
+    ]
+    lifecycle_ids = {}
+
+    for local_part, full_name, needs_password in lifecycle_accounts:
+        email = f"{local_part}@{EMAIL_DOMAIN}"
+        existing = get_player_by_email(email)
+        if existing:
+            print(f"Skipping {email} — already exists (playerId={existing['playerId']})")
+            lifecycle_ids[local_part] = int(existing["playerId"])
+            continue
+
+        player_id = add_player(full_name=full_name, nick_name=local_part, email=email)
+        update_player_profile(str(player_id), {"is_test_account": True, "role": "user"})
+        if needs_password:
+            update_player_credentials(str(player_id), password_hash)
+        lifecycle_ids[local_part] = player_id
+        print(f"Created {email} — playerId={player_id}, has_password={needs_password}")
+
+    # e2e-test-12-mfa additionally needs mfa_enabled=True.
+    update_player_profile(str(lifecycle_ids["e2e-test-12-mfa"]), {"mfa_enabled": True})
+
+    print(f"\nLifecycle account IDs: {lifecycle_ids}")
     print(f"\nDone. Player IDs: {created_ids}")
     print(f"Shared password (save to .env as E2E_TEST_PLAYER_PASSWORD): {password}")
     print("Run `python scripts/refresh_local_pkls.py` to pull these into .local_db/.")
