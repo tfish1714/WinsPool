@@ -95,11 +95,14 @@ def restore_tempword_account_after(live_server, browser, lifecycle_test_accounts
     # #auth-confirm-password carries the "hidden" class before any email is
     # even typed, so waiting on ".hidden" with Playwright's default
     # state="visible" times out -- there's no visible->hidden transition to
-    # observe. handleEmailBlur (main.js:864-883) sets the submit button's
-    # text to "Log In" once it confirms has_password=True, which IS a real
-    # transition (default text is "Sign In" before any email is entered) --
-    # wait on that instead.
-    verify_page.wait_for_selector("#auth-submit-btn:has-text('Log In')", timeout=5000)
+    # observe. #auth-submit-btn's default markup text is already "Log In"
+    # (templates/base.html:73), so waiting on that text is a no-op that
+    # resolves immediately, before handleEmailBlur's fetch has any chance to
+    # complete -- no real synchronization. #auth-title, by contrast, only
+    # flips to "Sign In" once handleEmailBlur (main.js:869) resolves with
+    # has_password=True, which is a real transition -- wait on that instead
+    # (same pattern as tests_e2e/test_mfa.py).
+    verify_page.wait_for_selector("#auth-title:has-text('Sign In')", timeout=5000)
     verify_page.fill("#auth-password", creds["password"])
     verify_page.click("#auth-submit-btn")
     verify_page.wait_for_selector("#signin-screen", state="hidden", timeout=10000)
@@ -159,10 +162,11 @@ def test_admin_set_temp_password_blocks_normal_login(live_server, page, browser,
     target_page.fill("#auth-email", creds["email"])
     target_page.locator("#auth-email").blur()
     # See the matching comment in restore_tempword_account_after -- wait on
-    # the submit button's text flipping to "Log In" (has_password=True),
-    # not on the confirm-password field's "hidden" class, which never
-    # transitions since it's already hidden before any email is entered.
-    target_page.wait_for_selector("#auth-submit-btn:has-text('Log In')", timeout=5000)
+    # #auth-title flipping to "Sign In" (has_password=True), not on
+    # #auth-submit-btn's text: its default markup text is already "Log In"
+    # (templates/base.html:73), so a wait on that text resolves immediately
+    # and doesn't actually synchronize on the blur/check_player fetch at all.
+    target_page.wait_for_selector("#auth-title:has-text('Sign In')", timeout=5000)
     target_page.fill("#auth-password", TEMP_PASSWORD)
     target_page.click("#auth-submit-btn")
 
