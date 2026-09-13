@@ -129,3 +129,27 @@ def test_player_credentials():
         }
         for i, pid in enumerate(ids)
     ]
+
+
+@pytest.fixture(scope="session")
+def lifecycle_test_accounts():
+    """The 4 dedicated single-purpose accounts from Task 1 of the
+    auth-lifecycle plan. Each dict also carries the shared base password
+    (same one test_player_credentials uses) so tests that need to log in
+    with a known-good password can."""
+    password = os.environ.get("E2E_TEST_PLAYER_PASSWORD", "")
+    ids = {
+        "claim": os.environ.get("E2E_CLAIM_TEST_PLAYER_ID"),
+        "mfa": os.environ.get("E2E_MFA_TEST_PLAYER_ID"),
+        "lockout": os.environ.get("E2E_LOCKOUT_TEST_PLAYER_ID"),
+        "tempword": os.environ.get("E2E_TEMPWORD_TEST_PLAYER_ID"),
+    }
+    if not all(ids.values()) or not password:
+        pytest.skip("E2E_*_TEST_PLAYER_ID / E2E_TEST_PLAYER_PASSWORD not set — run Task 1's seed script extension first")
+
+    return {
+        "claim": {"id": int(ids["claim"]), "email": "e2e-test-11-claim@winspool.internal", "password": password},
+        "mfa": {"id": int(ids["mfa"]), "email": "e2e-test-12-mfa@winspool.internal", "password": password},
+        "lockout": {"id": int(ids["lockout"]), "email": "e2e-test-13-lockout@winspool.internal", "password": password},
+        "tempword": {"id": int(ids["tempword"]), "email": "e2e-test-14-tempword@winspool.internal", "password": password},
+    }

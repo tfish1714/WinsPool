@@ -82,6 +82,32 @@ def test_get_player_by_email_cold_cache_falls_back(monkeypatch):
     assert result['fullName'] == 'Cache Hit'
 
 
+def test_get_player_by_email_normalizes_nan_field_to_none(monkeypatch):
+    """A players DataFrame built from heterogeneous Firestore docs has NaN
+    (not None) for a field missing on some rows -- e.g. password_hash never
+    set for a player who has never claimed their account. get_player_by_email
+    (via _row_to_dict_no_nan) must normalize that to None so callers doing
+    bool(player.get('password_hash')) don't treat NaN as truthy (see the
+    _row_to_dict_no_nan docstring in services/db_service.py)."""
+    from services import cache_service
+    from services.db_service import get_player_by_email
+
+    df = pd.DataFrame([
+        # No password_hash key at all -- pandas fills it with NaN once the
+        # second row's dict supplies the column.
+        {"playerId": 1, "fullName": "No Password Player", "email": "nopw@example.com"},
+        {"playerId": 2, "fullName": "Has Password Player", "email": "haspw@example.com", "password_hash": "somehash"},
+    ])
+    bundle = MagicMock()
+    bundle.players = df
+    monkeypatch.setitem(cache_service._DATA_CACHE, 'all', bundle)
+
+    result = get_player_by_email("nopw@example.com")
+    assert result is not None
+    assert result["password_hash"] is None
+    assert not result["password_hash"]  # bool(None) is False, unlike bool(nan)
+
+
 def _test_email():
     """Generate a unique test email to prevent Firestore collision on re-runs."""
     return f"test_{uuid.uuid4().hex[:8]}@example.com"
