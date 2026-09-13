@@ -188,7 +188,18 @@ def _row_to_dict_no_nan(row) -> dict:
     every caller of get_player_by_email/get_player_by_id at the source
     instead of requiring each call site to remember a pd.notna() guard.
     """
-    return {k: (None if pd.isna(v) else v) for k, v in row.to_dict().items()}
+    result = {}
+    for k, v in row.to_dict().items():
+        try:
+            result[k] = None if pd.isna(v) else v
+        except (TypeError, ValueError):
+            # pd.isna(v) returns an array (not a scalar bool) for a
+            # list/array-valued field, and using that in `if` raises
+            # "truth value of an array is ambiguous". No such field exists
+            # today, but fall back to the raw value rather than crashing if
+            # one ever appears.
+            result[k] = v
+    return result
 
 def get_player_by_email(email: str):
     """Retrieve a single player directly by their standardized email address."""

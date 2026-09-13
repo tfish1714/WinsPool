@@ -37,7 +37,7 @@ def test_mfa_required_state_and_wrong_code_rejected(live_server, page, lifecycle
     page.click("#auth-submit-btn")
 
     page.wait_for_selector("#auth-error:not(.hidden)", timeout=10000)
-    assert "signin-screen" in (page.get_attribute("#signin-screen", "id") or "")  # still on the signin screen
+    assert page.locator("#signin-screen").is_visible()  # still on the signin screen
     error_text = page.locator("#auth-error").inner_text()
     assert error_text  # non-empty -- exact wording ("Incorrect verification code." or "MFA code expired or invalid.")
                         # depends on whether the 000000 guess happens to collide with expiry timing, both are correct rejections

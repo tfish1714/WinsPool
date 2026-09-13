@@ -1,9 +1,12 @@
-"""scripts/seed_e2e_test_players.py — One-time setup: create the 10 dedicated
-Firestore-backed test player accounts used by the tests_e2e/ Playwright suite.
+"""scripts/seed_e2e_test_players.py — One-time setup: create the 14 dedicated
+Firestore-backed test player accounts used by the tests_e2e/ Playwright suite
+(the base 10 drafting accounts plus 4 single-purpose auth-lifecycle accounts).
 
 Run once against production Firestore. Safe to re-run — skips any test
-account whose email already exists. Prints the generated password once;
-copy it into .env as E2E_TEST_PLAYER_PASSWORD (all 10 accounts share one
+account whose email already exists. Prints the generated password once, only
+when a fresh password was actually generated (a re-run against an
+already-seeded database reuses the existing password_hash and prints nothing
+new); copy it into .env as E2E_TEST_PLAYER_PASSWORD (all 14 accounts share one
 password — they're fixture accounts, not real credentials to protect
 individually).
 
@@ -11,6 +14,7 @@ Usage: python scripts/seed_e2e_test_players.py
 """
 import os
 import pathlib
+import re
 import secrets
 import sys
 
@@ -18,6 +22,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 os.environ["USE_LOCAL_DATA"] = "False"
 
+from services.constants import PASSWORD_COMPLEXITY_RE
 from services.db_service import (
     add_player, get_password_hash, get_player_by_email,
     update_player_credentials, update_player_profile,
@@ -79,7 +84,21 @@ def main():
         created_ids = existing_ids
     else:
         # Fresh run: generate password and create all 10 accounts.
-        password = secrets.token_urlsafe(16)
+        # secrets.token_urlsafe's alphabet (letters, digits, '-', '_') has
+        # roughly 50% odds of NOT containing a symbol character, and no
+        # guarantee of both upper- and lowercase — so on its own it can fail
+        # PASSWORD_COMPLEXITY_RE. This password is now load-bearing for two
+        # complexity-validated endpoints (/admin/set_temp_password,
+        # /set_password) via the lifecycle tests, so build it to satisfy the
+        # regex by construction (append characters guaranteed to cover every
+        # required class) and assert the match rather than hoping — a future
+        # seed run fails loudly instead of silently producing a bad password.
+        password = secrets.token_urlsafe(16) + "aA1!"
+        assert re.match(PASSWORD_COMPLEXITY_RE, password), (
+            "Generated seed password does not satisfy PASSWORD_COMPLEXITY_RE "
+            f"({PASSWORD_COMPLEXITY_RE}) — fix the generation logic above "
+            "before seeding accounts."
+        )
         password_hash = get_password_hash(password)
         created_ids = []
 

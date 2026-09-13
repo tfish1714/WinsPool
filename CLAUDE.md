@@ -142,6 +142,10 @@ VAPID_CLAIMS_EMAIL=...      # Contact email included in VAPID JWT claims
 DISABLE_OUTBOUND_EMAIL=...  # True → no-ops all Resend sends (safety gate; set by the tests_e2e/ harness so browser tests never send real mail)
 E2E_TEST_PLAYER_IDS=...     # Comma-separated seeded e2e test player IDs (first is admin) — from scripts/seed_e2e_test_players.py; required to run tests_e2e/
 E2E_TEST_PLAYER_PASSWORD=...# Shared password for those seeded e2e test players — required to run tests_e2e/
+E2E_CLAIM_TEST_PLAYER_ID=...    # Dedicated no-password lifecycle account for tests_e2e/test_account_claim.py — from scripts/seed_e2e_test_players.py's "Lifecycle account IDs" print output; required to run that test, else it skips
+E2E_MFA_TEST_PLAYER_ID=...      # Dedicated mfa_enabled=True lifecycle account for tests_e2e/test_mfa.py — from scripts/seed_e2e_test_players.py's "Lifecycle account IDs" print output; required to run that test, else it skips
+E2E_LOCKOUT_TEST_PLAYER_ID=...  # Dedicated lifecycle account for tests_e2e/test_lockout.py — from scripts/seed_e2e_test_players.py's "Lifecycle account IDs" print output; required to run that test, else it skips
+E2E_TEMPWORD_TEST_PLAYER_ID=... # Dedicated lifecycle account for tests_e2e/test_forced_password_change.py — from scripts/seed_e2e_test_players.py's "Lifecycle account IDs" print output; required to run that test, else it skips
 PORT=8000
 ```
 

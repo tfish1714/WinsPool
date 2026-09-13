@@ -19,7 +19,7 @@ a full "user completes the forced change" UI flow, since that UI flow
 doesn't exist to test.
 """
 import pytest
-from tests_e2e.test_account_claim import _admin_reset_password, _login_admin
+from tests_e2e.test_account_claim import _login_admin, _restore_account_via_claim
 
 TEMP_PASSWORD = "E2eForcedTemp!7"
 
@@ -36,77 +36,31 @@ def restore_tempword_account_after(live_server, browser, lifecycle_test_accounts
     password. That would NOT actually restore a working account --
     routes/admin_routes.py's /admin/set_temp_password unconditionally sets
     must_change_password=True (line 296), and routes/admin_routes.py's
-    /admin/reset_password (used first, via _admin_reset_password) never
-    clears that field -- it only clears password_hash / failed_setup_attempts
-    / lockout_until / mfa_secret / mfa_enabled. Given the confirmed main.js
-    gap above (no frontend handler for must_change_password), re-setting it
-    to True during cleanup would permanently strand the account: unable to
-    log in through the normal UI ever again, including for the next run of
-    this very test.
+    /admin/reset_password never clears that field -- it only clears
+    password_hash / failed_setup_attempts / lockout_until / mfa_secret /
+    mfa_enabled. Given the confirmed main.js gap above (no frontend handler
+    for must_change_password), re-setting it to True during cleanup would
+    permanently strand the account: unable to log in through the normal UI
+    ever again, including for the next run of this very test.
 
-    The actual fix: restore through the real account-claim flow
-    (POST /set_password via the signin screen's "Setup Account" path
-    instead of the admin temp-password button). auth_routes.py's
-    /set_password explicitly sets must_change_password=False on success
-    (line 151), and it requires password_hash to be falsy first (line 126)
-    -- which is exactly what _admin_reset_password produces. This exactly
-    mirrors the account's original seeded state
+    The actual fix, extracted into the shared _restore_account_via_claim
+    helper (tests_e2e/test_account_claim.py) so test_lockout.py's own
+    cleanup fixture can use the identical sequence: restore through the
+    real account-claim flow (POST /set_password via the signin screen's
+    "Setup Account" path instead of the admin temp-password button).
+    auth_routes.py's /set_password explicitly sets must_change_password=False
+    on success (line 151), and it requires password_hash to be falsy first
+    (line 126) -- which is exactly what the helper's admin Reset Password
+    step produces. This exactly mirrors the account's original seeded state
     (scripts/seed_e2e_test_players.py creates e2e-test-14-tempword WITH a
     password_hash and must_change_password left unset/False).
     """
     yield
     creds = lifecycle_test_accounts["tempword"]
-
-    # Step 1: clear password_hash via the real Admin Portal "Reset Password"
-    # flow so the account becomes claimable again.
-    admin_ctx = browser.new_context()
-    admin_page = admin_ctx.new_page()
-    admin_creds = _login_admin(admin_page, live_server, test_player_credentials)
-    _admin_reset_password(admin_page, live_server, admin_creds, creds["id"], "E2E Tempword Test")
-    admin_ctx.close()
-
-    # Step 2: re-claim the account through the real signin-screen "Setup
-    # Account" flow with the known shared password. This is what actually
-    # clears must_change_password (unlike the admin temp-password button --
-    # see the docstring above).
-    claim_ctx = browser.new_context()
-    claim_page = claim_ctx.new_page()
-    claim_page.goto(live_server)
-    claim_page.wait_for_selector("#signin-screen", state="visible")
-    claim_page.fill("#auth-email", creds["email"])
-    claim_page.locator("#auth-email").blur()
-    claim_page.wait_for_selector("#auth-confirm-password:not(.hidden)", timeout=5000)
-    claim_page.fill("#auth-password", creds["password"])
-    claim_page.fill("#auth-confirm-password", creds["password"])
-    claim_page.wait_for_selector("#pw-match-hint.match", timeout=5000)
-    claim_page.click("#auth-submit-btn")
-    claim_page.wait_for_selector("#signin-screen", state="hidden", timeout=10000)
-    claim_ctx.close()
-
-    # Step 3: independently verify a completely fresh normal login now
-    # succeeds. This is the invariant that actually matters given the
-    # stuck-account risk -- don't just trust that Step 2 didn't throw.
-    verify_ctx = browser.new_context()
-    verify_page = verify_ctx.new_page()
-    verify_page.goto(live_server)
-    verify_page.wait_for_selector("#signin-screen", state="visible")
-    verify_page.fill("#auth-email", creds["email"])
-    verify_page.locator("#auth-email").blur()
-    # #auth-confirm-password carries the "hidden" class before any email is
-    # even typed, so waiting on ".hidden" with Playwright's default
-    # state="visible" times out -- there's no visible->hidden transition to
-    # observe. #auth-submit-btn's default markup text is already "Log In"
-    # (templates/base.html:73), so waiting on that text is a no-op that
-    # resolves immediately, before handleEmailBlur's fetch has any chance to
-    # complete -- no real synchronization. #auth-title, by contrast, only
-    # flips to "Sign In" once handleEmailBlur (main.js:869) resolves with
-    # has_password=True, which is a real transition -- wait on that instead
-    # (same pattern as tests_e2e/test_mfa.py).
-    verify_page.wait_for_selector("#auth-title:has-text('Sign In')", timeout=5000)
-    verify_page.fill("#auth-password", creds["password"])
-    verify_page.click("#auth-submit-btn")
-    verify_page.wait_for_selector("#signin-screen", state="hidden", timeout=10000)
-    verify_ctx.close()
+    _restore_account_via_claim(
+        browser, live_server, test_player_credentials,
+        creds["id"], creds["email"], creds["password"],
+    )
 
 
 def _check_show_test_accounts(page):
