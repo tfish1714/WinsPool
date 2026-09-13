@@ -19,6 +19,12 @@ def _app_base_url() -> str:
     return os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")
 
 
+def _outbound_email_disabled() -> bool:
+    """Safety gate for the e2e test suite (and any other automated run that
+    must never hit the real Resend API). Checked first in every send path."""
+    return os.environ.get("DISABLE_OUTBOUND_EMAIL", "").lower() == "true"
+
+
 def send_mfa_code_email(to_email: str, code: str) -> bool:
     """Send a 6-digit MFA verification code to a single recipient."""
     html = f"""
@@ -120,6 +126,9 @@ def send_alert_email(subject: str, message: str) -> bool:
 
 def _send(to_email: str, subject: str, html: str, reply_to: str = None) -> bool:
     """Send a single transactional email via Resend. Returns True on success."""
+    if _outbound_email_disabled():
+        logger.info("DISABLE_OUTBOUND_EMAIL set — skipping send to %s: %s", to_email, subject)
+        return True
     api_key = os.getenv("RESEND_API_KEY")
     if not api_key:
         logger.error("RESEND_API_KEY not set — email not sent.")
@@ -147,6 +156,9 @@ def _send(to_email: str, subject: str, html: str, reply_to: str = None) -> bool:
 
 def _send_multi(to_emails: list, subject: str, html: str, reply_to: str = None) -> bool:
     """Send one transactional email to multiple recipients (all in `to`) via Resend."""
+    if _outbound_email_disabled():
+        logger.info("DISABLE_OUTBOUND_EMAIL set — skipping send to %s: %s", to_emails, subject)
+        return True
     api_key = os.getenv("RESEND_API_KEY")
     if not api_key:
         logger.error("RESEND_API_KEY not set — email not sent.")

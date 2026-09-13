@@ -72,24 +72,40 @@ python scripts/walk_forward_calibrate_preseason_weights.py --weights '{...}'   #
 
 ### Tests
 ```bash
-pytest tests/
+pytest tests/                              # Unit suite (routes/services). A bare `pytest` also runs exactly this — pytest.ini pins testpaths = tests
 pytest tests/ --cov=services --cov=routes
+pytest tests_e2e/ -v                       # Playwright browser e2e suite (explicit path required — not collected by a bare `pytest`)
 ```
+
+`pytest tests_e2e/ -v` needs `requirements-dev.txt` installed plus a one-time
+`playwright install chromium`, and the `E2E_TEST_PLAYER_IDS` /
+`E2E_TEST_PLAYER_PASSWORD` env vars seeded by
+`scripts/seed_e2e_test_players.py` (the suite skips itself without them).
+**Also run it as a deploy pre-flight gate** — see `.claude/commands/deploy.md`
+for the full pre-flight sequence (that file is untracked; this line is the
+durable record of the gate).
 
 ### Frontend Testing
 
-`pytest` covers routes/services only — there is no automated JS test suite. Any
-UI-visible change (new page, new nav entry, CSS, layout) must be manually
-verified in-browser, and **that verification must include a mobile viewport**,
-not just desktop. This app has bitten itself on this before: `static/js/main.js`'s
-`updateNav()` renders the desktop nav (top rail + "More" dropdown) entirely
-client-side, but the mobile nav drawer (`templates/base.html`'s
-`.nav-drawer__links`) is separate, hardcoded, server-rendered markup —
-`responsive.js` only toggles the drawer open/closed, it doesn't populate its
-links. **A nav link added to one does not appear in the other.** When adding or
-changing a nav destination, update both `updateNav()`'s `moreLinks`/`primaryLinks`
-arrays *and* the matching `<a>` in `base.html`'s drawer, and check both a desktop
-width and a narrow (~390px) mobile width before calling it done.
+There is still no automated JS *unit* test suite, but `tests_e2e/` (Playwright)
+now drives the real app in a real browser at both desktop and mobile viewports,
+so UI-visible behavior is no longer covered by manual checking alone. Manual
+in-browser verification of any UI-visible change (new page, new nav entry, CSS,
+layout) is still good practice — and **that verification must include a mobile
+viewport**, not just desktop — it just isn't the only line of defense anymore.
+
+This app has bitten itself on this before: `static/js/main.js`'s `updateNav()`
+renders the desktop nav (top rail + "More" dropdown) entirely client-side, but
+the mobile nav drawer (`templates/base.html`'s `.nav-drawer__links`) is
+separate, hardcoded, server-rendered markup — `responsive.js` only toggles the
+drawer open/closed, it doesn't populate its links. **A nav link added to one
+does not appear in the other.** When adding or changing a nav destination,
+update both `updateNav()`'s `moreLinks`/`primaryLinks` arrays *and* the matching
+`<a>` in `base.html`'s drawer, and check both a desktop width and a narrow
+(~390px) mobile width before calling it done.
+`tests_e2e/test_nav_parity.py` is the automated regression test for exactly
+this gotcha — it logs in, then diffs the visible desktop nav hrefs against the
+visible mobile drawer hrefs across several pages and fails on any asymmetry.
 
 ## Architecture
 
@@ -103,6 +119,7 @@ width and a narrow (~390px) mobile width before calling it done.
 
 ### Dependencies
 - `requirements.txt` — web app only; this is what the Dockerfile installs.
+- `requirements-dev.txt` — Playwright plus the base `requirements.txt`. Needed only to run the `tests_e2e/` browser suite: `pip install -r requirements.txt -r requirements-dev.txt`, then `playwright install chromium` **once** (pip installs the Python package, not the browser binary — the suite cannot run without that second step). Not installed by any Docker image.
 - `requirements-ml.txt` — TensorFlow, Keras, scikit-learn, XGBoost, scipy. Install where you train or run batch predictions: `pip install -r requirements.txt -r requirements-ml.txt`. **Excluded from the main web-service image** (`Dockerfile`) — the deployed `winspool` Cloud Run *service* reads stored predictions from Firestore and never loads a model, which is why the prediction services guard their imports behind `TF_AVAILABLE` / `SKLEARN_AVAILABLE`. It **is** installed by `Dockerfile.predict` (the `winspool-predict-daily` scheduled job that regenerates predictions — see Scheduled Jobs below), which is why that image is pinned to `python:3.11-slim` rather than the web service's `python:3.10-slim`: `keras==3.13.2` (required to load `models/nn_v14.keras` — Keras added a Dense-layer config field in 3.13 that older Keras can't deserialize) has no Python 3.10 wheel at all. TensorFlow itself is pinned because the `.keras` artifact format has changed across minor versions and `models/nn_v*.keras` were trained under 2.21.0.
 
 ### Key Environment Variables
@@ -122,6 +139,9 @@ GCP_SCHEDULER_SERVICE_ACCOUNT=...    # Service account schedule_kickoffs.py's en
 VAPID_PUBLIC_KEY=...        # Web Push VAPID public key (base64url)
 VAPID_PRIVATE_KEY=...       # Web Push VAPID private key (base64url)
 VAPID_CLAIMS_EMAIL=...      # Contact email included in VAPID JWT claims
+DISABLE_OUTBOUND_EMAIL=...  # True → no-ops all Resend sends (safety gate; set by the tests_e2e/ harness so browser tests never send real mail)
+E2E_TEST_PLAYER_IDS=...     # Comma-separated seeded e2e test player IDs (first is admin) — from scripts/seed_e2e_test_players.py; required to run tests_e2e/
+E2E_TEST_PLAYER_PASSWORD=...# Shared password for those seeded e2e test players — required to run tests_e2e/
 PORT=8000
 ```
 
@@ -166,6 +186,8 @@ static/
     chat.js              # Draft room chat overlay
     mock_draft.js        # Standalone mock draft page logic — does NOT import main.js/websocket_service.js/auth_service.js
 scripts/                 # CLI tools for data sync, ML training, cache building
+tests/                   # pytest unit suite (routes/services) — what a bare `pytest` collects
+tests_e2e/               # Playwright browser e2e suite (run by explicit path); see tests_e2e/conftest.py for fixtures
 models/                  # nn_v{N}.keras + scaler, xgb_v{N}.json + scaler, lr_v{N}.pkl + scaler; *_registry.json per model type
 rawdata/                 # NFL raw data (NOT committed)
 docs/                    # Architecture and model documentation (prediction_model.md, etc.)

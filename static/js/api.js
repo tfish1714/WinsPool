@@ -53,8 +53,9 @@ export const ApiService = {
     },
 
     // --- Admin API ---
-    async fetchPlayers(playerId) {
-        return fetchWithTimeout(`${API_BASE}/admin/players?playerId=${playerId}`);
+    async fetchPlayers(playerId, includeTestAccounts = false) {
+        const qs = includeTestAccounts ? '?include_test_accounts=true' : '';
+        return fetchWithTimeout(`${API_BASE}/admin/players${qs}`);
     },
     async fetchSeasons(playerId) {
         return fetchWithTimeout(`${API_BASE}/admin/seasons?playerId=${playerId}`);

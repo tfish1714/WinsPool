@@ -1,0 +1,6 @@
+# requirements-dev.txt
+-r requirements.txt
+playwright>=1.59.0
+# After installing, run this ONCE to fetch the browser binary (pip only installs
+# the Python package, not the browser — tests_e2e/ cannot run without it):
+#   playwright install chromium

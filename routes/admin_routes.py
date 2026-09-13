@@ -97,12 +97,19 @@ async def create_new_season(body: NewSeasonRequest, _: dict = Depends(require_ad
 
 
 @router.get("/admin/players")
-async def fetch_admin_players(_: dict = Depends(require_admin)):
-    """Retrieve all players for the admin selection grid and player management."""
+async def fetch_admin_players(include_test_accounts: bool = False, _: dict = Depends(require_admin)):
+    """Retrieve all players for the admin selection grid and player management.
+
+    Test/QA fixture accounts (is_test_account=True) are excluded by default so
+    they don't clutter the real season-creation player picker.
+    """
     try:
         _, _, _, players_df, _, _, _ = load_data()
         records = []
         for r in players_df.to_dict(orient="records"):
+            is_test = bool(r.get("is_test_account", False)) if pd.notna(r.get("is_test_account")) else False
+            if is_test and not include_test_accounts:
+                continue
             pw_hash = r.get("password_hash")
             has_pw = bool(pw_hash) if pd.notna(pw_hash) else False
             must_change = bool(r.get("must_change_password", False)) if pd.notna(r.get("must_change_password")) else False
@@ -119,6 +126,7 @@ async def fetch_admin_players(_: dict = Depends(require_admin)):
                 "has_password": has_pw,
                 "must_change_password": must_change,
                 "last_login": last_login,
+                "is_test_account": is_test,
             }
             if "failed_setup_attempts" in r and pd.notna(r.get("failed_setup_attempts")):
                 rec["failed_setup_attempts"] = int(r["failed_setup_attempts"])

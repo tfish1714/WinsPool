@@ -8,6 +8,7 @@ import os
 import time
 import pathlib
 import uvicorn
+from datetime import date
 from dotenv import load_dotenv
 load_dotenv()
 from fastapi import FastAPI, Request
@@ -63,9 +64,30 @@ def _current_season_label():
     bundle = load_data()
     return get_active_season(bundle.games, bundle.draft_results, bundle.draft_order_rules)
 
+def _current_year():
+    """Literal current calendar year, for base.html's mobile nav drawer links
+    (Standings / Weekly Progress) -- registered as a Jinja global (not
+    per-route context) so every page gets a correct fallback even if its
+    route doesn't explicitly pass current_year. Matches desktop updateNav()'s
+    `new Date().getFullYear()` in static/js/main.js exactly; deliberately NOT
+    get_active_season() (a different concept -- "most recent season with
+    games and draft picks" -- that can diverge from the calendar year for
+    months, e.g. in the pre-draft offseason). A route that explicitly passes
+    its own current_year in a TemplateResponse context (e.g. viewing an
+    archived season) always takes precedence over this global.
+
+    Unlike current_season_label (called as current_season_label() in
+    base.html), base.html references current_year as a plain value --
+    `{{ current_year|default(2024) }}` -- so this must be registered as the
+    computed value itself, not the function, or Jinja renders the function's
+    repr into the href instead of calling it.
+    """
+    return date.today().year
+
 for t in [standings_templates, history_templates, draft_templates, admin_templates]:
     t.env.globals['get_team_logo'] = get_team_logo
     t.env.globals['current_season_label'] = _current_season_label
+    t.env.globals['current_year'] = _current_year()
 
 # ── Static files ──────────────────────────────────────────────────────────────
 STATIC_PATH = os.environ.get("STATIC_PATH", "static")

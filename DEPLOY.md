@@ -15,6 +15,11 @@ This script will:
 3. Deploy to Cloud Run (`winspool` service, `us-east1`, project `fishbone-wins-pool`)
 4. Rebuild the `winspool-sync`/`winspool-predict` images (`cloudbuild-sync.yaml`/`cloudbuild-predict.yaml`) and update the 4 scheduled Cloud Run Jobs to use them — see CLAUDE.md's **Scheduled Jobs** section for what those are. This step does NOT repeat one-time GCP setup (API enablement, IAM, the Cloud Tasks queue, Cloud Scheduler triggers) — see `docs/superpowers/plans/completed/2026-08-19-scheduled-jobs.md` Task 9 for that.
 
+Before deploying, also run `pytest tests_e2e/ -v` (the Playwright browser
+suite) alongside `pytest tests/` — see `.claude/commands/deploy.md` for the
+full pre-flight sequence and CLAUDE.md's **Tests** section for the e2e suite's
+setup requirements.
+
 **Service URL:** `https://winspool-1045965963135.us-east1.run.app`
 
 ---
