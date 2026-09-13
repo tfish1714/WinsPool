@@ -62,6 +62,13 @@ def _expand_and_click(row, action_btn_selector, dialog_page):
     btn.click()
 
 
+def _parse_mmss(text):
+    """Parse main.js's `mmss()` shame-timer format ("m:ss", no leading zero
+    on minutes -- see updateShameTimer in static/js/main.js) into seconds."""
+    minutes, seconds = text.strip().split(":")
+    return int(minutes) * 60 + int(seconds)
+
+
 def test_admin_can_undo_last_pick_and_reset_timer(
     live_server, browser, test_player_credentials, clean_season_3000
 ):
@@ -144,11 +151,58 @@ def test_admin_can_undo_last_pick_and_reset_timer(
         admin_draft_page.wait_for_selector("#pick-queue .q-row", timeout=15000)
         timer_row = admin_draft_page.locator(".q-row-admin:has(.q-timer-btn)")
         timer_row.wait_for(state="visible", timeout=10000)
-        _expand_and_click(timer_row, ".q-timer-btn", admin_draft_page)  # confirm('Reset the timer...?')
-        admin_draft_page.wait_for_timeout(500)
 
+        # A persistent dialog recorder (not _expand_and_click's one-shot
+        # `.once` handler) is attached for this portion: if the server instead
+        # rejected the reset (stale pick number, a real regression, etc.) the
+        # client renders that as an `alert()` (main.js's `msg.type === 'error'`
+        # branch, static/js/main.js ~line 459) -- a *second* native dialog on
+        # top of the confirm() this action already triggers. A one-shot
+        # handler registered only for the confirm() would leave that alert
+        # unhandled and Playwright would silently auto-dismiss it, letting a
+        # silent server-side failure pass. This recorder accepts and records
+        # every dialog on this page for the rest of the test, so any such
+        # alert is both handled and assertable below.
+        timer_dialogs = _record_dialogs(admin_draft_page)
+
+        # Sample the on-screen shame-timer's elapsed time and wait a couple of
+        # seconds so it is meaningfully non-zero before resetting. This is the
+        # real, user-visible effect of a successful reset_pick() call:
+        # services/draft_service.py::reset_pick() stamps a fresh
+        # `pick_start_time` into draft_timer metadata and clears the state
+        # cache, so the next `state` broadcast's payload carries a
+        # pick_start_time of "now" -- main.js's updateShameTimer() renders
+        # that synchronously (routes/draft_routes.py's reset_pick handler
+        # broadcasts state before the confirmation chat message). Asserting
+        # the rendered elapsed time actually drops verifies the real
+        # server-side effect, not just the absence of a generic error string.
+        shame_num = admin_draft_page.locator("#shame-timer-card .shame-num")
+        shame_num.wait_for(state="visible", timeout=10000)
+        admin_draft_page.wait_for_timeout(2500)
+        elapsed_before = _parse_mmss(shame_num.inner_text())
+        assert elapsed_before >= 2, (
+            f"expected shame timer to show a couple seconds elapsed before reset, got {elapsed_before}s"
+        )
+
+        timer_row.locator(".q-row-main").click()
+        timer_btn = timer_row.locator(".q-timer-btn")
+        timer_btn.wait_for(state="visible", timeout=5000)
+        timer_btn.click()  # confirm('Reset the timer...?') -- accepted by the recorder above
+
+        admin_draft_page.wait_for_timeout(500)
+        assert not timer_dialogs[1:], (
+            f"unexpected dialog(s) after the reset confirm() -- likely a server-side error alert: {timer_dialogs[1:]}"
+        )
+
+        elapsed_after = _parse_mmss(shame_num.inner_text())
+        assert elapsed_after < elapsed_before, (
+            f"shame timer did not reset: was {elapsed_before}s, still {elapsed_after}s after reset"
+        )
         assert "Internal Server Error" not in admin_draft_page.content()
-        print("[reset-timer] timer reset on active pick #2")
+        print(
+            f"[reset-timer] timer reset on active pick #2: {elapsed_before}s -> {elapsed_after}s; "
+            f"dialogs={timer_dialogs}"
+        )
     finally:
         for ctx in contexts:
             ctx.close()
