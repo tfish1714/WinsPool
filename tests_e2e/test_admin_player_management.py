@@ -6,8 +6,11 @@ endpoint at all, so a player created by this test is NOT cleaned up --
 it becomes a permanent row in whatever backend the live_server subprocess
 is pointed at (local .local_db/players.pkl in the normal dev/CI setup,
 since live_server always sets USE_LOCAL_DATA=true). A fixed email keeps
-reruns from accumulating unbounded duplicate-looking rows; check_player's
-"exists" response is used to skip re-creating on a rerun.
+reruns from accumulating unbounded duplicate-looking rows; test_create_player
+waits for the (async-fetched) `.player-mgmt-card` list to actually render,
+then checks whether one of those cards already contains the fixed email,
+to skip re-creating on a rerun -- see that test for why a plain `.count()`
+without the wait is not reliable.
 
 Two more live-DOM gaps discovered while writing these tests (not present in
 the original plan, which was checked against source but not run live):
@@ -32,9 +35,65 @@ the original plan, which was checked against source but not run live):
    stale until something re-fetches. `_refetch_players()` is reused after
    each action for this too.
 """
+import pytest
+
 from tests_e2e.test_standings import _login
 
 NEW_PLAYER_EMAIL = "e2e-created-player@winspool.internal"
+
+
+@pytest.fixture
+def restore_player_9(live_server, page, test_player_credentials):
+    """Guarantee test_player_credentials[9]'s password is restored to its
+    seeded working value even if the test body fails partway through a
+    destructive mutation (reset-password or set-temp-password).
+
+    The restore runs in fixture teardown, which Python's generator-fixture
+    semantics run even when the test body raises (a finally-equivalent) --
+    unlike the inline end-of-function restore this replaces, which was
+    simply skipped on any earlier failure (a selector timeout, a flaky
+    dialog, "Setup Account" never appearing), leaving account 9 with no
+    working password for every later test in the session (notably
+    test_live_draft.py's 10-account login flow, which runs after this file
+    alphabetically).
+
+    Safe to run regardless of what state the test left the account in:
+    resetPlayerPassword() unconditionally clears whatever password/temp
+    password currently exists, so forcing a reset before reclaiming is a
+    no-op if the test already did so, and still correct if the test failed
+    before ever touching the account.
+    """
+    target = test_player_credentials[9]
+    yield target
+    _reclaim_player_password(page, live_server, target)
+
+
+def _reclaim_player_password(page, live_server, target):
+    """Admin-reset target's password (idempotent regardless of its current
+    state) then reclaim it through the real signin overlay's Setup Account
+    flow, restoring target["password"] as its working password."""
+    page.goto(f"{live_server}/admin")
+    page.wait_for_selector("#player-section:not(.hidden)", timeout=10000)
+    _refetch_players(page)
+
+    card = page.locator(f'.player-mgmt-card[data-player-id="{target["id"]}"]')
+    card.wait_for(state="visible", timeout=10000)
+    _click_through_two_dialogs(page, card.locator(".btn-reset-pw"))
+
+    # The admin's own session is still live in this page's localStorage,
+    # which would otherwise keep the signin overlay hidden (initGlobalUI()
+    # in main.js only shows it when no credentials are stored) -- clear it
+    # first to force a logged-out load.
+    page.evaluate("() => localStorage.clear()")
+    page.goto(live_server)
+    page.wait_for_selector("#signin-screen", state="visible")
+    page.fill("#auth-email", target["email"])
+    page.locator("#auth-email").blur()
+    page.wait_for_selector("#auth-submit-btn:has-text('Setup Account')", timeout=5000)
+    page.fill("#auth-password", target["password"])
+    page.fill("#auth-confirm-password", target["password"])
+    page.click("#auth-submit-btn")
+    page.wait_for_selector("#signin-screen", state="hidden", timeout=10000)
 
 
 def _refetch_players(page):
@@ -115,6 +174,12 @@ def test_create_player(live_server, page, test_player_credentials):
     page.goto(f"{live_server}/admin")
     page.wait_for_selector("#player-section:not(.hidden)", timeout=10000)
 
+    # fetchInitialData() is async -- #player-section loses its "hidden" class
+    # immediately, well before the player list's network round trip resolves,
+    # so a bare `.count()` here would almost always race an empty DOM and
+    # fall through to creating a duplicate. Wait for the list to actually
+    # render (any card, not necessarily the target one) before checking.
+    page.wait_for_selector(".player-mgmt-card", timeout=10000)
     already_exists = page.locator(f'.player-mgmt-card:has-text("{NEW_PLAYER_EMAIL}")').count() > 0
     if already_exists:
         return  # idempotent: a prior run already created this fixture player
@@ -163,9 +228,9 @@ def test_edit_player_profile(live_server, page, test_player_credentials):
     page.wait_for_selector(f'.player-mgmt-card[data-player-id="{target["id"]}"]:has-text("555-0199")', timeout=10000)
 
 
-def test_reset_password_and_reclaim(live_server, page, test_player_credentials):
+def test_reset_password_and_reclaim(live_server, page, test_player_credentials, restore_player_9):
     admin_creds = test_player_credentials[0]
-    target = test_player_credentials[9]
+    target = restore_player_9
     _login(page, live_server, admin_creds)
 
     page.goto(f"{live_server}/admin")
@@ -181,27 +246,15 @@ def test_reset_password_and_reclaim(live_server, page, test_player_credentials):
     _refetch_players(page)  # resetPlayerPassword() doesn't self-refresh -- see gap 2
     page.wait_for_selector(f'.player-mgmt-card[data-player-id="{target["id"]}"]:has-text("No Password")', timeout=10000)
 
-    # Re-claim through the real signin overlay so target's credentials still
-    # work for any later test in this session. The admin's own session is
-    # still live in this page's localStorage, which would otherwise keep the
-    # signin overlay hidden (initGlobalUI() in main.js only shows it when no
-    # credentials are stored) -- clear it first to force a logged-out load.
-    page.evaluate("() => localStorage.clear()")
-    page.goto(live_server)
-    page.wait_for_selector("#signin-screen", state="visible")
-    page.fill("#auth-email", target["email"])
-    page.locator("#auth-email").blur()
-    page.wait_for_selector("#auth-submit-btn:has-text('Setup Account')", timeout=5000)
-
-    page.fill("#auth-password", target["password"])
-    page.fill("#auth-confirm-password", target["password"])
-    page.click("#auth-submit-btn")
-    page.wait_for_selector("#signin-screen", state="hidden", timeout=10000)
+    # Reclaiming target's credentials (so they still work for any later test
+    # in this session) now happens unconditionally in the restore_player_9
+    # fixture's teardown -- see that fixture -- rather than inline here, so
+    # a failure above still leaves the account restored.
 
 
-def test_set_temp_password(live_server, page, test_player_credentials):
+def test_set_temp_password(live_server, page, test_player_credentials, restore_player_9):
     admin_creds = test_player_credentials[0]
-    target = test_player_credentials[9]
+    target = restore_player_9
     _login(page, live_server, admin_creds)
 
     page.goto(f"{live_server}/admin")
@@ -224,19 +277,7 @@ def test_set_temp_password(live_server, page, test_player_credentials):
     _refetch_players(page)  # setTempPassword() doesn't self-refresh -- see gap 2
     page.wait_for_selector(f'.player-mgmt-card[data-player-id="{target["id"]}"]:has-text("Temp Password")', timeout=10000)
 
-    # Restore target to its normal, non-temp password so later tests in this
-    # session (and the live-draft test's 10-account login flow) aren't broken.
-    _click_through_two_dialogs(
-        page, page.locator(f'.player-mgmt-card[data-player-id="{target["id"]}"] .btn-reset-pw')
-    )
-
-    page.evaluate("() => localStorage.clear()")
-    page.goto(live_server)
-    page.wait_for_selector("#signin-screen", state="visible")
-    page.fill("#auth-email", target["email"])
-    page.locator("#auth-email").blur()
-    page.wait_for_selector("#auth-submit-btn:has-text('Setup Account')", timeout=5000)
-    page.fill("#auth-password", target["password"])
-    page.fill("#auth-confirm-password", target["password"])
-    page.click("#auth-submit-btn")
-    page.wait_for_selector("#signin-screen", state="hidden", timeout=10000)
+    # Restoring target to its normal, non-temp password now happens
+    # unconditionally in the restore_player_9 fixture's teardown -- see that
+    # fixture -- rather than inline here, so a failure above still leaves
+    # the account restored.

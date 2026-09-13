@@ -1,31 +1,61 @@
 """tests_e2e/test_admin_members_and_recap.py — Member/paid tracking and the
 weekly-recap workflow up to its real-Gemini-API boundary (see this plan's
 Task 4 for why full recap generation is out of scope for automation)."""
+from tests_e2e.test_live_draft import _record_dialogs
 from tests_e2e.test_standings import _login
 
 
 def test_toggle_member_paid_status(live_server, page, test_player_credentials):
+    """togglePaid() (admin_main.js) flips `data-paid` optimistically before
+    awaiting the real POST, and only reverts + alert()s on failure -- so
+    reading the DOM right after a click proves nothing about whether the
+    write actually reached the server. Force a real re-fetch through the UI
+    (re-selecting the members-tab season, whose `change` listener calls
+    loadMembers() -> a fresh GET) and assert against that freshly rendered
+    state instead. A dialog recorder is attached so a failure alert (which
+    this page has no handler for otherwise, and Playwright would silently
+    auto-dismiss) surfaces as a real assertion failure."""
     admin_creds = test_player_credentials[0]
     _login(page, live_server, admin_creds)
+
+    dialogs = _record_dialogs(page)
 
     page.goto(f"{live_server}/admin")
     page.click('.admin-tabs .tab-btn[data-tab="members-section"]')
     page.wait_for_selector("#members-section:not(.hidden)", timeout=10000)
 
     page.wait_for_selector(".paid-toggle", timeout=10000)
-    first_toggle = page.locator(".paid-toggle").first
-    before = first_toggle.get_attribute("data-paid")
+    season_select = page.locator("#members-season-select")
+    season_value = season_select.input_value()
 
-    first_toggle.click()
-    page.wait_for_timeout(1000)  # togglePaid() is async; no dialog, just a POST
+    first_row = page.locator(".members-row").first
+    player_id = first_row.get_attribute("data-player-id")
+    before = first_row.locator(".paid-toggle").get_attribute("data-paid")
 
-    after = first_toggle.get_attribute("data-paid")
-    assert after != before, "paid-toggle's data-paid attribute did not flip"
+    def _reload_via_season_select():
+        # loadMembers() rebuilds #members-rows from scratch, so any earlier
+        # row/button handle is stale afterwards -- re-locate by player id.
+        season_select.select_option(value=season_value)
+        page.wait_for_selector(".paid-toggle", timeout=10000)
+        row = page.locator(f'.members-row[data-player-id="{player_id}"]')
+        row.wait_for(state="visible", timeout=10000)
+        return row.locator(".paid-toggle")
 
-    # Toggle back so this test is idempotent across reruns.
-    first_toggle.click()
+    first_row.locator(".paid-toggle").click()
+    page.wait_for_timeout(1000)  # togglePaid()'s awaited POST
+
+    after = _reload_via_season_select().get_attribute("data-paid")
+    assert after != before, "paid-toggle change did not persist server-side (re-fetch shows the old value)"
+
+    # Toggle back so this test is idempotent across reruns, again verified
+    # through a real re-fetch rather than the optimistic DOM state.
+    _reload_via_season_select().click()
     page.wait_for_timeout(1000)
-    assert first_toggle.get_attribute("data-paid") == before
+
+    restored = _reload_via_season_select().get_attribute("data-paid")
+    assert restored == before, "paid-toggle restore did not persist server-side (re-fetch shows the toggled value)"
+
+    assert dialogs == [], f"unexpected dialog(s) during paid-toggle test (likely a failure alert): {dialogs}"
 
 
 def test_recap_prompt_preview_populates(live_server, page, test_player_credentials):
