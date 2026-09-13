@@ -8,6 +8,14 @@ Usage:
     python scripts/weekly_model_eval.py --season 2025 --week 14
     python scripts/weekly_model_eval.py --season 2025 --week 14 --model best
     python scripts/weekly_model_eval.py --season 2025 --week 1 --week 17  # range
+    python scripts/weekly_model_eval.py --season 2025 --week 14 --firestore
+
+--firestore additionally upserts these rows into the nn_weekly_accuracy
+Firestore collection (services/cache_service.py), a durable per-week record
+of what the model predicted before the outcome was known -- unlike
+game_predictions, which cache_builder.py silently recomputes with whatever
+model is currently deployed on every daily run. This script stays manual
+(run it yourself after each week finishes); nothing schedules it.
 """
 
 import sys
@@ -229,9 +237,21 @@ def main():
     )
     parser.add_argument(
         "--no-save", action="store_true",
-        help="Print results but do not append to CSV."
+        help="Print results but do not append to CSV or write the nn_weekly_accuracy store."
+    )
+    parser.add_argument(
+        "--firestore", action="store_true",
+        help="Also push these weekly rows to the Firestore nn_weekly_accuracy "
+             "collection (used by the admin ML Accuracy panel's weekly-snapshot view)."
     )
     args = parser.parse_args()
+
+    if args.firestore:
+        # get_db() (services/db_service.py) returns None whenever USE_LOCAL_DATA
+        # is true, regardless of the use_local=False passed to
+        # write_nn_weekly_accuracy_rows below -- same gotcha as compute_elo.py
+        # --firestore / cache_builder.py / refresh_local_pkls.py.
+        os.environ["USE_LOCAL_DATA"] = "False"
 
     # Expand week range if two values given (e.g. --week 1 17 → weeks 1..17)
     if len(args.week) == 2 and args.week[0] < args.week[1]:
@@ -265,8 +285,16 @@ def main():
 
     if not args.no_save:
         _append_to_csv(rows)
+
+        from services.cache_service import write_nn_weekly_accuracy_rows
+        write_nn_weekly_accuracy_rows(args.season, rows, use_local=True)
+        print(f"  Wrote {len(rows)} row(s) -> .local_db/nn_weekly_accuracy_{args.season}.json")
+
+        if args.firestore:
+            write_nn_weekly_accuracy_rows(args.season, rows, use_local=False)
+            print(f"  Pushed {len(rows)} row(s) to Firestore nn_weekly_accuracy/{args.season}")
     else:
-        print("\n  (--no-save: results not written to CSV)")
+        print("\n  (--no-save: results not written to CSV or nn_weekly_accuracy store)")
 
     print(f"\n{'='*65}")
     print(f"  Done. To view all recorded accuracy:")

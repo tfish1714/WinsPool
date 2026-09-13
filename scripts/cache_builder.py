@@ -188,6 +188,8 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
     pred_confs: list = [None] * n
     pred_ats: list = [None] * n
     pred_probs: list = [None] * n
+    pred_spreads: list = [None] * n
+    pred_edges: list = [None] * n
 
     unplayed_idx: list = []
 
@@ -203,6 +205,8 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
             pred_confs[i]   = pred['pred_su_conf']
             pred_ats[i]     = pred['pred_ats_pick']
             pred_probs[i]   = pred['pred_prob']
+            pred_spreads[i] = pred.get('model_spread')
+            pred_edges[i]   = pred.get('edge_vs_vegas')
             continue
 
         # Not in feature table — unplayed future game, queue for simulate_season()
@@ -240,12 +244,16 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
             pred_confs[i]   = derived['pred_su_conf']
             pred_ats[i]     = derived['pred_ats_pick']
             pred_probs[i]   = round(hp, 4)
+            pred_spreads[i] = derived['model_spread']
+            pred_edges[i]   = derived['edge_vs_vegas']
 
     out = schedule_df.copy()
     out['pred_winner']  = pred_winners
     out['pred_su_conf'] = pred_confs
     out['pred_ats_pick'] = pred_ats
     out['pred_prob']    = pred_probs
+    out['model_spread']   = pred_spreads
+    out['edge_vs_vegas']  = pred_edges
     return out
 
 
@@ -327,7 +335,8 @@ def build_year(standings, games, players, draft_order, draft_results,
             # This captures both feature-table predictions and fallback predictions for
             # future games, which pred_lookup alone would miss.
             pred_cols = ['week', 'home_team', 'away_team', 'pred_winner',
-                         'pred_su_conf', 'pred_ats_pick', 'pred_prob']
+                         'pred_su_conf', 'pred_ats_pick', 'pred_prob',
+                         'model_spread', 'edge_vs_vegas']
             pc = [c for c in pred_cols if c in schedule_df.columns]
             if 'pred_winner' in pc:
                 pmap = {}
@@ -336,12 +345,24 @@ def build_year(standings, games, players, draft_order, draft_results,
                     at = _normalize_team(str(r.get('away_team', '') or ''))
                     wk = r.get('week')
                     if ht and at and wk is not None:
-                        pmap[f"W{int(wk):02d}_{ht}_{at}"] = {
+                        entry = {
                             'pred_prob':     r.get('pred_prob'),
                             'pred_winner':   r.get('pred_winner'),
                             'pred_su_conf':  r.get('pred_su_conf'),
                             'pred_ats_pick': r.get('pred_ats_pick'),
                         }
+                        # model_spread/edge_vs_vegas are only known when
+                        # this row came from a source that computed them
+                        # (feature-table lookup or the simulate_season
+                        # fallback) -- omit rather than write NaN over a
+                        # previously-stored value from --resimulate/backfill.
+                        ms = r.get('model_spread')
+                        if pd.notna(ms):
+                            entry['model_spread'] = ms
+                        ev = r.get('edge_vs_vegas')
+                        if pd.notna(ev):
+                            entry['edge_vs_vegas'] = ev
+                        pmap[f"W{int(wk):02d}_{ht}_{at}"] = entry
                 if pmap:
                     existing = get_game_predictions(year)
                     merged = merge_thin_game_predictions(existing, pmap)

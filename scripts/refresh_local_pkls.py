@@ -196,6 +196,34 @@ def dump_elo_history():
         log.error(f"    ✗ Failed 'elo_history': {e}")
 
 
+def dump_nn_weekly_accuracy():
+    """Pull all nn_weekly_accuracy docs from Firestore → .local_db/nn_weekly_accuracy_{season}.json."""
+    log.info("  Fetching 'nn_weekly_accuracy' from Firestore...")
+    try:
+        db = get_db()
+        docs = list(db.collection("nn_weekly_accuracy").stream())
+        if not docs:
+            log.warning("    'nn_weekly_accuracy' returned no documents — skipping")
+            return
+
+        written = 0
+        for doc in docs:
+            d = doc.to_dict()
+            season = d.get("season")
+            rows = d.get("rows")
+            if season is None or not rows:
+                continue
+            out_path = LOCAL_DB / f"nn_weekly_accuracy_{int(season)}.json"
+            with open(out_path, "w") as f:
+                json.dump(d, f, default=str)
+            written += 1
+            log.info(f"    ✓ {len(rows)} rows → nn_weekly_accuracy_{int(season)}.json")
+
+        log.info(f"    ✓ {written} seasons written")
+    except Exception as e:
+        log.error(f"    ✗ Failed 'nn_weekly_accuracy': {e}")
+
+
 def dump_config_settings():
     """Pull config/settings doc → .local_db/config_settings.json."""
     log.info("  Fetching 'config/settings' from Firestore...")
@@ -233,6 +261,9 @@ def main():
 
     log.info("\n-- Elo rating history --")
     dump_elo_history()
+
+    log.info("\n-- NN weekly accuracy history --")
+    dump_nn_weekly_accuracy()
 
     log.info("\n-- App config --")
     dump_config_settings()

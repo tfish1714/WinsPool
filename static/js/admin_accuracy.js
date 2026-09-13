@@ -8,6 +8,7 @@
 
 let _accuracyData = null;
 let _forecastData = null;
+let _snapshotsData = null;
 const _gameCache  = {};  // keyed by `${season}-${week}-${away}-${home}`
 
 // ── Formatting helpers ─────────────────────────────────────────────────────────
@@ -523,6 +524,76 @@ async function loadAccuracyData() {
     }
 }
 
+// ── Weekly snapshots (graded once, never rewritten by a later retrain) ──────────
+
+function renderSnapshotsTable(seasons) {
+    const wrap = document.getElementById('acc-snapshots-table');
+    const seasonKeys = Object.keys(seasons).sort((a, b) => b - a);
+    if (seasonKeys.length === 0) {
+        wrap.innerHTML = '<p style="color:var(--text-secondary);">No weekly snapshots recorded yet.</p>';
+        return;
+    }
+
+    const latest = seasonKeys[0];
+    const selectHtml = seasonKeys.length > 1
+        ? `<select id="acc-snapshot-season" class="admin-input" style="margin-bottom:0.75rem;">
+            ${seasonKeys.map(s => `<option value="${s}">${s}</option>`).join('')}
+           </select>`
+        : '';
+
+    function _tableFor(season) {
+        const rows = seasons[season] || [];
+        const body = rows.map(r => `
+            <tr>
+                <td>${r.week}</td>
+                <td>${r.model_version ?? '—'}</td>
+                <td>${r.correct ?? '—'}/${r.games ?? '—'}</td>
+                <td style="color:${_colorForAccuracy(r.accuracy_pct ?? 0)}; font-weight:700;">${r.accuracy_pct ?? '—'}%</td>
+                <td>${r.brier_score ?? '—'}</td>
+                <td>${r.log_loss ?? '—'}</td>
+                <td>${r.season_r2_ytd ?? '—'}</td>
+                <td style="color:var(--text-secondary); font-size:0.78rem;">${r.evaluated_at ? new Date(r.evaluated_at).toLocaleDateString() : '—'}</td>
+            </tr>`).join('');
+        return `
+            <table class="admin-table" style="width:100%; border-collapse:collapse;">
+                <thead>
+                    <tr>
+                        <th>Week</th><th>Model</th><th>Correct</th><th>Accuracy</th>
+                        <th>Brier</th><th>Log Loss</th><th>Season R2 YTD</th><th>Graded</th>
+                    </tr>
+                </thead>
+                <tbody>${body}</tbody>
+            </table>`;
+    }
+
+    wrap.innerHTML = `${selectHtml}<div id="acc-snapshot-table-body">${_tableFor(latest)}</div>`;
+
+    const select = document.getElementById('acc-snapshot-season');
+    if (select) {
+        select.addEventListener('change', () => {
+            document.getElementById('acc-snapshot-table-body').innerHTML = _tableFor(select.value);
+        });
+    }
+}
+
+async function loadSnapshotsData() {
+    const wrap = document.getElementById('acc-snapshots-table');
+    try {
+        const token   = localStorage.getItem('nfl_wins_token');
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const resp = await fetch('/api/admin/nn_weekly_accuracy', { headers });
+        if (resp.status === 404) {
+            wrap.innerHTML = '<p style="color:var(--text-secondary);">No weekly snapshots recorded yet. Run <code>weekly_model_eval.py --firestore</code> after a week completes.</p>';
+            return;
+        }
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        _snapshotsData = await resp.json();
+        renderSnapshotsTable(_snapshotsData.seasons || {});
+    } catch (err) {
+        wrap.innerHTML = `<p style="color:var(--accent-red);">Failed to load weekly snapshots: ${err.message}</p>`;
+    }
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -532,6 +603,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.addEventListener('click', () => {
                 if (!_forecastData) loadForecastData();
                 if (!_accuracyData) loadAccuracyData();
+                if (!_snapshotsData) loadSnapshotsData();
             });
         }
     });

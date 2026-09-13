@@ -454,8 +454,34 @@ class TestApplyPredictionsFallback:
         fallback_engine.game_win_probabilities_batch.assert_not_called()
         assert out.iloc[0]["pred_winner"] == "WAS"
         assert out.iloc[0]["pred_prob"] == 0.62
+        # Regression: model_spread/edge_vs_vegas used to be computed here and
+        # then silently dropped, so a daily rebuild could refresh pred_winner
+        # (from today's simulation) while leaving model_spread stale from
+        # whatever a prior --resimulate/backfill run last wrote -- producing
+        # a pred_winner that disagreed with the displayed model spread.
+        assert out.iloc[0]["model_spread"] == -3.0
+        assert out.iloc[0]["edge_vs_vegas"] == pytest.approx(-0.5)
 
     def test_completed_game_never_touches_fallback_engine(self):
+        from scripts.cache_builder import _apply_predictions
+        schedule = pd.DataFrame([
+            {"home_team": "WAS", "away_team": "KC", "week": 3, "result": 3.0},
+        ])
+        pred_lookup = {(2026, 3, "WAS", "KC"): {
+            "pred_winner": "WAS", "pred_su_conf": 70.0,
+            "pred_ats_pick": "WAS", "pred_prob": 0.7,
+            "model_spread": 4.5, "edge_vs_vegas": 1.0,
+        }}
+        fallback_engine = MagicMock()
+        out = _apply_predictions(schedule, 2026, pred_lookup, fallback_engine=fallback_engine)
+        fallback_engine.simulate_season.assert_not_called()
+        assert out.iloc[0]["pred_winner"] == "WAS"
+        assert out.iloc[0]["model_spread"] == 4.5
+        assert out.iloc[0]["edge_vs_vegas"] == 1.0
+
+    def test_pred_lookup_entry_missing_model_spread_does_not_raise(self):
+        """Older feature-table lookups without model_spread/edge_vs_vegas
+        should degrade to None rather than KeyError."""
         from scripts.cache_builder import _apply_predictions
         schedule = pd.DataFrame([
             {"home_team": "WAS", "away_team": "KC", "week": 3, "result": 3.0},
@@ -466,8 +492,8 @@ class TestApplyPredictionsFallback:
         }}
         fallback_engine = MagicMock()
         out = _apply_predictions(schedule, 2026, pred_lookup, fallback_engine=fallback_engine)
-        fallback_engine.simulate_season.assert_not_called()
-        assert out.iloc[0]["pred_winner"] == "WAS"
+        assert out.iloc[0]["model_spread"] is None
+        assert out.iloc[0]["edge_vs_vegas"] is None
 
     def test_simulate_season_failure_leaves_predictions_none_not_raises(self):
         from scripts.cache_builder import _apply_predictions

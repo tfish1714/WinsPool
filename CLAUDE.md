@@ -54,6 +54,7 @@ python scripts/train_nn_model.py       # Train ML model (auto-increments version
 python scripts/train_nn_model.py --version v3   # Train and save as specific version
 python scripts/weekly_model_eval.py --season 2025 --week 14    # Evaluate ensemble accuracy for one week
 python scripts/weekly_model_eval.py --season 2025 --week 1 18  # Evaluate full season range (NN+XGB+LR ensemble)
+python scripts/weekly_model_eval.py --season 2025 --week 14 --firestore  # Also push to the nn_weekly_accuracy store (admin ML Accuracy tab)
 
 # Consensus benchmark
 python scripts/seed_consensus.py --season 2026 --firestore    # Seed analyst consensus from data/consensus_2026.csv
@@ -196,6 +197,7 @@ Firestore collections and their local equivalents:
 | `game_predictions` | `.local_db/game_predictions_{year}.json` | JSON, not pkl; one doc per season |
 | `analytics_cache` | `.local_db/analytics/{analytic}_{year}_{week}.json` | JSON |
 | `elo_history` | `.local_db/elo_history_{season}.json` | JSON, one doc per season; written by `scripts/compute_elo.py --firestore` (not the normal service-write path — see gotcha below); powers the admin Elo Ratings Explorer |
+| `nn_weekly_accuracy` | `.local_db/nn_weekly_accuracy_{season}.json` | JSON, one doc per season; written by `scripts/weekly_model_eval.py --firestore` (manual, run once a week's games finish — nothing schedules it). Durable per-week accuracy snapshot that survives later retrains, unlike `game_predictions` which `cache_builder.py` recomputes with whatever model is currently deployed every day. Powers the admin ML Accuracy tab's "Weekly Snapshots" panel. Writes upsert by week rather than overwrite the season doc, since each run only evaluates the weeks passed on its command line |
 | `config` | *(no local pkl — always reads Firestore)* | Single doc `config/settings`; stores `draft_active` flag and app-level settings |
 
 `.local_db/backup_preseason_consensus_*.json` holds the pre-migration backup of
@@ -288,7 +290,7 @@ Three models are blended (45% NN + 20% XGB + 35% LR) for every game prediction:
 Each registry tracks all versions and designates `latest` and `best`. When retraining, the train scripts auto-increment the version.
 
 - Feature pipeline: `nn_feature_engine.py` (26 features) → `nn_prediction_service.py` / `xgb_prediction_service.py` / `lr_prediction_service.py` → blended in `prediction_service.py` and `backfill_schedule_predictions.py`
-- Weekly ensemble accuracy tracked in `reports/nn_weekly_accuracy.csv` via `scripts/weekly_model_eval.py`
+- Weekly ensemble accuracy tracked in `reports/nn_weekly_accuracy.csv` via `scripts/weekly_model_eval.py`, and optionally pushed to the `nn_weekly_accuracy` Firestore store (`--firestore`) for the admin ML Accuracy tab's "Weekly Snapshots" panel
 - Elo ratings computed by `scripts/compute_elo.py` → `rawdata/elo_computed.csv` (run after each rawdata sync)
 - `NNProjectionEngine` (`nn_projection_engine.py`) produces season projections by running the **same** per-game ensemble forward through the schedule — there is no separate season-wins model, and no power-rating blend (`_batch_predict` is the plain 45/20/35 ensemble). `simulate_season()` seeds each team's state (Elo + 4 EPA dims + margin) from preseason player profiles plus a profile-composite Elo boost (`PRESEASON_ELO_BOOST_MAX`, ±200), tiles it across N Monte Carlo trials, then walks weeks in order: batch-predict every game across every trial, convert probability to an implied margin, sample `Normal(implied, MC_MARGIN_STD)`, increment wins on the margin sign, and **update Elo/EPA state in place** so later weeks see the simulated record. Win distributions across trials give `mean_wins`/`median`/`std_dev`/`p5`/`p25`/`p75`/`p95`. Preseason team state comes from `compute_preseason_player_profiles()` (`nn_feature_engine.py`) — a player-level blend of up to 3 prior seasons per position group (QB/WR/TE/RB, OL, DL, LB, CB/S), weighted by recency × reliability (share of a full season's volume), with a season excluded entirely (not just down-weighted) below a minimum-sample threshold so a single noisy small-sample season can't dominate a player's rate.
 - `scripts/walk_forward_validate.py` scores the ensemble out-of-sample (train on seasons strictly before the fold, predict the fold) → `reports/walk_forward_validation.csv` — a diagnostic for "is the model actually better than consensus," not a production path. It can't exercise the preseason-profile branch above for most historical folds (see `docs/prediction_model.md`'s Season Win Projection section); `scripts/walk_forward_diagnose_preseason_path.py` forces that branch for the 2025 fold specifically as a one-off check.

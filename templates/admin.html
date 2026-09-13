@@ -424,6 +424,21 @@
             <h4 id="acc-week-title" style="color: var(--accent-gold); margin: 0 0 0.75rem;"></h4>
             <div id="acc-week-table" style="overflow-x: auto;"></div>
         </div>
+
+        <!-- Weekly snapshots: graded once per week by scripts/weekly_model_eval.py
+             --firestore, never rewritten by a later retrain -- unlike the live
+             table above, which reflects whatever model is currently deployed. -->
+        <div id="acc-snapshots-section" style="margin-top: 2rem; border-top: 1px solid var(--glass-border); padding-top: 1.5rem;">
+            <h3 style="margin: 0 0 0.25rem;">Weekly Snapshots</h3>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0 0 1rem;">
+                Graded once per week (<code>weekly_model_eval.py --firestore</code>) and never
+                overwritten by a later retrain -- a true record of what the model called
+                before each outcome was known.
+            </p>
+            <div id="acc-snapshots-table" style="overflow-x: auto;">
+                <div style="padding: 1.5rem; text-align: center; color: var(--text-secondary);">Loading weekly snapshots…</div>
+            </div>
+        </div>
     </div>
 
     <div id="consensus-section" class="tab-content card-glass hidden" style="height: auto;">

@@ -470,3 +470,107 @@ def write_elo_history_season(season: int, rows: list[dict], *, use_local: bool |
             "season": season,
             "rows": rows,
         })
+
+
+# ---------------------------------------------------------------------------
+# NN weekly accuracy tracking (Model Accuracy Explorer)
+# ---------------------------------------------------------------------------
+# One document per season, mirroring elo_history above. Written by
+# scripts/weekly_model_eval.py --firestore after each week's games complete,
+# so this is a durable, retrain-proof record of "what did the model predict
+# before we knew the outcome" -- unlike game_predictions, which cache_builder.py
+# recomputes with whatever model is currently deployed every day.
+# Local: .local_db/nn_weekly_accuracy_{season}.json. Firestore: nn_weekly_accuracy/{season}.
+
+
+def _read_nn_weekly_accuracy_local(season: int) -> list[dict] | None:
+    p = _GAME_PRED_DIR / f"nn_weekly_accuracy_{season}.json"
+    if p.exists():
+        try:
+            with open(p) as f:
+                return json.load(f).get("rows")
+        except Exception:
+            return None
+    return None
+
+
+def _read_nn_weekly_accuracy_firestore(season: int) -> list[dict] | None:
+    try:
+        from services.db_service import get_db
+        db = get_db()
+        doc = db.collection("nn_weekly_accuracy").document(str(season)).get()
+        if doc.exists:
+            return doc.to_dict().get("rows")
+    except Exception:
+        pass
+    return None
+
+
+def get_nn_weekly_accuracy_season(season: int) -> list[dict] | None:
+    """Return the list of per-week accuracy rows for one season, or None if absent."""
+    if _USE_LOCAL:
+        return _read_nn_weekly_accuracy_local(season)
+    return _read_nn_weekly_accuracy_firestore(season)
+
+
+def get_all_nn_weekly_accuracy() -> list[dict]:
+    """Return every recorded weekly-accuracy row across all seasons, sorted oldest first."""
+    all_rows: list[dict] = []
+    if _USE_LOCAL:
+        for p in sorted(_GAME_PRED_DIR.glob("nn_weekly_accuracy_*.json")):
+            try:
+                with open(p) as f:
+                    all_rows.extend(json.load(f).get("rows", []))
+            except Exception:
+                logger.warning("Failed to read %s", p)
+    else:
+        try:
+            from services.db_service import get_db
+            db = get_db()
+            for doc in db.collection("nn_weekly_accuracy").stream():
+                all_rows.extend(doc.to_dict().get("rows", []))
+        except Exception:
+            logger.exception("Failed to fetch nn_weekly_accuracy from Firestore")
+    all_rows.sort(key=lambda r: (r.get("season", 0), r.get("week", 0)))
+    return all_rows
+
+
+def write_nn_weekly_accuracy_rows(season: int, new_rows: list[dict], *, use_local: bool | None = None) -> None:
+    """Upsert `new_rows` (one per evaluated week) into this season's stored
+    accuracy history by week number, then persist the merged list.
+
+    Called by scripts/weekly_model_eval.py --firestore. Unlike
+    write_elo_history_season (a full-season overwrite -- compute_elo.py always
+    recomputes every week), this merges: weekly_model_eval.py only evaluates
+    the weeks passed on its command line per run, so a naive overwrite would
+    erase every previously-recorded week.
+    """
+    _local = _USE_LOCAL if use_local is None else use_local
+
+    existing = (
+        _read_nn_weekly_accuracy_local(season) if _local
+        else _read_nn_weekly_accuracy_firestore(season)
+    ) or []
+    by_week = {r["week"]: r for r in existing}
+    for row in new_rows:
+        by_week[row["week"]] = row
+    merged = [by_week[wk] for wk in sorted(by_week)]
+
+    if _local:
+        _GAME_PRED_DIR.mkdir(parents=True, exist_ok=True)
+        p = _GAME_PRED_DIR / f"nn_weekly_accuracy_{season}.json"
+        with open(p, "w") as f:
+            json.dump({"season": season, "rows": merged}, f, default=str)
+    else:
+        from services.db_service import get_db
+        db = get_db()
+        if db is None:
+            raise RuntimeError(
+                f"Cannot write nn_weekly_accuracy/{season} to Firestore: get_db() returned "
+                "None (USE_LOCAL_DATA is set). Set USE_LOCAL_DATA=False before calling "
+                "write_nn_weekly_accuracy_rows(use_local=False)."
+            )
+        db.collection("nn_weekly_accuracy").document(str(season)).set({
+            "season": season,
+            "rows": merged,
+        })

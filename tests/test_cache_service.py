@@ -156,6 +156,106 @@ class TestEloHistoryCache:
         assert [r["season"] for r in all_rows] == [2006, 2025]
 
 
+class TestNnWeeklyAccuracyCache:
+    """Tests for get_nn_weekly_accuracy_season / get_all_nn_weekly_accuracy /
+    write_nn_weekly_accuracy_rows."""
+
+    def test_write_then_read_local_season(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+        monkeypatch.setattr("services.cache_service._GAME_PRED_DIR", tmp_path)
+
+        from services.cache_service import write_nn_weekly_accuracy_rows, get_nn_weekly_accuracy_season
+
+        rows = [{"season": 2025, "week": 1, "accuracy_pct": 62.5}]
+        write_nn_weekly_accuracy_rows(2025, rows, use_local=True)
+
+        result = get_nn_weekly_accuracy_season(2025)
+        assert result == rows
+
+    def test_get_nonexistent_season_returns_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+        monkeypatch.setattr("services.cache_service._GAME_PRED_DIR", tmp_path)
+
+        from services.cache_service import get_nn_weekly_accuracy_season
+        assert get_nn_weekly_accuracy_season(2099) is None
+
+    def test_write_upserts_by_week_without_erasing_other_weeks(self, tmp_path, monkeypatch):
+        """A run evaluating only week 2 must not wipe out week 1's stored row --
+        weekly_model_eval.py is only ever given the weeks on its command line,
+        unlike compute_elo.py which recomputes a whole season every time."""
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+        monkeypatch.setattr("services.cache_service._GAME_PRED_DIR", tmp_path)
+
+        from services.cache_service import write_nn_weekly_accuracy_rows, get_nn_weekly_accuracy_season
+
+        write_nn_weekly_accuracy_rows(2025, [{"season": 2025, "week": 1, "accuracy_pct": 60.0}], use_local=True)
+        write_nn_weekly_accuracy_rows(2025, [{"season": 2025, "week": 2, "accuracy_pct": 70.0}], use_local=True)
+
+        result = get_nn_weekly_accuracy_season(2025)
+        assert [r["week"] for r in result] == [1, 2]
+
+    def test_write_replaces_same_week_on_rerun(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+        monkeypatch.setattr("services.cache_service._GAME_PRED_DIR", tmp_path)
+
+        from services.cache_service import write_nn_weekly_accuracy_rows, get_nn_weekly_accuracy_season
+
+        write_nn_weekly_accuracy_rows(2025, [{"season": 2025, "week": 1, "accuracy_pct": 60.0}], use_local=True)
+        write_nn_weekly_accuracy_rows(2025, [{"season": 2025, "week": 1, "accuracy_pct": 80.0}], use_local=True)
+
+        result = get_nn_weekly_accuracy_season(2025)
+        assert len(result) == 1
+        assert result[0]["accuracy_pct"] == 80.0
+
+    def test_get_all_combines_and_sorts_seasons(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+        monkeypatch.setattr("services.cache_service._GAME_PRED_DIR", tmp_path)
+
+        from services.cache_service import write_nn_weekly_accuracy_rows, get_all_nn_weekly_accuracy
+
+        write_nn_weekly_accuracy_rows(2025, [{"season": 2025, "week": 1}], use_local=True)
+        write_nn_weekly_accuracy_rows(2006, [{"season": 2006, "week": 1}], use_local=True)
+
+        all_rows = get_all_nn_weekly_accuracy()
+        assert [r["season"] for r in all_rows] == [2006, 2025]
+
+    def test_write_firestore_writes_merged_document(self, mock_firestore, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+
+        mock_doc = MagicMock()
+        mock_doc.exists = True
+        mock_doc.to_dict.return_value = {"season": 2025, "rows": [{"season": 2025, "week": 1, "accuracy_pct": 60.0}]}
+        mock_firestore.collection.return_value.document.return_value.get.return_value = mock_doc
+
+        from services.cache_service import write_nn_weekly_accuracy_rows
+
+        write_nn_weekly_accuracy_rows(2025, [{"season": 2025, "week": 2, "accuracy_pct": 70.0}], use_local=False)
+
+        mock_firestore.collection.assert_called_with("nn_weekly_accuracy")
+        mock_firestore.collection.return_value.document.assert_called_with("2025")
+        mock_firestore.collection.return_value.document.return_value.set.assert_called_with({
+            "season": 2025,
+            "rows": [
+                {"season": 2025, "week": 1, "accuracy_pct": 60.0},
+                {"season": 2025, "week": 2, "accuracy_pct": 70.0},
+            ],
+        })
+
+    def test_get_all_firestore_streams_every_doc(self, mock_firestore, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", False)
+
+        from services.cache_service import get_all_nn_weekly_accuracy
+
+        doc_2006 = MagicMock()
+        doc_2006.to_dict.return_value = {"season": 2006, "rows": [{"season": 2006, "week": 1}]}
+        doc_2025 = MagicMock()
+        doc_2025.to_dict.return_value = {"season": 2025, "rows": [{"season": 2025, "week": 1}]}
+        mock_firestore.collection.return_value.stream.return_value = [doc_2025, doc_2006]
+
+        all_rows = get_all_nn_weekly_accuracy()
+        assert [r["season"] for r in all_rows] == [2006, 2025]
+
+
 def test_merge_game_predictions_includes_edge_vs_vegas():
     """merge_game_predictions must propagate edge_vs_vegas from prediction dict."""
     import pandas as pd

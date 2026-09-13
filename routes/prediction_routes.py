@@ -182,6 +182,39 @@ async def get_elo_history(_: dict = Depends(require_admin)):
         return server_error()
 
 
+@router.get("/admin/nn_weekly_accuracy")
+async def get_nn_weekly_accuracy(_: dict = Depends(require_admin)):
+    """Admin-only: per-week model accuracy snapshots, grouped by season.
+
+    Reads the nn_weekly_accuracy store (services/cache_service.py), which
+    scripts/weekly_model_eval.py --firestore writes once per graded week --
+    a durable record of what the model predicted before the outcome was
+    known, unrelated to (and not overwritten by) game_predictions, which
+    cache_builder.py recomputes with the currently-deployed model every day.
+    """
+    try:
+        from services.cache_service import get_all_nn_weekly_accuracy
+
+        rows = get_all_nn_weekly_accuracy()
+        if not rows:
+            return JSONResponse(status_code=404, content={
+                "error": "No weekly accuracy history found. Run "
+                         "scripts/weekly_model_eval.py --firestore after a week completes."
+            })
+
+        seasons: dict = {}
+        for row in rows:
+            season_key = str(row.get("season"))
+            seasons.setdefault(season_key, []).append(row)
+        for season_key in seasons:
+            seasons[season_key].sort(key=lambda r: r.get("week", 0))
+
+        return JSONResponse(content={"seasons": seasons})
+    except Exception as e:
+        logger.exception("Unhandled error in prediction endpoint")
+        return server_error()
+
+
 def _load_predictions_by_season(all_games):
     """{season: {game_key: pred_dict}} for every season from BACKTEST_MIN_SEASON
     (or the games data's own floor, if later) through the latest season present
