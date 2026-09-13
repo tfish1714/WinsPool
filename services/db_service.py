@@ -175,13 +175,28 @@ def _get_players_df():
         return getattr(bundle, "players", pd.DataFrame())
     return get_collection_df("players")
 
+def _row_to_dict_no_nan(row) -> dict:
+    """Converts a DataFrame row to a dict, normalizing pandas NaN to None.
+
+    A players DataFrame built from heterogeneous Firestore docs (e.g. some
+    players have never had `password_hash`/`must_change_password`/etc. set)
+    has NaN, not None, for those missing fields on the rows lacking them —
+    a pandas artifact of building one DataFrame out of docs with different
+    keys. `bool(float('nan'))` is True in Python, so callers doing
+    `bool(player.get("password_hash"))` would incorrectly treat a player who
+    has never set a password as already having one. Normalizing here fixes
+    every caller of get_player_by_email/get_player_by_id at the source
+    instead of requiring each call site to remember a pd.notna() guard.
+    """
+    return {k: (None if pd.isna(v) else v) for k, v in row.to_dict().items()}
+
 def get_player_by_email(email: str):
     """Retrieve a single player directly by their standardized email address."""
     players_df = _get_players_df()
     if not players_df.empty and "email" in players_df.columns:
         match = players_df[players_df["email"].astype(str).str.lower() == email.lower()]
         if not match.empty:
-            return match.iloc[0].to_dict()
+            return _row_to_dict_no_nan(match.iloc[0])
     return None
 
 def get_player_by_id(player_id: str):
@@ -190,7 +205,7 @@ def get_player_by_id(player_id: str):
     if not players_df.empty and "playerId" in players_df.columns:
         match = players_df[players_df["playerId"].astype(str) == str(player_id)]
         if not match.empty:
-            return match.iloc[0].to_dict()
+            return _row_to_dict_no_nan(match.iloc[0])
     return None
 
 def update_player_credentials(player_id: str, password_hash: str):
