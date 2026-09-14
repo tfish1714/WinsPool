@@ -103,7 +103,22 @@ Lowering the TTL would add Firestore load to the one path in this inventory that
 
 ## Frontend Core Web Vitals
 
-*(filled in by Task 6)*
+Audited against production (`https://winspool-62mntiyu5a-ue.a.run.app`), authenticated as `e2e-test-01` (logged in via the real signin form at `#signin-screen`/`#auth-email`/`#auth-password`/`#auth-submit-btn`, same flow `tests_e2e/test_standings.py::_login` uses, driven here via `chrome-devtools-mcp` instead of Playwright).
+
+**Tooling note — deviation from the brief's literal `lighthouse_audit` instruction:** this environment's `lighthouse_audit` tool explicitly scopes itself to Accessibility/Best-Practices/SEO/Agentic-Browsing and does not run a Performance category at all (confirmed by inspecting its raw `report.json`: no `performance` key under `categories`, and no `largest-contentful-paint`/`total-blocking-time`/`interaction-to-next-paint` audit entries — only a stray `cumulative-layout-shift` value leaked in outside any category). Real LCP/CLS numbers instead came from `performance_start_trace`/`performance_stop_trace` (the same underlying Chrome trace machinery Lighthouse's performance category uses), run once per page/viewport with a forced reload and default (no) throttling. This tool does not report INP or TBT: INP requires a real user interaction during the trace (none was performed — these are cold navigation loads), and TBT is not surfaced in this tool's summary output at all. Both are recorded as "not available" below rather than guessed.
+
+| Page | Viewport | LCP | CLS | INP/TBT |
+|---|---|---|---|---|
+| Standings (/wins-pool) | Desktop | 495 ms | 0.005 | not available (see tooling note) |
+| Standings (/wins-pool) | Mobile (~390px) | 631 ms | 0.01 | not available (see tooling note) |
+| Draft room (/draft) | Desktop | 246 ms | 0.01 | not available (see tooling note) |
+| Draft room (/draft) | Mobile (~390px) | 241 ms | 0.01 | not available (see tooling note) |
+
+All four runs were unthrottled (1x CPU, no network throttling) against the live Cloud Run service from this machine's network — not a simulated slow-mobile profile, so these numbers are a best case rather than representative of a user on a poor connection.
+
+**Draft room state at time of audit:** full interactive draft room — a live, mid-draft 2026 season (round 3, picks 28-30 remaining in the pick queue, running portfolio table populated for all 10 players, chat panel with full history), not the "no active draft" placeholder. Both the desktop and mobile audits hit this same state (viewport does not change which state the route renders).
+
+**Interpretation:** All four LCP figures (246-631 ms) comfortably clear Google's "good" LCP threshold (<2.5s) and all four CLS figures (0.005-0.01) comfortably clear the "good" CLS threshold (<0.1) — no red flags on these two metrics at either viewport, on either page, under these unthrottled conditions. The standings page's mobile LCP (631 ms) is noticeably higher than its desktop LCP (495 ms), consistent with the render-delay component of LCP dominating over TTFB in both cases (TTFB 286-336 ms, render delay 159-346 ms) — this points at client-side rendering/hydration work as the bigger lever for further LCP gains here, not server response time, echoing Task 2's finding that backend request p50/p95 latency is not itself the bottleneck. INP/TBT could not be measured with the tooling available in this environment (see tooling note above) — that is a real gap in this audit, not a "good" result being implied; a follow-up with Lighthouse's own performance category (a different chrome-devtools-mcp version, or the standalone `lighthouse` CLI) or a synthetic-interaction trace would be needed to fill it in. Because the draft room was captured in its full interactive state rather than the no-draft placeholder, its LCP/CLS numbers are representative of the real hot page, not a degenerate case — a meaningfully more useful result than the brief's anticipated fallback.
 
 ## Recommendations
 
