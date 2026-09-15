@@ -192,3 +192,49 @@ def test_sync_nfl_data_explicit_historical_range_signals_historical_domain(monke
         daily_nfl_sync.sync_nfl_data(seasons=(2020, 2024))  # entirely before the max season (2026)
 
     mock_signal.assert_called_once_with(DOMAIN_HISTORICAL)
+
+
+def test_sync_nfl_data_explicit_active_only_range_signals_active_domain_only(monkeypatch):
+    """Regression: a --seasons range that is exactly the active season alone
+    must signal only DOMAIN_ACTIVE, not both (matches backfill_schedule_
+    predictions.py's Task 6 boundary fix)."""
+    from scripts import daily_nfl_sync
+    from services.cache_service import DOMAIN_ACTIVE
+    fake_games = pd.DataFrame([
+        {"season": 2026, "game_type": "REG", "home_team": "KC", "away_team": "BUF",
+         "result": 3, "home_score": 24, "away_score": 21, "game_id": "g2"},
+    ])
+    monkeypatch.setattr(daily_nfl_sync, "load_games", lambda: fake_games)
+    monkeypatch.setattr(daily_nfl_sync, "initialize_firebase", lambda: MagicMock())
+    monkeypatch.setattr(daily_nfl_sync, "batch_upload", lambda *a, **k: 1)
+
+    from unittest.mock import patch
+    with patch("services.db_service.signal_data_update") as mock_signal:
+        daily_nfl_sync.sync_nfl_data(seasons=(2026, 2026))
+
+    mock_signal.assert_called_once_with(DOMAIN_ACTIVE)
+
+
+def test_sync_nfl_data_explicit_range_spanning_active_signals_both_domains(monkeypatch):
+    """Regression for the boundary bug: a --seasons range that touches the
+    active season but also extends into historical seasons must signal BOTH
+    domains, not silently under-signal historical."""
+    from scripts import daily_nfl_sync
+    from services.cache_service import DOMAIN_ACTIVE, DOMAIN_HISTORICAL
+    fake_games = pd.DataFrame([
+        {"season": 2024, "game_type": "REG", "home_team": "KC", "away_team": "SF",
+         "result": 3, "home_score": 20, "away_score": 17, "game_id": "g1"},
+        {"season": 2026, "game_type": "REG", "home_team": "KC", "away_team": "BUF",
+         "result": 3, "home_score": 24, "away_score": 21, "game_id": "g2"},
+    ])
+    monkeypatch.setattr(daily_nfl_sync, "load_games", lambda: fake_games)
+    monkeypatch.setattr(daily_nfl_sync, "initialize_firebase", lambda: MagicMock())
+    monkeypatch.setattr(daily_nfl_sync, "batch_upload", lambda *a, **k: 1)
+
+    from unittest.mock import patch
+    with patch("services.db_service.signal_data_update") as mock_signal:
+        daily_nfl_sync.sync_nfl_data(seasons=(2013, 2026))  # spans historical + active (max season 2026)
+
+    assert mock_signal.call_count == 2
+    called_domains = {c.args[0] for c in mock_signal.call_args_list}
+    assert called_domains == {DOMAIN_ACTIVE, DOMAIN_HISTORICAL}

@@ -640,7 +640,11 @@ def set_consensus_projections(season: int, rows: list) -> int:
         batch.commit()
 
     logger.info("Wrote %d consensus rows for %s.", count, season)
-    signal_data_update()
+    if count:
+        from services.cache_service import DOMAIN_PREDICTIONS_ACTIVE, DOMAIN_PREDICTIONS_HISTORICAL
+        from services.data_service import _get_active_bucket
+        domain = DOMAIN_PREDICTIONS_ACTIVE if season == _get_active_bucket()["season"] else DOMAIN_PREDICTIONS_HISTORICAL
+        signal_data_update(domain)
     return count
 
 
@@ -709,5 +713,8 @@ def set_preseason_predictions(season: int, projections: dict, model_version: str
         batch.commit()
 
     if written:
-        signal_data_update()
+        from services.cache_service import DOMAIN_PREDICTIONS_ACTIVE, DOMAIN_PREDICTIONS_HISTORICAL
+        from services.data_service import _get_active_bucket
+        domain = DOMAIN_PREDICTIONS_ACTIVE if season == _get_active_bucket()["season"] else DOMAIN_PREDICTIONS_HISTORICAL
+        signal_data_update(domain)
     return written

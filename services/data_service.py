@@ -83,9 +83,16 @@ def _fetch_static_bucket():
 
 
 def _get_static_bucket():
+    """No TTL here -- per the design spec, static is refreshed only by an
+    explicit write-triggered clear or the remote-signal check, never on a
+    routine cadence. Every writer that touches players/draft_order/
+    draft_results/draft_order_rules already calls clear_data_cache(DOMAIN_STATIC)
+    + signal_data_update(DOMAIN_STATIC) (see Task 4), so a TTL fallback here
+    would only add a needless full 5-collection refetch on every warm
+    instance once an hour, forever."""
     import services.cache_service as cs
     cached = cs.get_domain(cs.DOMAIN_STATIC)
-    if cached is not None and _domain_is_fresh(cs.DOMAIN_STATIC):
+    if cached is not None:
         return cached
     bucket = _fetch_static_bucket()
     cs.set_domain(cs.DOMAIN_STATIC, bucket)
@@ -148,9 +155,15 @@ def _get_active_bucket():
 
 
 def _get_historical_bucket():
+    """No TTL here -- per the design spec, historical is "fetched once, then
+    effectively permanent: refreshed only when an explicit ... signal fires
+    ..., not on any routine cadence." A TTL fallback would force a full
+    unfiltered nfl_games/nfl_standings refetch on every warm instance once
+    an hour forever, which is exactly the read-volume cost this plan exists
+    to eliminate."""
     import services.cache_service as cs
     cached = cs.get_domain(cs.DOMAIN_HISTORICAL)
-    if cached is not None and _domain_is_fresh(cs.DOMAIN_HISTORICAL):
+    if cached is not None:
         return cached
     _, historical = _bootstrap_games_standings()
     return historical

@@ -433,3 +433,39 @@ def test_predict_season_write_is_picked_up_by_a_separate_load(monkeypatch):
 
     assert cs.get_domain(cs.DOMAIN_PREDICTIONS_ACTIVE) is None  # cleared by the remote signal
     cs.clear_data_cache()
+
+
+def test_historical_bucket_does_not_refetch_purely_because_an_hour_passed(monkeypatch):
+    """Regression: per the design spec, DOMAIN_HISTORICAL is 'fetched once,
+    then effectively permanent ... not on any routine cadence' -- a warm
+    bucket must survive well past the old 1-hour TTL with zero additional
+    Firestore/pkl fetches."""
+    import services.cache_service as cs
+    from services import data_service
+    cs.clear_data_cache()
+    data_service.load_data()  # warm the historical bucket
+    assert cs.get_domain(cs.DOMAIN_HISTORICAL) is not None
+
+    # Simulate time well past the old TTL -- no signal fired, nothing changed.
+    cs._DOMAIN_TIMESTAMPS[cs.DOMAIN_HISTORICAL] -= 10 * cs._CACHE_TTL_SECONDS
+
+    with patch("services.data_service.get_collection_df") as mock_fetch:
+        data_service._get_historical_bucket()
+        mock_fetch.assert_not_called()
+    cs.clear_data_cache()
+
+
+def test_static_bucket_does_not_refetch_purely_because_an_hour_passed(monkeypatch):
+    """Same regression as above, for DOMAIN_STATIC."""
+    import services.cache_service as cs
+    from services import data_service
+    cs.clear_data_cache()
+    data_service.load_data()  # warm the static bucket
+    assert cs.get_domain(cs.DOMAIN_STATIC) is not None
+
+    cs._DOMAIN_TIMESTAMPS[cs.DOMAIN_STATIC] -= 10 * cs._CACHE_TTL_SECONDS
+
+    with patch("services.data_service.get_collection_df") as mock_fetch:
+        data_service._get_static_bucket()
+        mock_fetch.assert_not_called()
+    cs.clear_data_cache()

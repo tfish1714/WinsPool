@@ -42,68 +42,9 @@ DOMAIN_SIGNAL_FIELDS = {
 
 _DOMAIN_CACHE: dict = {}
 _DOMAIN_TIMESTAMPS: dict = {}
-_CACHE_TTL_SECONDS = 3600  # 1-hour TTL; long enough to avoid Firestore spam on every request, short enough to catch same-day data changes
+_CACHE_TTL_SECONDS = 3600  # 1-hour TTL; used only by data_service.py's _get_active_bucket() as a defensive backstop -- historical/static are signal-only per the design spec, see data_service.py's _get_historical_bucket()/_get_static_bucket()
 _LAST_REMOTE_CHECK = 0
 _REMOTE_CHECK_INTERVAL = 60  # Check Firestore for invalidation every 60 seconds
-
-# Backward compatibility shims: map old year-based keys to domain ACTIVE data
-# This allows existing code (db_service.py, data_service.py) to continue working
-# while transitioning to the domain-based API. Once all callers migrate, these
-# can be removed.
-class _DataCacheCompat(dict):
-    """Compatibility wrapper that maps legacy 'all' key to DOMAIN_ACTIVE."""
-    def get(self, key, default=None):
-        if key == 'all' or key is None:
-            return _DOMAIN_CACHE.get(DOMAIN_ACTIVE, default)
-        return _DOMAIN_CACHE.get(key, default)
-
-    def __setitem__(self, key, value):
-        if key == 'all' or key is None:
-            _DOMAIN_CACHE[DOMAIN_ACTIVE] = value
-        else:
-            _DOMAIN_CACHE[key] = value
-
-    def __getitem__(self, key):
-        if key == 'all' or key is None:
-            return _DOMAIN_CACHE[DOMAIN_ACTIVE]
-        return _DOMAIN_CACHE[key]
-
-    def __contains__(self, key):
-        if key == 'all' or key is None:
-            return DOMAIN_ACTIVE in _DOMAIN_CACHE
-        return key in _DOMAIN_CACHE
-
-    def clear(self):
-        _DOMAIN_CACHE.clear()
-
-class _TimestampsCompat(dict):
-    """Compatibility wrapper for timestamps that maps to domain ACTIVE."""
-    def get(self, key, default=None):
-        if key == 'all' or key is None:
-            return _DOMAIN_TIMESTAMPS.get(DOMAIN_ACTIVE, default)
-        return _DOMAIN_TIMESTAMPS.get(key, default)
-
-    def __setitem__(self, key, value):
-        if key == 'all' or key is None:
-            _DOMAIN_TIMESTAMPS[DOMAIN_ACTIVE] = value
-        else:
-            _DOMAIN_TIMESTAMPS[key] = value
-
-    def __getitem__(self, key):
-        if key == 'all' or key is None:
-            return _DOMAIN_TIMESTAMPS[DOMAIN_ACTIVE]
-        return _DOMAIN_TIMESTAMPS[key]
-
-    def __contains__(self, key):
-        if key == 'all' or key is None:
-            return DOMAIN_ACTIVE in _DOMAIN_TIMESTAMPS
-        return key in _DOMAIN_TIMESTAMPS
-
-    def clear(self):
-        _DOMAIN_TIMESTAMPS.clear()
-
-_DATA_CACHE = _DataCacheCompat()
-_CACHE_TIMESTAMPS = _TimestampsCompat()
 
 
 def get_domain(domain: str):
@@ -142,17 +83,6 @@ def clear_data_cache(domain: str = None) -> None:
         _DOMAIN_CACHE.clear()
         _DOMAIN_TIMESTAMPS.clear()
         logger.info("All cache domains cleared.")
-
-
-# Legacy compatibility shim for db_service.py's current use of _DATA_CACHE
-def _cache_key(year):
-    """Transitional shim: convert year-based key to domain constant.
-
-    This function maintains backward compatibility for code that hasn't yet
-    migrated to domain-based caching. It should be replaced by direct use of
-    domain constants in Task 4.
-    """
-    return str(year) if year is not None else 'all'
 
 
 # ---------------------------------------------------------------------------

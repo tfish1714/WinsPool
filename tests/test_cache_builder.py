@@ -394,6 +394,71 @@ class TestPreseasonPredictionsWiring:
             assert call.kwargs.get("model_version") == "nn_v15+xgb_v9+lr_v7"
 
 
+class TestScheduleEnrichedGate:
+    """Task 10 deviation: schedule_enriched's is_past_season gate replaces
+    the deleted analytics_cache is_cache_final() finality check. Without
+    this gate, a completed past season's game_predictions would be
+    recomputed and rewritten to Firestore on every single daily
+    cache_builder.py run, forever."""
+
+    @patch("scripts.cache_builder.analysis.get_enriched_schedule")
+    def test_past_season_skipped_without_force(self, mock_get_enriched):
+        from scripts.cache_builder import build_year
+        import pandas as pd
+
+        games = pd.DataFrame([
+            {"season": 2024, "week": 18, "home_team": "KC", "away_team": "TEN",
+             "result": 7.0, "game_type": "REG"},
+        ])
+        build_year(
+            standings=pd.DataFrame(), games=games, players=pd.DataFrame(),
+            draft_order=pd.DataFrame(), draft_results=pd.DataFrame(),
+            draft_order_rules=pd.DataFrame(), year=2024, current_year=2026,
+            all_games=games, force=False, pred_lookup={}, model_version=None,
+        )
+
+        mock_get_enriched.assert_not_called()
+
+    @patch("scripts.cache_builder.analysis.get_enriched_schedule")
+    def test_past_season_recomputed_with_force(self, mock_get_enriched):
+        from scripts.cache_builder import build_year
+        import pandas as pd
+
+        mock_get_enriched.return_value = pd.DataFrame()
+        games = pd.DataFrame([
+            {"season": 2024, "week": 18, "home_team": "KC", "away_team": "TEN",
+             "result": 7.0, "game_type": "REG"},
+        ])
+        build_year(
+            standings=pd.DataFrame(), games=games, players=pd.DataFrame(),
+            draft_order=pd.DataFrame(), draft_results=pd.DataFrame(),
+            draft_order_rules=pd.DataFrame(), year=2024, current_year=2026,
+            all_games=games, force=True, pred_lookup={}, model_version=None,
+        )
+
+        mock_get_enriched.assert_called_once()
+
+    @patch("scripts.cache_builder.analysis.get_enriched_schedule")
+    def test_current_season_always_recomputed(self, mock_get_enriched):
+        """A current/future season is never skipped by this gate, force or not."""
+        from scripts.cache_builder import build_year
+        import pandas as pd
+
+        mock_get_enriched.return_value = pd.DataFrame()
+        games = pd.DataFrame([
+            {"season": 2026, "week": 1, "home_team": "KC", "away_team": "TEN",
+             "result": None, "game_type": "REG"},
+        ])
+        build_year(
+            standings=pd.DataFrame(), games=games, players=pd.DataFrame(),
+            draft_order=pd.DataFrame(), draft_results=pd.DataFrame(),
+            draft_order_rules=pd.DataFrame(), year=2026, current_year=2026,
+            all_games=games, force=False, pred_lookup={}, model_version=None,
+        )
+
+        mock_get_enriched.assert_called_once()
+
+
 class TestBuildCompletedResults:
     def test_extracts_completed_reg_games_only(self):
         from scripts.cache_builder import _build_completed_results

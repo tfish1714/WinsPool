@@ -187,12 +187,13 @@ def sync_nfl_data(seasons: tuple = None):
     df_games = load_games()
     print(f"  {len(df_games)} games loaded ({int(df_games['season'].min())}–{int(df_games['season'].max())})")
 
+    active_season = int(df_games["season"].max())
     if seasons is not None:
         lo, hi = seasons
         scoped_games = df_games[(df_games["season"] >= lo) & (df_games["season"] <= hi)].copy()
         print(f"  Scoped to explicit season range {lo}-{hi} ({len(scoped_games)} games)")
     else:
-        active_season = int(df_games["season"].max())
+        lo, hi = active_season, active_season
         scoped_games = df_games[df_games["season"] == active_season].copy()
         print(f"  Scoped to active season {active_season} ({len(scoped_games)} games)")
 
@@ -206,8 +207,18 @@ def sync_nfl_data(seasons: tuple = None):
         print("Signaling cache invalidation...")
         from services.db_service import signal_data_update
         from services.cache_service import DOMAIN_ACTIVE, DOMAIN_HISTORICAL
-        domain = DOMAIN_HISTORICAL if seasons is not None and seasons[1] < int(df_games["season"].max()) else DOMAIN_ACTIVE
-        signal_data_update(domain)
+        # DOMAIN_ACTIVE/DOMAIN_HISTORICAL route by season == active_season vs.
+        # not (see data_service.py's _bootstrap_games_standings()), so a range
+        # spanning both must signal both -- an explicit --seasons range that
+        # touches the active season but also extends past it (e.g. a backfill
+        # covering 2013-2026 while 2026 is active) must not under-signal
+        # historical the way a single either/or domain choice would.
+        if lo <= active_season <= hi:
+            signal_data_update(DOMAIN_ACTIVE)
+            if not (lo == hi == active_season):
+                signal_data_update(DOMAIN_HISTORICAL)
+        else:
+            signal_data_update(DOMAIN_HISTORICAL)
     else:
         print("No changes -- skipping cache invalidation signal.")
 

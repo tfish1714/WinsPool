@@ -77,7 +77,7 @@ def test_set_consensus_projections_writes_derived_stats(monkeypatch):
     # (set globally for the test session in conftest.py), so it can't be
     # observed via the FakeDB write path -- spy on the call directly instead.
     signaled = []
-    monkeypatch.setattr(db_service, "signal_data_update", lambda: signaled.append(True))
+    monkeypatch.setattr(db_service, "signal_data_update", lambda domain: signaled.append(domain))
 
     count = db_service.set_consensus_projections(2026, [
         {"team": "BUF", "sources": {"br": 12, "vegas_ou": 11.5}, "as_of": "2026-08-12"},
@@ -94,8 +94,12 @@ def test_set_consensus_projections_writes_derived_stats(monkeypatch):
     # Regression guard: the deployed app's in-memory cache has a 1-hour TTL,
     # so writes here must signal remote cache invalidation the same way
     # cache_builder.py and predict_season.py already do, or fresh consensus
-    # data silently doesn't appear on the live site for up to an hour.
-    assert signaled == [True]
+    # data silently doesn't appear on the live site for up to an hour --
+    # and must signal the correct predictions domain for season 2026, not
+    # the unrelated static domain.
+    from services.cache_service import DOMAIN_PREDICTIONS_ACTIVE, DOMAIN_PREDICTIONS_HISTORICAL
+    assert len(signaled) == 1
+    assert signaled[0] in (DOMAIN_PREDICTIONS_ACTIVE, DOMAIN_PREDICTIONS_HISTORICAL)
 
 
 def test_set_consensus_projections_no_db_returns_zero(monkeypatch):
@@ -194,7 +198,7 @@ def test_set_preseason_predictions_writes_full_stats(monkeypatch):
     fake_db = FakeDB()
     monkeypatch.setattr(db_service, "get_db", lambda: fake_db)
     signaled = []
-    monkeypatch.setattr(db_service, "signal_data_update", lambda: signaled.append(True))
+    monkeypatch.setattr(db_service, "signal_data_update", lambda domain: signaled.append(domain))
 
     count = db_service.set_preseason_predictions(
         2026,
@@ -211,7 +215,11 @@ def test_set_preseason_predictions_writes_full_stats(monkeypatch):
     assert payload["model_version"] == "nn_v15+xgb_v9+lr_v7"
     assert payload["locked"] is False
     assert "generated_at" in payload
-    assert signaled == [True]
+    # Must signal a predictions domain (active or historical), not the
+    # unrelated static domain a bare, argument-less signal used to hit.
+    from services.cache_service import DOMAIN_PREDICTIONS_ACTIVE, DOMAIN_PREDICTIONS_HISTORICAL
+    assert len(signaled) == 1
+    assert signaled[0] in (DOMAIN_PREDICTIONS_ACTIVE, DOMAIN_PREDICTIONS_HISTORICAL)
 
 
 def test_set_preseason_predictions_skips_locked_team_without_force(monkeypatch):
@@ -261,7 +269,7 @@ def test_set_preseason_predictions_skips_locked_team_without_force(monkeypatch):
     import services.db_service as db_service
     existing = [FakeExistingDoc({"season": 2026, "team": "KC", "locked": True})]
     monkeypatch.setattr(db_service, "get_db", lambda: FakeDB(existing))
-    monkeypatch.setattr(db_service, "signal_data_update", lambda: None)
+    monkeypatch.setattr(db_service, "signal_data_update", lambda domain: None)
 
     count = db_service.set_preseason_predictions(
         2026,
@@ -328,7 +336,7 @@ def test_set_preseason_predictions_force_overwrites_locked(monkeypatch):
     import services.db_service as db_service
     existing = [FakeExistingDoc({"season": 2026, "team": "KC", "locked": True})]
     monkeypatch.setattr(db_service, "get_db", lambda: FakeDB(existing))
-    monkeypatch.setattr(db_service, "signal_data_update", lambda: None)
+    monkeypatch.setattr(db_service, "signal_data_update", lambda domain: None)
 
     count = db_service.set_preseason_predictions(
         2026,

@@ -32,7 +32,7 @@ def _meta_ok():
     now = time.time()
     def _side(doc_id):
         if doc_id == "cache_control":
-            return {"last_update": now - 3600}
+            return {"predictions_active_updated": now - 3600}
         if doc_id == "sync_elo":
             return {"completed_at": now - 3600, "season": 2025, "week": 18,
                     "games_processed": 12453, "status": "ok", "error": None}
@@ -92,7 +92,7 @@ class TestSyncStatus:
     def test_cache_warn_when_older_than_12h(self, admin_token):
         def _stale_meta(doc_id):
             if doc_id == "cache_control":
-                return {"last_update": time.time() - 50000}
+                return {"predictions_active_updated": time.time() - 50000}
             return None
         with patch("routes.admin_routes.load_data") as mock_load, \
              patch("routes.admin_routes.get_active_season", return_value=2025), \
@@ -101,6 +101,24 @@ class TestSyncStatus:
             mock_load.return_value = _load_data_return()
             resp = client.get("/api/admin/sync_status", headers={"Authorization": admin_token})
         assert resp.json()["analytics_cache"]["status"] == "warn"
+
+    def test_cache_unknown_when_predictions_active_updated_missing(self, admin_token):
+        """Regression: metadata/cache_control can exist (other domains have
+        signaled) without ever having a predictions_active_updated field --
+        e.g. before cache_builder.py's first run, or in the old
+        last_update-only shape. Must report 'unknown', not crash or silently
+        report a stale/wrong age."""
+        def _no_predictions_signal(doc_id):
+            if doc_id == "cache_control":
+                return {"active_updated": time.time() - 60}
+            return None
+        with patch("routes.admin_routes.load_data") as mock_load, \
+             patch("routes.admin_routes.get_active_season", return_value=2025), \
+             patch("routes.admin_routes.get_game_predictions", return_value=_preds()), \
+             patch("routes.admin_routes.get_metadata", side_effect=_no_predictions_signal):
+            mock_load.return_value = _load_data_return()
+            resp = client.get("/api/admin/sync_status", headers={"Authorization": admin_token})
+        assert resp.json()["analytics_cache"]["status"] == "unknown"
 
     def test_elo_unknown_when_metadata_missing(self, admin_token):
         with patch("routes.admin_routes.load_data") as mock_load, \
