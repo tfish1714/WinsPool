@@ -163,8 +163,11 @@ def extract_draft_data(year):
         formatted_roster = []
         proj_wins = 0.0
         for team in roster:
-            if team in preds and preds[team].get('projected_wins') is not None:
-                val = float(preds[team]['projected_wins'])
+            # mean_wins, not projected_wins: projected_wins is rounded to a whole
+            # number, but the running portfolio shown during the draft
+            # (ui_renderer.js) sums mean_wins, so the recap must match that number.
+            if team in preds and preds[team].get('mean_wins') is not None:
+                val = float(preds[team]['mean_wins'])
                 formatted_roster.append(f"{team} ({val})")
                 proj_wins += val
             else:
