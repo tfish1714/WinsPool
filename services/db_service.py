@@ -7,8 +7,7 @@ import pandas as pd
 import hashlib
 import time
 import bcrypt
-from services.cache_service import clear_data_cache, _cache_key
-import services.cache_service as _cache_svc
+from services.cache_service import clear_data_cache, DOMAIN_STATIC
 
 logger = logging.getLogger(__name__)
 
@@ -175,10 +174,17 @@ def update_player_cell(player_id: int, cell: str):
     update_player_profile(str(player_id), {"cell": cell})
 
 def _get_players_df():
-    """Return players DataFrame from warm in-memory cache or fall back to Firestore."""
-    bundle = _cache_svc._DATA_CACHE.get(_cache_key(None))
-    if bundle is not None:
-        return getattr(bundle, "players", pd.DataFrame())
+    """Return players DataFrame from the warm static-domain cache, or fall
+    back to a direct Firestore/pkl fetch when that cache is cold.
+
+    Since Task 3, players live in the `static` domain bucket (a plain dict
+    with a "players" key -- not the old DataBundle namedtuple with a
+    `.players` attribute), so this reads DOMAIN_STATIC, not DOMAIN_ACTIVE.
+    """
+    from services.cache_service import get_domain, DOMAIN_STATIC
+    static = get_domain(DOMAIN_STATIC)
+    if static is not None and not static["players"].empty:
+        return static["players"]
     return get_collection_df("players")
 
 def _row_to_dict_no_nan(row) -> dict:
@@ -274,9 +280,9 @@ def add_player(full_name: str, nick_name: str, email: str, phone: str = ""):
     new_row = pd.DataFrame([data])
     players_df = pd.concat([players_df, new_row], ignore_index=True)
     _save_df_to_local("players", players_df)
-    
-    clear_data_cache()
-    signal_data_update()
+
+    clear_data_cache(DOMAIN_STATIC)
+    signal_data_update(DOMAIN_STATIC)
     return new_id
 
 
@@ -305,17 +311,8 @@ def add_draft_result(season: int, draft_pick: int, player_id: int, team: str, ex
     results_df = pd.concat([results_df, pd.DataFrame([data])], ignore_index=True)
     _save_df_to_local("draft_results", results_df)
 
-    # KNOWN GAP (not fixed here — needs its own design pass; see
-    # docs/superpowers/specs/2026-09-12-cache-invalidation-gap-followup.md):
-    # clear_data_cache(season) only evicts the year-keyed cache entry
-    # (cache_service._DATA_CACHE[str(season)]). It does NOT evict the separate
-    # master 'all'-keyed entry, which is what every bare load_data() caller
-    # reads — /wins-pool/{year}, /draft-results and /draft/{year} among them.
-    # So on a long-running warm process (i.e. production), those pages can keep
-    # serving pre-pick data — up to "0 picks made" — until the 'all' entry's
-    # 1-hour TTL expires, even mid-live-draft. Discovered via
-    # tests_e2e/test_live_draft.py.
-    clear_data_cache(season)
+    clear_data_cache(DOMAIN_STATIC)
+    signal_data_update(DOMAIN_STATIC)
 
 def delete_draft_pick(season: int, draft_pick: int):
     """Delete a specific draft pick document from Firestore and local pkl."""
@@ -330,13 +327,8 @@ def delete_draft_pick(season: int, draft_pick: int):
         results_df = results_df[~((results_df["season"] == season) & (results_df["draftPick"] == draft_pick))]
         _save_df_to_local("draft_results", results_df)
 
-    # Same known gap as add_draft_result() above: this only evicts the
-    # year-keyed cache entry, never the master 'all'-keyed entry that
-    # load_data()-based routes (/wins-pool/{year}, /draft-results,
-    # /draft/{year}) actually read, so an undone pick can stay visible on those
-    # pages for up to the 1-hour TTL on a warm process. See
-    # docs/superpowers/specs/2026-09-12-cache-invalidation-gap-followup.md.
-    clear_data_cache(season)
+    clear_data_cache(DOMAIN_STATIC)
+    signal_data_update(DOMAIN_STATIC)
 
 def delete_draft_results_for_season(season: int):
     """Delete all draft_results documents for the given season from Firestore and local pkl."""
@@ -358,7 +350,7 @@ def delete_draft_results_for_season(season: int):
         results_df = results_df[results_df["season"] != season]
         _save_df_to_local("draft_results", results_df)
 
-    clear_data_cache()
+    clear_data_cache(DOMAIN_STATIC)
 
 def delete_season_data(season: int):
     """Wipes draft_order, draft_order_rules, draft_results, and the persisted
@@ -386,8 +378,8 @@ def delete_season_data(season: int):
             _save_df_to_local(col, df)
 
     save_metadata(f"draft_timer_{season}", {"picks": {}})
-    clear_data_cache()
-    signal_data_update()
+    clear_data_cache(DOMAIN_STATIC)
+    signal_data_update(DOMAIN_STATIC)
 
 
 def add_draft_order(season: int, draft_order: int, player_id: int):
@@ -409,7 +401,7 @@ def add_draft_order(season: int, draft_order: int, player_id: int):
     order_df = pd.concat([order_df, pd.DataFrame([data])], ignore_index=True)
     _save_df_to_local("draft_order", order_df)
 
-    clear_data_cache()
+    clear_data_cache(DOMAIN_STATIC)
 
 
 def add_draft_rule(season: int, draft_order: int, pick_one: int, pick_two: int, pick_three: int):
@@ -433,8 +425,8 @@ def add_draft_rule(season: int, draft_order: int, pick_one: int, pick_two: int, 
     rules_df = pd.concat([rules_df, pd.DataFrame([data])], ignore_index=True)
     _save_df_to_local("draft_order_rules", rules_df)
 
-    clear_data_cache()
-    signal_data_update()
+    clear_data_cache(DOMAIN_STATIC)
+    signal_data_update(DOMAIN_STATIC)
 
 def set_member_paid(season: int, player_id: int, paid: bool) -> bool:
     """Set the paid flag on a player's draft_order entry for a given season."""
@@ -470,8 +462,8 @@ def update_player_profile(player_id: str, updates: dict):
                 players_df.loc[mask, k] = v
             _save_df_to_local("players", players_df)
 
-    clear_data_cache()
-    signal_data_update()
+    clear_data_cache(DOMAIN_STATIC)
+    signal_data_update(DOMAIN_STATIC)
 
 def save_weekly_recap(year: int, week: int, summary: str):
     """Saves an AI-generated weekly summary to Firestore and/or local cache."""
