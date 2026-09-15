@@ -14,7 +14,6 @@ import json
 import argparse
 import pathlib
 import subprocess
-import time
 
 # Ensure project root is on the path
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -33,8 +32,6 @@ os.environ['USE_LOCAL_DATA'] = 'False'
 # image, so this job could never actually start on Cloud Run: it would
 # sys.exit(1) at import time -- before _run_with_alerting() is even reached,
 # so the failure produced no alert email either.
-import firebase_admin
-from firebase_admin import firestore as _fs
 from scripts.daily_nfl_sync import initialize_firebase
 initialize_firebase()
 
@@ -610,8 +607,9 @@ def main():
         print(f"[cache_builder] --resimulate: published {n} prediction(s).")
 
         try:
-            db = _fs.client()
-            db.collection("metadata").document("cache_control").set({"last_update": time.time()})
+            from services.cache_service import DOMAIN_PREDICTIONS_ACTIVE
+            from services.db_service import signal_data_update
+            signal_data_update(DOMAIN_PREDICTIONS_ACTIVE)
         except Exception as e:
             print(f"  [err] Failed to signal cache invalidation: {e}")
         return
@@ -651,13 +649,14 @@ def main():
                    force=args.force, pred_lookup=pred_lookup,
                    model_version=model_version)
 
-    # Signal web server to invalidate in-memory cache
-    print("\n[cache_builder] Signaling global cache invalidation...")
+    # Signal the predictions_active domain (games/standings, players, etc.
+    # are untouched by this script -- see docs/superpowers/specs/
+    # 2026-09-14-cache-mutability-redesign-design.md SS2/SS3).
+    print("\n[cache_builder] Signaling predictions_active cache invalidation...")
     try:
-        db = _fs.client()
-        db.collection("metadata").document("cache_control").set({
-            "last_update": time.time()
-        })
+        from services.cache_service import DOMAIN_PREDICTIONS_ACTIVE
+        from services.db_service import signal_data_update
+        signal_data_update(DOMAIN_PREDICTIONS_ACTIVE)
     except Exception as e:
         print(f"  [err] Failed to signal cache invalidation: {e}")
 

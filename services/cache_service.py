@@ -262,8 +262,7 @@ def _cache_key(year):
 _GAME_PRED_DIR = pathlib.Path('.local_db')
 
 
-def get_game_predictions(season: int) -> dict:
-    """Return {game_key: pred_dict} for season, or {} if not found."""
+def _fetch_game_predictions(season: int) -> dict:
     if _USE_LOCAL:
         p = _GAME_PRED_DIR / f"game_predictions_{season}.json"
         if p.exists():
@@ -283,6 +282,20 @@ def get_game_predictions(season: int) -> dict:
         except Exception:
             pass
         return {}
+
+
+def get_game_predictions(season: int) -> dict:
+    """Return {game_key: pred_dict} for season, or {} if not found. Cached
+    per-season within whichever predictions domain (active/historical) that
+    season falls into today -- shares its per-season entry dict with
+    data_service.py's get_preseason_predictions()/get_consensus_projections()
+    (see _get_predictions_bucket_entry() there), populating only its own
+    "game_predictions" key lazily."""
+    from services.data_service import _get_predictions_bucket_entry
+    entry = _get_predictions_bucket_entry(season)
+    if "game_predictions" not in entry:
+        entry["game_predictions"] = _fetch_game_predictions(season)
+    return entry["game_predictions"]
 
 
 def merge_game_predictions(df: pd.DataFrame, season: int) -> pd.DataFrame:

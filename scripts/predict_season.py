@@ -153,6 +153,12 @@ def _model_version_string() -> str:
 
 def _upload_predictions(season: int, projections: list):
     """Write projections to preseason_predictions collection (upsert by season+team)."""
+    # services.db_service.get_db() (used below by signal_data_update() and
+    # _get_active_bucket()) returns None whenever USE_LOCAL_DATA is true in
+    # the environment, regardless of this script's own separate
+    # _init_firebase() connection -- see CLAUDE.md's "any script that writes
+    # to Firestore must force USE_LOCAL_DATA=False" gotcha.
+    os.environ["USE_LOCAL_DATA"] = "False"
     db = _init_firebase()
     from firebase_admin import firestore as fs
 
@@ -183,7 +189,11 @@ def _upload_predictions(season: int, projections: list):
         batch.commit()
 
     # Signal cache invalidation
-    db.collection("metadata").document("cache_control").set({"last_update": time.time()})
+    from services.cache_service import DOMAIN_PREDICTIONS_ACTIVE, DOMAIN_PREDICTIONS_HISTORICAL
+    from services.db_service import signal_data_update
+    from services.data_service import _get_active_bucket
+    domain = DOMAIN_PREDICTIONS_ACTIVE if season == _get_active_bucket()["season"] else DOMAIN_PREDICTIONS_HISTORICAL
+    signal_data_update(domain)
     print(f"  Uploaded {count} team projections to preseason_predictions.")
 
 

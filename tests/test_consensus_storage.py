@@ -5,13 +5,33 @@ import pytest
 import services.data_service as data_service
 
 
+@pytest.fixture(autouse=True)
+def _isolate_predictions_cache():
+    """get_preseason_predictions()/get_consensus_projections() now resolve
+    the active season (via _get_active_bucket()) to decide which cache
+    domain to use -- so a test that monkeypatches get_collection_df to
+    return a fixed value for every collection name, ignoring which
+    collection was actually asked for, would otherwise corrupt the shared
+    active/historical games+standings cache for every other test in the
+    suite. Clearing the whole cache before and after each test in this file
+    keeps that blind monkeypatching from leaking anywhere else."""
+    import services.cache_service as cs
+    cs.clear_data_cache()
+    yield
+    cs.clear_data_cache()
+
+
 def test_get_consensus_projections_shapes_rows(monkeypatch):
     fake = pd.DataFrame([
         {"season": 2026, "team": "BUF", "sources": {"br": 12, "vegas_ou": 11.5},
          "n_sources": 2, "consensus_mean": 11.75, "consensus_median": 11.75,
          "consensus_min": 11.5, "consensus_max": 12.0, "consensus_std": 0.25},
     ])
-    monkeypatch.setattr(data_service, "get_collection_df", lambda *a, **k: fake)
+
+    def fake_get_collection_df(collection, filters=None, **kwargs):
+        return fake if collection == "consensus_projections" else pd.DataFrame()
+
+    monkeypatch.setattr(data_service, "get_collection_df", fake_get_collection_df)
 
     res = data_service.get_consensus_projections(2026)
     assert set(res) == {"BUF"}
@@ -104,6 +124,12 @@ def test_get_preseason_predictions_mean_wins_nan_falls_back_to_projected_wins(mo
     Regression test for the IntCastingNaNError this caused in
     consensus_service.build_comparison's ranking step.
     """
+    # get_preseason_predictions() now resolves the active season internally
+    # (to pick a cache domain) -- warm that resolution against real local
+    # fixture data first, so the assertion below only sees the
+    # preseason_predictions fetches this test actually cares about.
+    data_service.load_data()
+
     df = pd.DataFrame([
         {"season": 2025, "team": "BUF", "projected_wins": 11.5, "mean_wins": float("nan"),
          "std_dev": 1.0, "sources": {}},

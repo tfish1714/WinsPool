@@ -329,6 +329,48 @@ def test_merge_game_predictions_includes_edge_vs_vegas():
     assert result.iloc[0]['edge_vs_vegas'] == 4.5
 
 
+def test_get_game_predictions_is_cached_per_season(monkeypatch):
+    """Task 6: get_game_predictions() must be cached per-season within the
+    active/historical predictions domain, not re-fetched (disk or Firestore)
+    on every call."""
+    import services.cache_service as cs
+    from services import data_service
+    cs.clear_data_cache()
+    data_service.load_data()  # resolves the active season
+    active_season = cs.get_domain(cs.DOMAIN_ACTIVE)["season"]
+
+    with patch("services.cache_service._fetch_game_predictions") as mock_fetch:
+        mock_fetch.return_value = {"W01_KC_BUF": {"pred_winner": "KC"}}
+        first = cs.get_game_predictions(active_season)
+        second = cs.get_game_predictions(active_season)
+        mock_fetch.assert_called_once()
+    assert first == second == {"W01_KC_BUF": {"pred_winner": "KC"}}
+    cs.clear_data_cache()
+
+
+def test_get_game_predictions_shares_bucket_with_preseason_predictions(monkeypatch):
+    """The per-season entry get_game_predictions() writes into must not
+    clobber (or be clobbered by) the preseason_df/consensus_df entry
+    data_service._get_predictions_bucket() writes for the same season."""
+    import services.cache_service as cs
+    from services import data_service
+    cs.clear_data_cache()
+    data_service.load_data()
+    active_season = cs.get_domain(cs.DOMAIN_ACTIVE)["season"]
+
+    with patch("services.cache_service._fetch_game_predictions", return_value={"W01_KC_BUF": {}}), \
+         patch("services.data_service.get_collection_df", return_value=pd.DataFrame()):
+        cs.get_game_predictions(active_season)
+        preseason_result = data_service.get_preseason_predictions(active_season)
+        # Re-fetching game predictions afterwards must still hit the cache,
+        # proving _get_predictions_bucket() didn't wipe the earlier entry.
+        with patch("services.cache_service._fetch_game_predictions") as mock_fetch_2:
+            cs.get_game_predictions(active_season)
+            mock_fetch_2.assert_not_called()
+    assert preseason_result == {}
+    cs.clear_data_cache()
+
+
 class TestMergeThinGamePredictions:
     """Tests for merge_thin_game_predictions -- the fix for cache_builder.py
     silently overwriting the richer explanation/model_spread/edge_vs_vegas/locked

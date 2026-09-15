@@ -595,6 +595,35 @@ class TestPublishGameProbs:
         assert entry["edge_vs_vegas"] == pytest.approx(-2.0)  # -3.0 - (-1.0)
 
 
+class TestPredictionsActiveSignal:
+    """Task 6: main()'s daily full-build run must signal predictions_active_
+    updated (merge=True, via signal_data_update()) instead of the old bare,
+    non-merging metadata/cache_control write -- that bare write would wipe
+    every other domain's field in the same document on every run."""
+
+    @patch("scripts.cache_builder.load_data")
+    @patch("scripts.cache_builder.get_available_years", return_value=[2026])
+    @patch("scripts.cache_builder._years_to_build", return_value=[2026])
+    @patch("scripts.cache_builder.NNPredictionService", side_effect=RuntimeError("no model in test env"))
+    @patch("scripts.cache_builder.build_year")
+    @patch("services.db_service.signal_data_update")
+    def test_full_run_signals_predictions_active(
+        self, mock_signal, mock_build_year, mock_nn_svc, mock_years_to_build,
+        mock_available_years, mock_load_data, monkeypatch,
+    ):
+        import sys
+        from services.cache_service import DOMAIN_PREDICTIONS_ACTIVE
+
+        monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--skip-sync"])
+        mock_load_data.return_value = (
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame([{"season": 2026}]),
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+        )
+        main()
+
+        mock_signal.assert_called_once_with(DOMAIN_PREDICTIONS_ACTIVE)
+
+
 class TestResimulateModeWiring:
     def test_resimulate_flag_skips_full_multi_year_build(self, monkeypatch):
         """--resimulate must not call build_year() (the full standings/analytics
@@ -608,7 +637,7 @@ class TestResimulateModeWiring:
              patch("scripts.cache_builder.NNProjectionEngine") as mock_engine_cls, \
              patch("services.espn_injury_service.get_espn_injury_overrides", return_value={}), \
              patch("scripts.cache_builder._publish_game_probs", return_value=0) as mock_publish, \
-             patch("scripts.cache_builder._fs"):
+             patch("services.db_service.signal_data_update"):
             mock_load_data.return_value = (
                 pd.DataFrame(), pd.DataFrame(), _games_df(), pd.DataFrame(),
                 pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
@@ -631,7 +660,7 @@ class TestResimulateModeWiring:
              patch("services.espn_injury_service.get_espn_injury_overrides",
                    return_value={(3, "QB1"): 0.0}) as mock_espn, \
              patch("scripts.cache_builder._publish_game_probs", return_value=1), \
-             patch("scripts.cache_builder._fs"):
+             patch("services.db_service.signal_data_update"):
             mock_load_data.return_value = (
                 pd.DataFrame(), pd.DataFrame(), _games_df(), pd.DataFrame(),
                 pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
@@ -656,7 +685,7 @@ class TestResimulateModeWiring:
              patch("services.espn_injury_service.get_espn_injury_overrides",
                    side_effect=Exception("ESPN down")), \
              patch("scripts.cache_builder._publish_game_probs", return_value=1) as mock_publish, \
-             patch("scripts.cache_builder._fs"):
+             patch("services.db_service.signal_data_update"):
             mock_load_data.return_value = (
                 pd.DataFrame(), pd.DataFrame(), _games_df(), pd.DataFrame(),
                 pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),

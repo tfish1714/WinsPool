@@ -351,9 +351,42 @@ def get_latest_season_and_week(games: pd.DataFrame) -> Tuple[int, int]:
         
     return int(latest_season), int(latest_week)
 
+def _predictions_domain_for(season: int) -> str:
+    import services.cache_service as cs
+    active = _get_active_bucket()
+    return cs.DOMAIN_PREDICTIONS_ACTIVE if season == active["season"] else cs.DOMAIN_PREDICTIONS_HISTORICAL
+
+
+def _get_predictions_bucket_entry(season: int) -> dict:
+    """Returns the per-season dict for `season`'s predictions, cached within
+    whichever domain (active/historical) that season falls into today -- see
+    docs/superpowers/specs/2026-09-14-cache-mutability-redesign-design.md SS3.
+
+    The entry is populated lazily, one key at a time (preseason_df /
+    consensus_df / cache_service.get_game_predictions()'s own
+    game_predictions key) -- calling get_preseason_predictions() alone must
+    not also fetch consensus_projections, and vice versa."""
+    import services.cache_service as cs
+    domain = _predictions_domain_for(season)
+    bucket = cs.get_domain(domain)
+    if bucket is None:
+        # Only stamp the domain's timestamp on first creation -- once it
+        # exists, later calls mutate this same dict object in place (via the
+        # reference cs.get_domain() returns), so lazily adding a key for a
+        # different season/collection must never re-bump the timestamp; that
+        # would make check_remote_signals() never see a remote signal as
+        # newer, since "newer than right now" is never true.
+        bucket = {}
+        cs.set_domain(domain, bucket)
+    return bucket.setdefault(season, {})
+
+
 def get_preseason_predictions(season: int) -> Dict[str, dict]:
     """Retrieves Win Totals (including avg, std_dev, and sources) from the database."""
-    preds_df = get_collection_df("preseason_predictions", filters=[("season", "==", season)])
+    entry = _get_predictions_bucket_entry(season)
+    if "preseason_df" not in entry:
+        entry["preseason_df"] = get_collection_df("preseason_predictions", filters=[("season", "==", season)])
+    preds_df = entry["preseason_df"]
     if preds_df.empty:
         return {}
     
@@ -375,7 +408,10 @@ def get_preseason_predictions(season: int) -> Dict[str, dict]:
 
 def get_consensus_projections(season: int) -> Dict[str, dict]:
     """Retrieve analyst consensus projections for a season, keyed by team."""
-    df = get_collection_df("consensus_projections", filters=[("season", "==", season)])
+    entry = _get_predictions_bucket_entry(season)
+    if "consensus_df" not in entry:
+        entry["consensus_df"] = get_collection_df("consensus_projections", filters=[("season", "==", season)])
+    df = entry["consensus_df"]
     if df.empty:
         return {}
 

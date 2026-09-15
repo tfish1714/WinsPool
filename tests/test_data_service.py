@@ -342,3 +342,94 @@ def test_check_remote_signals_clears_only_domains_with_newer_signal(mock_firesto
     assert cs.get_domain(cs.DOMAIN_ACTIVE) is None       # 200 > 100 -> cleared
     assert cs.get_domain(cs.DOMAIN_STATIC) == "old-static"  # 50 < 100 -> untouched
     cs.clear_data_cache()  # cleanup
+
+
+def test_get_preseason_predictions_active_season_is_cached(monkeypatch):
+    import services.cache_service as cs
+    from services import data_service
+    cs.clear_data_cache()
+    data_service.load_data()  # resolves the active season
+    active_season = cs.get_domain(cs.DOMAIN_ACTIVE)["season"]
+
+    with patch("services.data_service.get_collection_df") as mock_fetch:
+        mock_fetch.return_value = pd.DataFrame()
+        data_service.get_preseason_predictions(active_season)
+        data_service.get_preseason_predictions(active_season)  # second call
+        preseason_calls = [c for c in mock_fetch.call_args_list if c.args and c.args[0] == "preseason_predictions"]
+        assert len(preseason_calls) == 1  # only the first call actually fetched
+    cs.clear_data_cache()
+
+
+def test_get_preseason_predictions_historical_season_is_cached_separately(monkeypatch):
+    import services.cache_service as cs
+    from services import data_service
+    cs.clear_data_cache()
+    data_service.load_data()
+    active_season = cs.get_domain(cs.DOMAIN_ACTIVE)["season"]
+    historical_season = active_season - 1
+
+    with patch("services.data_service.get_collection_df") as mock_fetch:
+        mock_fetch.return_value = pd.DataFrame()
+        data_service.get_preseason_predictions(historical_season)
+        data_service.get_preseason_predictions(historical_season)
+        calls = [c for c in mock_fetch.call_args_list if c.args and c.args[0] == "preseason_predictions"]
+        assert len(calls) == 1
+    cs.clear_data_cache()
+
+
+def test_get_consensus_projections_shares_the_same_predictions_bucket(monkeypatch):
+    """get_preseason_predictions and get_consensus_projections for the same
+    season must share one cached fetch pair, not trigger two independent
+    bucket entries."""
+    import services.cache_service as cs
+    from services import data_service
+    cs.clear_data_cache()
+    data_service.load_data()
+    active_season = cs.get_domain(cs.DOMAIN_ACTIVE)["season"]
+
+    with patch("services.data_service.get_collection_df") as mock_fetch:
+        mock_fetch.return_value = pd.DataFrame()
+        data_service.get_preseason_predictions(active_season)
+        data_service.get_consensus_projections(active_season)
+        calls = [c for c in mock_fetch.call_args_list if c.args and c.args[0] in ("preseason_predictions", "consensus_projections")]
+        assert len(calls) == 2  # one fetch per collection, shared across both callers
+    cs.clear_data_cache()
+
+
+def test_predictions_domain_for_routes_by_active_season(monkeypatch):
+    import services.cache_service as cs
+    from services import data_service
+    cs.clear_data_cache()
+    data_service.load_data()
+    active_season = cs.get_domain(cs.DOMAIN_ACTIVE)["season"]
+
+    assert data_service._predictions_domain_for(active_season) == cs.DOMAIN_PREDICTIONS_ACTIVE
+    assert data_service._predictions_domain_for(active_season - 1) == cs.DOMAIN_PREDICTIONS_HISTORICAL
+    cs.clear_data_cache()
+
+
+def test_predict_season_write_is_picked_up_by_a_separate_load(monkeypatch):
+    """Regression test for the cross-process staleness trap: a write from
+    predict_season.py's process (a raw Firestore write + a scoped signal,
+    never an in-process cache call) must be visible to a completely
+    separate load_data()/prediction read within one remote-check cycle."""
+    import services.cache_service as cs
+    from services import data_service
+    cs.clear_data_cache()
+    data_service.load_data()
+    active_season = cs.get_domain(cs.DOMAIN_ACTIVE)["season"]
+    data_service.get_preseason_predictions(active_season)  # warm the predictions cache
+    assert cs.get_domain(cs.DOMAIN_PREDICTIONS_ACTIVE) is not None
+
+    # Simulate predict_season.py's out-of-process signal.
+    from unittest.mock import patch, MagicMock
+    with patch("services.db_service.get_db") as mock_get_db:
+        mock_doc = MagicMock()
+        mock_doc.exists = True
+        mock_doc.to_dict.return_value = {"predictions_active_updated": 9999999999.0}
+        mock_get_db.return_value.collection.return_value.document.return_value.get.return_value = mock_doc
+        cs._LAST_REMOTE_CHECK = 0  # force the next check to actually poll
+        data_service.check_remote_signals(use_local=False)
+
+    assert cs.get_domain(cs.DOMAIN_PREDICTIONS_ACTIVE) is None  # cleared by the remote signal
+    cs.clear_data_cache()

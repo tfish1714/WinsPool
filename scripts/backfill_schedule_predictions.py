@@ -281,6 +281,14 @@ def main():
     write_firestore = (args.firestore or args.firestore_only) and not args.dry_run
     write_features  = args.features and not args.dry_run
 
+    if write_firestore:
+        # services.db_service.get_db() (used below by signal_data_update()
+        # and _get_active_bucket()) returns None whenever USE_LOCAL_DATA is
+        # true in the environment, regardless of this script's own separate
+        # _init_firestore() connection -- see CLAUDE.md's "any script that
+        # writes to Firestore must force USE_LOCAL_DATA=False" gotcha.
+        os.environ["USE_LOCAL_DATA"] = "False"
+
     print("=" * 64)
     print("  Backfill Schedule Predictions (NN+XGB+LR Ensemble)")
     print(f"  Weights: NN={NN_WEIGHT:.0%} / XGB={XGB_WEIGHT:.0%} / LR={LR_WEIGHT:.0%}")
@@ -430,7 +438,22 @@ def main():
                 print(f"    [warn] No feature rows for {year} -- feature audit skipped")
 
     if write_firestore and db:
-        db.collection("metadata").document("cache_control").set({"last_update": time.time()})
+        from services.cache_service import DOMAIN_PREDICTIONS_ACTIVE, DOMAIN_PREDICTIONS_HISTORICAL
+        from services.db_service import signal_data_update
+        from services.data_service import _get_active_bucket
+        active_season = _get_active_bucket()["season"]
+        lo, hi = min(years), max(years)
+        # _predictions_domain_for()/get_game_predictions() route purely on
+        # season == active_season, so a range touching only the active
+        # season signals just DOMAIN_PREDICTIONS_ACTIVE; any other season in
+        # the range (past OR beyond the resolved active season) lands in the
+        # historical domain and needs that signal too.
+        if lo <= active_season <= hi:
+            signal_data_update(DOMAIN_PREDICTIONS_ACTIVE)
+            if not (lo == hi == active_season):
+                signal_data_update(DOMAIN_PREDICTIONS_HISTORICAL)
+        else:
+            signal_data_update(DOMAIN_PREDICTIONS_HISTORICAL)
         print("\n  Cache invalidation signal sent.")
 
     print(f"\n{'='*64}")
