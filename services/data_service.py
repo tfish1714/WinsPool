@@ -108,9 +108,16 @@ def _bootstrap_games_standings():
         "games": all_games[all_games["season"] == season].copy() if not all_games.empty else all_games,
         "standings": all_standings[all_standings["season"] == season].copy() if not all_standings.empty else all_standings,
     }
+    # `!= season`, not `< season`: nfl_games/nfl_standings routinely carry a
+    # FUTURE season (next year's schedule is synced long before that season's
+    # draft completes, so get_active_season() still resolves to the current
+    # one). Splitting on `<` dropped those rows from both buckets and they
+    # disappeared from load_data() entirely. A future season is just as frozen
+    # as a past one from the cache's point of view -- only the active season
+    # changes routinely -- so both belong here.
     historical_bucket = {
-        "games": all_games[all_games["season"] < season].copy() if not all_games.empty else all_games,
-        "standings": all_standings[all_standings["season"] < season].copy() if not all_standings.empty else all_standings,
+        "games": all_games[all_games["season"] != season].copy() if not all_games.empty else all_games,
+        "standings": all_standings[all_standings["season"] != season].copy() if not all_standings.empty else all_standings,
     }
     cs.set_domain(cs.DOMAIN_ACTIVE, active_bucket)
     cs.set_domain(cs.DOMAIN_HISTORICAL, historical_bucket)

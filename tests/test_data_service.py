@@ -253,6 +253,76 @@ def test_active_bucket_rebuilds_when_active_season_changes(monkeypatch):
         assert rebuilt["season"] != stale["season"] - 1  # rebuilt against the real active season
 
 
+def test_future_season_rows_are_served_from_historical_bucket(monkeypatch, tmp_path):
+    """A season LATER than the resolved active season must not vanish.
+
+    nfl_games/nfl_standings routinely carry a future season (next year's
+    schedule is synced well before that season's draft completes, so
+    get_active_season() still resolves to the current one). Splitting the
+    buckets on `season < active` dropped those rows from both buckets, so
+    neither load_data(year=<future>) nor load_data(year=None) could see them.
+    From the cache's point of view a future season is just as frozen as a past
+    one, so it belongs in the historical bucket too.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("USE_LOCAL_DATA", "true")
+
+    import services.cache_service as cs
+    from services.data_service import load_data, get_active_season
+    cs.clear_data_cache()
+
+    local_db = tmp_path / ".local_db"
+    local_db.mkdir()
+
+    # 2024 is played out; 2025's schedule exists but has no results yet.
+    games_all = pd.DataFrame({
+        "season": [2024, 2024, 2025],
+        "week": [1, 2, 1],
+        "home_team": ["BUF", "KC", "SF"],
+        "away_team": ["NYJ", "DEN", "SEA"],
+        "result": [3.0, 7.0, None],
+    })
+    games_all.to_pickle(local_db / "nfl_games.pkl")
+
+    standings_all = pd.DataFrame({
+        "season": [2024, 2025],
+        "team": ["BUF", "SF"],
+        "wins": [13, 0],
+    })
+    standings_all.to_pickle(local_db / "nfl_standings.pkl")
+
+    # Draft picks only exist for 2024, so the active season resolves to 2024
+    # while 2025 game rows are already present.
+    pd.DataFrame({"season": [2024], "playerId": [1], "team": ["BUF"]}).to_pickle(
+        local_db / "draft_results.pkl"
+    )
+    empty = pd.DataFrame()
+    for name in ["nfl_teams", "players", "draft_order", "draft_order_rules"]:
+        empty.to_pickle(local_db / f"{name}.pkl")
+
+    try:
+        full = load_data(year=None)
+        assert get_active_season(full.games, full.draft_results, full.draft_order_rules) == 2024
+
+        # 1. The future season must be retrievable on its own.
+        future = load_data(year=2025)
+        assert not future.games.empty
+        assert set(future.games["season"].unique()) == {2025}
+        assert not future.standings.empty
+        assert set(future.standings["season"].unique()) == {2025}
+
+        # 2. ...and must appear in the unfiltered full-history bundle.
+        assert 2025 in set(full.games["season"].unique())
+        assert 2025 in set(full.standings["season"].unique())
+        assert len(full.games) == 3  # nothing dropped on the floor
+
+        # 3. The active season is still served from the active bucket.
+        assert cs.get_domain(cs.DOMAIN_ACTIVE)["season"] == 2024
+        assert set(load_data(year=2024).games["season"].unique()) == {2024}
+    finally:
+        cs.clear_data_cache()
+
+
 def test_check_remote_signals_clears_only_domains_with_newer_signal(mock_firestore, monkeypatch):
     import time
     from services.data_service import check_remote_signals
