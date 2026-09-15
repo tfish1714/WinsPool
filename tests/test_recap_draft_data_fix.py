@@ -4,7 +4,7 @@ from unittest.mock import patch
 from services.recap_service import extract_draft_data
 
 @patch("services.recap_service.load_data")
-@patch("services.recap_service.get_season_projection")
+@patch("services.recap_service.get_season_projection_blended")
 def test_extract_draft_data_filters_by_year(mock_preds, mock_load):
     """
     Verify that extract_draft_data only includes picks for the requested year
@@ -27,9 +27,9 @@ def test_extract_draft_data_filters_by_year(mock_preds, mock_load):
     # Other returned values don't matter much for this specific logic check
     mock_load.return_value = (None, None, None, players, None, draft_results, None)
     mock_preds.return_value = {
-        "SEA": {"wins": 8.5, "source_type": "model", "detail": {}},
-        "CHI": {"wins": 9.0, "source_type": "model", "detail": {}},
-        "CIN": {"wins": 10.5, "source_type": "model", "detail": {}},
+        "SEA": {"projected_wins": 8.5, "mean_wins": 8.5, "std_dev": 0, "sources": {}},
+        "CHI": {"projected_wins": 9.0, "mean_wins": 9.0, "std_dev": 0, "sources": {}},
+        "CIN": {"projected_wins": 10.5, "mean_wins": 10.5, "std_dev": 0, "sources": {}},
     }
 
     # Act

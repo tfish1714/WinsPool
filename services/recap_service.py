@@ -1,6 +1,6 @@
 import pandas as pd
 from services.constants import UNDRAFTED_SENTINEL
-from services.data_service import load_data, get_season_projection
+from services.data_service import load_data, get_season_projection_blended
 from services.analysis_service import get_enriched_schedule
 from services.ai_service import generate_weekly_summary, get_recap_prompt
 from services.db_service import save_weekly_recap
@@ -125,7 +125,10 @@ def extract_draft_data(year):
     """
     
     standings, teams, games, players, draft_order, draft_results, draft_order_rules = load_data(year=year)
-    preds = get_season_projection(year)
+    # Same resolver the live draft room's running portfolio uses
+    # (services.draft_service.load_draft_state), so the recap's projections
+    # match what players actually saw on the draft page.
+    preds = get_season_projection_blended(year)
     
     if draft_results.empty:
         return None, []
@@ -160,8 +163,8 @@ def extract_draft_data(year):
         formatted_roster = []
         proj_wins = 0.0
         for team in roster:
-            if team in preds and preds[team].get('wins') is not None:
-                val = float(preds[team]['wins'])
+            if team in preds and preds[team].get('projected_wins') is not None:
+                val = float(preds[team]['projected_wins'])
                 formatted_roster.append(f"{team} ({val})")
                 proj_wins += val
             else:
