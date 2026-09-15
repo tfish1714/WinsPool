@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 from unittest.mock import patch, MagicMock
-from scripts.sync_live_scores import overlay_espn_live_fields
+from scripts.sync_live_scores import overlay_espn_live_fields, sync_authoritative
 
 
 def _games_df():
@@ -116,6 +116,124 @@ class TestOverlayEspnLiveFields:
             from scripts.sync_live_scores import run_espn_overlay_safely
             result = run_espn_overlay_safely(db, _games_df())
         assert result == 0
+
+
+class TestSyncAuthoritativeScoping:
+    """Task 9: sync_authoritative() scopes to the active season only (not
+    current + prior season -- compute_standings() has no cross-season
+    dependency, matching daily_nfl_sync.py's Task 8 change) and diffs
+    before writing, same as daily_nfl_sync.py."""
+
+    def _patch_subprocess_ok(self):
+        return patch("scripts.sync_live_scores.subprocess.run",
+                     return_value=MagicMock(returncode=0, stderr=""))
+
+    def test_scopes_standings_to_active_season_only(self, monkeypatch):
+        from scripts import sync_live_scores
+        fake_games = pd.DataFrame([
+            {"season": 2025, "game_type": "REG", "home_team": "KC", "away_team": "SF",
+             "result": 3, "home_score": 20, "away_score": 17, "game_id": "g1",
+             "gameday": "2025-09-01"},
+            {"season": 2026, "game_type": "REG", "home_team": "KC", "away_team": "BUF",
+             "result": 3, "home_score": 24, "away_score": 21, "game_id": "g2",
+             "gameday": pd.Timestamp.now().strftime("%Y-%m-%d")},
+        ])
+        monkeypatch.setattr(sync_live_scores, "load_games", lambda: fake_games)
+        captured = {}
+
+        def fake_batch_upload(db, name, df, id_col=None, diff_before_write=False):
+            captured[name] = df
+            return 0
+        monkeypatch.setattr(sync_live_scores, "batch_upload", fake_batch_upload)
+
+        with self._patch_subprocess_ok():
+            sync_authoritative(MagicMock())
+
+        assert set(captured["nfl_standings"]["season"].unique()) == {2026}
+
+    def test_uses_diff_before_write(self, monkeypatch):
+        from scripts import sync_live_scores
+        calls = []
+
+        def fake_batch_upload(db, name, df, id_col=None, diff_before_write=False):
+            calls.append(diff_before_write)
+            return 0
+        monkeypatch.setattr(sync_live_scores, "batch_upload", fake_batch_upload)
+        monkeypatch.setattr(sync_live_scores, "load_games", lambda: pd.DataFrame([
+            {"season": 2026, "game_type": "REG", "home_team": "KC", "away_team": "BUF",
+             "result": 3, "home_score": 24, "away_score": 21, "game_id": "g2",
+             "gameday": pd.Timestamp.now().strftime("%Y-%m-%d")},
+        ]))
+
+        with self._patch_subprocess_ok():
+            sync_authoritative(MagicMock())
+
+        assert calls  # at least one batch_upload call happened
+        assert all(calls)  # every call in this function passes diff_before_write=True
+
+    def test_still_narrows_games_push_to_trailing_week(self, monkeypatch):
+        """The nfl_games push window (last ~7 days by gameday) is unrelated
+        to the season-scoping change above and must survive it unchanged."""
+        from scripts import sync_live_scores
+        old_game_day = (pd.Timestamp.now() - pd.Timedelta(days=30)).strftime("%Y-%m-%d")
+        recent_game_day = pd.Timestamp.now().strftime("%Y-%m-%d")
+        fake_games = pd.DataFrame([
+            {"season": 2026, "game_type": "REG", "home_team": "KC", "away_team": "SF",
+             "result": 3, "home_score": 20, "away_score": 17, "game_id": "old",
+             "gameday": old_game_day},
+            {"season": 2026, "game_type": "REG", "home_team": "KC", "away_team": "BUF",
+             "result": None, "home_score": None, "away_score": None, "game_id": "new",
+             "gameday": recent_game_day},
+        ])
+        monkeypatch.setattr(sync_live_scores, "load_games", lambda: fake_games)
+        captured = {}
+
+        def fake_batch_upload(db, name, df, id_col=None, diff_before_write=False):
+            captured[name] = df
+            return 0
+        monkeypatch.setattr(sync_live_scores, "batch_upload", fake_batch_upload)
+
+        with self._patch_subprocess_ok():
+            sync_authoritative(MagicMock())
+
+        assert list(captured["nfl_games"]["game_id"]) == ["new"]
+
+    def test_preseason_window_with_zero_completed_games_does_not_crash(self, monkeypatch):
+        """Regression: scoping to the active season alone (no prior-season
+        safety net) means this can hit compute_standings() with zero
+        completed REG games -- e.g. every 5-minute run during the preseason
+        window, before that season's Week 1 has finished."""
+        from scripts import sync_live_scores
+        fake_games = pd.DataFrame([
+            {"season": 2026, "game_type": "PRE", "home_team": "KC", "away_team": "SF",
+             "result": 3, "home_score": 20, "away_score": 17, "game_id": "pre1",
+             "gameday": pd.Timestamp.now().strftime("%Y-%m-%d")},
+        ])
+        monkeypatch.setattr(sync_live_scores, "load_games", lambda: fake_games)
+        monkeypatch.setattr(sync_live_scores, "batch_upload", lambda *a, **k: 0)
+
+        with self._patch_subprocess_ok():
+            result = sync_authoritative(MagicMock())  # must not raise -- that's the whole point
+
+        assert list(result["game_id"]) == ["pre1"]
+
+
+class TestMainSignaling:
+    """Task 9: main() signals DOMAIN_ACTIVE unconditionally (the ESPN
+    overlay writes is_live/clock/period even when nflverse data didn't
+    change, so gating on sync_authoritative()'s own write counts alone
+    would under-signal during a live game)."""
+
+    def test_signals_active_domain_after_overlay(self):
+        from services.cache_service import DOMAIN_ACTIVE
+        with patch("scripts.sync_live_scores.initialize_firebase", return_value=MagicMock()), \
+             patch("scripts.sync_live_scores.sync_authoritative", return_value=_games_df()), \
+             patch("scripts.sync_live_scores.run_espn_overlay_safely", return_value=0), \
+             patch("services.db_service.signal_data_update") as mock_signal:
+            from scripts.sync_live_scores import main
+            main()
+
+        mock_signal.assert_called_once_with(DOMAIN_ACTIVE)
 
 
 class TestAlertingPaths:

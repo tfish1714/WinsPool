@@ -4,7 +4,7 @@ redesign)."""
 from unittest.mock import MagicMock
 import pandas as pd
 
-from scripts.daily_nfl_sync import batch_upload
+from scripts.daily_nfl_sync import batch_upload, compute_standings
 
 
 def test_batch_upload_without_diff_writes_every_row():
@@ -53,6 +53,26 @@ def test_batch_upload_with_diff_always_writes_rows_with_no_derivable_id():
     df = pd.DataFrame([{"some_other_field": "x"}])
     written = batch_upload(db, "misc", df, diff_before_write=True)
     assert written == 1
+
+
+def test_compute_standings_returns_empty_shaped_frame_when_no_completed_games():
+    """Regression: sync_live_scores.py's Task 9 scoping (active season only,
+    no prior-season safety net) means this can now genuinely receive zero
+    completed REG games -- e.g. every 5-minute run during the preseason
+    window, before that season's Week 1 has finished. pd.DataFrame([]) has
+    no columns at all, so a bare .sort_values(["season", "team"]) would
+    raise KeyError instead of returning an empty frame every caller's
+    existing `if df.empty` handling already expects."""
+    games = pd.DataFrame([
+        {"season": 2026, "game_type": "REG", "home_team": "KC", "away_team": "SF",
+         "result": None, "home_score": None, "away_score": None},
+        {"season": 2026, "game_type": "PRE", "home_team": "KC", "away_team": "SF",
+         "result": 3.0, "home_score": 20.0, "away_score": 17.0},
+    ])
+    result = compute_standings(games)
+    assert result.empty
+    assert list(result.columns) == ["season", "team", "wins", "losses", "ties",
+                                     "scored", "allowed", "net", "pct"]
 
 
 def test_sync_nfl_data_defaults_to_active_season_only(monkeypatch):

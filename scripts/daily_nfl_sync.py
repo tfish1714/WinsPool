@@ -153,7 +153,16 @@ def compute_standings(games: pd.DataFrame) -> pd.DataFrame:
             "pct":     pct,
         })
 
-    return pd.DataFrame(records).sort_values(["season", "team"]).reset_index(drop=True)
+    columns = ["season", "team", "wins", "losses", "ties", "scored", "allowed", "net", "pct"]
+    if not records:
+        # No completed REG games in the input at all (e.g. sync_live_scores.py
+        # scoped to the active season alone, run during the preseason window
+        # before that season's Week 1 has finished) -- pd.DataFrame([]) has no
+        # columns, so sort_values(["season", "team"]) below would raise
+        # KeyError. An empty-but-correctly-shaped frame lets every caller's
+        # existing "if df.empty" handling work unchanged.
+        return pd.DataFrame(columns=columns)
+    return pd.DataFrame(records)[columns].sort_values(["season", "team"]).reset_index(drop=True)
 
 
 def sync_nfl_data(seasons: tuple = None):
