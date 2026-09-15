@@ -39,7 +39,6 @@ import subprocess
 import sys
 import pathlib
 import os
-import time
 import traceback
 
 os.environ["USE_LOCAL_DATA"] = "False"  # must be set before importing db_service (see CLAUDE.md gotcha)
@@ -56,9 +55,15 @@ SCRIPTS_DIR = pathlib.Path(__file__).parent
 
 
 def sync_authoritative(db) -> pd.DataFrame:
-    """Part 1: re-pull rawdata, recompute standings for the current + prior
-    season, push nfl_games + nfl_standings. Returns the freshly-loaded,
-    season-filtered games DataFrame for part 2 to reuse."""
+    """Part 1: re-pull rawdata, recompute standings for the active season,
+    push nfl_games + nfl_standings, diffing against what's already stored.
+
+    Scoped to the active season only -- compute_standings() groups by
+    (season, team) independently, with no cross-season dependency, so
+    there's no correctness reason to also rewrite the prior season every
+    5 minutes (matches daily_nfl_sync.py's Task 8 change; the previous
+    current + prior season scoping here was only ever a cadence-cost
+    concession, not a data-correctness requirement)."""
     result = subprocess.run(
         [sys.executable, str(SCRIPTS_DIR / "sync_nflverse_data.py"), "--priority", "1"],
         capture_output=True, text=True, timeout=120,
@@ -76,23 +81,18 @@ def sync_authoritative(db) -> pd.DataFrame:
 
     games = load_games()
     current_season = games["season"].max()
-    recent = games[games["season"] >= current_season - 1].copy()
+    active_season_games = games[games["season"] == current_season].copy()
 
-    standings = compute_standings(recent)
-    batch_upload(db, "nfl_standings", standings)
+    standings = compute_standings(active_season_games)
+    standings_written = batch_upload(db, "nfl_standings", standings, diff_before_write=True)
 
-    # Narrow the nfl_games push (but NOT the standings input above) to games
-    # with a gameday in roughly the last week -- these are the only games
-    # that could plausibly be live or have just finished. Pushing all of
-    # `recent` (current + prior season, ~620 docs) every 5 minutes measured
-    # at ~179k Firestore writes/day, ~9x the free tier. compute_standings()
-    # still needs the full current season to produce correct win/loss
-    # totals, so only the nfl_games push is narrowed here.
-    gameday = pd.to_datetime(recent["gameday"], errors="coerce")
+    # Narrow the nfl_games push to the trailing ~7 days by gameday -- these
+    # are the only games that could plausibly be live or have just finished.
+    gameday = pd.to_datetime(active_season_games["gameday"], errors="coerce")
     today = pd.Timestamp.now().normalize()
-    window = recent[(gameday >= today - pd.Timedelta(days=7)) & (gameday <= today)].copy()
+    window = active_season_games[(gameday >= today - pd.Timedelta(days=7)) & (gameday <= today)].copy()
 
-    batch_upload(db, "nfl_games", window)
+    games_written = batch_upload(db, "nfl_games", window, diff_before_write=True)
     return window
 
 
@@ -180,15 +180,22 @@ def main():
 
     written = run_espn_overlay_safely(db, games)
 
-    # Signal cache invalidation so the app's caches pick up the fresh
+    # Signal DOMAIN_ACTIVE so the app's caches pick up the fresh
     # standings/games + ESPN overlay fields just written, matching
-    # daily_nfl_sync.py's pattern. Deliberately placed *after* the overlay
-    # step, not right after sync_authoritative() -- a page request landing
-    # in that earlier window would rebuild the cache from nfl_games docs
-    # that were just fully overwritten without is_live/clock/period (those
-    # are added by the overlay step above), systematically caching away the
-    # LIVE badge for a full 5-minute cycle during actual game traffic.
-    db.collection("metadata").document("cache_control").set({"last_update": time.time()})
+    # daily_nfl_sync.py's pattern -- but unconditionally, unlike that
+    # script's written-count gate: the ESPN overlay step above always
+    # writes is_live/clock/period on live games via its own separate
+    # merge=True .set() calls, which sync_authoritative()'s own
+    # standings/games write counts don't capture, so gating this signal on
+    # those counts alone would under-signal during an actual live game.
+    # Deliberately placed *after* the overlay step, not right after
+    # sync_authoritative() -- a page request landing in that earlier window
+    # would rebuild the cache from nfl_games docs that were just fully
+    # overwritten without is_live/clock/period, systematically caching away
+    # the LIVE badge for a full 5-minute cycle during actual game traffic.
+    from services.cache_service import DOMAIN_ACTIVE
+    from services.db_service import signal_data_update
+    signal_data_update(DOMAIN_ACTIVE)
 
     print(f"Live sync complete. ESPN overlay wrote {written} game(s).")
 

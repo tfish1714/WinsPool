@@ -603,12 +603,16 @@ async def get_sync_status(_: dict = Depends(require_admin)):
         result["predictions"] = {"status": "error", "error": str(e)}
 
     # ── Analytics Cache ────────────────────────────────────────────────────
+    # cache_builder.py's daily run signals predictions_active_updated (see
+    # docs/superpowers/specs/completed/2026-09-14-cache-mutability-redesign-
+    # design.md) -- the old bare last_update field is dead; nothing writes
+    # it anymore since signal_data_update() moved to per-domain fields.
     try:
         cache_meta = get_metadata("cache_control")
-        if cache_meta is None:
+        last_rebuilt_at = cache_meta.get("predictions_active_updated") if cache_meta else None
+        if last_rebuilt_at is None:
             result["analytics_cache"] = {"status": "unknown"}
         else:
-            last_rebuilt_at = cache_meta.get("last_update", 0)
             age_hours = round((time.time() - float(last_rebuilt_at)) / 3600, 1)
             result["analytics_cache"] = {
                 "last_rebuilt_at": last_rebuilt_at,

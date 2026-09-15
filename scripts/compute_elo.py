@@ -346,7 +346,7 @@ def main():
         # is true, regardless of the use_local=False passed to
         # write_elo_history_season below -- so on a normal local dev machine
         # this must be forced before any Firestore write is attempted, same as
-        # refresh_local_pkls.py / cache_builder.py / run_predictions.py do.
+        # refresh_local_pkls.py / cache_builder.py / smart_refresh.py do.
         os.environ["USE_LOCAL_DATA"] = "False"
 
     print("=" * 65)
@@ -375,6 +375,11 @@ def main():
         for season, group in df.groupby("season"):
             write_elo_history_season(int(season), group.to_dict(orient="records"), use_local=False)
         print(f"  Pushed {df['season'].nunique()} seasons to Firestore")
+
+        from services.db_service import signal_data_update, get_db
+        from services.cache_service import DOMAIN_ADMIN_ANALYTICS
+        if get_db():
+            signal_data_update(DOMAIN_ADMIN_ANALYTICS)
 
     try:
         save_metadata("sync_elo", {

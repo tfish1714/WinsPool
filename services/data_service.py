@@ -1,6 +1,5 @@
 import logging
 import os
-import pathlib
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -27,164 +26,177 @@ def get_team_logo(team_code: str) -> str:
     """Returns the official high-resolution logo URL for an NFL team."""
     return get_team_logo_url(team_code)
 
-from services.cache_service import (
-    _DATA_CACHE, _CACHE_TIMESTAMPS, _CACHE_TTL_SECONDS,
-    _LAST_REMOTE_CHECK, _REMOTE_CHECK_INTERVAL,
-    clear_data_cache, _cache_key
-)
+from services.cache_service import clear_data_cache
+
+def check_remote_signals(use_local: bool) -> None:
+    """Poll metadata/cache_control (at most once per _REMOTE_CHECK_INTERVAL)
+    and clear any cache domain whose remote signal is newer than what this
+    process has cached -- the only channel by which a separate process
+    (winspool-predict-daily, or another web-service instance) can tell this
+    process its cached data is stale.
+    """
+    import services.cache_service as cs
+    current_time = time.time()
+    if use_local or (current_time - cs._LAST_REMOTE_CHECK) <= cs._REMOTE_CHECK_INTERVAL:
+        return
+    cs._LAST_REMOTE_CHECK = current_time
+    try:
+        from services.db_service import get_db
+        db = get_db()
+        if not db:
+            return
+        ctrl = db.collection("metadata").document("cache_control").get(timeout=5)
+        if not ctrl.exists:
+            return
+        remote = ctrl.to_dict()
+        for domain, field in cs.DOMAIN_SIGNAL_FIELDS.items():
+            remote_ts = remote.get(field, 0)
+            if remote_ts > cs.get_domain_timestamp(domain):
+                logger.info("Remote invalidation detected for domain '%s' (remote=%s, local=%s).",
+                            domain, remote_ts, cs.get_domain_timestamp(domain))
+                cs.clear_domain(domain)
+    except Exception as e:
+        logger.warning("Failed to check remote cache control: %s", e)
+
+
+def _domain_is_fresh(domain: str) -> bool:
+    """True while `domain`'s cached value is still inside _CACHE_TTL_SECONDS.
+
+    Read through the module (not the name imported above) so a test or a
+    runtime tweak of cache_service._CACHE_TTL_SECONDS is actually honoured.
+    """
+    import services.cache_service as cs
+    return (time.time() - cs.get_domain_timestamp(domain)) < cs._CACHE_TTL_SECONDS
+
+
+def _fetch_static_bucket():
+    """The 5 collections that are never season-filtered -- one shared
+    in-memory bundle instead of being re-fetched inside every year-keyed
+    slot the old cache used."""
+    return {
+        "teams":             get_collection_df("nfl_teams"),
+        "players":           get_collection_df("players"),
+        "draft_order":       get_collection_df("draft_order"),
+        "draft_results":     get_collection_df("draft_results"),
+        "draft_order_rules": get_collection_df("draft_order_rules"),
+    }
+
+
+def _get_static_bucket():
+    """No TTL here -- per the design spec, static is refreshed only by an
+    explicit write-triggered clear or the remote-signal check, never on a
+    routine cadence. Every writer that touches players/draft_order/
+    draft_results/draft_order_rules already calls clear_data_cache(DOMAIN_STATIC)
+    + signal_data_update(DOMAIN_STATIC) (see Task 4), so a TTL fallback here
+    would only add a needless full 5-collection refetch on every warm
+    instance once an hour, forever."""
+    import services.cache_service as cs
+    cached = cs.get_domain(cs.DOMAIN_STATIC)
+    if cached is not None:
+        return cached
+    bucket = _fetch_static_bucket()
+    cs.set_domain(cs.DOMAIN_STATIC, bucket)
+    return bucket
+
+
+def _bootstrap_games_standings():
+    """Cold-start only: one unfiltered fetch of nfl_games/nfl_standings,
+    used to determine the active season, then split in memory into the
+    active/historical buckets so this fetch is never repeated per-bucket.
+    """
+    import services.cache_service as cs
+    all_games = get_collection_df("nfl_games")
+    all_standings = get_collection_df("nfl_standings")
+    static = _get_static_bucket()
+    season = get_active_season(all_games, static["draft_results"], static["draft_order_rules"])
+
+    active_bucket = {
+        "season": season,
+        "games": all_games[all_games["season"] == season].copy() if not all_games.empty else all_games,
+        "standings": all_standings[all_standings["season"] == season].copy() if not all_standings.empty else all_standings,
+    }
+    # `!= season`, not `< season`: nfl_games/nfl_standings routinely carry a
+    # FUTURE season (next year's schedule is synced long before that season's
+    # draft completes, so get_active_season() still resolves to the current
+    # one). Splitting on `<` dropped those rows from both buckets and they
+    # disappeared from load_data() entirely. A future season is just as frozen
+    # as a past one from the cache's point of view -- only the active season
+    # changes routinely -- so both belong here.
+    historical_bucket = {
+        "games": all_games[all_games["season"] != season].copy() if not all_games.empty else all_games,
+        "standings": all_standings[all_standings["season"] != season].copy() if not all_standings.empty else all_standings,
+    }
+    cs.set_domain(cs.DOMAIN_ACTIVE, active_bucket)
+    cs.set_domain(cs.DOMAIN_HISTORICAL, historical_bucket)
+    return active_bucket, historical_bucket
+
+
+def _get_active_bucket():
+    import services.cache_service as cs
+    cached = cs.get_domain(cs.DOMAIN_ACTIVE)
+    if cached is not None and _domain_is_fresh(cs.DOMAIN_ACTIVE):
+        # Season-rollover guard: if the static bucket's own draft data now
+        # resolves to a different active season, this bucket is stale by
+        # identity, not just by TTL -- rebuild regardless of cache age.
+        static = _get_static_bucket()
+        all_games_for_check = pd.concat([
+            cs.get_domain(cs.DOMAIN_HISTORICAL)["games"] if cs.get_domain(cs.DOMAIN_HISTORICAL) else pd.DataFrame(),
+            cached["games"],
+        ], ignore_index=True) if not cached["games"].empty else cached["games"]
+        current_active = get_active_season(all_games_for_check, static["draft_results"], static["draft_order_rules"])
+        if current_active == cached["season"]:
+            return cached
+        # No clear_domain() here: _bootstrap_games_standings() unconditionally
+        # set_domain()s both ACTIVE and HISTORICAL on the very next line, which
+        # replaces value *and* timestamp. An extra eviction would be a second,
+        # redundant invalidation of the same domain in the same call.
+    active, _ = _bootstrap_games_standings()
+    return active
+
+
+def _get_historical_bucket():
+    """No TTL here -- per the design spec, historical is "fetched once, then
+    effectively permanent: refreshed only when an explicit ... signal fires
+    ..., not on any routine cadence." A TTL fallback would force a full
+    unfiltered nfl_games/nfl_standings refetch on every warm instance once
+    an hour forever, which is exactly the read-volume cost this plan exists
+    to eliminate."""
+    import services.cache_service as cs
+    cached = cs.get_domain(cs.DOMAIN_HISTORICAL)
+    if cached is not None:
+        return cached
+    _, historical = _bootstrap_games_standings()
+    return historical
+
 
 def load_data(year: int = None):
     """
-    Loads data for the given season year with smart caching.
-    
-    Caching Hierarchy:
-    1. Memory Cache (_DATA_CACHE): Instant return if within TTL.
-    2. Local Pickle Cache (.local_db): Returns from disk if memory cache is cold.
-    3. Firestore (get_collection_df): Remote fetch if all else fails.
+    Loads data for the given season year using the active/historical/static
+    cache domains (see docs/superpowers/specs/2026-09-14-cache-mutability-
+    redesign-design.md). year=None returns the full multi-year history.
     """
-    start_total = time.time()
-    is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     use_local = os.environ.get('USE_LOCAL_DATA', 'False').lower() == 'true'
-    
-    if is_debug:
-        logger.debug("load_data(year=%s) called. USE_LOCAL_DATA=%s", year, use_local)
+    check_remote_signals(use_local)
 
-    # 1. Check for remote invalidation signals if it's been a while
-    current_time = time.time()
-    
-    # We need to access and potentially update the module-level globals in cache_service
-    import services.cache_service as cs
-    
-    # Only check remote cache control if we are NOT using local data.
-    # Checking remote Firestore when using local data forces SDK initialization, causing a 12s hang.
-    if not use_local and (current_time - cs._LAST_REMOTE_CHECK) > cs._REMOTE_CHECK_INTERVAL:
-        cs._LAST_REMOTE_CHECK = current_time
-        if is_debug:
-            logger.debug("Triggering remote Firestore cache_control check...")
-        try:
-            # We use a raw Firestore fetch here to avoid circular dependencies
-            from services.db_service import get_db
-            db = get_db()
-            if db:
-                # Add a timeout to prevent hanging the whole request if Firestore is slow
-                ctrl = db.collection("metadata").document("cache_control").get(timeout=5)
-                if ctrl.exists:
-                    remote_ts = ctrl.to_dict().get("last_update", 0)
-                    # If remote signal is newer than our local cache creation for this key
-                    key = _cache_key(year)
-                    local_ts = _CACHE_TIMESTAMPS.get(key, 0)
-                    if remote_ts > local_ts:
-                        logger.info("Remote invalidation detected (remote=%s, local=%s). Clearing cache.", remote_ts, local_ts)
-                        clear_data_cache()
-                elif is_debug:
-                    logger.debug("Remote cache_control document not found.")
-        except Exception as e:
-            logger.warning("Failed to check remote cache control: %s", e)
-    elif is_debug and use_local:
-        logger.debug("Skipped remote Firestore cache_control check because USE_LOCAL_DATA=True.")
+    active = _get_active_bucket()
+    historical = _get_historical_bucket()
+    static = _get_static_bucket()
 
-    key = _cache_key(year)
-    master_key = _cache_key(None)
+    if year is None:
+        games = pd.concat([historical["games"], active["games"]], ignore_index=True)
+        standings = pd.concat([historical["standings"], active["standings"]], ignore_index=True)
+    elif year == active["season"]:
+        games = active["games"]
+        standings = active["standings"]
+    else:
+        games = historical["games"][historical["games"]["season"] == year].copy() if not historical["games"].empty else historical["games"]
+        standings = historical["standings"][historical["standings"]["season"] == year].copy() if not historical["standings"].empty else historical["standings"]
 
-    # 2. Check if we already have the memory cache for this specific key
-    if key in _DATA_CACHE and (current_time - _CACHE_TIMESTAMPS.get(key, 0) < _CACHE_TTL_SECONDS):
-        if is_debug:
-            logger.debug("Returning load_data(year=%s) from memory cache.", year)
-        return _DATA_CACHE[key]
-
-
-
-    local_dir = pathlib.Path('.local_db')
-
-    if use_local and not local_dir.exists():
-        local_dir.mkdir(parents=True, exist_ok=True)
-
-    def fetch_or_load(collection_name, filters=None, pkl_suffix=''):
-        """Helper to fetch from Disk (Pickle) or Remote (Firestore) or Local-Slice."""
-        pkl_name = f"{collection_name}{pkl_suffix}.pkl"
-        pkl_path = local_dir / pkl_name
-        if use_local and pkl_path.exists():
-            try:
-                return pd.read_pickle(pkl_path)
-            except Exception:
-                pass  # Fallback if pickle is corrupted
-
-        if use_local and pkl_suffix:
-            # Year-specific pkl missing — fall back to filtering the base (unfiltered) pkl.
-            # This prevents the web server from calling Firestore when a year hasn't been cached yet.
-            base_pkl = local_dir / f"{collection_name}.pkl"
-            if base_pkl.exists():
-                try:
-                    base_df = pd.read_pickle(base_pkl)
-                    if filters and not base_df.empty:
-                        for f in filters:
-                            col, op, val = f
-                            if col in base_df.columns:
-                                if op == '==':
-                                    base_df = base_df[base_df[col] == val]
-                    # Cache the year slice so the next request is fast
-                    if not base_df.empty:
-                        base_df.to_pickle(pkl_path)
-                    return base_df
-                except Exception:
-                    pass
-
-        if use_local:
-            # In local mode never call Firestore — return empty if no pkl found
-            return pd.DataFrame()
-
-        start_io = time.time()
-        df = get_collection_df(collection_name, filters)
-        if is_debug:
-            logger.debug("Firestore read '%s' took %.3fs", collection_name, time.time() - start_io)
-
-        if use_local and not df.empty:
-            df.to_pickle(pkl_path)
-        return df
-
-
-    # Build season filter for NFL game data
-    season_filter = [('season', '==', year)] if year is not None else None
-    yr_suffix = f'_{year}' if year is not None else ''
-
-    from concurrent.futures import ThreadPoolExecutor
-
-    # Define the datasets we need to fetch
-    fetch_tasks = [
-        ('nfl_standings',    season_filter, yr_suffix),
-        ('nfl_teams',        None,          ''),
-        ('nfl_games',        season_filter, yr_suffix),
-        ('players',          None,          ''),
-        ('draft_order',      None,          ''),
-        ('draft_results',    None,          ''),
-        ('draft_order_rules',None,          '')
-    ]
-
-    if is_debug:
-        logger.debug("Starting parallel fetch of %d collections...", len(fetch_tasks))
-
-    with ThreadPoolExecutor(max_workers=len(fetch_tasks)) as executor:
-        # Map task tuples to fetch_or_load
-        futures = {executor.submit(fetch_or_load, *task): task[0] for task in fetch_tasks}
-        
-        # Collect results into a dictionary for easy access
-        results = {}
-        for future in futures:
-            collection_name = futures[future]
-            try:
-                results[collection_name] = future.result()
-            except Exception as e:
-                logger.error("Parallel fetch failed for %s: %s", collection_name, e)
-                results[collection_name] = pd.DataFrame()
-
-    # Unpack results in the correct order
-    standings         = results['nfl_standings']
-    teams             = results['nfl_teams']
-    games             = results['nfl_games']
-    players           = results['players']
-    draft_order       = results['draft_order']
-    draft_results     = results['draft_results']
-    draft_order_rules = results['draft_order_rules']
+    teams = static["teams"]
+    players = static["players"]
+    draft_order = static["draft_order"]
+    draft_results = static["draft_results"]
+    draft_order_rules = static["draft_order_rules"]
 
     # Schema Healing — Ensure MixedCase column names for downstream logic
     RENAME_MAP = {
@@ -194,15 +206,11 @@ def load_data(year: int = None):
         'draftorder': 'draftOrder',
         'teamid': 'teamId',
         'nickname': 'nickName',
-        'score': 'TotalWinsBySeason' # Handle specific draft_results differences if any
+        'score': 'TotalWinsBySeason'
     }
-
-    # Ensure numeric columns are correctly typed
     for df in [standings, teams, games, players, draft_order, draft_results, draft_order_rules]:
         if not df.empty:
-            # Heal columns first
             df.rename(columns={k: v for k, v in RENAME_MAP.items() if k in df.columns}, inplace=True)
-            
             if 'season' in df.columns:
                 df['season'] = pd.to_numeric(df['season'], errors='coerce').fillna(0).astype(int)
             if 'week' in df.columns:
@@ -214,47 +222,18 @@ def load_data(year: int = None):
             if 'draftOrder' in df.columns:
                 df['draftOrder'] = pd.to_numeric(df['draftOrder'], errors='coerce').fillna(0).astype(int)
 
-    # Deduplicate players — old Firestore auto-ID records can cause duplicates
     if not players.empty and 'playerId' in players.columns:
         players = players.dropna(subset=['playerId'])
         players = players.sort_values('playerId').drop_duplicates(subset=['playerId'], keep='last').reset_index(drop=True)
 
-    res = DataBundle(standings, teams, games, players, draft_order, draft_results, draft_order_rules)
-    _DATA_CACHE[key] = res
-    _CACHE_TIMESTAMPS[key] = current_time
-    
-    if is_debug:
-        logger.debug("load_data(year=%s) total execution took %.3fs", year, time.time() - start_total)
-        
-    return res
+    return DataBundle(standings, teams, games, players, draft_order, draft_results, draft_order_rules)
+
 
 def load_data_season(year: int):
-    """
-    Returns data sliced to a single season year.
-    Uses the same 3-tier cache as load_data().
-
-    Returns the same 7-tuple as load_data() but with DataFrames filtered to
-    just the requested year. Use this in route handlers that only need one season
-    to avoid processing multi-year master datasets.
-
-    Returns: (standings, teams, games, players, draft_order, draft_results, rules)
-    """
-    bundle = load_data()
-
-    def _filter(df, col='season'):
-        if df.empty or col not in df.columns:
-            return df
-        return df[df[col] == year].copy()
-
-    return DataBundle(
-        _filter(bundle.standings),
-        bundle.teams,
-        _filter(bundle.games),
-        bundle.players,
-        bundle.draft_order,
-        _filter(bundle.draft_results),
-        bundle.draft_order_rules,
-    )
+    """Returns data sliced to a single season year -- now a thin wrapper,
+    since load_data(year=X) does exactly this via the historical/active
+    bucket split above."""
+    return load_data(year=year)
 
 
 def get_active_season(games: pd.DataFrame, draft_results: pd.DataFrame = None,
@@ -385,9 +364,42 @@ def get_latest_season_and_week(games: pd.DataFrame) -> Tuple[int, int]:
         
     return int(latest_season), int(latest_week)
 
+def _predictions_domain_for(season: int) -> str:
+    import services.cache_service as cs
+    active = _get_active_bucket()
+    return cs.DOMAIN_PREDICTIONS_ACTIVE if season == active["season"] else cs.DOMAIN_PREDICTIONS_HISTORICAL
+
+
+def _get_predictions_bucket_entry(season: int) -> dict:
+    """Returns the per-season dict for `season`'s predictions, cached within
+    whichever domain (active/historical) that season falls into today -- see
+    docs/superpowers/specs/2026-09-14-cache-mutability-redesign-design.md SS3.
+
+    The entry is populated lazily, one key at a time (preseason_df /
+    consensus_df / cache_service.get_game_predictions()'s own
+    game_predictions key) -- calling get_preseason_predictions() alone must
+    not also fetch consensus_projections, and vice versa."""
+    import services.cache_service as cs
+    domain = _predictions_domain_for(season)
+    bucket = cs.get_domain(domain)
+    if bucket is None:
+        # Only stamp the domain's timestamp on first creation -- once it
+        # exists, later calls mutate this same dict object in place (via the
+        # reference cs.get_domain() returns), so lazily adding a key for a
+        # different season/collection must never re-bump the timestamp; that
+        # would make check_remote_signals() never see a remote signal as
+        # newer, since "newer than right now" is never true.
+        bucket = {}
+        cs.set_domain(domain, bucket)
+    return bucket.setdefault(season, {})
+
+
 def get_preseason_predictions(season: int) -> Dict[str, dict]:
     """Retrieves Win Totals (including avg, std_dev, and sources) from the database."""
-    preds_df = get_collection_df("preseason_predictions", filters=[("season", "==", season)])
+    entry = _get_predictions_bucket_entry(season)
+    if "preseason_df" not in entry:
+        entry["preseason_df"] = get_collection_df("preseason_predictions", filters=[("season", "==", season)])
+    preds_df = entry["preseason_df"]
     if preds_df.empty:
         return {}
     
@@ -409,7 +421,10 @@ def get_preseason_predictions(season: int) -> Dict[str, dict]:
 
 def get_consensus_projections(season: int) -> Dict[str, dict]:
     """Retrieve analyst consensus projections for a season, keyed by team."""
-    df = get_collection_df("consensus_projections", filters=[("season", "==", season)])
+    entry = _get_predictions_bucket_entry(season)
+    if "consensus_df" not in entry:
+        entry["consensus_df"] = get_collection_df("consensus_projections", filters=[("season", "==", season)])
+    df = entry["consensus_df"]
     if df.empty:
         return {}
 

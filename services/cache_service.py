@@ -10,136 +10,79 @@ import os
 import json
 import pathlib
 import pandas as pd
-from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 _USE_LOCAL = os.environ.get('USE_LOCAL_DATA', 'False').lower() == 'true'
-_LOCAL_CACHE_DIR = pathlib.Path('.local_db/analytics')
 
-
-def _local_path(analytic: str, year: int, week: int) -> pathlib.Path:
-    _LOCAL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    return _LOCAL_CACHE_DIR / f"{analytic}_{year}_{week}.json"
-
-
-def get_cached(analytic: str, year: int, week: int) -> Optional[Any]:
-    """
-    Reads one cached analytic result for (analytic, year, week).
-    Returns the deserialized data, or None if not found.
-
-    In local dev mode: reads from .local_db/analytics/<analytic>_<year>_<week>.json
-    In production:     reads ONE document from Firestore analytics_cache collection
-    """
-    if _USE_LOCAL:
-        p = _local_path(analytic, year, week)
-        if p.exists():
-            try:
-                with open(p, 'r') as f:
-                    doc = json.load(f)
-                return doc.get('data')
-            except Exception:
-                return None
-        return None
-    else:
-        try:
-            from services.db_service import get_db
-            db = get_db()
-            doc_id = f"{analytic}_{year}_{week}"
-            doc = db.collection('analytics_cache').document(doc_id).get()
-            if doc.exists:
-                raw = doc.to_dict().get('data')
-                if raw:
-                    return json.loads(raw)
-        except Exception:
-            pass
-        return None
-
-
-def write_cache(analytic: str, year: int, week: int, data: Any, is_final: bool = False) -> None:
-    """
-    Writes a computed analytic result to cache.
-    Called exclusively by scripts/cache_builder.py — never from page routes.
-    """
-    serialized = json.dumps(data, default=str)
-
-    if _USE_LOCAL:
-        p = _local_path(analytic, year, week)
-        with open(p, 'w') as f:
-            json.dump({'analytic': analytic, 'year': year, 'week': week,
-                       'is_final': is_final, 'data': data}, f, default=str)
-    else:
-        try:
-            from services.db_service import get_db
-            from datetime import datetime, timezone
-            db = get_db()
-            doc_id = f"{analytic}_{year}_{week}"
-            db.collection('analytics_cache').document(doc_id).set({
-                'analytic': analytic,
-                'year': year,
-                'week': week,
-                'is_final': is_final,
-                'computed_at': datetime.now(timezone.utc).isoformat(),
-                'data': serialized
-            })
-        except Exception as e:
-            logger.error("Failed to write cache: %s", e)
-
-
-def is_cache_final(analytic: str, year: int, week: int) -> bool:
-    """Returns True if the cached result is marked final (no recompute needed)."""
-    if _USE_LOCAL:
-        p = _local_path(analytic, year, week)
-        if p.exists():
-            try:
-                with open(p, 'r') as f:
-                    return json.load(f).get('is_final', False)
-            except Exception:
-                pass
-        return False
-    else:
-        try:
-            from services.db_service import get_db
-            db = get_db()
-            doc_id = f"{analytic}_{year}_{week}"
-            doc = db.collection('analytics_cache').document(doc_id).get()
-            if doc.exists:
-                return doc.to_dict().get('is_final', False)
-        except Exception:
-            pass
-        return False
-
-# --- Data Cache (Moved from data_service to break circular import) ---
+# --- Data Cache: domain-keyed, not year-keyed (see docs/superpowers/specs/
+# 2026-09-14-cache-mutability-redesign-design.md) ---
 import time
 
-# In-memory cache keyed by year (or 'all' for unfiltered load)
-_DATA_CACHE: dict = {}
-_CACHE_TIMESTAMPS: dict = {}
-_CACHE_TTL_SECONDS = 3600  # 1-hour TTL; long enough to avoid Firestore spam on every request, short enough to catch same-day data changes
+DOMAIN_ACTIVE = "active"
+DOMAIN_HISTORICAL = "historical"
+DOMAIN_STATIC = "static"
+DOMAIN_PREDICTIONS_ACTIVE = "predictions_active"
+DOMAIN_PREDICTIONS_HISTORICAL = "predictions_historical"
+DOMAIN_ADMIN_ANALYTICS = "admin_analytics"
+
+# Maps each cache domain to the field name it owns inside the single
+# metadata/cache_control Firestore document. A writer signals exactly the
+# domain(s) it touched; every process (including winspool-predict-daily,
+# which never shares memory with the web service) discovers the signal via
+# the existing remote-check poll below.
+DOMAIN_SIGNAL_FIELDS = {
+    DOMAIN_ACTIVE: "active_updated",
+    DOMAIN_HISTORICAL: "historical_updated",
+    DOMAIN_STATIC: "static_updated",
+    DOMAIN_PREDICTIONS_ACTIVE: "predictions_active_updated",
+    DOMAIN_PREDICTIONS_HISTORICAL: "predictions_historical_updated",
+    DOMAIN_ADMIN_ANALYTICS: "admin_analytics_updated",
+}
+
+_DOMAIN_CACHE: dict = {}
+_DOMAIN_TIMESTAMPS: dict = {}
+_CACHE_TTL_SECONDS = 3600  # 1-hour TTL; used only by data_service.py's _get_active_bucket() as a defensive backstop -- historical/static are signal-only per the design spec, see data_service.py's _get_historical_bucket()/_get_static_bucket()
 _LAST_REMOTE_CHECK = 0
-_REMOTE_CHECK_INTERVAL = 60 # Check Firestore for invalidation every 60 seconds
+_REMOTE_CHECK_INTERVAL = 60  # Check Firestore for invalidation every 60 seconds
 
-def clear_data_cache(year=None):
+
+def get_domain(domain: str):
+    """Return the cached value for `domain`, or None if not cached."""
+    return _DOMAIN_CACHE.get(domain)
+
+
+def set_domain(domain: str, value, timestamp: float = None) -> None:
+    """Cache `value` under `domain`, stamped with the given (or current) time."""
+    _DOMAIN_CACHE[domain] = value
+    _DOMAIN_TIMESTAMPS[domain] = timestamp if timestamp is not None else time.time()
+
+
+def clear_domain(domain: str) -> None:
+    """Evict one domain's cached value and timestamp."""
+    _DOMAIN_CACHE.pop(domain, None)
+    _DOMAIN_TIMESTAMPS.pop(domain, None)
+
+
+def get_domain_timestamp(domain: str) -> float:
+    """Return when `domain` was last cached, or 0 if never cached."""
+    return _DOMAIN_TIMESTAMPS.get(domain, 0)
+
+
+def clear_data_cache(domain: str = None) -> None:
+    """Invalidate one named cache domain, or every domain if none given.
+
+    `domain` must be one of the DOMAIN_* constants above (a bare Firestore
+    collection name or a season year is no longer a valid argument -- see
+    the design doc's "year-keyed-plus-'all'" replacement).
     """
-    Invalidates in-memory data caches.
-    If year is provided, only that year's cache is cleared.
-    If year is None, wipes all data (default behavior for full refreshes).
-    """
-    global _DATA_CACHE, _CACHE_TIMESTAMPS
-    if year is not None:
-        key = str(year)
-        if key in _DATA_CACHE:
-            del _DATA_CACHE[key]
-        if key in _CACHE_TIMESTAMPS:
-            del _CACHE_TIMESTAMPS[key]
-        logger.info("Local data cache for %s cleared.", year)
+    if domain is not None:
+        clear_domain(domain)
+        logger.info("Cache domain '%s' cleared.", domain)
     else:
-        _DATA_CACHE.clear()
-        _CACHE_TIMESTAMPS.clear()
-        logger.info("Global data cache explicitly cleared.")
-
-def _cache_key(year):
-    return str(year) if year is not None else 'all'
+        _DOMAIN_CACHE.clear()
+        _DOMAIN_TIMESTAMPS.clear()
+        logger.info("All cache domains cleared.")
 
 
 # ---------------------------------------------------------------------------
@@ -155,8 +98,7 @@ def _cache_key(year):
 _GAME_PRED_DIR = pathlib.Path('.local_db')
 
 
-def get_game_predictions(season: int) -> dict:
-    """Return {game_key: pred_dict} for season, or {} if not found."""
+def _fetch_game_predictions(season: int) -> dict:
     if _USE_LOCAL:
         p = _GAME_PRED_DIR / f"game_predictions_{season}.json"
         if p.exists():
@@ -176,6 +118,20 @@ def get_game_predictions(season: int) -> dict:
         except Exception:
             pass
         return {}
+
+
+def get_game_predictions(season: int) -> dict:
+    """Return {game_key: pred_dict} for season, or {} if not found. Cached
+    per-season within whichever predictions domain (active/historical) that
+    season falls into today -- shares its per-season entry dict with
+    data_service.py's get_preseason_predictions()/get_consensus_projections()
+    (see _get_predictions_bucket_entry() there), populating only its own
+    "game_predictions" key lazily."""
+    from services.data_service import _get_predictions_bucket_entry
+    entry = _get_predictions_bucket_entry(season)
+    if "game_predictions" not in entry:
+        entry["game_predictions"] = _fetch_game_predictions(season)
+    return entry["game_predictions"]
 
 
 def merge_game_predictions(df: pd.DataFrame, season: int) -> pd.DataFrame:
@@ -420,24 +376,38 @@ def get_elo_history_season(season: int) -> list[dict] | None:
 
 
 def get_all_elo_history() -> list[dict]:
-    """Return every computed Elo row across all seasons, sorted oldest first."""
-    all_rows: list[dict] = []
+    """Return every computed Elo row across all seasons, sorted oldest first.
+
+    In Firestore mode, cached under DOMAIN_ADMIN_ANALYTICS (shared with
+    get_all_nn_weekly_accuracy()) -- admin-only traffic, refreshed only by
+    an explicit admin_analytics_updated signal, not a TTL."""
     if _USE_LOCAL:
+        all_rows: list[dict] = []
         for p in sorted(_GAME_PRED_DIR.glob("elo_history_*.json")):
             try:
                 with open(p) as f:
                     all_rows.extend(json.load(f).get("rows", []))
             except Exception:
                 logger.warning("Failed to read %s", p)
-    else:
-        try:
-            from services.db_service import get_db
-            db = get_db()
-            for doc in db.collection("elo_history").stream():
-                all_rows.extend(doc.to_dict().get("rows", []))
-        except Exception:
-            logger.exception("Failed to fetch elo_history from Firestore")
+        all_rows.sort(key=lambda r: (r.get("season", 0), r.get("week", 0)))
+        return all_rows
+
+    bucket = get_domain(DOMAIN_ADMIN_ANALYTICS) or {}
+    if "elo_history" in bucket:
+        return bucket["elo_history"]
+
+    all_rows: list[dict] = []
+    try:
+        from services.db_service import get_db
+        db = get_db()
+        for doc in db.collection("elo_history").stream():
+            all_rows.extend(doc.to_dict().get("rows", []))
+    except Exception:
+        logger.exception("Failed to fetch elo_history from Firestore")
     all_rows.sort(key=lambda r: (r.get("season", 0), r.get("week", 0)))
+
+    bucket["elo_history"] = all_rows
+    set_domain(DOMAIN_ADMIN_ANALYTICS, bucket)
     return all_rows
 
 
@@ -514,24 +484,39 @@ def get_nn_weekly_accuracy_season(season: int) -> list[dict] | None:
 
 
 def get_all_nn_weekly_accuracy() -> list[dict]:
-    """Return every recorded weekly-accuracy row across all seasons, sorted oldest first."""
-    all_rows: list[dict] = []
+    """Return every recorded weekly-accuracy row across all seasons, sorted
+    oldest first.
+
+    In Firestore mode, cached under DOMAIN_ADMIN_ANALYTICS (shared with
+    get_all_elo_history()) -- admin-only traffic, refreshed only by an
+    explicit admin_analytics_updated signal, not a TTL."""
     if _USE_LOCAL:
+        all_rows: list[dict] = []
         for p in sorted(_GAME_PRED_DIR.glob("nn_weekly_accuracy_*.json")):
             try:
                 with open(p) as f:
                     all_rows.extend(json.load(f).get("rows", []))
             except Exception:
                 logger.warning("Failed to read %s", p)
-    else:
-        try:
-            from services.db_service import get_db
-            db = get_db()
-            for doc in db.collection("nn_weekly_accuracy").stream():
-                all_rows.extend(doc.to_dict().get("rows", []))
-        except Exception:
-            logger.exception("Failed to fetch nn_weekly_accuracy from Firestore")
+        all_rows.sort(key=lambda r: (r.get("season", 0), r.get("week", 0)))
+        return all_rows
+
+    bucket = get_domain(DOMAIN_ADMIN_ANALYTICS) or {}
+    if "nn_weekly_accuracy" in bucket:
+        return bucket["nn_weekly_accuracy"]
+
+    all_rows: list[dict] = []
+    try:
+        from services.db_service import get_db
+        db = get_db()
+        for doc in db.collection("nn_weekly_accuracy").stream():
+            all_rows.extend(doc.to_dict().get("rows", []))
+    except Exception:
+        logger.exception("Failed to fetch nn_weekly_accuracy from Firestore")
     all_rows.sort(key=lambda r: (r.get("season", 0), r.get("week", 0)))
+
+    bucket["nn_weekly_accuracy"] = all_rows
+    set_domain(DOMAIN_ADMIN_ANALYTICS, bucket)
     return all_rows
 
 

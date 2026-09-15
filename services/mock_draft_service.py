@@ -9,6 +9,7 @@ from typing import Dict, List, Tuple
 
 from services.data_service import (
     get_season_projection_dual, get_season_projection_legacy_shape, get_team_schedule, load_data_season,
+    _get_static_bucket,
 )
 from services.db_service import get_collection_df
 
@@ -33,7 +34,7 @@ def get_pick_sequence() -> List[Dict[str, int]]:
     season's rules produce the same slot structure, and the mock draft
     keeps working even if the target season's rules get wiped.
     """
-    rules_df = get_collection_df("draft_order_rules")
+    rules_df = _get_static_bucket()["draft_order_rules"]
     if rules_df.empty:
         raise ValueError("No draft_order_rules configured for any season.")
 

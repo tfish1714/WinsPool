@@ -14,12 +14,9 @@ import pytest
 # Firestore/cache-touching note: most tests here mock `main()` or `build_year()`
 # entirely, so nothing real is exercised. The exception is
 # TestPreseasonPredictionsWiring's tests that call `build_year()` directly
-# (not `main()`) -- those run all five real analytic blocks inside
-# `build_year()`, including `write_cache()`/`is_cache_final()`, which would
-# otherwise write to the developer's actual local `.local_db/analytics/`
-# cache as a side effect. Those tests patch `write_cache`/`is_cache_final`
-# explicitly to prevent that; every Firestore call within them
-# (`set_preseason_predictions`, `NNProjectionEngine`) is also mocked.
+# (not `main()`) -- those run the real schedule_enriched/preseason_predictions
+# blocks inside `build_year()`; every Firestore call within them
+# (`set_preseason_predictions`, `NNProjectionEngine`) is mocked.
 import firebase_admin as _firebase_admin
 with patch.object(_firebase_admin, "_apps", {"__test__": object()}), \
      patch("firebase_admin.firestore.client"):
@@ -178,13 +175,11 @@ class TestYearsToBuildWiring:
 
 
 class TestPreseasonPredictionsWiring:
-    @patch("scripts.cache_builder.is_cache_final", return_value=False)
-    @patch("scripts.cache_builder.write_cache")
     @patch("scripts.cache_builder.live_scores.sync_live_scores_to_df")
     @patch("scripts.cache_builder.set_preseason_predictions")
     @patch("scripts.cache_builder.NNProjectionEngine")
     def test_writes_unlocked_for_current_season(
-        self, mock_engine_cls, mock_set, mock_sync_live, mock_write_cache, mock_is_final,
+        self, mock_engine_cls, mock_set, mock_sync_live,
     ):
         from scripts.cache_builder import build_year
         import pandas as pd
@@ -229,12 +224,10 @@ class TestPreseasonPredictionsWiring:
     # every unscoped daily run. See test_skips_write_for_past_season_even_
     # with_no_locked_field_in_existing_docs below for the real-world scenario
     # this protects against.
-    @patch("scripts.cache_builder.is_cache_final", return_value=False)
-    @patch("scripts.cache_builder.write_cache")
     @patch("scripts.cache_builder.set_preseason_predictions")
     @patch("scripts.cache_builder.NNProjectionEngine")
     def test_writes_locked_for_past_season(
-        self, mock_engine_cls, mock_set, mock_write_cache, mock_is_final,
+        self, mock_engine_cls, mock_set,
     ):
         from scripts.cache_builder import build_year
         import pandas as pd
@@ -262,12 +255,10 @@ class TestPreseasonPredictionsWiring:
         # never be written -- the write block is gated off entirely.
         mock_set.assert_not_called()
 
-    @patch("scripts.cache_builder.is_cache_final", return_value=False)
-    @patch("scripts.cache_builder.write_cache")
     @patch("scripts.cache_builder.set_preseason_predictions")
     @patch("scripts.cache_builder.NNProjectionEngine")
     def test_skips_write_for_past_season_even_with_no_locked_field_in_existing_docs(
-        self, mock_engine_cls, mock_set, mock_write_cache, mock_is_final,
+        self, mock_engine_cls, mock_set,
     ):
         """The real-world bug scenario: every historical preseason_predictions
         doc was written by predict_season.py, which never sets a `locked`
@@ -304,12 +295,10 @@ class TestPreseasonPredictionsWiring:
 
         mock_set.assert_not_called()
 
-    @patch("scripts.cache_builder.is_cache_final", return_value=False)
-    @patch("scripts.cache_builder.write_cache")
     @patch("scripts.cache_builder.set_preseason_predictions")
     @patch("scripts.cache_builder.NNProjectionEngine")
     def test_force_allows_writing_past_season(
-        self, mock_engine_cls, mock_set, mock_write_cache, mock_is_final,
+        self, mock_engine_cls, mock_set,
     ):
         """--force is the intentional manual-override escape hatch: it must
         still allow writing (and relocking) an already-completed season."""
@@ -338,12 +327,10 @@ class TestPreseasonPredictionsWiring:
         mock_set.assert_called_once()
         assert mock_set.call_args.kwargs["force"] is True
 
-    @patch("scripts.cache_builder.is_cache_final", return_value=False)
-    @patch("scripts.cache_builder.write_cache")
     @patch("scripts.cache_builder.set_preseason_predictions")
     @patch("scripts.cache_builder.NNProjectionEngine")
     def test_skips_write_when_model_version_none(
-        self, mock_engine_cls, mock_set, mock_write_cache, mock_is_final,
+        self, mock_engine_cls, mock_set,
     ):
         """model_version=None signals model loading failed this run (mirrors
         pred_lookup={} for game_predictions) -- must not attempt the write."""
@@ -405,6 +392,71 @@ class TestPreseasonPredictionsWiring:
         assert mock_build_year.call_count == 2
         for call in mock_build_year.call_args_list:
             assert call.kwargs.get("model_version") == "nn_v15+xgb_v9+lr_v7"
+
+
+class TestScheduleEnrichedGate:
+    """Task 10 deviation: schedule_enriched's is_past_season gate replaces
+    the deleted analytics_cache is_cache_final() finality check. Without
+    this gate, a completed past season's game_predictions would be
+    recomputed and rewritten to Firestore on every single daily
+    cache_builder.py run, forever."""
+
+    @patch("scripts.cache_builder.analysis.get_enriched_schedule")
+    def test_past_season_skipped_without_force(self, mock_get_enriched):
+        from scripts.cache_builder import build_year
+        import pandas as pd
+
+        games = pd.DataFrame([
+            {"season": 2024, "week": 18, "home_team": "KC", "away_team": "TEN",
+             "result": 7.0, "game_type": "REG"},
+        ])
+        build_year(
+            standings=pd.DataFrame(), games=games, players=pd.DataFrame(),
+            draft_order=pd.DataFrame(), draft_results=pd.DataFrame(),
+            draft_order_rules=pd.DataFrame(), year=2024, current_year=2026,
+            all_games=games, force=False, pred_lookup={}, model_version=None,
+        )
+
+        mock_get_enriched.assert_not_called()
+
+    @patch("scripts.cache_builder.analysis.get_enriched_schedule")
+    def test_past_season_recomputed_with_force(self, mock_get_enriched):
+        from scripts.cache_builder import build_year
+        import pandas as pd
+
+        mock_get_enriched.return_value = pd.DataFrame()
+        games = pd.DataFrame([
+            {"season": 2024, "week": 18, "home_team": "KC", "away_team": "TEN",
+             "result": 7.0, "game_type": "REG"},
+        ])
+        build_year(
+            standings=pd.DataFrame(), games=games, players=pd.DataFrame(),
+            draft_order=pd.DataFrame(), draft_results=pd.DataFrame(),
+            draft_order_rules=pd.DataFrame(), year=2024, current_year=2026,
+            all_games=games, force=True, pred_lookup={}, model_version=None,
+        )
+
+        mock_get_enriched.assert_called_once()
+
+    @patch("scripts.cache_builder.analysis.get_enriched_schedule")
+    def test_current_season_always_recomputed(self, mock_get_enriched):
+        """A current/future season is never skipped by this gate, force or not."""
+        from scripts.cache_builder import build_year
+        import pandas as pd
+
+        mock_get_enriched.return_value = pd.DataFrame()
+        games = pd.DataFrame([
+            {"season": 2026, "week": 1, "home_team": "KC", "away_team": "TEN",
+             "result": None, "game_type": "REG"},
+        ])
+        build_year(
+            standings=pd.DataFrame(), games=games, players=pd.DataFrame(),
+            draft_order=pd.DataFrame(), draft_results=pd.DataFrame(),
+            draft_order_rules=pd.DataFrame(), year=2026, current_year=2026,
+            all_games=games, force=False, pred_lookup={}, model_version=None,
+        )
+
+        mock_get_enriched.assert_called_once()
 
 
 class TestBuildCompletedResults:
@@ -595,6 +647,35 @@ class TestPublishGameProbs:
         assert entry["edge_vs_vegas"] == pytest.approx(-2.0)  # -3.0 - (-1.0)
 
 
+class TestPredictionsActiveSignal:
+    """Task 6: main()'s daily full-build run must signal predictions_active_
+    updated (merge=True, via signal_data_update()) instead of the old bare,
+    non-merging metadata/cache_control write -- that bare write would wipe
+    every other domain's field in the same document on every run."""
+
+    @patch("scripts.cache_builder.load_data")
+    @patch("scripts.cache_builder.get_available_years", return_value=[2026])
+    @patch("scripts.cache_builder._years_to_build", return_value=[2026])
+    @patch("scripts.cache_builder.NNPredictionService", side_effect=RuntimeError("no model in test env"))
+    @patch("scripts.cache_builder.build_year")
+    @patch("services.db_service.signal_data_update")
+    def test_full_run_signals_predictions_active(
+        self, mock_signal, mock_build_year, mock_nn_svc, mock_years_to_build,
+        mock_available_years, mock_load_data, monkeypatch,
+    ):
+        import sys
+        from services.cache_service import DOMAIN_PREDICTIONS_ACTIVE
+
+        monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--skip-sync"])
+        mock_load_data.return_value = (
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame([{"season": 2026}]),
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+        )
+        main()
+
+        mock_signal.assert_called_once_with(DOMAIN_PREDICTIONS_ACTIVE)
+
+
 class TestResimulateModeWiring:
     def test_resimulate_flag_skips_full_multi_year_build(self, monkeypatch):
         """--resimulate must not call build_year() (the full standings/analytics
@@ -608,7 +689,7 @@ class TestResimulateModeWiring:
              patch("scripts.cache_builder.NNProjectionEngine") as mock_engine_cls, \
              patch("services.espn_injury_service.get_espn_injury_overrides", return_value={}), \
              patch("scripts.cache_builder._publish_game_probs", return_value=0) as mock_publish, \
-             patch("scripts.cache_builder._fs"):
+             patch("services.db_service.signal_data_update"):
             mock_load_data.return_value = (
                 pd.DataFrame(), pd.DataFrame(), _games_df(), pd.DataFrame(),
                 pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
@@ -631,7 +712,7 @@ class TestResimulateModeWiring:
              patch("services.espn_injury_service.get_espn_injury_overrides",
                    return_value={(3, "QB1"): 0.0}) as mock_espn, \
              patch("scripts.cache_builder._publish_game_probs", return_value=1), \
-             patch("scripts.cache_builder._fs"):
+             patch("services.db_service.signal_data_update"):
             mock_load_data.return_value = (
                 pd.DataFrame(), pd.DataFrame(), _games_df(), pd.DataFrame(),
                 pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
@@ -656,7 +737,7 @@ class TestResimulateModeWiring:
              patch("services.espn_injury_service.get_espn_injury_overrides",
                    side_effect=Exception("ESPN down")), \
              patch("scripts.cache_builder._publish_game_probs", return_value=1) as mock_publish, \
-             patch("scripts.cache_builder._fs"):
+             patch("services.db_service.signal_data_update"):
             mock_load_data.return_value = (
                 pd.DataFrame(), pd.DataFrame(), _games_df(), pd.DataFrame(),
                 pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),

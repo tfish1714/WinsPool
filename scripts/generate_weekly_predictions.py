@@ -159,7 +159,6 @@ def _upload_weekly_predictions(records: list, dry_run: bool):
     if committed % 400 != 0:
         batch.commit()
 
-    db.collection("metadata").document("cache_control").set({"last_update": time.time()})
     print(f"  Uploaded {committed} game predictions to weekly_game_predictions.")
 
 

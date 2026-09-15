@@ -11,6 +11,22 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from services.db_service import get_collection_df, add_player, get_player_by_email, delete_season_data
 
 
+@pytest.fixture(autouse=True)
+def _reset_data_cache():
+    """Isolate cache_service's module-level domain cache between tests.
+
+    Several tests in this file warm a specific domain (e.g. DOMAIN_STATIC)
+    with fake data via cache_service.set_domain() directly, bypassing any
+    per-test patching -- without this, that fake data leaks into whichever
+    test runs next and reads through the real _get_players_df()/load_data()
+    path (e.g. test_player_exists_helper), independent of test file order.
+    """
+    from services import cache_service
+    cache_service.clear_data_cache()
+    yield
+    cache_service.clear_data_cache()
+
+
 def _make_players_df():
     return pd.DataFrame([
         {"playerId": 42, "fullName": "Cache Hit",  "email": "hit@example.com"},
@@ -18,14 +34,80 @@ def _make_players_df():
     ])
 
 
+def _make_static_bucket(players_df):
+    """Build a `static`-domain bucket dict shaped like the real one Task 3's
+    _get_static_bucket() produces -- a plain dict with a "players" key, not
+    the old DataBundle namedtuple with a `.players` attribute."""
+    return {
+        "teams": pd.DataFrame(),
+        "players": players_df,
+        "draft_order": pd.DataFrame(),
+        "draft_results": pd.DataFrame(),
+        "draft_order_rules": pd.DataFrame(),
+    }
+
+
+def test_signal_data_update_writes_domain_specific_field(mock_firestore):
+    from services.db_service import signal_data_update
+    from services.cache_service import DOMAIN_ACTIVE
+
+    signal_data_update(DOMAIN_ACTIVE)
+
+    mock_firestore.collection.assert_called_with("metadata")
+    mock_firestore.collection.return_value.document.assert_called_with("cache_control")
+    set_call = mock_firestore.collection.return_value.document.return_value.set
+    set_call.assert_called_once()
+    args, kwargs = set_call.call_args
+    assert list(args[0].keys()) == ["active_updated"]
+    assert kwargs.get("merge") is True
+
+def test_signal_data_update_defaults_to_static_domain(mock_firestore):
+    from services.db_service import signal_data_update
+
+    signal_data_update()  # no argument -- must match every pre-existing call site's intent
+
+    set_call = mock_firestore.collection.return_value.document.return_value.set
+    args, kwargs = set_call.call_args
+    assert list(args[0].keys()) == ["static_updated"]
+    assert kwargs.get("merge") is True
+
+
+def test_add_draft_result_clears_static_domain_and_signals(mock_firestore, monkeypatch):
+    import services.cache_service as cs
+    from services.db_service import add_draft_result
+    cs.set_domain(cs.DOMAIN_STATIC, "stale-static-bundle")
+
+    add_draft_result(season=2026, draft_pick=1, player_id=14, team="KC")
+
+    assert cs.get_domain(cs.DOMAIN_STATIC) is None  # evicted
+    set_call = mock_firestore.collection.return_value.document.return_value.set
+    # one of the .set() calls must be the cache_control signal with static_updated
+    signal_calls = [c for c in set_call.call_args_list if c.args and "static_updated" in c.args[0]]
+    assert len(signal_calls) == 1
+    assert signal_calls[0].kwargs.get("merge") is True
+
+def test_delete_draft_pick_clears_static_domain_and_signals(mock_firestore, monkeypatch):
+    import services.cache_service as cs
+    from services.db_service import delete_draft_pick
+    cs.set_domain(cs.DOMAIN_STATIC, "stale-static-bundle")
+
+    delete_draft_pick(season=2026, draft_pick=1)
+
+    assert cs.get_domain(cs.DOMAIN_STATIC) is None
+    set_call = mock_firestore.collection.return_value.document.return_value.set
+    signal_calls = [c for c in set_call.call_args_list if c.args and "static_updated" in c.args[0]]
+    assert len(signal_calls) == 1
+
+
 def test_get_player_by_id_uses_warm_cache(monkeypatch):
-    """get_player_by_id reads from _DATA_CACHE when it is warm — no Firestore call."""
+    """get_player_by_id reads from cache when it is warm — no Firestore call.
+
+    Since Task 3, players live in the `static` domain (a plain dict with a
+    "players" key), not the old DataBundle-shaped DOMAIN_ACTIVE."""
     from services import cache_service
     from services.db_service import get_player_by_id
 
-    bundle = MagicMock()
-    bundle.players = _make_players_df()
-    monkeypatch.setitem(cache_service._DATA_CACHE, 'all', bundle)
+    cache_service.set_domain(cache_service.DOMAIN_STATIC, _make_static_bucket(_make_players_df()))
 
     with patch('services.db_service.get_collection_df') as mock_gcd:
         result = get_player_by_id('42')
@@ -35,12 +117,40 @@ def test_get_player_by_id_uses_warm_cache(monkeypatch):
     assert result['fullName'] == 'Cache Hit'
 
 
-def test_get_player_by_id_cold_cache_falls_back(monkeypatch):
-    """get_player_by_id calls get_collection_df when _DATA_CACHE is empty."""
+def test_get_player_by_id_works_before_load_data_runs(monkeypatch):
+    """Regression for the DOMAIN_ACTIVE/DataBundle staleness bug fixed in Task 4:
+    _get_players_df() must read the `static` domain's dict-shaped bucket, and
+    must work correctly even when that bucket was populated directly (e.g. by
+    _get_static_bucket()) rather than via load_data() -- i.e. before any
+    schema-healing/dedup pass has ever touched the players frame in this
+    process. player_id is passed as an int here (as callers like
+    get_player_by_id(str(player_id)) and the reauthenticate handshake do in
+    various forms) to also confirm the str-comparison in get_player_by_id is
+    robust to the raw (unhealed) int64 dtype get_collection_df naturally
+    produces from Firestore docs -- not just to the post-load_data() state."""
     from services import cache_service
     from services.db_service import get_player_by_id
 
-    monkeypatch.setattr(cache_service, '_DATA_CACHE', {})
+    cache_service.clear_data_cache()
+    raw_players = pd.DataFrame([
+        {"playerId": 14, "fullName": "Raw Player", "email": "raw@example.com"},
+    ])
+    cache_service.set_domain(cache_service.DOMAIN_STATIC, _make_static_bucket(raw_players))
+
+    with patch('services.db_service.get_collection_df') as mock_gcd:
+        result = get_player_by_id(14)
+        mock_gcd.assert_not_called()
+
+    assert result is not None
+    assert result['fullName'] == 'Raw Player'
+
+
+def test_get_player_by_id_cold_cache_falls_back(monkeypatch):
+    """get_player_by_id calls get_collection_df when cache is empty."""
+    from services import cache_service
+    from services.db_service import get_player_by_id
+
+    cache_service.clear_data_cache()
 
     with patch('services.db_service.get_collection_df') as mock_gcd:
         mock_gcd.return_value = _make_players_df()
@@ -51,13 +161,14 @@ def test_get_player_by_id_cold_cache_falls_back(monkeypatch):
 
 
 def test_get_player_by_email_uses_warm_cache(monkeypatch):
-    """get_player_by_email reads from _DATA_CACHE when it is warm — no Firestore call."""
+    """get_player_by_email reads from cache when it is warm — no Firestore call.
+
+    Since Task 3, players live in the `static` domain (a plain dict with a
+    "players" key), not the old DataBundle-shaped DOMAIN_ACTIVE."""
     from services import cache_service
     from services.db_service import get_player_by_email
 
-    bundle = MagicMock()
-    bundle.players = _make_players_df()
-    monkeypatch.setitem(cache_service._DATA_CACHE, 'all', bundle)
+    cache_service.set_domain(cache_service.DOMAIN_STATIC, _make_static_bucket(_make_players_df()))
 
     with patch('services.db_service.get_collection_df') as mock_gcd:
         result = get_player_by_email('hit@example.com')
@@ -68,11 +179,11 @@ def test_get_player_by_email_uses_warm_cache(monkeypatch):
 
 
 def test_get_player_by_email_cold_cache_falls_back(monkeypatch):
-    """get_player_by_email calls get_collection_df when _DATA_CACHE is empty."""
+    """get_player_by_email calls get_collection_df when cache is empty."""
     from services import cache_service
     from services.db_service import get_player_by_email
 
-    monkeypatch.setattr(cache_service, '_DATA_CACHE', {})
+    cache_service.clear_data_cache()
 
     with patch('services.db_service.get_collection_df') as mock_gcd:
         mock_gcd.return_value = _make_players_df()
@@ -98,9 +209,7 @@ def test_get_player_by_email_normalizes_nan_field_to_none(monkeypatch):
         {"playerId": 1, "fullName": "No Password Player", "email": "nopw@example.com"},
         {"playerId": 2, "fullName": "Has Password Player", "email": "haspw@example.com", "password_hash": "somehash"},
     ])
-    bundle = MagicMock()
-    bundle.players = df
-    monkeypatch.setitem(cache_service._DATA_CACHE, 'all', bundle)
+    cache_service.set_domain(cache_service.DOMAIN_STATIC, _make_static_bucket(df))
 
     result = get_player_by_email("nopw@example.com")
     assert result is not None
@@ -137,7 +246,7 @@ def test_add_player_integrity(monkeypatch):
     touches the real database or the .local_db/ pickle files.
     """
     from services import cache_service
-    monkeypatch.setattr(cache_service, '_DATA_CACHE', {})
+    cache_service.clear_data_cache()
 
     test_email = _test_email()
     test_name = "Stability Test User"
@@ -352,3 +461,34 @@ def test_get_collection_df_corrupted_pickle_returns_empty(monkeypatch, tmp_path)
 
     assert isinstance(result, pd.DataFrame)
     assert result.empty
+
+
+def test_add_draft_result_makes_pick_visible_through_load_data(mock_firestore, monkeypatch):
+    """Regression test for the original staleness bug: a page reading via
+    bare load_data() (year=None) must see a just-added pick immediately,
+    not after up to an hour's TTL."""
+    import services.cache_service as cs
+    from services.data_service import load_data
+    from services.db_service import add_draft_result
+
+    cs.clear_data_cache()
+    before = load_data()  # warms the static domain with pre-pick draft_results
+    before_count = len(before.draft_results)
+
+    # Simulate the pick actually landing in draft_results (mock_firestore
+    # doesn't persist real documents, so patch get_collection_df's
+    # draft_results read to reflect one more row after the write).
+    import pandas as pd
+    from unittest.mock import patch
+    after_df = pd.concat([
+        before.draft_results,
+        pd.DataFrame([{"season": 2026, "draftPick": 1, "playerId": 14, "team": "KC"}]),
+    ], ignore_index=True)
+
+    add_draft_result(season=2026, draft_pick=1, player_id=14, team="KC")
+    with patch("services.data_service.get_collection_df") as mock_fetch:
+        mock_fetch.side_effect = lambda name, *a, **kw: (
+            after_df if name == "draft_results" else pd.DataFrame()
+        )
+        after = load_data()
+    assert len(after.draft_results) == before_count + 1

@@ -13,7 +13,7 @@ class TestGetPickSequence:
             {"season": 2025, "draftOrder": 2, "pickOne": 2, "pickTwo": 19, "pickThree": 27},
             {"season": 2026, "draftOrder": 1, "pickOne": 3, "pickTwo": 18, "pickThree": 28},
         ])
-        with patch("services.mock_draft_service.get_collection_df", return_value=rules_df):
+        with patch("services.mock_draft_service._get_static_bucket", return_value={"draft_order_rules": rules_df}):
             seq = get_pick_sequence()
         # Uses the most recent season present (2026) — only 1 slot there, 3 picks.
         assert len(seq) == 3
@@ -26,15 +26,29 @@ class TestGetPickSequence:
             {"season": 2024, "draftOrder": 1, "pickOne": 99, "pickTwo": 98, "pickThree": 97},
             {"season": 2025, "draftOrder": 1, "pickOne": 1, "pickTwo": 20, "pickThree": 26},
         ])
-        with patch("services.mock_draft_service.get_collection_df", return_value=rules_df):
+        with patch("services.mock_draft_service._get_static_bucket", return_value={"draft_order_rules": rules_df}):
             seq = get_pick_sequence()
         assert {e["pick"] for e in seq} == {1, 20, 26}
 
     def test_raises_value_error_when_no_rules_configured(self):
         from services.mock_draft_service import get_pick_sequence
-        with patch("services.mock_draft_service.get_collection_df", return_value=pd.DataFrame()):
+        with patch("services.mock_draft_service._get_static_bucket", return_value={"draft_order_rules": pd.DataFrame()}):
             with pytest.raises(ValueError):
                 get_pick_sequence()
+
+    def test_uses_static_bucket_not_a_fresh_fetch(self):
+        """Regression for Task 5's reroute: draft_order_rules must come from
+        the shared static cache bucket, not a redundant direct Firestore/pkl
+        fetch on every call."""
+        from services.mock_draft_service import get_pick_sequence
+        rules_df = pd.DataFrame([
+            {"season": 2025, "draftOrder": 1, "pickOne": 1, "pickTwo": 20, "pickThree": 26},
+        ])
+        with patch("services.mock_draft_service._get_static_bucket", return_value={"draft_order_rules": rules_df}) as mock_bucket, \
+             patch("services.mock_draft_service.get_collection_df") as mock_fetch:
+            get_pick_sequence()
+            mock_bucket.assert_called_once()
+            mock_fetch.assert_not_called()
 
 
 class TestGetProjectionSeason:
