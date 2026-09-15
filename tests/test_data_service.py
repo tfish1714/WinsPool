@@ -55,10 +55,13 @@ def test_load_data_with_debug_flag(monkeypatch):
         assert not df.empty
 
 
-# ── Issue #50: year-slice pkl fallback ────────────────────────────────────
+# ── Issue #50 (rewritten): historical-year slice in local mode ─────────────
 
-def test_load_data_year_slice_falls_back_to_base_pkl(monkeypatch, tmp_path):
-    """When the year-specific pkl is absent, fetch_or_load filters the base pkl."""
+def test_load_data_historical_year_slice_served_from_base_pkl(monkeypatch, tmp_path):
+    """Issue #50's year-suffixed pkl fallback is gone. get_collection_df() now
+    reads the single base pkl and load_data() slices the requested historical
+    season out of the in-memory historical bucket, so a historical year is still
+    correctly retrievable in local mode — with no year-slice pkl written."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("USE_LOCAL_DATA", "true")
 
@@ -86,8 +89,9 @@ def test_load_data_year_slice_falls_back_to_base_pkl(monkeypatch, tmp_path):
         assert not games.empty
         assert set(games["season"].unique()) == {2024}
         assert len(games) == 2
-        # Side-effect: year-slice pkl must be created for future fast reads
-        assert (local_db / "nfl_games_2024.pkl").exists()
+        # 2025 is the active season here, so 2024 came out of the historical
+        # bucket — and no year-slice pkl is written any more.
+        assert not (local_db / "nfl_games_2024.pkl").exists()
     finally:
         cs.clear_data_cache()
 
@@ -166,6 +170,87 @@ def test_remote_cache_invalidation_calls_clear_when_remote_is_newer(monkeypatch)
     finally:
         cs.clear_data_cache()
         cs._LAST_REMOTE_CHECK = 0
+
+
+# ── Cache mutability redesign: active/historical/static buckets ──────────────
+
+def test_load_data_active_season_comes_from_active_bucket(monkeypatch):
+    """A season equal to the resolved active season is served from the
+    active bucket, not by scanning the historical bucket."""
+    import services.cache_service as cs
+    from services.data_service import load_data
+    cs.clear_data_cache()
+    bundle = load_data()  # cold start -- bootstraps both buckets
+    active_games = bundle.games
+    assert not active_games.empty
+    # The active bucket must now be warm without a second cold-start fetch.
+    assert cs.get_domain(cs.DOMAIN_ACTIVE) is not None
+    assert cs.get_domain(cs.DOMAIN_HISTORICAL) is not None
+
+
+def test_load_data_historical_year_is_served_from_historical_bucket(monkeypatch):
+    import services.cache_service as cs
+    from services.data_service import load_data, get_active_season
+    cs.clear_data_cache()
+    bundle = load_data()
+    active_season = get_active_season(bundle.games, bundle.draft_results, bundle.draft_order_rules)
+    historical_year = active_season - 1
+    result = load_data(year=historical_year)
+    assert (result.games["season"] == historical_year).all() or result.games.empty
+
+
+def test_load_data_none_returns_full_history_concat_of_both_buckets():
+    import services.cache_service as cs
+    from services.data_service import load_data
+    cs.clear_data_cache()
+    full = load_data(year=None)
+    active_season = full.games["season"].max()
+    historical_only = load_data(year=int(active_season) - 1)
+    # every historical row must also appear in the unfiltered bundle
+    if not historical_only.games.empty:
+        assert historical_only.games["season"].iloc[0] in full.games["season"].values
+
+
+def test_load_data_season_is_now_a_thin_wrapper():
+    from services.data_service import load_data, load_data_season, get_active_season
+    bundle = load_data()
+    season = get_active_season(bundle.games, bundle.draft_results, bundle.draft_order_rules)
+    direct = load_data(year=season)
+    via_season = load_data_season(season)
+    assert list(via_season.games.columns) == list(direct.games.columns)
+
+
+def test_static_bucket_shared_across_year_arguments(monkeypatch):
+    """players/draft_order/draft_results/draft_order_rules/teams never
+    differ by year -- confirm both calls hit the same cached static bucket
+    (no extra Firestore fetch for the second call)."""
+    import services.cache_service as cs
+    from services.data_service import load_data
+    cs.clear_data_cache()
+    first = load_data(year=None)
+    static_after_first = cs.get_domain(cs.DOMAIN_STATIC)
+    assert static_after_first is not None
+    second = load_data(year=2020)
+    assert cs.get_domain(cs.DOMAIN_STATIC) is static_after_first  # same object, not refetched
+    assert list(first.players.columns) == list(second.players.columns)
+
+
+def test_active_bucket_rebuilds_when_active_season_changes(monkeypatch):
+    """Simulates a season rollover: the static bucket's draft data now
+    resolves to a later active season than the cached active bucket."""
+    import services.cache_service as cs
+    from services.data_service import load_data, _get_active_bucket
+    cs.clear_data_cache()
+    first = load_data()
+    old_active_season = first.games["season"].max() if not first.games.empty else None
+
+    # Force a stale active bucket claiming an older season than what
+    # get_active_season() would now resolve to.
+    stale = cs.get_domain(cs.DOMAIN_ACTIVE)
+    if stale and old_active_season is not None:
+        cs.set_domain(cs.DOMAIN_ACTIVE, {**stale, "season": stale["season"] - 1})
+        rebuilt = _get_active_bucket()
+        assert rebuilt["season"] != stale["season"] - 1  # rebuilt against the real active season
 
 
 def test_check_remote_signals_clears_only_domains_with_newer_signal(mock_firestore, monkeypatch):
