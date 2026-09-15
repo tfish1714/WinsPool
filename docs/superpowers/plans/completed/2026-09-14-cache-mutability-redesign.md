@@ -33,7 +33,7 @@
 
 This task keeps `_CACHE_TTL_SECONDS` (`cache_service.py:118`) and `_LAST_REMOTE_CHECK`/`_REMOTE_CHECK_INTERVAL` (`cache_service.py:119-120`) untouched — Task 2 changes how the remote-check uses them, not their definitions.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `tests/test_cache_service.py`, replacing the existing `test_clear_data_cache_wipes_memory` (which references the old `_DATA_CACHE` global directly):
 
@@ -89,12 +89,12 @@ def test_domain_signal_fields_cover_every_domain_constant():
     assert len(set(DOMAIN_SIGNAL_FIELDS.values())) == len(expected)  # no duplicate field names
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/test_cache_service.py -k "domain or signal_fields" -v`
 Expected: FAIL — `ImportError: cannot import name 'set_domain'` (none of these names exist yet).
 
-- [ ] **Step 3: Replace the year-keyed cache block**
+- [x] **Step 3: Replace the year-keyed cache block**
 
 In `services/cache_service.py`, replace lines 112-142 (from `# --- Data Cache (Moved from data_service to break circular import) ---` through the end of `_cache_key`) with:
 
@@ -169,7 +169,7 @@ def clear_data_cache(domain: str = None) -> None:
         logger.info("All cache domains cleared.")
 ```
 
-- [ ] **Step 4: Update the existing tests that poke the old internals**
+- [x] **Step 4: Update the existing tests that poke the old internals**
 
 In `tests/test_cache_service.py`, change the import line (currently `from services.cache_service import get_cached, write_cache, clear_data_cache, _DATA_CACHE`) to drop `_DATA_CACHE` (no longer exists) and replace the old `test_clear_data_cache_wipes_memory` test body with:
 
@@ -185,12 +185,12 @@ In `tests/test_data_service.py`, every occurrence of `cs._DATA_CACHE.clear()` / 
 
 In `tests/test_db.py`, search for the same internals (`grep -n "_DATA_CACHE\|_CACHE_TIMESTAMPS\|clear_data_cache" tests/test_db.py` to find exact lines) and apply the same replacement pattern: any direct `_DATA_CACHE`/`_CACHE_TIMESTAMPS` manipulation becomes a call to the new `set_domain`/`clear_data_cache()` functions; any call to `clear_data_cache(<year>)` (a season year, e.g. `clear_data_cache(2024)`) is from code this plan's later tasks will rewrite to pass a domain name instead — leave a `# TODO(Task 4)` comment on any such call for now rather than guessing the right domain in this task, since Task 4 owns deciding which domain each `db_service.py` writer signals.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `pytest tests/test_cache_service.py tests/test_data_service.py tests/test_db.py -v`
 Expected: PASS for the new domain tests; the pre-existing tests that were only touched for the rename should still pass unchanged. `test_data_service.py`'s `test_load_data` etc. will still reference `load_data()` which Task 3 hasn't rewritten yet — they should still pass since `load_data()` itself is untouched by this task.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add services/cache_service.py tests/test_cache_service.py tests/test_data_service.py tests/test_db.py
@@ -212,7 +212,7 @@ git commit -m "refactor: replace year-keyed cache with named domains"
 
 Find `signal_data_update`'s current definition first: `grep -n "def signal_data_update" services/db_service.py` (it's referenced at line 10/11's import and called at lines 273, 384, 431, 468, 645, 714 per earlier investigation — read the actual current function body before editing, since this plan was written against those line numbers and a rebase since then could have shifted them).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `tests/test_db.py` (find the existing `signal_data_update` tests first with `grep -n "signal_data_update" tests/test_db.py` and place these alongside them):
 
@@ -242,12 +242,12 @@ def test_signal_data_update_defaults_to_static_domain(mock_firestore):
     assert kwargs.get("merge") is True
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/test_db.py -k "signal_data_update_writes_domain or signal_data_update_defaults" -v`
 Expected: FAIL — the current `signal_data_update()` writes `{"last_update": time.time()}` with no `merge=True`, so both assertions on the written dict's keys fail.
 
-- [ ] **Step 3: Rewrite `signal_data_update()`**
+- [x] **Step 3: Rewrite `signal_data_update()`**
 
 Replace the current function body in `services/db_service.py` (read it first to preserve its docstring/imports) with:
 
@@ -274,17 +274,17 @@ def signal_data_update(domain: str = "static") -> None:
 
 (`domain: str = "static"` rather than importing `DOMAIN_STATIC` as the default avoids a module-level circular import between `db_service.py` and `cache_service.py` — `cache_service.py` already imports from `db_service.py` inside function bodies to avoid exactly this; match that existing pattern by importing `DOMAIN_SIGNAL_FIELDS` inside the function body too, as shown above. `"static"` and `DOMAIN_STATIC` must be the same string — Task 1 fixes `DOMAIN_STATIC = "static"`, so this is safe today, not a coincidence to maintain by hand.)
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `pytest tests/test_db.py -k "signal_data_update_writes_domain or signal_data_update_defaults" -v`
 Expected: PASS.
 
-- [ ] **Step 5: Run the full existing `signal_data_update` call-site tests**
+- [x] **Step 5: Run the full existing `signal_data_update` call-site tests**
 
 Run: `pytest tests/test_db.py -v`
 Expected: every pre-existing test that calls a function which internally calls `signal_data_update()` (e.g. `add_player`) still passes, since the default argument preserves today's behavior (`static_updated` is written, with `merge=True` now added). If any pre-existing test asserted the *exact* dict passed to `.set()` (e.g. asserted `{"last_update": ...}` verbatim), it will now fail because the field name changed from `last_update` to `static_updated` and `merge=True` is now present — update any such assertion to match the new field/merge shape rather than skip it.
 
-- [ ] **Step 6: Replace `data_service.py`'s remote-check block with a domain-aware version**
+- [x] **Step 6: Replace `data_service.py`'s remote-check block with a domain-aware version**
 
 Read `services/data_service.py:52-84` first (the block starting `# 1. Check for remote invalidation signals...`). Replace it with a call to a new, separately-testable function:
 
@@ -322,7 +322,7 @@ def check_remote_signals(use_local: bool) -> None:
 
 Call `check_remote_signals(use_local)` at the top of `load_data()` in place of the block being replaced (Task 3 will restructure `load_data()`'s body further, but this call belongs at its current position in the function regardless).
 
-- [ ] **Step 7: Write a test for the new remote-check function**
+- [x] **Step 7: Write a test for the new remote-check function**
 
 ```python
 def test_check_remote_signals_clears_only_domains_with_newer_signal(mock_firestore, monkeypatch):
@@ -346,12 +346,12 @@ def test_check_remote_signals_clears_only_domains_with_newer_signal(mock_firesto
     cs.clear_data_cache()  # cleanup
 ```
 
-- [ ] **Step 8: Run test to verify it passes**
+- [x] **Step 8: Run test to verify it passes**
 
 Run: `pytest tests/test_data_service.py -k "check_remote_signals" -v`
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add services/db_service.py services/data_service.py tests/test_db.py tests/test_data_service.py
@@ -372,7 +372,7 @@ git commit -m "feat: make cache invalidation signaling domain-scoped"
 
 This is the largest single task in this plan. Read the current `load_data()` (lines 36-229) in full before starting — this task replaces its body, not just a few lines.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_load_data_active_season_comes_from_active_bucket(monkeypatch):
@@ -432,12 +432,12 @@ def test_static_bucket_shared_across_year_arguments(monkeypatch):
     assert list(first.players.columns) == list(second.players.columns)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/test_data_service.py -k "active_season_comes_from or historical_year_is_served or full_history_concat or thin_wrapper or static_bucket_shared" -v`
 Expected: FAIL — `load_data()` hasn't been rewritten yet, so `cs.DOMAIN_ACTIVE`/`get_domain` calls against it return `None` (nothing populates them under the old code path).
 
-- [ ] **Step 3: Implement the bucket-building helpers**
+- [x] **Step 3: Implement the bucket-building helpers**
 
 In `services/data_service.py`, add these new module-level functions (placed above `load_data`, after the existing imports):
 
@@ -521,7 +521,7 @@ def _get_historical_bucket():
 
 (Note: `_get_active_bucket()`'s rollover check reconstructs a games frame to re-derive the active season on every warm call — this is a real, if small, per-call cost. If profiling later shows this matters, it can be cheapened by caching the resolved season number as its own tiny domain value updated only when `static` or `active` actually rebuild, rather than recomputed every call; not needed for correctness now, flagged here rather than silently over-engineered up front.)
 
-- [ ] **Step 4: Rewrite `load_data()` and `load_data_season()`**
+- [x] **Step 4: Rewrite `load_data()` and `load_data_season()`**
 
 Replace `load_data()`'s body (lines 36-229) with:
 
@@ -595,12 +595,12 @@ def load_data_season(year: int):
 
 Delete the old `fetch_or_load`/`fetch_tasks`/`ThreadPoolExecutor` machinery entirely (lines 97-187 of the original) — it's superseded by `_fetch_static_bucket`/`_bootstrap_games_standings` above. Delete the old `local_dir`/pkl-fallback logic from inside `load_data()` too; local-pkl support for the bucket helpers is out of scope for this plan (all of Task 3's tests run against `USE_LOCAL_DATA=true` fixture data the same way `test_load_data()` already does today, reading through `get_collection_df()`, which already handles the local-vs-Firestore split — confirm this by reading `services/db_service.py::get_collection_df()` before assuming, since this task's tests depend on it still working correctly in local mode).
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `pytest tests/test_data_service.py -v`
 Expected: PASS, including every pre-existing test in this file (`test_load_data`, `test_load_data_with_debug_flag`, `test_load_data_year_slice_falls_back_to_base_pkl` — the last of these tested the now-deleted pkl-fallback path directly; read it and either adapt it to assert against the new bucket-based behavior or, if it's now testing removed machinery, replace it with an equivalent assertion that a historical year's data is still correctly retrievable in local mode).
 
-- [ ] **Step 6: Add the season-rollover regression test**
+- [x] **Step 6: Add the season-rollover regression test**
 
 ```python
 def test_active_bucket_rebuilds_when_active_season_changes(monkeypatch):
@@ -621,12 +621,12 @@ def test_active_bucket_rebuilds_when_active_season_changes(monkeypatch):
         assert rebuilt["season"] != stale["season"] - 1  # rebuilt against the real active season
 ```
 
-- [ ] **Step 7: Run test to verify it passes**
+- [x] **Step 7: Run test to verify it passes**
 
 Run: `pytest tests/test_data_service.py -k "rebuilds_when_active_season_changes" -v`
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add services/data_service.py tests/test_data_service.py
@@ -646,7 +646,7 @@ git commit -m "feat: rewrite load_data() around active/historical/static cache b
 
 This task closes both halves of the original bug (`docs/superpowers/specs/2026-09-12-cache-invalidation-gap-followup.md`): `clear_data_cache(season)` missing the `'all'` eviction (now structurally impossible — `static` is one domain, not year-keyed), and the missing `signal_data_update()` call for cross-instance correctness.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_add_draft_result_clears_static_domain_and_signals(mock_firestore, monkeypatch):
@@ -676,12 +676,12 @@ def test_delete_draft_pick_clears_static_domain_and_signals(mock_firestore, monk
     assert len(signal_calls) == 1
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/test_db.py -k "add_draft_result_clears_static or delete_draft_pick_clears_static" -v`
 Expected: FAIL — `add_draft_result`/`delete_draft_pick` currently call `clear_data_cache(season)` (a season year, meaningless to the new domain-keyed `clear_data_cache`) and never call `signal_data_update()` at all.
 
-- [ ] **Step 3: Fix `add_draft_result()` and `delete_draft_pick()`**
+- [x] **Step 3: Fix `add_draft_result()` and `delete_draft_pick()`**
 
 Read the current bodies first (`grep -n "def add_draft_result\|def delete_draft_pick" -A 40 services/db_service.py`). Replace the trailing `clear_data_cache(season)` line in each with:
 
@@ -694,16 +694,16 @@ adding `from services.cache_service import DOMAIN_STATIC` to the module's existi
 
 Delete the "KNOWN GAP" comment blocks above both functions (the ones referencing `docs/superpowers/specs/2026-09-12-cache-invalidation-gap-followup.md`) — the gap they describe no longer exists.
 
-- [ ] **Step 4: Audit and fix every other `clear_data_cache(...)`/`signal_data_update(...)` call site in this file**
+- [x] **Step 4: Audit and fix every other `clear_data_cache(...)`/`signal_data_update(...)` call site in this file**
 
 Run `grep -n "clear_data_cache(\|signal_data_update(" services/db_service.py` and, for each remaining call site (`add_player`, `delete_season_data`, `add_draft_order`, `add_draft_order_rule`, `update_player_profile`, per the design's signal-routing table — confirm the actual full list from the grep, don't assume this list is exhaustive), change any bare `clear_data_cache()`/`signal_data_update()` call to explicitly pass `DOMAIN_STATIC` — these all write to `players`/`draft_order`/`draft_results`/`draft_order_rules`, which now live in the `static` domain. A bare `clear_data_cache()` with no argument still works today (Task 1 made it "wipe everything" when called with no argument), but leaving it bare here is misleading now that named domains exist — make every call site explicit about which domain it's signaling, matching the "one clear owner each" principle the whole redesign is built on.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `pytest tests/test_db.py -v`
 Expected: PASS, including every pre-existing test for the writers touched in Step 4 (their behavior is unchanged — same domain wiped, just explicitly named now).
 
-- [ ] **Step 6: Write the live-draft staleness regression test**
+- [x] **Step 6: Write the live-draft staleness regression test**
 
 This is the original bug's real-world regression test. Add to `tests/test_db.py`:
 
@@ -739,12 +739,12 @@ def test_add_draft_result_makes_pick_visible_through_load_data(mock_firestore, m
     assert len(after.draft_results) == before_count + 1
 ```
 
-- [ ] **Step 7: Run test to verify it passes**
+- [x] **Step 7: Run test to verify it passes**
 
 Run: `pytest tests/test_db.py -k "add_draft_result_makes_pick_visible" -v`
 Expected: PASS — the `static` domain was cleared by `add_draft_result()` in Step 3, so `load_data()`'s next call rebuilds it from the (mocked) fresh Firestore read rather than serving the stale cached bundle.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add services/db_service.py tests/test_db.py
@@ -764,7 +764,7 @@ git commit -m "fix: close draft-pick cache staleness bug and cross-instance sign
 **Interfaces:**
 - Consumes: `_get_static_bucket()` from Task 3 (note: this is a "private" `_`-prefixed helper today — either export a public `get_static_bucket()` alias from `data_service.py` for these three call sites to import, or import the underscore-prefixed name directly, matching whatever convention this codebase already uses for cross-module internal helper access; check a couple of existing cross-`services/*.py` imports first, e.g. how `draft_service.py` currently imports from `data_service.py`, and follow that pattern rather than inventing a new one).
 
-- [ ] **Step 1: Read each call site**
+- [x] **Step 1: Read each call site**
 
 ```bash
 grep -n -B3 -A3 "get_collection_df('draft_order')" services/draft_service.py
@@ -772,7 +772,7 @@ grep -n -B3 -A3 'get_collection_df("draft_order_rules")' services/mock_draft_ser
 grep -n -B3 -A3 "collection(\"players\").document" services/push_service.py
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```python
 # tests/test_draft_service.py
@@ -817,12 +817,12 @@ def test_send_push_notification_uses_static_bucket_players(monkeypatch):
 
 (These three test bodies name the exact behavior to verify — "the redundant fetch is gone" — but the precise mocking shape depends on each file's actual current structure, which you must read before finalizing the assertion; do not guess a mock target that doesn't match the real import.)
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `pytest tests/test_draft_service.py tests/test_mock_draft_service.py tests/test_push_service.py -k "static_bucket" -v`
 Expected: FAIL — all three still call `get_collection_df`/Firestore directly.
 
-- [ ] **Step 4: Reroute `draft_service.py:67`**
+- [x] **Step 4: Reroute `draft_service.py:67`**
 
 Replace the raw `get_collection_df('draft_order')` call with a lookup against the static bucket:
 
@@ -832,7 +832,7 @@ from services.data_service import _get_static_bucket
 draft_order_df = _get_static_bucket()["draft_order"]
 ```
 
-- [ ] **Step 5: Reroute `mock_draft_service.py:36`**
+- [x] **Step 5: Reroute `mock_draft_service.py:36`**
 
 Same pattern for `draft_order_rules`:
 
@@ -842,7 +842,7 @@ from services.data_service import _get_static_bucket
 rules_df = _get_static_bucket()["draft_order_rules"]
 ```
 
-- [ ] **Step 6: Reroute `push_service.py:40`**
+- [x] **Step 6: Reroute `push_service.py:40`**
 
 Replace the direct `get_db().collection("players").document(str(player_id)).get()` with a lookup by `playerId` in the static bucket's `players` DataFrame, falling back to the direct Firestore read only if the player isn't found in the cached frame (defensive — a brand-new player added between cache refreshes should still resolve):
 
@@ -865,12 +865,12 @@ def _get_player_row(player_id):
 
 Use `_get_player_row(player_id)` wherever `push_service.py` previously did the direct `.get()`.
 
-- [ ] **Step 7: Run tests to verify they pass**
+- [x] **Step 7: Run tests to verify they pass**
 
 Run: `pytest tests/test_draft_service.py tests/test_mock_draft_service.py tests/test_push_service.py -v`
 Expected: PASS, including all pre-existing tests in these three files (their observable behavior — the data returned — is unchanged; only the fetch path changed).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add services/draft_service.py services/mock_draft_service.py services/push_service.py tests/test_draft_service.py tests/test_mock_draft_service.py tests/test_push_service.py
@@ -893,7 +893,7 @@ git commit -m "perf: read draft_order/draft_order_rules/players from the static 
 - Consumes: `DOMAIN_PREDICTIONS_ACTIVE`, `DOMAIN_PREDICTIONS_HISTORICAL`, `get_domain`, `set_domain` (Task 1); `signal_data_update(domain)` (Task 2); `_get_active_bucket()`'s resolved `season` value (Task 3) to decide which predictions bucket a request falls into.
 - Produces: `get_preseason_predictions(season)`, `get_consensus_projections(season)`, `get_game_predictions(season)` all become cache-backed (same return signatures as today — no caller elsewhere in the codebase needs to change).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_get_preseason_predictions_active_season_is_cached(monkeypatch):
@@ -928,12 +928,12 @@ def test_get_preseason_predictions_historical_season_is_cached_separately(monkey
         assert len(calls) == 1
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/test_data_service.py -k "preseason_predictions_active_season_is_cached or historical_season_is_cached_separately" -v`
 Expected: FAIL — `get_preseason_predictions()` currently calls `get_collection_df()` on every single call, uncached.
 
-- [ ] **Step 3: Implement the predictions cache**
+- [x] **Step 3: Implement the predictions cache**
 
 In `services/data_service.py`, add a helper mirroring the active/historical split pattern from Task 3, but for predictions:
 
@@ -964,16 +964,16 @@ def _get_predictions_bucket(season: int) -> dict:
 
 Rewrite `get_preseason_predictions(season)` and `get_consensus_projections(season)` to read from `_get_predictions_bucket(season)["preseason_df"]`/`["consensus_df"]` instead of calling `get_collection_df()` directly, keeping every line below the fetch (the `res[row["team"]] = {...}` dict-building loop) exactly as it is today — only the data-acquisition line changes.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `pytest tests/test_data_service.py -v`
 Expected: PASS, including every pre-existing prediction-related test in this file (the returned dict shape is unchanged).
 
-- [ ] **Step 5: Cache `get_game_predictions()` the same way**
+- [x] **Step 5: Cache `get_game_predictions()` the same way**
 
 In `services/cache_service.py`, apply the identical pattern to `get_game_predictions(season)` (currently at lines 158-178): check the same predictions bucket by domain/season, falling back to the existing Firestore/local-pkl read only on a cache miss. Write the equivalent test in `tests/test_cache_service.py`, following the same two-call/one-fetch assertion shape as Step 1.
 
-- [ ] **Step 6: Signal `predictions_active_updated` from `cache_builder.py`**
+- [x] **Step 6: Signal `predictions_active_updated` from `cache_builder.py`**
 
 Read `scripts/cache_builder.py`'s end-of-run section (near its `if __name__` block or wherever it currently finishes a year's processing) and add, once per full run (not once per year in the loop):
 
@@ -986,7 +986,7 @@ if write_firestore:  # or whatever the existing flag/condition is -- confirm fro
         signal_data_update(DOMAIN_PREDICTIONS_ACTIVE)
 ```
 
-- [ ] **Step 7: Update `backfill_schedule_predictions.py` and `predict_season.py`'s signal calls**
+- [x] **Step 7: Update `backfill_schedule_predictions.py` and `predict_season.py`'s signal calls**
 
 In `scripts/backfill_schedule_predictions.py`, replace the bare write at line 433 (`db.collection("metadata").document("cache_control").set({"last_update": time.time()})`) with domain-aware signaling based on the run's `--seasons MIN MAX` argument:
 
@@ -1024,7 +1024,7 @@ domain = DOMAIN_PREDICTIONS_ACTIVE if season == _get_active_bucket()["season"] e
 signal_data_update(domain)
 ```
 
-- [ ] **Step 8: Write the cross-process staleness regression test**
+- [x] **Step 8: Write the cross-process staleness regression test**
 
 ```python
 def test_predict_season_write_is_picked_up_by_a_separate_load(monkeypatch):
@@ -1053,12 +1053,12 @@ def test_predict_season_write_is_picked_up_by_a_separate_load(monkeypatch):
     assert cs.get_domain(cs.DOMAIN_PREDICTIONS_ACTIVE) is None  # cleared by the remote signal
 ```
 
-- [ ] **Step 9: Run test to verify it passes**
+- [x] **Step 9: Run test to verify it passes**
 
 Run: `pytest tests/test_data_service.py -k "predict_season_write_is_picked_up" -v`
 Expected: PASS.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add services/data_service.py services/cache_service.py scripts/cache_builder.py scripts/backfill_schedule_predictions.py scripts/predict_season.py tests/test_data_service.py tests/test_cache_service.py
@@ -1078,7 +1078,7 @@ git commit -m "feat: cache preseason/consensus/game predictions with active/hist
 **Interfaces:**
 - Consumes: `DOMAIN_ADMIN_ANALYTICS`, `get_domain`, `set_domain` (Task 1); `signal_data_update(domain)` (Task 2).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_get_all_elo_history_is_cached(mock_firestore, monkeypatch):
@@ -1108,12 +1108,12 @@ def test_get_all_nn_weekly_accuracy_is_cached(mock_firestore, monkeypatch):
     assert mock_firestore.collection.return_value.stream.call_count == 1
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/test_cache_service.py -k "get_all_elo_history_is_cached or get_all_nn_weekly_accuracy_is_cached" -v`
 Expected: FAIL — both functions currently `.stream()` the whole collection on every call.
 
-- [ ] **Step 3: Cache both functions**
+- [x] **Step 3: Cache both functions**
 
 In `services/cache_service.py`, wrap `get_all_elo_history()`'s Firestore branch (and `get_all_nn_weekly_accuracy()`'s, identically) with a `DOMAIN_ADMIN_ANALYTICS`-keyed cache check:
 
@@ -1154,12 +1154,12 @@ def get_all_elo_history() -> list[dict]:
 
 Apply the identical shape to `get_all_nn_weekly_accuracy()`, storing its result under `bucket["nn_weekly_accuracy"]` in the same shared `DOMAIN_ADMIN_ANALYTICS` dict (both collections share one signal per the design's §4 — an elo write clearing the whole domain and forcing a re-stream of `nn_weekly_accuracy` too is an accepted, low-cost trade for admin-only traffic).
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `pytest tests/test_cache_service.py -v`
 Expected: PASS, all pre-existing elo/nn_weekly_accuracy tests included (`TestEloHistoryCache`, `TestNnWeeklyAccuracyCache` classes) — their local-mode tests are untouched by this change; their Firestore-mode tests (`test_get_all_firestore_streams_every_doc`) must still pass on a *cold* cache (first call) since this task doesn't change first-call behavior, only repeat-call behavior — if a pre-existing test calls `get_all_elo_history()` more than once expecting two `.stream()` calls, update it to `clear_data_cache()` between calls or assert the new one-stream-then-cached behavior instead, matching what this task actually changed.
 
-- [ ] **Step 5: Add the missing signal to `compute_elo.py --firestore`**
+- [x] **Step 5: Add the missing signal to `compute_elo.py --firestore`**
 
 Read `scripts/compute_elo.py`'s `--firestore` write path (`grep -n "write_elo_history_season\|args.firestore" scripts/compute_elo.py`) and add, once after the full write loop completes:
 
@@ -1170,7 +1170,7 @@ if args.firestore and get_db():
     signal_data_update(DOMAIN_ADMIN_ANALYTICS)
 ```
 
-- [ ] **Step 6: Add the missing signal to `weekly_model_eval.py --firestore`**
+- [x] **Step 6: Add the missing signal to `weekly_model_eval.py --firestore`**
 
 Read its `--firestore` branch (near `write_nn_weekly_accuracy_rows(args.season, rows, use_local=False)`, line ~294) and add immediately after:
 
@@ -1181,7 +1181,7 @@ if get_db():
     signal_data_update(DOMAIN_ADMIN_ANALYTICS)
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add services/cache_service.py scripts/compute_elo.py scripts/weekly_model_eval.py tests/test_cache_service.py
@@ -1199,7 +1199,7 @@ git commit -m "perf: cache elo_history/nn_weekly_accuracy full-collection stream
 **Interfaces:**
 - Produces: `batch_upload(db, collection_name, dataframe, id_col=None, diff_before_write=False) -> int` (new `diff_before_write` parameter; returns the count of documents actually written, so callers can decide whether to signal at all). `sync_nfl_data(seasons: tuple[int, int] = None)` (new optional argument — when omitted, scopes to the active season only; a `(min, max)` tuple forces the old full-range behavior for manual backfills).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_daily_nfl_sync.py
@@ -1252,12 +1252,12 @@ def test_batch_upload_with_diff_always_writes_rows_with_no_derivable_id():
     assert written == 1
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/test_daily_nfl_sync.py -v`
 Expected: FAIL — `batch_upload()` has no `diff_before_write` parameter and always returns `None`, not a write count.
 
-- [ ] **Step 3: Implement diffing in `batch_upload()`**
+- [x] **Step 3: Implement diffing in `batch_upload()`**
 
 Replace the function body (`scripts/daily_nfl_sync.py:38-74`) with:
 
@@ -1326,12 +1326,12 @@ def batch_upload(db, collection_name, dataframe, id_col=None, diff_before_write=
     return total_committed
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `pytest tests/test_daily_nfl_sync.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Scope `sync_nfl_data()` to the active season by default**
+- [x] **Step 5: Scope `sync_nfl_data()` to the active season by default**
 
 Replace `sync_nfl_data()` (lines 135-154) with:
 
@@ -1387,7 +1387,7 @@ if __name__ == "__main__":
     sync_nfl_data(seasons=tuple(args.seasons) if args.seasons else None)
 ```
 
-- [ ] **Step 6: Write a test for the active-season scoping**
+- [x] **Step 6: Write a test for the active-season scoping**
 
 ```python
 def test_sync_nfl_data_defaults_to_active_season_only(monkeypatch):
@@ -1412,12 +1412,12 @@ def test_sync_nfl_data_defaults_to_active_season_only(monkeypatch):
     assert set(captured["nfl_games"]["season"].unique()) == {2026}
 ```
 
-- [ ] **Step 7: Run test to verify it passes**
+- [x] **Step 7: Run test to verify it passes**
 
 Run: `pytest tests/test_daily_nfl_sync.py -k "defaults_to_active_season_only" -v`
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add scripts/daily_nfl_sync.py tests/test_daily_nfl_sync.py
@@ -1435,11 +1435,11 @@ git commit -m "perf: diff-before-write in batch_upload(), scope daily sync to th
 **Interfaces:**
 - Consumes: `batch_upload(..., diff_before_write=True)` (Task 8).
 
-- [ ] **Step 1: Resolve the "current + prior season" open question**
+- [x] **Step 1: Resolve the "current + prior season" open question**
 
 Read `compute_standings()` (`scripts/daily_nfl_sync.py:88-132`) closely: it groups games by `(season, team)` independently per season, with no cross-season logic — nothing in `compute_standings()` itself requires prior-season game data to correctly compute the current season's standings. Check `sync_authoritative()`'s own comment (`scripts/sync_live_scores.py:12-14`, "filtered to the current + prior season only... the 5-minute cadence makes a full historical rewrite needlessly expensive") — this reads as an intermediate step down from "full history," not a deliberate "prior season needs live updates" decision, and no correction/finalization logic elsewhere in this script touches prior-season data specifically. **Conclusion: scope to the active season only**, matching `daily_nfl_sync.py`'s Task 8 change. If, after re-reading, you find an actual reason prior-season data needs touching every 5 minutes (e.g. a real late-scoring-correction case), stop and note it in this task's commit message instead of silently proceeding — but proceed with active-season-only scoping as the default unless you find one.
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```python
 # tests/test_sync_live_scores.py
@@ -1486,12 +1486,12 @@ def test_sync_authoritative_uses_diff_before_write(monkeypatch):
     assert all(calls)  # every batch_upload call in this function passes diff_before_write=True
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `pytest tests/test_sync_live_scores.py -v`
 Expected: FAIL — `sync_authoritative()` currently filters to `current_season - 1` and calls `batch_upload()` with no `diff_before_write` argument.
 
-- [ ] **Step 4: Update `sync_authoritative()`**
+- [x] **Step 4: Update `sync_authoritative()`**
 
 Replace lines 78-96 of `scripts/sync_live_scores.py`:
 
@@ -1527,7 +1527,7 @@ def sync_authoritative(db) -> pd.DataFrame:
 
 (`standings_written`/`games_written` are computed but not yet used here — `main()` needs them to decide whether to signal, handled in Step 5.)
 
-- [ ] **Step 5: Update `main()` to only signal when something changed, using the active domain**
+- [x] **Step 5: Update `main()` to only signal when something changed, using the active domain**
 
 Replace `sync_authoritative()`'s call site and the unconditional signal at the bottom of `main()`:
 
@@ -1558,12 +1558,12 @@ def main():
 
 (Note: unlike `daily_nfl_sync.py`, this keeps the signal unconditional — the ESPN overlay step (`run_espn_overlay_safely`) does its own separate `.set(..., merge=True)` writes for `is_live`/`clock`/`period` on live games, which `sync_authoritative()`'s own `standings_written`/`games_written` counts don't capture, so gating the signal on those two counts alone would under-signal during an actual live game. Keeping this one always-fires is the correct, conservative choice — the diff-before-write savings on `nfl_standings`/`nfl_games` writes stand regardless of whether the signal itself fires every run.)
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [x] **Step 6: Run tests to verify they pass**
 
 Run: `pytest tests/test_sync_live_scores.py -v`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add scripts/sync_live_scores.py tests/test_sync_live_scores.py
@@ -1584,7 +1584,7 @@ git commit -m "perf: scope winspool-live-scores to the active season and diff be
 **Interfaces:**
 - Consumes: nothing from other tasks — this is independent cleanup, safe to do at any point in this plan, placed last since it's lowest-risk to defer.
 
-- [ ] **Step 1: Confirm zero remaining production callers before deleting anything**
+- [x] **Step 1: Confirm zero remaining production callers before deleting anything**
 
 ```bash
 grep -rn "get_cached(\|write_cache(\|is_cache_final(" --include="*.py" . | grep -v "\.venv\|test_\|inspect_cache"
@@ -1592,7 +1592,7 @@ grep -rn "get_cached(\|write_cache(\|is_cache_final(" --include="*.py" . | grep 
 
 Expected: only `services/cache_service.py`'s own definitions and `scripts/cache_builder.py`'s 5+ call sites remain — confirm this matches the investigation's earlier finding before proceeding (if a new caller appeared since, stop and reassess; this task assumes the investigation's grep still holds).
 
-- [ ] **Step 2: Remove the `analytics_cache` writes from `cache_builder.py`**
+- [x] **Step 2: Remove the `analytics_cache` writes from `cache_builder.py`**
 
 Read each of the 5 `write_cache(...)`/`is_cache_final(...)` call sites in full context first (`sed -n '295,455p' scripts/cache_builder.py`). For the `wins_pool_standings` block (around line 303-313):
 
@@ -1609,28 +1609,28 @@ Apply the same pattern to the `schedule_enriched` block (line ~316-380) — **bu
 
 Repeat for the remaining 3 `write_cache()` call sites (lines ~395, ~410, ~450) — read each one's surrounding context the same way before removing, since this plan can't enumerate exactly what (if anything) each one also feeds without reading the live file.
 
-- [ ] **Step 3: Remove the now-fully-dead functions from `cache_service.py`**
+- [x] **Step 3: Remove the now-fully-dead functions from `cache_service.py`**
 
 Delete `_local_path` (lines 21-23), `get_cached` (lines 26-56), `write_cache` (lines 59-86), `is_cache_final` (lines 89-110) from `services/cache_service.py`.
 
-- [ ] **Step 4: Remove the now-dead tests**
+- [x] **Step 4: Remove the now-dead tests**
 
 In `tests/test_cache_service.py`, remove `test_local_cache_read_write`, `test_remote_firestore_cache_read` (both test `get_cached`/`write_cache`, now deleted).
 
-- [ ] **Step 5: Handle `tests/inspect_cache.py`**
+- [x] **Step 5: Handle `tests/inspect_cache.py`**
 
 Read this file (`cat tests/inspect_cache.py`) — if its only purpose is manually inspecting `get_cached()`'s output (per the one call site found earlier, `get_cached('prediction_snapshot', 2026, 0)`), delete it. If it does anything else, remove only the `get_cached` usage.
 
-- [ ] **Step 6: Run the full test suite**
+- [x] **Step 6: Run the full test suite**
 
 Run: `pytest tests/ -v`
 Expected: PASS. Every removed function's test is gone (Step 4), and no remaining test references `get_cached`/`write_cache`/`is_cache_final`/`_local_path`.
 
-- [ ] **Step 7: Manually verify the serving path still works**
+- [x] **Step 7: Manually verify the serving path still works**
 
 Since this plan cannot execute a live server, name the concrete manual check for whoever runs this plan: start the app locally (`uvicorn main:app --reload` per this repo's standard dev workflow) and load `/wins-pool/{a real season year}` and `/api/schedule`(or the schedule page) directly, confirming both render real standings/schedule data with no server error — these are the two pages whose data comes from the computations this task stopped writing to `analytics_cache`, and they must still work purely from `analysis_service.py`'s on-the-fly computation over `load_data()`'s bundle, unaffected by this removal.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add scripts/cache_builder.py services/cache_service.py tests/test_cache_service.py tests/inspect_cache.py
