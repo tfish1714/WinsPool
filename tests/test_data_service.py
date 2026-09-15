@@ -89,8 +89,7 @@ def test_load_data_year_slice_falls_back_to_base_pkl(monkeypatch, tmp_path):
         # Side-effect: year-slice pkl must be created for future fast reads
         assert (local_db / "nfl_games_2024.pkl").exists()
     finally:
-        cs._DATA_CACHE.clear()
-        cs._CACHE_TIMESTAMPS.clear()
+        cs.clear_data_cache()
 
 
 # ── Issue #91: in-memory cache TTL expiry ────────────────────────────────
@@ -117,8 +116,11 @@ def test_load_data_cache_ttl_expiry_triggers_refetch(monkeypatch, tmp_path):
         result1 = load_data()
         assert result1.games["_sentinel"].iloc[0] == 1
 
-        # Force TTL expiry by clearing timestamps in-place
-        cs._CACHE_TIMESTAMPS.clear()
+        # Force TTL expiry by re-setting cached data with stale timestamp (timestamp=0)
+        # This preserves the cached value while making it appear expired by TTL
+        cached_bundle = cs.get_domain(cs.DOMAIN_ACTIVE)
+        if cached_bundle is not None:
+            cs.set_domain(cs.DOMAIN_ACTIVE, cached_bundle, timestamp=0)
 
         # Replace pkl with v2 data before second call
         games_v2 = pd.DataFrame({"season": [2024], "team": ["KC"], "_sentinel": [2]})
@@ -128,8 +130,7 @@ def test_load_data_cache_ttl_expiry_triggers_refetch(monkeypatch, tmp_path):
         # Must have re-fetched from disk — not served the old cached v1 data
         assert result2.games["_sentinel"].iloc[0] == 2
     finally:
-        cs._DATA_CACHE.clear()
-        cs._CACHE_TIMESTAMPS.clear()
+        cs.clear_data_cache()
 
 
 # ── Issue #92: remote Firestore cache invalidation signal ────────────────────
