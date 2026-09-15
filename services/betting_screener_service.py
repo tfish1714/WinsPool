@@ -27,6 +27,7 @@ from __future__ import annotations
 import math
 from typing import Optional
 
+from services.cache_service import get_game_predictions
 from services.nn_feature_engine import _normalize_team
 
 # Elo data starts in 2006 (see services/cache_service.py's get_all_elo_history);
@@ -156,6 +157,28 @@ def find_next_upcoming_week(games_df, season: int) -> Optional[int]:
     if unplayed.empty:
         return None
     return int(unplayed["week"].min())
+
+
+def load_predictions_by_season(all_games) -> tuple[dict, int, int]:
+    """{season: {game_key: pred_dict}} for every season from BACKTEST_MIN_SEASON
+    (or the games data's own floor, if later) through the latest season present
+    in `all_games`. Shared by the betting screener/pattern-scanner admin routes
+    and the weekly betting-edge-alert job.
+
+    BACKTEST_MIN_SEASON=2006 is when Elo data starts, but games_df (used to
+    grade ATS/SU outcomes) only goes back to 2013 -- looping earlier seasons
+    would fetch prediction docs that can never be graded (no matching game
+    result), wasting Firestore reads and silently misrepresenting how much
+    history actually backs the reported n.
+    """
+    max_season = int(all_games["season"].max())
+    min_season = max(BACKTEST_MIN_SEASON, int(all_games["season"].min()))
+    predictions_by_season = {}
+    for yr in range(min_season, max_season + 1):
+        preds = get_game_predictions(yr)
+        if preds:
+            predictions_by_season[yr] = preds
+    return predictions_by_season, min_season, max_season
 
 
 def screen_games(

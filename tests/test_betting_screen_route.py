@@ -71,7 +71,7 @@ def test_rejects_unknown_filter_feature(admin_token):
 
 def test_default_season_and_week_resolve_from_schedule(admin_token):
     with patch("routes.prediction_routes.load_data", return_value=(None, None, _games_df(), None, None, None, None)), \
-         patch("services.cache_service.get_game_predictions", side_effect=_predictions_for):
+         patch("services.betting_screener_service.get_game_predictions", side_effect=_predictions_for):
         response = client.get("/api/admin/betting/screen", headers={"Authorization": admin_token})
 
     assert response.status_code == 200
@@ -82,7 +82,7 @@ def test_default_season_and_week_resolve_from_schedule(admin_token):
 
 def test_explicit_week_used_over_default(admin_token):
     with patch("routes.prediction_routes.load_data", return_value=(None, None, _games_df(), None, None, None, None)), \
-         patch("services.cache_service.get_game_predictions", side_effect=_predictions_for):
+         patch("services.betting_screener_service.get_game_predictions", side_effect=_predictions_for):
         response = client.get(
             "/api/admin/betting/screen?season=2026&week=2",
             headers={"Authorization": admin_token},
@@ -97,7 +97,7 @@ def test_explicit_week_used_over_default(admin_token):
 
 def test_candidates_are_one_row_per_game(admin_token):
     with patch("routes.prediction_routes.load_data", return_value=(None, None, _games_df(), None, None, None, None)), \
-         patch("services.cache_service.get_game_predictions", side_effect=_predictions_for):
+         patch("services.betting_screener_service.get_game_predictions", side_effect=_predictions_for):
         response = client.get(
             "/api/admin/betting/screen?season=2026&week=1",
             headers={"Authorization": admin_token},
@@ -113,7 +113,7 @@ def test_candidates_are_one_row_per_game(admin_token):
 def test_generic_filter_narrows_candidates(admin_token):
     filters = json.dumps([{"feature": "elo_diff", "min": 100.0}])
     with patch("routes.prediction_routes.load_data", return_value=(None, None, _games_df(), None, None, None, None)), \
-         patch("services.cache_service.get_game_predictions", side_effect=_predictions_for):
+         patch("services.betting_screener_service.get_game_predictions", side_effect=_predictions_for):
         response = client.get(
             f"/api/admin/betting/screen?season=2026&week=1&filters={filters}",
             headers={"Authorization": admin_token},
@@ -131,7 +131,7 @@ def test_response_includes_seasons_covered(admin_token):
          "home_score": None, "away_score": None, "result": None},
     ])
     with patch("routes.prediction_routes.load_data", return_value=(None, None, games, None, None, None, None)), \
-         patch("services.cache_service.get_game_predictions", side_effect=_predictions_for):
+         patch("services.betting_screener_service.get_game_predictions", side_effect=_predictions_for):
         response = client.get(
             "/api/admin/betting/screen?season=2026&week=1",
             headers={"Authorization": admin_token},

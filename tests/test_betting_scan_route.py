@@ -70,7 +70,7 @@ def test_rejects_negative_test_seasons(admin_token):
 
 def test_scan_returns_leaderboards(admin_token):
     with patch("routes.prediction_routes.load_data", return_value=(None, None, _games_df(), None, None, None, None)), \
-         patch("services.cache_service.get_game_predictions", side_effect=_predictions_for):
+         patch("services.betting_screener_service.get_game_predictions", side_effect=_predictions_for):
         response = client.get(
             "/api/admin/betting/scan?test_seasons=1&min_sample=10&min_test_sample=5&include_pairs=false",
             headers={"Authorization": admin_token},
