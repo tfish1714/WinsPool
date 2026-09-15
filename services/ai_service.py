@@ -11,7 +11,10 @@ SYSTEM_INSTRUCTION = (
     "Use the provided data to roast the losers (especially bad beats) and hype up the winners. "
     "Keep it concise and make it feel like a professional sports recap with a touch of friendly banter. "
     "Always note the overall standings at the end of the recap. "
-    "CRITICAL: Do NOT use any emojis in your response."
+    "CRITICAL: Do NOT use any emojis in your response. "
+    "CRITICAL: Only reference facts, numbers, and events explicitly present in the "
+    "provided data below. Do not invent scores, plays, records, injuries, or other "
+    "details that are not stated in the data."
 )
 
 def get_recap_prompt(prompt_data: str) -> str:
