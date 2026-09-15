@@ -29,7 +29,7 @@
 
 The admin dashboard (`templates/admin.html`) is a single page with 8 tabs, switched client-side by `admin_main.js::setupTabHandlers()`: clicking a `.admin-tabs .tab-btn[data-tab="<id>"]` button removes `.hidden` from `#<id>` and adds it to every other `.tab-content`. `player-section` is the only tab visible by default on page load (it has no `hidden` class in the template) — every other tab requires a click before its content is visible. This matters because the base plan's Task 8 admin-dashboard smoke test waits for `#player-grid` (which lives inside `#draft-section`, hidden by default) without clicking the "Draft" tab first — see this plan's Self-Review Notes for that flag.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 ```python
 """tests_e2e/test_admin_tabs.py — Admin dashboard tab navigation smoke tests.
@@ -88,12 +88,12 @@ def test_admin_predictions_debug_page_loads(live_server, page, test_player_crede
     assert "Internal Server Error" not in page.content()
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_admin_tabs.py -v`
 Expected: PASS for all 7 tabs plus the two dedicated tests.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_admin_tabs.py
@@ -112,7 +112,7 @@ git commit -m "test: add e2e smoke tests for all admin dashboard tabs"
 
 `renderPlayerList` (`static/js/admin_main.js:241-353`) renders one `.player-mgmt-card[data-player-id="<id>"]` per player, each with `.btn-edit-player`, `.btn-reset-pw`, `.btn-temp-pw` buttons and hidden `.player-mgmt-edit`/`.player-mgmt-temppw` panels that toggle open. `createPlayer()` (line 477) has no `is_test_account` field in its form (`#new-player-name`/`#new-player-nick`/`#new-player-email`/`#new-player-phone`) — this plan's test therefore creates its player, then immediately flips `is_test_account` via the same player's `.btn-edit-player` panel is **not** possible either, since `updates` in `POST /api/admin/update_player` only allows `{fullName, nickName, email, cell}` (`routes/admin_routes.py:240`) — `is_test_account` isn't editable through this form at all. **Flagged gap, not worked around**: a player created through this admin UI today has no way to be marked as a test account after the fact except the one-time seed script's direct `update_player_profile` call (base plan Task 3). This test's created player is therefore cleaned up by deleting it is **also not possible** — there is no delete-player endpoint in `admin_routes.py` (only `delete_season`/`delete_draft_results_for_season`, which delete season/draft data, not player rows). This test accepts that its created player is a permanent addition to the local `.local_db/players.pkl` (or Firestore, when NOT run with `USE_LOCAL_DATA=true`) and uses a fixed, recognizable email so repeat runs create at most one duplicate-looking row rather than an unbounded number — see Step 1's idempotency note.
 
-- [ ] **Step 1: Write the create-player test**
+- [x] **Step 1: Write the create-player test**
 
 ```python
 """tests_e2e/test_admin_player_management.py — Player CRUD-ish admin actions.
@@ -154,12 +154,12 @@ def test_create_player(live_server, page, test_player_credentials):
     page.wait_for_selector(f'.player-mgmt-card:has-text("{NEW_PLAYER_EMAIL}")', timeout=10000)
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_admin_player_management.py::test_create_player -v`
 Expected: PASS on first run (creates the player) and on rerun (finds it already exists, returns early).
 
-- [ ] **Step 3: Write the edit-player test**
+- [x] **Step 3: Write the edit-player test**
 
 Targets a dedicated, already-seeded e2e test player rather than a real drafting account, so field edits don't disturb the base plan's live-draft test — `test_player_credentials[9]` (`e2e-test-10`, the last of the 10, never used for anything else across any of the plans in this series).
 
@@ -191,12 +191,12 @@ def test_edit_player_profile(live_server, page, test_player_credentials):
     page.wait_for_selector(f'.player-mgmt-card[data-player-id="{target["id"]}"]:has-text("555-0199")', timeout=10000)
 ```
 
-- [ ] **Step 4: Run it**
+- [x] **Step 4: Run it**
 
 Run: `pytest tests_e2e/test_admin_player_management.py::test_edit_player_profile -v`
 Expected: PASS.
 
-- [ ] **Step 5: Write the reset-password test**
+- [x] **Step 5: Write the reset-password test**
 
 `resetPlayerPassword()` clears `password_hash` entirely (`routes/admin_routes.py:255-271`) — this is destructive to the target's ability to log in until they re-claim. Use the same `test_player_credentials[9]` target and immediately re-claim the account within the test (via the real signin overlay's "Setup Account" flow) so the account is left in a working, logged-in-capable state for any other test that might run after this one in the same session.
 
@@ -233,12 +233,12 @@ def test_reset_password_and_reclaim(live_server, page, test_player_credentials):
     page.wait_for_selector("#signin-screen", state="hidden", timeout=10000)
 ```
 
-- [ ] **Step 6: Run it**
+- [x] **Step 6: Run it**
 
 Run: `pytest tests_e2e/test_admin_player_management.py::test_reset_password_and_reclaim -v`
 Expected: PASS, and `target`'s original password (from `E2E_TEST_PLAYER_PASSWORD`) works again afterward since the re-claim step sets it back to the same value.
 
-- [ ] **Step 7: Write the set-temp-password test**
+- [x] **Step 7: Write the set-temp-password test**
 
 Covers the admin-side form and success confirmation only (the login-side consequence — `must_change_password` forcing a change screen — is the sibling auth-lifecycle plan's responsibility, `docs/superpowers/plans/2026-09-09-ui-tests-auth-lifecycle.md`). Uses the same `test_player_credentials[9]` target; ends by resetting the password back via the same reset-and-reclaim pattern as Step 5 so this test is independently idempotent regardless of run order relative to Step 5's test.
 
@@ -283,12 +283,12 @@ def test_set_temp_password(live_server, page, test_player_credentials):
     page.wait_for_selector("#signin-screen", state="hidden", timeout=10000)
 ```
 
-- [ ] **Step 8: Run it**
+- [x] **Step 8: Run it**
 
 Run: `pytest tests_e2e/test_admin_player_management.py -v`
 Expected: PASS for all four tests in this file.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add tests_e2e/test_admin_player_management.py
@@ -307,7 +307,7 @@ git commit -m "test: add e2e admin player management tests (create/edit/reset-pa
 
 **Email-gate verification (done during planning, not a test step):** traced `save_and_broadcast_recap` (`routes/admin_routes.py:359-390`) → `email_service.send_weekly_recap_email(emails, subject, html_body)` → `services/email_service.py::send_weekly_recap_email` → `all(_send(email, subject, html_content) for email in to_emails)` → `_send()`, which is the exact function the base plan's Task 2 gates with `_outbound_email_disabled()`. **Confirmed**: the recap-broadcast path is fully covered by the existing `DISABLE_OUTBOUND_EMAIL` gate. No additional gate needed for this plan.
 
-- [ ] **Step 1: Write the member paid-toggle test**
+- [x] **Step 1: Write the member paid-toggle test**
 
 `initMembersTab()` (`static/js/admin_main.js:61-84`) auto-fetches `GET /api/admin/members/{season}` the moment the Members tab is clicked (no extra interaction needed to trigger the real API call). Each row's `.paid-toggle` button flips paid status via `POST /api/admin/members/paid`.
 
@@ -342,12 +342,12 @@ def test_toggle_member_paid_status(live_server, page, test_player_credentials):
     assert first_toggle.get_attribute("data-paid") == before
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_admin_members_and_recap.py::test_toggle_member_paid_status -v`
 Expected: PASS if at least one season with enrolled members exists in the test data (it will — the base plan's live-draft test creates season 3000 with all 10 test players, though this test doesn't depend on that specific season and works against whichever season the Members tab defaults to loading, per `initMembersTab`'s "load the most recent season by default").
 
-- [ ] **Step 3: Write the recap-prompt-preview test (the automatable boundary)**
+- [x] **Step 3: Write the recap-prompt-preview test (the automatable boundary)**
 
 ```python
 def test_recap_prompt_preview_populates(live_server, page, test_player_credentials):
@@ -380,12 +380,12 @@ def test_recap_prompt_preview_populates(live_server, page, test_player_credentia
     assert len(prompt_text) > 0, "recap prompt preview returned empty text"
 ```
 
-- [ ] **Step 4: Run it**
+- [x] **Step 4: Run it**
 
 Run: `pytest tests_e2e/test_admin_members_and_recap.py -v`
 Expected: PASS for both tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests_e2e/test_admin_members_and_recap.py
@@ -400,13 +400,13 @@ git commit -m "test: add e2e member paid-toggle test and recap-prompt-preview te
 
 `generateRecapAI()` (`static/js/admin_main.js:539-561`) → `POST /api/admin/recap/generate` → `routes/admin_routes.py:346-356`'s `generate_admin_recap` → `ai_service.generate_generic_content(prompt_data)` (`services/ai_service.py:25-45`) → a **real** `genai.GenerativeModel('gemini-1.5-flash').generate_content(...)` call. Unlike the email path, there is no environment-gated bypass for this today.
 
-- [ ] **Step 1: Record the gap (no code change in this plan)**
+- [x] **Step 1: Record the gap (no code change in this plan)**
 
 Automating past `test_recap_prompt_preview_populates` (Task 3) into clicking "Generate AI Summary" or "Save & Broadcast" would mean every pre-deploy e2e run makes a real, billed Gemini API call with nondeterministic output — unlike everything else in this test suite, which is fully local and free. That's a different risk profile than this plan should silently accept.
 
 **Recommendation for a future, separate task** (not built here): add a `DISABLE_AI_GENERATION` (or similarly-named) env gate to `ai_service.py::generate_generic_content`, mirroring `email_service.py`'s `_outbound_email_disabled()` pattern from the base plan's Task 2 — return a fixed canned string when set, so the full recap → broadcast flow becomes safely automatable. Until that exists, `save_and_broadcast_recap` and `generate_admin_recap` remain manually-tested-only.
 
-- [ ] **Step 2: No commit — this task is documentation-only, folded into this plan file itself.**
+- [x] **Step 2: No commit — this task is documentation-only, folded into this plan file itself.**
 
 ---
 
@@ -422,7 +422,7 @@ Automating past `test_recap_prompt_preview_populates` (Task 3) into clicking "Ge
 
 What **is** reachable and gets tested: admin picking out-of-turn (the actual "override" path), undo-last-pick (`.q-undo-btn`), and reset-timer (`.q-timer-btn`) — both rendered by `ui_renderer.js::renderPickQueue` (lines 240-310-ish) only for an admin viewer, on the just-completed pick row (`.q-row-admin .q-undo-btn`/`.q-reset-btn`) and the active pick row respectively, and wired via a delegated click listener in `main.js::initGlobalUI` (`.q-undo-btn` → `undoPick()`, `.q-reset-btn` → `resetPick()`, `.q-timer-btn` → `resetTimer()`).
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 ```python
 """tests_e2e/test_admin_draft_overrides.py — In-draft admin controls.
@@ -481,7 +481,7 @@ def test_admin_can_undo_last_pick_and_reset_timer(live_server, browser, test_pla
     setup_context.close()
 ```
 
-- [ ] **Step 2: Run it against the real element structure and fix selectors**
+- [x] **Step 2: Run it against the real element structure and fix selectors**
 
 Run: `E2E_TEST_PLAYER_IDS=<ids> E2E_TEST_PLAYER_PASSWORD=<pw> pytest tests_e2e/test_admin_draft_overrides.py -v -s`
 
@@ -489,7 +489,7 @@ Run: `E2E_TEST_PLAYER_IDS=<ids> E2E_TEST_PLAYER_PASSWORD=<pw> pytest tests_e2e/t
 
 Expected once selectors are correct: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_admin_draft_overrides.py

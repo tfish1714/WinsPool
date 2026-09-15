@@ -29,7 +29,7 @@
 **Interfaces:**
 - Consumes: `_login` from `tests_e2e/test_standings.py`.
 
-- [ ] **Step 1: Write the tests**
+- [x] **Step 1: Write the tests**
 
 ```python
 """tests_e2e/test_headtohead.py — Head-to-head matchup pages.
@@ -82,12 +82,12 @@ def test_headtohead_history_link_and_page(live_server, page, test_player_credent
     assert "Internal Server Error" not in page.content()
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_headtohead.py -v`
 Expected: PASS at both viewports.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_headtohead.py
@@ -101,7 +101,7 @@ git commit -m "test: add e2e head-to-head flow tests (year picker + all-time his
 **Files:**
 - Create: `tests_e2e/test_playoff_and_weekly.py`
 
-- [ ] **Step 1: Write the tests**
+- [x] **Step 1: Write the tests**
 
 ```python
 """tests_e2e/test_playoff_and_weekly.py — Playoff race and weekly-progress pages.
@@ -158,12 +158,12 @@ def test_weekly_progress_loads(live_server, page, test_player_credentials, viewp
     assert "Internal Server Error" not in page.content()
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_playoff_and_weekly.py -v`
 Expected: PASS at both viewports.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_playoff_and_weekly.py
@@ -180,7 +180,7 @@ git commit -m "test: add e2e playoff race and weekly progress tests"
 **Interfaces:**
 - Consumes: `_login` from `tests_e2e/test_standings.py`.
 
-- [ ] **Step 1: Write the tests**
+- [x] **Step 1: Write the tests**
 
 ```python
 """tests_e2e/test_history.py — All-time history and per-player profile pages.
@@ -211,12 +211,12 @@ def test_all_time_history_and_player_profile_link(live_server, page, test_player
     assert "Internal Server Error" not in page.content()
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_history.py -v`
 Expected: PASS at both viewports. (Requires at least one completed historical season with draft results in `.local_db` — true for this repo's real production-mirrored data; if run against a truly empty dataset the `#history` page renders no player rows and this test would need `pytest.skip`, but that's not the case here.)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_history.py
@@ -235,7 +235,7 @@ git commit -m "test: add e2e all-time history and per-player profile tests"
 
 This is the deepest real-interaction test in this plan: it edits and reverts a real field on a real test account through the actual form (`templates/profile.html`'s `#profile-form`, posting to `POST /api/profile/update`), rather than just checking the page loads.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 ```python
 """tests_e2e/test_profile.py — Profile view and edit, including the MFA toggle.
@@ -318,12 +318,12 @@ def test_profile_wrong_current_password_is_rejected(live_server, page, test_play
     assert page.locator("#profile-form").count() == 1
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_profile.py -v`
 Expected: PASS. `test_profile_edit_nickname_round_trip` and `test_profile_wrong_current_password_is_rejected` trigger real browser `alert()` dialogs (`window.alert` in `templates/profile.html`'s inline script) — handled via Playwright's `page.once("dialog", ...)`, matching the pattern already established in the live-draft plan (`docs/superpowers/plans/2026-09-09-ui-tests-playwright.md` Task 10).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_profile.py
@@ -342,7 +342,7 @@ git commit -m "test: add e2e profile view/edit tests including a real round-trip
 
 `/draft-results` redirects to `/draft/{active_season}`, served by `draft_routes.py`'s `/draft/{year}` handler with `templates/draft_results.html` (for a completed/historical season — distinct from the live in-progress draft room the same route serves for an active draft). This test targets a real historical season (whichever the year-picker's later options resolve to), not the synthetic season 3000 from the live-draft plan — season 3000 has no real NFL game data, so its award cards (`best_overall`, `cumulative_fastest`, etc., gated per `templates/draft_results.html:27`) won't render, which is expected for that plan's purposes but not useful for testing the award-card UI itself here.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 ```python
 """tests_e2e/test_draft_results.py — Draft results page: year picker + award cards.
@@ -381,12 +381,12 @@ def test_draft_results_loads_and_year_picker_navigates(live_server, page, test_p
         assert "Internal Server Error" not in page.content()
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_draft_results.py -v`
 Expected: PASS at both viewports.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_draft_results.py
@@ -403,7 +403,7 @@ git commit -m "test: add e2e draft results page test (year picker navigation)"
 **Interfaces:**
 - Consumes: `_login` from `tests_e2e/test_standings.py`.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 ```python
 """tests_e2e/test_draft_history.py — /draft/history's player/team view toggle.
@@ -446,12 +446,12 @@ def test_draft_history_view_toggle(live_server, page, test_player_credentials, v
     assert page.locator("#player-view").is_visible()
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_draft_history.py -v`
 Expected: PASS at both viewports.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_draft_history.py

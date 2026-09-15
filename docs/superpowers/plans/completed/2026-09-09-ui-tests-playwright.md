@@ -34,7 +34,7 @@
 - Produces: `GET /api/admin/players?include_test_accounts=<bool>` (default `false`) — existing response shape unchanged except each record gains `"is_test_account": bool`.
 - Produces: `renderPlayerSelectionGrid(players, onToggle)` — unchanged signature; filtering now happens before the call, driven by a new checkbox's state.
 
-- [ ] **Step 1: Write the failing test for the filter**
+- [x] **Step 1: Write the failing test for the filter**
 
 ```python
 # tests/test_admin_routes.py — add to TestFetchAdminPlayers
@@ -66,12 +66,12 @@ def test_excludes_test_accounts_by_default(self, admin_token):
         assert e2e["is_test_account"] is True
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pytest tests/test_admin_routes.py::TestFetchAdminPlayers::test_excludes_test_accounts_by_default -v`
 Expected: FAIL — endpoint doesn't accept `include_test_accounts`, and returns both players unfiltered (or KeyErrors on `is_test_account` in assertions).
 
-- [ ] **Step 3: Implement the filter**
+- [x] **Step 3: Implement the filter**
 
 In `routes/admin_routes.py`, change the endpoint signature and add the flag + filter:
 
@@ -117,12 +117,12 @@ async def fetch_admin_players(include_test_accounts: bool = False, _: dict = Dep
         return server_error()
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `pytest tests/test_admin_routes.py::TestFetchAdminPlayers -v`
 Expected: PASS (both the new test and the existing `test_happy_path_returns_password_and_login_metadata`, which doesn't set `is_test_account` so it defaults falsy and is unaffected).
 
-- [ ] **Step 5: Wire the frontend toggle**
+- [x] **Step 5: Wire the frontend toggle**
 
 In `static/js/api.js`, find `fetchPlayers` and add the query param:
 
@@ -169,12 +169,12 @@ Add a one-line listener near wherever `setupActionHandlers()` wires other contro
 document.getElementById('show-test-accounts-toggle')?.addEventListener('change', () => this.fetchInitialData());
 ```
 
-- [ ] **Step 6: Run the full admin route test suite to check for regressions**
+- [x] **Step 6: Run the full admin route test suite to check for regressions**
 
 Run: `pytest tests/test_admin_routes.py -v`
 Expected: PASS, no regressions.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add routes/admin_routes.py static/js/api.js static/js/admin_main.js templates/admin.html tests/test_admin_routes.py
@@ -192,7 +192,7 @@ git commit -m "feat: add is_test_account player flag, hide test accounts from ad
 **Interfaces:**
 - Produces: when `os.environ["DISABLE_OUTBOUND_EMAIL"]` is `"true"` (any case), `_send`/`_send_multi` log and return `True` without importing/calling `resend` at all — every public `send_*` function in this module is unaffected in signature, only in behavior.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_email_service.py — append
@@ -221,12 +221,12 @@ def test_send_multi_disabled_via_env_var_never_calls_resend(mock_send, monkeypat
     mock_send.assert_not_called()
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_email_service.py -k disabled -v`
 Expected: FAIL — no such gate exists yet, `mock_send` gets called.
 
-- [ ] **Step 3: Implement the gate**
+- [x] **Step 3: Implement the gate**
 
 In `services/email_service.py`, add a small helper near the top (after `_app_base_url`) and call it first in both `_send` and `_send_multi`:
 
@@ -259,12 +259,12 @@ def _send_multi(to_emails: list, subject: str, html: str, reply_to: str = None) 
 
 (Leave the rest of both functions unchanged — only the early-return guard is new.)
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_email_service.py -v`
 Expected: PASS, all tests including pre-existing ones.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add services/email_service.py tests/test_email_service.py
@@ -284,7 +284,7 @@ git commit -m "feat: add DISABLE_OUTBOUND_EMAIL safety gate to the Resend send p
 
 This is a one-time, manually-run operational script (like `predict_season.py`), not part of the automated pytest suite — run once against production Firestore to create the accounts, then never again (re-running is safe/idempotent: it skips any email that already exists).
 
-- [ ] **Step 1: Write the script**
+- [x] **Step 1: Write the script**
 
 ```python
 """scripts/seed_e2e_test_players.py — One-time setup: create the 10 dedicated
@@ -345,14 +345,14 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Commit the script**
+- [x] **Step 2: Commit the script**
 
 ```bash
 git add scripts/seed_e2e_test_players.py
 git commit -m "feat: add one-time seed script for the 10 e2e test player accounts"
 ```
 
-- [ ] **Step 3: Run it once against production and record the output**
+- [x] **Step 3: Run it once against production and record the output**
 
 Run: `python scripts/seed_e2e_test_players.py`
 
@@ -373,7 +373,7 @@ This step is manual/operational — capture the 10 player IDs and the printed pa
 **Interfaces:**
 - Produces: `live_server` (session-scoped fixture, yields base URL string e.g. `"http://127.0.0.1:8811"`), `browser` (session-scoped Playwright `Browser`), `page` (function-scoped Playwright `Page`, already navigated nowhere), `test_player_credentials` (session-scoped fixture, yields `list[dict]` of `{"id": int, "email": str, "password": str, "role": str}` for all 10 seeded accounts, read from `E2E_TEST_PLAYER_IDS`/`E2E_TEST_PLAYER_PASSWORD` env vars).
 
-- [ ] **Step 1: Add dev/test dependencies**
+- [x] **Step 1: Add dev/test dependencies**
 
 ```
 # requirements-dev.txt
@@ -383,7 +383,7 @@ playwright>=1.59.0
 
 (`pytest` itself is assumed already available per the existing `tests/` suite's own setup — this repo's `requirements.txt` doesn't list it either, so this file follows the same existing convention rather than introducing a new one.)
 
-- [ ] **Step 2: Write `tests_e2e/conftest.py`**
+- [x] **Step 2: Write `tests_e2e/conftest.py`**
 
 ```python
 """tests_e2e/conftest.py — Playwright browser-driven test harness.
@@ -489,12 +489,12 @@ def test_player_credentials():
     ]
 ```
 
-- [ ] **Step 3: Verify the harness boots**
+- [x] **Step 3: Verify the harness boots**
 
 Run: `pytest tests_e2e/ -v --collect-only`
 Expected: no collection errors (no test files exist yet, so 0 collected — this just proves `conftest.py` imports cleanly and `sync_playwright` is importable).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add requirements-dev.txt tests_e2e/__init__.py tests_e2e/conftest.py
@@ -511,7 +511,7 @@ git commit -m "feat: add Playwright e2e test harness (live_server, browser, page
 **Interfaces:**
 - Consumes: `live_server`, `page`, `test_player_credentials` fixtures from Task 4.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 ```python
 """tests_e2e/test_login.py — Real login through the signin overlay."""
@@ -539,12 +539,12 @@ def test_login_reaches_standings(live_server, page, test_player_credentials, vie
     assert "wins-pool" in page.url
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `E2E_TEST_PLAYER_IDS=<ids> E2E_TEST_PLAYER_PASSWORD=<pw> pytest tests_e2e/test_login.py -v`
 Expected: PASS at both viewports (requires Task 3 already run once against production and `.local_db` refreshed).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_login.py
@@ -558,7 +558,7 @@ git commit -m "test: add e2e login flow test at desktop and mobile viewports"
 **Files:**
 - Create: `tests_e2e/test_mock_draft.py`
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 ```python
 """tests_e2e/test_mock_draft.py — Login-free solo practice draft smoke test."""
@@ -588,12 +588,12 @@ def test_mock_draft_loads_and_allows_a_pick(live_server, page, viewport):
     page.wait_for_selector(".pick-queue, #pick-queue", timeout=10000)
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_mock_draft.py -v`
 Expected: PASS at both viewports. If the selectors don't match (mock_draft.js may use different class names than `.team-card`/`[data-team]`), adjust to the actual rendered markup — inspect via `page.content()` in a scratch run before finalizing.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_mock_draft.py
@@ -607,7 +607,7 @@ git commit -m "test: add e2e mock draft smoke test at desktop and mobile viewpor
 **Files:**
 - Create: `tests_e2e/test_standings.py`
 
-- [ ] **Step 1: Write a shared login helper and the tests**
+- [x] **Step 1: Write a shared login helper and the tests**
 
 ```python
 """tests_e2e/test_standings.py — Standings and schedule page smoke tests."""
@@ -650,12 +650,12 @@ def test_schedule_page_loads(live_server, page, test_player_credentials, viewpor
     assert "Internal Server Error" not in page.content()
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_standings.py -v`
 Expected: PASS at both viewports.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_standings.py
@@ -669,7 +669,7 @@ git commit -m "test: add e2e standings and schedule page smoke tests"
 **Files:**
 - Create: `tests_e2e/test_admin_dashboard.py`
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 ```python
 """tests_e2e/test_admin_dashboard.py — Admin dashboard loads for an admin test account."""
@@ -694,12 +694,12 @@ def test_admin_dashboard_loads(live_server, page, test_player_credentials):
     assert "Internal Server Error" not in page.content()
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_admin_dashboard.py -v`
 Expected: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_admin_dashboard.py
@@ -718,7 +718,7 @@ This directly encodes the CLAUDE.md gotcha: `updateNav()` (desktop) and the draw
 **Interfaces:**
 - Consumes: `_login` helper from Task 7 (`tests_e2e/test_standings.py`).
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 ```python
 """tests_e2e/test_nav_parity.py — Desktop nav and mobile drawer must expose the same destinations.
@@ -771,12 +771,12 @@ def test_desktop_and_mobile_nav_expose_the_same_destinations(live_server, page, 
     assert not missing_from_desktop, f"Mobile drawer has links the desktop nav is missing: {missing_from_desktop}"
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_nav_parity.py -v`
 Expected: PASS if the two navs currently agree; FAIL with the exact missing-href set if they don't (which would itself be a real bug to fix separately, not a plan step to silently work around).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_nav_parity.py
@@ -795,7 +795,7 @@ git commit -m "test: add e2e nav parity test between desktop rail and mobile dra
 
 This is the test that matters most: it reproduces the actual mechanics of a real draft (season creation through the real Admin Portal, 10 real players joining and picking in turn over a real WebSocket connection) rather than a synthetic shortcut, because the bugs that motivated this whole plan — wrong round labels, wrong portfolio win math, `/wins-pool` 500ing mid-draft — only show up under the real multi-player, real-WebSocket flow. `draft_routes.py:704`'s `active_pick > 30` completion check and `admin_main.js:438`'s `selectedPlayerIds.size !== 10` season-creation guard both hardcode the real pool size (10 players × 3 picks), so a smaller synthetic draft would not exercise the same code path.
 
-- [ ] **Step 1: Write the season-3000 setup helper and cleanup fixture**
+- [x] **Step 1: Write the season-3000 setup helper and cleanup fixture**
 
 ```python
 """tests_e2e/test_live_draft.py — Full 10-player live draft, season 3000.
@@ -839,7 +839,7 @@ def clean_season_3000(live_server, browser, test_player_credentials):
     _delete()
 ```
 
-- [ ] **Step 2: Write the season-creation step (through the real Admin UI)**
+- [x] **Step 2: Write the season-creation step (through the real Admin UI)**
 
 ```python
 def _create_season_3000(page, live_server, test_player_credentials):
@@ -888,7 +888,7 @@ def _activate_draft(page, live_server):
         )
 ```
 
-- [ ] **Step 3: Write the turn-taking pick loop**
+- [x] **Step 3: Write the turn-taking pick loop**
 
 ```python
 def _make_pick_when_it_is_my_turn(page, timeout_ms=15000):
@@ -905,7 +905,7 @@ def _make_pick_when_it_is_my_turn(page, timeout_ms=15000):
     page.wait_for_timeout(500)
 ```
 
-- [ ] **Step 4: Write the full draft test**
+- [x] **Step 4: Write the full draft test**
 
 ```python
 def test_full_ten_player_live_draft(live_server, browser, test_player_credentials, clean_season_3000):
@@ -971,7 +971,7 @@ def test_full_ten_player_live_draft(live_server, browser, test_player_credential
     setup_context.close()
 ```
 
-- [ ] **Step 5: Run it against the real element structure and fix selectors**
+- [x] **Step 5: Run it against the real element structure and fix selectors**
 
 Run: `E2E_TEST_PLAYER_IDS=<ids> E2E_TEST_PLAYER_PASSWORD=<pw> pytest tests_e2e/test_live_draft.py -v -s`
 
@@ -979,7 +979,7 @@ This test's selectors (`#generate-season-btn`, `#draft-active-toggle`, `.team-ca
 
 Expected once selectors are correct: PASS — one full 30-pick draft completes with no `Internal Server Error` appearing at any point and the round label reading "Round 3" at completion.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests_e2e/test_live_draft.py
@@ -996,15 +996,15 @@ git commit -m "test: add full 10-player live draft e2e test (season 3000)"
 **Interfaces:**
 - Consumes: everything above — this task only changes the deploy checklist text, no application code.
 
-- [ ] **Step 1: Read the current pre-flight section**
+- [x] **Step 1: Read the current pre-flight section**
 
 Read `.claude/commands/deploy.md` to find where `pytest tests/` is currently listed as a pre-flight step.
 
-- [ ] **Step 2: Add the e2e suite as a required pre-flight step, after the unit test step**
+- [x] **Step 2: Add the e2e suite as a required pre-flight step, after the unit test step**
 
 Add a line/step instructing: run `pytest tests_e2e/ -v` (requires `E2E_TEST_PLAYER_IDS`/`E2E_TEST_PLAYER_PASSWORD` in `.env` per Task 3) after `pytest tests/` passes, before proceeding to `git push`/`deploy.ps1`. Note explicitly that `tests_e2e/test_live_draft.py` is the slowest test in the suite (a real 30-pick draft) and is expected to take on the order of a minute or two — this is a deliberate tradeoff for pre-deploy confidence, not a bug.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .claude/commands/deploy.md
@@ -1018,7 +1018,7 @@ git commit -m "docs: add Playwright e2e suite to the /deploy pre-flight checklis
 **Files:**
 - Modify: `docs/superpowers/specs/2026-09-09-post-launch-hardening-design.md`, §1 (UI Tests)
 
-- [ ] **Step 1: Replace the original one-line "Draft room" bullet**
+- [x] **Step 1: Replace the original one-line "Draft room" bullet**
 
 Replace:
 ```
@@ -1036,7 +1036,7 @@ with a line pointing to this plan for the full design:
   code path).
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-09-09-post-launch-hardening-design.md

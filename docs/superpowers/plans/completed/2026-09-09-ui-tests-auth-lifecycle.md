@@ -27,7 +27,7 @@
 **Interfaces:**
 - Produces: 4 additional Firestore player documents — `e2e-test-11-claim@winspool.internal` (password_hash left unset, for Task 2), `e2e-test-12-mfa@winspool.internal` (mfa_enabled=True, for Task 3), `e2e-test-13-lockout@winspool.internal` (for Task 4), `e2e-test-14-tempword@winspool.internal` (for Task 5) — all `is_test_account: True`, `role: "user"`.
 
-- [ ] **Step 1: Extend the script**
+- [x] **Step 1: Extend the script**
 
 Add this block to `scripts/seed_e2e_test_players.py`'s `main()`, after the existing 10-player loop and before the final print statements:
 
@@ -68,13 +68,13 @@ Add this block to `scripts/seed_e2e_test_players.py`'s `main()`, after the exist
 
 (This reuses the same `password_hash`/`password` generated earlier in `main()` for the base 10 accounts — no new secret to manage. `e2e-test-11-claim` deliberately does NOT get `update_player_credentials` called on it, since its whole purpose is testing the "no password yet" claim flow.)
 
-- [ ] **Step 2: Run it once and record the new IDs**
+- [x] **Step 2: Run it once and record the new IDs**
 
 Run: `python scripts/seed_e2e_test_players.py`
 
 Add to `.env`: `E2E_CLAIM_TEST_PLAYER_ID`, `E2E_MFA_TEST_PLAYER_ID`, `E2E_LOCKOUT_TEST_PLAYER_ID`, `E2E_TEMPWORD_TEST_PLAYER_ID` (the 4 printed IDs). Run `python scripts/refresh_local_pkls.py` afterward so they appear in `.local_db/players.pkl`.
 
-- [ ] **Step 3: Add a conftest fixture exposing these 4 accounts**
+- [x] **Step 3: Add a conftest fixture exposing these 4 accounts**
 
 Append to `tests_e2e/conftest.py` (created by the harness plan's Task 4):
 
@@ -103,7 +103,7 @@ def lifecycle_test_accounts():
     }
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/seed_e2e_test_players.py tests_e2e/conftest.py
@@ -123,7 +123,7 @@ git commit -m "feat: add 4 dedicated e2e accounts for account-claim/MFA/lockout/
 
 Confirmed against `routes/auth_routes.py:84-105` (`check_player`) and `static/js/main.js:854-916` (`handleEmailBlur`/`handleLogin`): blurring `#auth-email` calls `GET /api/check_player`; when `has_password` is false the UI reveals `#auth-confirm-password` + `#setup-requirements`, changes `#auth-submit-btn`'s text to "Setup Account", and submit calls `POST /api/set_password`.
 
-- [ ] **Step 1: Write the shared admin-reset-password helper**
+- [x] **Step 1: Write the shared admin-reset-password helper**
 
 ```python
 """tests_e2e/test_account_claim.py — First-time account claim (no password set yet)."""
@@ -145,7 +145,7 @@ def _admin_reset_password(page, live_server, admin_creds, target_player_id, targ
     page.wait_for_timeout(1000)
 ```
 
-- [ ] **Step 2: Write the claim-flow test**
+- [x] **Step 2: Write the claim-flow test**
 
 ```python
 from tests_e2e.test_standings import _login
@@ -212,12 +212,12 @@ def test_first_time_account_claim(live_server, page, lifecycle_test_accounts, re
     page.wait_for_url("**/wins-pool/**", timeout=10000)
 ```
 
-- [ ] **Step 3: Run it and fix selectors if needed**
+- [x] **Step 3: Run it and fix selectors if needed**
 
 Run: `pytest tests_e2e/test_account_claim.py -v`
 Expected: PASS. The `#pw-req-*` ids and `#pw-match-hint` classes (`met`, `match`, `mismatch`) are confirmed directly against `main.js:822-851` and `templates/base.html:52-66` — low selector risk here versus Task 6/10 of the harness plan.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tests_e2e/test_account_claim.py
@@ -236,7 +236,7 @@ git commit -m "test: add e2e first-time account claim flow test"
 **Interfaces:**
 - Consumes: `live_server`, `page`, `lifecycle_test_accounts` (Task 1).
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 ```python
 """tests_e2e/test_mfa.py — MFA-required login state.
@@ -276,12 +276,12 @@ def test_mfa_required_state_and_wrong_code_rejected(live_server, page, lifecycle
                         # depends on whether the 000000 guess happens to collide with expiry timing, both are correct rejections
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_mfa.py -v`
 Expected: PASS. No cleanup fixture needed — this test never successfully completes login, so `e2e-test-12-mfa`'s state (mfa_enabled=True, password unchanged) never actually changes; the only server-side mutation is a fresh `mfa_token`/`mfa_expiry` written on each attempt, which naturally gets overwritten by the next run's own login attempt.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_mfa.py
@@ -300,7 +300,7 @@ Confirmed against `routes/auth_routes.py:171-199`: on the 5th consecutive failed
 **Interfaces:**
 - Consumes: `live_server`, `page`, `browser`, `lifecycle_test_accounts` (Task 1), `test_player_credentials` (harness Task 4), `_admin_reset_password` + `_login_admin` helpers (Task 2).
 
-- [ ] **Step 1: Write a login-attempt helper and the test**
+- [x] **Step 1: Write a login-attempt helper and the test**
 
 ```python
 """tests_e2e/test_lockout.py — 5 failed logins trigger a 30-minute lockout."""
@@ -358,12 +358,12 @@ def test_five_failed_logins_lock_the_account(live_server, page, lifecycle_test_a
     assert "locked" in locked_error.lower()
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_lockout.py -v`
 Expected: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_lockout.py
@@ -381,7 +381,7 @@ Confirmed against `static/js/admin_main.js:305-351` (`.player-mgmt-temppw` panel
 
 **Confirmed real product gap (verified during planning, not speculative):** `grep -n "must_change_password" static/js/*.js` shows it referenced only in `admin_main.js:125,258` — both for the "Temp Password" status *badge* in the admin player list, never in the login flow. `main.js`'s `handleLogin` (`main.js:901-908`) branches only on `data.status === 'success'` and `data.status === 'mfa_required'`; `must_change_password` falls through to the generic `else { this.showAuthError(data.error || 'Login failed') }` — and that response never sets `error`, so the account gets stuck showing the generic "Login failed" text instead of ever being routed into a password-change form. **The backend supports forced password changes; the frontend has no way to complete one.** This plan does not fix that — fixing application behavior discovered incidentally while writing tests is out of scope for a test-writing plan — but Task 5 below is written to test what actually exists (the login block) rather than assert a UI flow that doesn't exist, and flags the gap explicitly in its own comments so it doesn't get silently lost.
 
-- [ ] **Step 1: Write the test for what actually exists**
+- [x] **Step 1: Write the test for what actually exists**
 
 ```python
 """tests_e2e/test_forced_password_change.py — Admin sets a temp password;
@@ -456,12 +456,12 @@ def test_admin_set_temp_password_blocks_normal_login(live_server, page, browser,
     target_ctx.close()
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pytest tests_e2e/test_forced_password_change.py -v`
 Expected: PASS, confirming the account stays blocked at the signin screen. If `main.js` has since gained a `must_change_password` handler (i.e., the confirmed-gap note above is stale by the time this runs), extend the test to complete that real flow instead of stopping at "blocked" — read the actual handler code first.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests_e2e/test_forced_password_change.py
