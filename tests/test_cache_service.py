@@ -2,7 +2,7 @@ import pytest
 import pandas as pd
 import time
 from unittest.mock import patch, MagicMock
-from services.cache_service import get_cached, write_cache, clear_data_cache, _DATA_CACHE
+from services.cache_service import get_cached, write_cache, clear_data_cache
 
 def test_local_cache_read_write(tmp_path, monkeypatch):
     """Round-trip: write analytics cache entry, read it back, assert equal."""
@@ -31,14 +31,61 @@ def test_remote_firestore_cache_read(mock_firestore):
     mock_firestore.collection.assert_called_with("analytics_cache")
     mock_firestore.collection.return_value.document.assert_called_with("test_analytic_2024_1")
 
-def test_clear_data_cache_wipes_memory():
-    """
-    Verify that explicit cache invalidation successfully drops
-    all Pandas DataFrames stationed in the RAM dictionary.
-    """
-    _DATA_CACHE["mock_year"] = pd.DataFrame()
+def test_set_and_get_domain_round_trips():
+    from services.cache_service import set_domain, get_domain, DOMAIN_ACTIVE, clear_domain
+    clear_domain(DOMAIN_ACTIVE)  # isolate from other tests
+    assert get_domain(DOMAIN_ACTIVE) is None
+    set_domain(DOMAIN_ACTIVE, {"games": "placeholder"})
+    assert get_domain(DOMAIN_ACTIVE) == {"games": "placeholder"}
+
+def test_clear_domain_removes_only_that_domain():
+    from services.cache_service import set_domain, clear_domain, get_domain, DOMAIN_ACTIVE, DOMAIN_STATIC
+    set_domain(DOMAIN_ACTIVE, "active-value")
+    set_domain(DOMAIN_STATIC, "static-value")
+    clear_domain(DOMAIN_ACTIVE)
+    assert get_domain(DOMAIN_ACTIVE) is None
+    assert get_domain(DOMAIN_STATIC) == "static-value"
+    clear_domain(DOMAIN_STATIC)  # cleanup
+
+def test_clear_data_cache_with_domain_clears_only_that_domain():
+    from services.cache_service import set_domain, clear_data_cache, get_domain, DOMAIN_ACTIVE, DOMAIN_STATIC
+    set_domain(DOMAIN_ACTIVE, "a")
+    set_domain(DOMAIN_STATIC, "s")
+    clear_data_cache(DOMAIN_ACTIVE)
+    assert get_domain(DOMAIN_ACTIVE) is None
+    assert get_domain(DOMAIN_STATIC) == "s"
+    clear_data_cache(DOMAIN_STATIC)  # cleanup
+
+def test_clear_data_cache_with_no_domain_wipes_everything():
+    from services.cache_service import set_domain, clear_data_cache, get_domain, DOMAIN_ACTIVE, DOMAIN_STATIC
+    set_domain(DOMAIN_ACTIVE, "a")
+    set_domain(DOMAIN_STATIC, "s")
     clear_data_cache()
-    assert len(_DATA_CACHE) == 0
+    assert get_domain(DOMAIN_ACTIVE) is None
+    assert get_domain(DOMAIN_STATIC) is None
+
+def test_get_domain_timestamp_defaults_to_zero_when_unset():
+    from services.cache_service import get_domain_timestamp, clear_domain, DOMAIN_HISTORICAL
+    clear_domain(DOMAIN_HISTORICAL)
+    assert get_domain_timestamp(DOMAIN_HISTORICAL) == 0
+
+def test_domain_signal_fields_cover_every_domain_constant():
+    """Every domain constant must have exactly one signal field -- catches a
+    typo'd or missing entry before it ships."""
+    from services.cache_service import (
+        DOMAIN_SIGNAL_FIELDS, DOMAIN_ACTIVE, DOMAIN_HISTORICAL, DOMAIN_STATIC,
+        DOMAIN_PREDICTIONS_ACTIVE, DOMAIN_PREDICTIONS_HISTORICAL, DOMAIN_ADMIN_ANALYTICS,
+    )
+    expected = {DOMAIN_ACTIVE, DOMAIN_HISTORICAL, DOMAIN_STATIC,
+                DOMAIN_PREDICTIONS_ACTIVE, DOMAIN_PREDICTIONS_HISTORICAL, DOMAIN_ADMIN_ANALYTICS}
+    assert set(DOMAIN_SIGNAL_FIELDS.keys()) == expected
+    assert len(set(DOMAIN_SIGNAL_FIELDS.values())) == len(expected)  # no duplicate field names
+
+def test_clear_data_cache_wipes_all_domains():
+    from services.cache_service import set_domain, get_domain, clear_data_cache, DOMAIN_ACTIVE
+    set_domain(DOMAIN_ACTIVE, pd.DataFrame())
+    clear_data_cache()
+    assert get_domain(DOMAIN_ACTIVE) is None
 
 
 class TestPredictionFeaturesCache:

@@ -63,8 +63,7 @@ def test_load_data_year_slice_falls_back_to_base_pkl(monkeypatch, tmp_path):
     monkeypatch.setenv("USE_LOCAL_DATA", "true")
 
     import services.cache_service as cs
-    cs._DATA_CACHE.clear()
-    cs._CACHE_TIMESTAMPS.clear()
+    cs.clear_data_cache()
 
     local_db = tmp_path / ".local_db"
     local_db.mkdir()
@@ -102,8 +101,7 @@ def test_load_data_cache_ttl_expiry_triggers_refetch(monkeypatch, tmp_path):
     monkeypatch.setenv("USE_LOCAL_DATA", "true")
 
     import services.cache_service as cs
-    cs._DATA_CACHE.clear()
-    cs._CACHE_TIMESTAMPS.clear()
+    cs.clear_data_cache()
 
     local_db = tmp_path / ".local_db"
     local_db.mkdir()
@@ -146,10 +144,8 @@ def test_remote_cache_invalidation_calls_clear_when_remote_is_newer(monkeypatch)
     local_ts = now - 120          # local cache timestamp is 2 minutes old
     remote_ts = now + 1           # remote says there is a newer update
 
-    cs._DATA_CACHE.clear()
-    cs._CACHE_TIMESTAMPS.clear()
-    cs._DATA_CACHE['all'] = MagicMock()   # warm the in-memory cache
-    cs._CACHE_TIMESTAMPS['all'] = local_ts
+    cs.clear_data_cache()
+    cs.set_domain(cs.DOMAIN_ACTIVE, MagicMock(), timestamp=local_ts)   # warm the in-memory cache with domain-keyed setter
     cs._LAST_REMOTE_CHECK = 0             # force the remote check to run
 
     mock_ctrl = MagicMock()
@@ -167,6 +163,5 @@ def test_remote_cache_invalidation_calls_clear_when_remote_is_newer(monkeypatch)
 
         mock_clear.assert_called_once()
     finally:
-        cs._DATA_CACHE.clear()
-        cs._CACHE_TIMESTAMPS.clear()
+        cs.clear_data_cache()
         cs._LAST_REMOTE_CHECK = 0

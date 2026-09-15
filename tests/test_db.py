@@ -19,13 +19,13 @@ def _make_players_df():
 
 
 def test_get_player_by_id_uses_warm_cache(monkeypatch):
-    """get_player_by_id reads from _DATA_CACHE when it is warm — no Firestore call."""
+    """get_player_by_id reads from cache when it is warm — no Firestore call."""
     from services import cache_service
     from services.db_service import get_player_by_id
 
     bundle = MagicMock()
     bundle.players = _make_players_df()
-    monkeypatch.setitem(cache_service._DATA_CACHE, 'all', bundle)
+    cache_service.set_domain(cache_service.DOMAIN_ACTIVE, bundle)
 
     with patch('services.db_service.get_collection_df') as mock_gcd:
         result = get_player_by_id('42')
@@ -36,11 +36,11 @@ def test_get_player_by_id_uses_warm_cache(monkeypatch):
 
 
 def test_get_player_by_id_cold_cache_falls_back(monkeypatch):
-    """get_player_by_id calls get_collection_df when _DATA_CACHE is empty."""
+    """get_player_by_id calls get_collection_df when cache is empty."""
     from services import cache_service
     from services.db_service import get_player_by_id
 
-    monkeypatch.setattr(cache_service, '_DATA_CACHE', {})
+    cache_service.clear_data_cache()
 
     with patch('services.db_service.get_collection_df') as mock_gcd:
         mock_gcd.return_value = _make_players_df()
@@ -51,13 +51,13 @@ def test_get_player_by_id_cold_cache_falls_back(monkeypatch):
 
 
 def test_get_player_by_email_uses_warm_cache(monkeypatch):
-    """get_player_by_email reads from _DATA_CACHE when it is warm — no Firestore call."""
+    """get_player_by_email reads from cache when it is warm — no Firestore call."""
     from services import cache_service
     from services.db_service import get_player_by_email
 
     bundle = MagicMock()
     bundle.players = _make_players_df()
-    monkeypatch.setitem(cache_service._DATA_CACHE, 'all', bundle)
+    cache_service.set_domain(cache_service.DOMAIN_ACTIVE, bundle)
 
     with patch('services.db_service.get_collection_df') as mock_gcd:
         result = get_player_by_email('hit@example.com')
@@ -68,11 +68,11 @@ def test_get_player_by_email_uses_warm_cache(monkeypatch):
 
 
 def test_get_player_by_email_cold_cache_falls_back(monkeypatch):
-    """get_player_by_email calls get_collection_df when _DATA_CACHE is empty."""
+    """get_player_by_email calls get_collection_df when cache is empty."""
     from services import cache_service
     from services.db_service import get_player_by_email
 
-    monkeypatch.setattr(cache_service, '_DATA_CACHE', {})
+    cache_service.clear_data_cache()
 
     with patch('services.db_service.get_collection_df') as mock_gcd:
         mock_gcd.return_value = _make_players_df()
@@ -100,7 +100,7 @@ def test_get_player_by_email_normalizes_nan_field_to_none(monkeypatch):
     ])
     bundle = MagicMock()
     bundle.players = df
-    monkeypatch.setitem(cache_service._DATA_CACHE, 'all', bundle)
+    cache_service.set_domain(cache_service.DOMAIN_ACTIVE, bundle)
 
     result = get_player_by_email("nopw@example.com")
     assert result is not None
@@ -137,7 +137,7 @@ def test_add_player_integrity(monkeypatch):
     touches the real database or the .local_db/ pickle files.
     """
     from services import cache_service
-    monkeypatch.setattr(cache_service, '_DATA_CACHE', {})
+    cache_service.clear_data_cache()
 
     test_email = _test_email()
     test_name = "Stability Test User"

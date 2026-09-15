@@ -109,36 +109,143 @@ def is_cache_final(analytic: str, year: int, week: int) -> bool:
             pass
         return False
 
-# --- Data Cache (Moved from data_service to break circular import) ---
+# --- Data Cache: domain-keyed, not year-keyed (see docs/superpowers/specs/
+# 2026-09-14-cache-mutability-redesign-design.md) ---
 import time
 
-# In-memory cache keyed by year (or 'all' for unfiltered load)
-_DATA_CACHE: dict = {}
-_CACHE_TIMESTAMPS: dict = {}
+DOMAIN_ACTIVE = "active"
+DOMAIN_HISTORICAL = "historical"
+DOMAIN_STATIC = "static"
+DOMAIN_PREDICTIONS_ACTIVE = "predictions_active"
+DOMAIN_PREDICTIONS_HISTORICAL = "predictions_historical"
+DOMAIN_ADMIN_ANALYTICS = "admin_analytics"
+
+# Maps each cache domain to the field name it owns inside the single
+# metadata/cache_control Firestore document. A writer signals exactly the
+# domain(s) it touched; every process (including winspool-predict-daily,
+# which never shares memory with the web service) discovers the signal via
+# the existing remote-check poll below.
+DOMAIN_SIGNAL_FIELDS = {
+    DOMAIN_ACTIVE: "active_updated",
+    DOMAIN_HISTORICAL: "historical_updated",
+    DOMAIN_STATIC: "static_updated",
+    DOMAIN_PREDICTIONS_ACTIVE: "predictions_active_updated",
+    DOMAIN_PREDICTIONS_HISTORICAL: "predictions_historical_updated",
+    DOMAIN_ADMIN_ANALYTICS: "admin_analytics_updated",
+}
+
+_DOMAIN_CACHE: dict = {}
+_DOMAIN_TIMESTAMPS: dict = {}
 _CACHE_TTL_SECONDS = 3600  # 1-hour TTL; long enough to avoid Firestore spam on every request, short enough to catch same-day data changes
 _LAST_REMOTE_CHECK = 0
-_REMOTE_CHECK_INTERVAL = 60 # Check Firestore for invalidation every 60 seconds
+_REMOTE_CHECK_INTERVAL = 60  # Check Firestore for invalidation every 60 seconds
 
-def clear_data_cache(year=None):
+# Backward compatibility shims: map old year-based keys to domain ACTIVE data
+# This allows existing code (db_service.py, data_service.py) to continue working
+# while transitioning to the domain-based API. Once all callers migrate, these
+# can be removed.
+class _DataCacheCompat(dict):
+    """Compatibility wrapper that maps legacy 'all' key to DOMAIN_ACTIVE."""
+    def get(self, key, default=None):
+        if key == 'all' or key is None:
+            return _DOMAIN_CACHE.get(DOMAIN_ACTIVE, default)
+        return _DOMAIN_CACHE.get(key, default)
+
+    def __setitem__(self, key, value):
+        if key == 'all' or key is None:
+            _DOMAIN_CACHE[DOMAIN_ACTIVE] = value
+        else:
+            _DOMAIN_CACHE[key] = value
+
+    def __getitem__(self, key):
+        if key == 'all' or key is None:
+            return _DOMAIN_CACHE[DOMAIN_ACTIVE]
+        return _DOMAIN_CACHE[key]
+
+    def __contains__(self, key):
+        if key == 'all' or key is None:
+            return DOMAIN_ACTIVE in _DOMAIN_CACHE
+        return key in _DOMAIN_CACHE
+
+    def clear(self):
+        _DOMAIN_CACHE.clear()
+
+class _TimestampsCompat(dict):
+    """Compatibility wrapper for timestamps that maps to domain ACTIVE."""
+    def get(self, key, default=None):
+        if key == 'all' or key is None:
+            return _DOMAIN_TIMESTAMPS.get(DOMAIN_ACTIVE, default)
+        return _DOMAIN_TIMESTAMPS.get(key, default)
+
+    def __setitem__(self, key, value):
+        if key == 'all' or key is None:
+            _DOMAIN_TIMESTAMPS[DOMAIN_ACTIVE] = value
+        else:
+            _DOMAIN_TIMESTAMPS[key] = value
+
+    def __getitem__(self, key):
+        if key == 'all' or key is None:
+            return _DOMAIN_TIMESTAMPS[DOMAIN_ACTIVE]
+        return _DOMAIN_TIMESTAMPS[key]
+
+    def __contains__(self, key):
+        if key == 'all' or key is None:
+            return DOMAIN_ACTIVE in _DOMAIN_TIMESTAMPS
+        return key in _DOMAIN_TIMESTAMPS
+
+    def clear(self):
+        _DOMAIN_TIMESTAMPS.clear()
+
+_DATA_CACHE = _DataCacheCompat()
+_CACHE_TIMESTAMPS = _TimestampsCompat()
+
+
+def get_domain(domain: str):
+    """Return the cached value for `domain`, or None if not cached."""
+    return _DOMAIN_CACHE.get(domain)
+
+
+def set_domain(domain: str, value, timestamp: float = None) -> None:
+    """Cache `value` under `domain`, stamped with the given (or current) time."""
+    _DOMAIN_CACHE[domain] = value
+    _DOMAIN_TIMESTAMPS[domain] = timestamp if timestamp is not None else time.time()
+
+
+def clear_domain(domain: str) -> None:
+    """Evict one domain's cached value and timestamp."""
+    _DOMAIN_CACHE.pop(domain, None)
+    _DOMAIN_TIMESTAMPS.pop(domain, None)
+
+
+def get_domain_timestamp(domain: str) -> float:
+    """Return when `domain` was last cached, or 0 if never cached."""
+    return _DOMAIN_TIMESTAMPS.get(domain, 0)
+
+
+def clear_data_cache(domain: str = None) -> None:
+    """Invalidate one named cache domain, or every domain if none given.
+
+    `domain` must be one of the DOMAIN_* constants above (a bare Firestore
+    collection name or a season year is no longer a valid argument -- see
+    the design doc's "year-keyed-plus-'all'" replacement).
     """
-    Invalidates in-memory data caches.
-    If year is provided, only that year's cache is cleared.
-    If year is None, wipes all data (default behavior for full refreshes).
-    """
-    global _DATA_CACHE, _CACHE_TIMESTAMPS
-    if year is not None:
-        key = str(year)
-        if key in _DATA_CACHE:
-            del _DATA_CACHE[key]
-        if key in _CACHE_TIMESTAMPS:
-            del _CACHE_TIMESTAMPS[key]
-        logger.info("Local data cache for %s cleared.", year)
+    if domain is not None:
+        clear_domain(domain)
+        logger.info("Cache domain '%s' cleared.", domain)
     else:
-        _DATA_CACHE.clear()
-        _CACHE_TIMESTAMPS.clear()
-        logger.info("Global data cache explicitly cleared.")
+        _DOMAIN_CACHE.clear()
+        _DOMAIN_TIMESTAMPS.clear()
+        logger.info("All cache domains cleared.")
 
+
+# Legacy compatibility shim for db_service.py's current use of _DATA_CACHE
 def _cache_key(year):
+    """Transitional shim: convert year-based key to domain constant.
+
+    This function maintains backward compatibility for code that hasn't yet
+    migrated to domain-based caching. It should be replaced by direct use of
+    domain constants in Task 4.
+    """
     return str(year) if year is not None else 'all'
 
 
