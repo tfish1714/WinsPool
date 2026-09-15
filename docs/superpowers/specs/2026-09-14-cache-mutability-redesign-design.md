@@ -115,8 +115,10 @@ low-enough-frequency that the complexity isn't worth it.
   to fold into `static` opportunistically since it costs nothing extra, but
   not a priority: drafting is now a once-a-year event for the active season,
   not ongoing cost.
-- **`analytics_cache`** — not read by the running app at all today (dead
-  code per the performance report); nothing to cache.
+- **`analytics_cache`'s read path** (`get_cached()`) — zero production
+  callers, confirmed via a repo-wide grep (only `tests/` reference it). Its
+  *write* path is not out of scope, though — see Design §6, since it's
+  actively run daily for zero downstream benefit.
 - The live-draft/mock-draft code's literal duplicate-function-call structure
   (`get_season_projection_blended()` and `get_season_projection_dual()` each
   independently calling `get_preseason_predictions()`/`get_consensus_projections()`,
@@ -133,9 +135,6 @@ low-enough-frequency that the complexity isn't worth it.
   of once, centrally, for a ~10-person pool where that trade only makes
   things worse. The app's one existing client-side cache (two `localStorage`
   booleans for instant nav render) is unrelated and untouched.
-- Fixing `winspool-live-scores`' "current + prior season" write — flagged as
-  something to verify (is it still needed once this design lands?) rather
-  than designed around here.
 
 ## Design
 
@@ -207,7 +206,7 @@ Every writer signals the domain(s) it actually touched:
 |---|---|
 | `add_draft_result`, `delete_draft_pick`, `add_player`, `update_player_profile`, `add_draft_order`, `add_draft_order_rule`, `delete_season_data` | `static_updated` |
 | `daily_nfl_sync.py` (after the write-side fix in §5, scoped to the active season in normal runs) | `active_updated` |
-| `sync_live_scores.py` / `live_score_service.py` | `active_updated` (and `historical_updated` too, if the "current + prior season" write turns out to be necessary — see open question) |
+| `sync_live_scores.py` / `live_score_service.py` (after the write-side fix in §5) | `active_updated` (and `historical_updated` too, only if the "current + prior season" write is confirmed still necessary — see §5) |
 | `cache_builder.py` (`winspool-predict-daily`'s daily run) | `predictions_active_updated` |
 | `backfill_schedule_predictions.py`, `predict_season.py` | `predictions_historical_updated` if the run's season range is entirely before the active season, `predictions_active_updated` if it includes the active season, both if it spans the boundary |
 | `compute_elo.py --firestore` | `active_updated` if scoped to the active season only (see open question below), `admin_analytics_updated` otherwise |
@@ -264,33 +263,77 @@ unnecessary full refetch here (e.g. an elo write triggering a
 weekly-accuracy-cache clear too) is an acceptable trade for not building a
 second full mutability split for admin-only traffic.
 
-### 5. Write-side: `daily_nfl_sync.py` stops rewriting frozen history
+### 5. Write-side: stop rewriting frozen history and unchanged data
 
-Today `batch_upload()` overwrites every game/team-season since 2013,
-unconditionally, every day. Two changes, both aimed at "don't write data
+Two writers currently rewrite far more than they need to every run —
+`daily_nfl_sync.py` is the smaller of the two; `sync_live_scores.py`
+(`winspool-live-scores`) is the bigger, since it runs every 5 minutes
+in-season (up to 288×/day) rather than once. Per the performance report,
+its unconditional `nfl_standings` overwrite (~64 docs/run, current + prior
+season) alone accounts for roughly two-thirds of the app's ≈136,071
+weekly Firestore writes — the single largest identified write driver in
+the whole app. Both get the same two changes, aimed at "don't write data
 that's already there":
 
 - **Scope to the active season by default.** Historical seasons don't
-  change in normal operation (per the design's own premise above) — the
-  daily sync has no reason to touch them at all unless explicitly asked to
-  (keep a `--seasons`-style override for the rare manual backfill/correction
-  case, consistent with how other scripts in this repo already expose a
-  season-range flag).
+  change in normal operation (per the design's own premise above) — neither
+  job has a reason to touch a season before the active one unless explicitly
+  asked to. For `sync_live_scores.py` specifically: confirm during
+  implementation whether the current "current + prior season" write is
+  actually load-bearing (e.g. correcting a late-arriving final score right
+  at a season boundary) or just historical inertia. If it's genuinely
+  needed, keep it but signal `historical_updated` when it fires, so the
+  cache still knows a historical document changed; if it's not needed,
+  drop it and write only the active season. Both scripts keep a
+  `--seasons`-style manual override for the rare backfill/correction case,
+  consistent with other scripts in this repo.
 - **Diff before writing.** Within the active season's write, compare each
   incoming row's values against what's currently stored and skip the
   `.set()` call for documents where nothing actually changed, instead of
-  blindly overwriting every row every run. Reduces Firestore *writes*, not
-  just reads — directly serves the "minimize reads and writes" goal, and is
-  a bounded, mechanical change (read current active-season docs once, diff
-  in memory, write only the deltas).
+  blindly overwriting every row every run. For `sync_live_scores.py` this
+  is the highest-leverage single change in this whole design on the write
+  side: most 5-minute runs during a game window touch only the handful of
+  games/standings rows that actually moved, not all 64 standings docs —
+  this alone should cut that job's write volume by roughly an order of
+  magnitude on a typical run. Reduces Firestore *writes*, not just reads —
+  directly serves the "minimize reads and writes" goal, and is a bounded,
+  mechanical change (read current active-season docs once, diff in memory,
+  write only the deltas).
+
+### 6. Remove `analytics_cache`'s dead write path — don't wire it up to be read
+
+`analytics_cache` exists to let the web app read precomputed analytics
+instead of recomputing them per-request — but `get_cached()` (the read
+side) has zero production callers; `services/analysis_service.py` already
+computes `wins_pool_standings`/`schedule_enriched` from `load_data()`'s
+in-memory bundle on every request instead. **The right fix is to delete the
+dead write path, not wire up the read path**, because once `load_data()`'s
+bundle is reliably warm (which this whole design guarantees), computing
+these values from memory costs zero Firestore reads — strictly cheaper than
+reading a precomputed copy back from Firestore, which costs at least one
+document read every time. The one genuinely expensive computation this
+kind of cache would be worth it for — the ML ensemble's predictions — never
+runs in the web service at all (`Dockerfile` excludes the ML dependency
+stack entirely); it only ever reads already-computed predictions from
+`game_predictions`/`preseason_predictions`, which §3 above already covers.
+
+Remove the `write_cache()`/`is_cache_final()` calls in `cache_builder.py`
+for `wins_pool_standings`, `schedule_enriched`, and the other analytics
+currently written there (confirmed 5 call sites) — this eliminates one
+Firestore read (`is_cache_final()`) and one write (`write_cache()`) per
+analytic/year/week combination, once a day, for values nothing ever reads
+back. **Do not** remove `schedule_enriched`'s block wholesale — it also
+writes to `game_predictions`, which `/api/schedule` genuinely reads; only
+the `analytics_cache`-specific calls are dead weight. Once removed, decide
+whether to also delete `write_cache()`/`get_cached()`/`is_cache_final()`
+from `cache_service.py` and the `analytics_cache` collection itself, or
+leave the (now fully unused) functions in place for a future legitimate
+use — leaning toward removing them, since dead infrastructure with no
+caller is exactly the kind of thing that quietly grows a new caller nobody
+reviews carefully later.
 
 ### Open questions to resolve during implementation
 
-- Why does `sync_live_scores.py` write `nfl_standings` for "current + prior
-  season," not just the active season? If it's correcting late-arriving
-  final scores at a season boundary, it needs to signal `historical_updated`
-  too when it does; if it's not actually necessary, scope it down to
-  active-only like the rest of this design assumes.
 - Whether `compute_elo.py --firestore`'s current full-history recompute
   (`elo_history`, min-season 2006 through current, confirmed ~21 docs/run in
   the performance report) should get the same active-only-by-default
@@ -313,6 +356,14 @@ that's already there":
   and the existing e2e suite's known limitation comment
   (`tests_e2e/test_live_draft.py`) can be upgraded to a real assertion once
   this lands.
+- A diff-before-write test for `sync_live_scores.py`/`daily_nfl_sync.py`:
+  run the write twice with identical source data and assert the second run
+  issues zero `.set()` calls; run it a third time with one row's value
+  changed and assert exactly one `.set()` call.
+- A regression test confirming `cache_builder.py`'s run no longer writes to
+  `analytics_cache` (or, if the functions are fully removed per §6, that
+  the module no longer exposes them) while `/wins-pool/{year}` and
+  `/api/schedule` continue to render correctly from the in-memory bundle.
 - A season-rollover test: simulate a draft completing and confirm the
   `active` bucket (and `predictions_active`) rebuild against the new season
   rather than continuing to serve the just-finished one.
