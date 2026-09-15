@@ -103,6 +103,33 @@ class TestLoadDraftStateSingleton:
         assert state is not cached  # deepcopy, not the same object
 
 
+class TestSeasonResolutionUsesStaticBucket:
+
+    def test_resolve_season_uses_static_bucket_not_a_fresh_fetch(self):
+        """Task 5 regression: on a cold singleton (year=None), the quick
+        current-season check must read draft_order from the shared static
+        cache bucket (services.draft_service._get_static_bucket), not issue
+        its own redundant get_collection_df('draft_order') call. Wraps the
+        real implementations (rather than replacing them) so the rest of
+        load_draft_state's season resolution / analytics still run against
+        real data -- only the call pattern is being observed here."""
+        import services.draft_service as ds
+        import services.data_service as data_service
+        from services.db_service import get_collection_df as real_get_collection_df
+
+        data_service.load_data()  # warm the static bucket (real fetch, unmocked)
+        ds._CACHED_DRAFT_STATE = None
+        try:
+            with patch("services.draft_service._get_static_bucket", wraps=data_service._get_static_bucket) as mock_bucket, \
+                 patch("services.data_service.get_collection_df", wraps=real_get_collection_df) as mock_fetch:
+                ds.load_draft_state(set())
+                mock_bucket.assert_called()
+                # Static bucket is already warm -- no fetch of draft_order at all.
+                assert not any(c.args and c.args[0] == "draft_order" for c in mock_fetch.call_args_list)
+        finally:
+            ds._CACHED_DRAFT_STATE = None
+
+
 # ── Draft-room payload must preserve true projected_wins, not mean_wins ──────
 
 class TestPreseasonPredictionsShape:

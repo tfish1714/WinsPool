@@ -2,9 +2,10 @@ import logging
 import os
 import pandas as pd
 from typing import Dict, Any, List
-from services.db_service import get_collection_df, add_draft_result, update_player_cell, delete_draft_pick
+from services.db_service import add_draft_result, update_player_cell, delete_draft_pick
 from services.data_service import (
     get_season_projection_blended, get_season_projection_dual, get_team_schedule, load_data,
+    _get_static_bucket,
 )
 import time
 
@@ -63,8 +64,8 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
     if year:
         season = int(year)
     else:
-        # Quick check for current season (draft_order is small, no year filter needed)
-        d_order_temp = get_collection_df('draft_order')
+        # Quick check for current season (draft_order lives in the static cache bucket)
+        d_order_temp = _get_static_bucket()["draft_order"]
         season_val = d_order_temp['season'].max()
         if pd.isna(season_val):
             # Avoid reloading everything just to get the season if possible, but for first load it's fine
