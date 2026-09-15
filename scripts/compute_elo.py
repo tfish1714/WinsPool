@@ -376,6 +376,11 @@ def main():
             write_elo_history_season(int(season), group.to_dict(orient="records"), use_local=False)
         print(f"  Pushed {df['season'].nunique()} seasons to Firestore")
 
+        from services.db_service import signal_data_update, get_db
+        from services.cache_service import DOMAIN_ADMIN_ANALYTICS
+        if get_db():
+            signal_data_update(DOMAIN_ADMIN_ANALYTICS)
+
     try:
         save_metadata("sync_elo", {
             "completed_at": time.time(),

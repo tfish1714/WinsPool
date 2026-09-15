@@ -293,6 +293,11 @@ def main():
         if args.firestore:
             write_nn_weekly_accuracy_rows(args.season, rows, use_local=False)
             print(f"  Pushed {len(rows)} row(s) to Firestore nn_weekly_accuracy/{args.season}")
+
+            from services.db_service import signal_data_update, get_db
+            from services.cache_service import DOMAIN_ADMIN_ANALYTICS
+            if get_db():
+                signal_data_update(DOMAIN_ADMIN_ANALYTICS)
     else:
         print("\n  (--no-save: results not written to CSV or nn_weekly_accuracy store)")
 

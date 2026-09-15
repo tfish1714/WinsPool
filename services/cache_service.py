@@ -540,24 +540,38 @@ def get_elo_history_season(season: int) -> list[dict] | None:
 
 
 def get_all_elo_history() -> list[dict]:
-    """Return every computed Elo row across all seasons, sorted oldest first."""
-    all_rows: list[dict] = []
+    """Return every computed Elo row across all seasons, sorted oldest first.
+
+    In Firestore mode, cached under DOMAIN_ADMIN_ANALYTICS (shared with
+    get_all_nn_weekly_accuracy()) -- admin-only traffic, refreshed only by
+    an explicit admin_analytics_updated signal, not a TTL."""
     if _USE_LOCAL:
+        all_rows: list[dict] = []
         for p in sorted(_GAME_PRED_DIR.glob("elo_history_*.json")):
             try:
                 with open(p) as f:
                     all_rows.extend(json.load(f).get("rows", []))
             except Exception:
                 logger.warning("Failed to read %s", p)
-    else:
-        try:
-            from services.db_service import get_db
-            db = get_db()
-            for doc in db.collection("elo_history").stream():
-                all_rows.extend(doc.to_dict().get("rows", []))
-        except Exception:
-            logger.exception("Failed to fetch elo_history from Firestore")
+        all_rows.sort(key=lambda r: (r.get("season", 0), r.get("week", 0)))
+        return all_rows
+
+    bucket = get_domain(DOMAIN_ADMIN_ANALYTICS) or {}
+    if "elo_history" in bucket:
+        return bucket["elo_history"]
+
+    all_rows: list[dict] = []
+    try:
+        from services.db_service import get_db
+        db = get_db()
+        for doc in db.collection("elo_history").stream():
+            all_rows.extend(doc.to_dict().get("rows", []))
+    except Exception:
+        logger.exception("Failed to fetch elo_history from Firestore")
     all_rows.sort(key=lambda r: (r.get("season", 0), r.get("week", 0)))
+
+    bucket["elo_history"] = all_rows
+    set_domain(DOMAIN_ADMIN_ANALYTICS, bucket)
     return all_rows
 
 
@@ -634,24 +648,39 @@ def get_nn_weekly_accuracy_season(season: int) -> list[dict] | None:
 
 
 def get_all_nn_weekly_accuracy() -> list[dict]:
-    """Return every recorded weekly-accuracy row across all seasons, sorted oldest first."""
-    all_rows: list[dict] = []
+    """Return every recorded weekly-accuracy row across all seasons, sorted
+    oldest first.
+
+    In Firestore mode, cached under DOMAIN_ADMIN_ANALYTICS (shared with
+    get_all_elo_history()) -- admin-only traffic, refreshed only by an
+    explicit admin_analytics_updated signal, not a TTL."""
     if _USE_LOCAL:
+        all_rows: list[dict] = []
         for p in sorted(_GAME_PRED_DIR.glob("nn_weekly_accuracy_*.json")):
             try:
                 with open(p) as f:
                     all_rows.extend(json.load(f).get("rows", []))
             except Exception:
                 logger.warning("Failed to read %s", p)
-    else:
-        try:
-            from services.db_service import get_db
-            db = get_db()
-            for doc in db.collection("nn_weekly_accuracy").stream():
-                all_rows.extend(doc.to_dict().get("rows", []))
-        except Exception:
-            logger.exception("Failed to fetch nn_weekly_accuracy from Firestore")
+        all_rows.sort(key=lambda r: (r.get("season", 0), r.get("week", 0)))
+        return all_rows
+
+    bucket = get_domain(DOMAIN_ADMIN_ANALYTICS) or {}
+    if "nn_weekly_accuracy" in bucket:
+        return bucket["nn_weekly_accuracy"]
+
+    all_rows: list[dict] = []
+    try:
+        from services.db_service import get_db
+        db = get_db()
+        for doc in db.collection("nn_weekly_accuracy").stream():
+            all_rows.extend(doc.to_dict().get("rows", []))
+    except Exception:
+        logger.exception("Failed to fetch nn_weekly_accuracy from Firestore")
     all_rows.sort(key=lambda r: (r.get("season", 0), r.get("week", 0)))
+
+    bucket["nn_weekly_accuracy"] = all_rows
+    set_domain(DOMAIN_ADMIN_ANALYTICS, bucket)
     return all_rows
 
 

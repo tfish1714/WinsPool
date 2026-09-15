@@ -41,13 +41,20 @@ class TestNnWeeklyAccuracyStoreWiring:
 
     def test_firestore_flag_forces_use_local_data_false_and_pushes(self, tmp_path, monkeypatch):
         monkeypatch.setenv("USE_LOCAL_DATA", "true")
-        with patch("services.cache_service.write_nn_weekly_accuracy_rows") as mock_write:
+        with patch("services.cache_service.write_nn_weekly_accuracy_rows") as mock_write, \
+             patch("services.db_service.get_db", return_value=MagicMock()), \
+             patch("services.db_service.signal_data_update") as mock_signal:
             _run_main(["--season", "2025", "--week", "14", "--firestore"], tmp_path, monkeypatch)
 
         assert os.environ["USE_LOCAL_DATA"] == "False"
         assert mock_write.call_count == 2
         mock_write.assert_any_call(2025, FAKE_ROWS, use_local=True)
         mock_write.assert_any_call(2025, FAKE_ROWS, use_local=False)
+
+        # Task 7: a Firestore push must signal admin_analytics_updated, or
+        # the admin ML Accuracy panel keeps serving a stale weekly snapshot.
+        from services.cache_service import DOMAIN_ADMIN_ANALYTICS
+        mock_signal.assert_called_once_with(DOMAIN_ADMIN_ANALYTICS)
 
     def test_no_save_skips_store_writes_entirely(self, tmp_path, monkeypatch):
         monkeypatch.setenv("USE_LOCAL_DATA", "true")

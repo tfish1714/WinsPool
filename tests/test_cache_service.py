@@ -202,6 +202,24 @@ class TestEloHistoryCache:
         all_rows = get_all_elo_history()
         assert [r["season"] for r in all_rows] == [2006, 2025]
 
+    def test_get_all_firestore_is_cached_across_calls(self, mock_firestore, monkeypatch):
+        """Task 7: repeated calls must not re-stream the whole collection."""
+        import services.cache_service as cs
+        monkeypatch.setattr(cs, "_USE_LOCAL", False)
+        cs.clear_data_cache()
+
+        from services.cache_service import get_all_elo_history
+
+        doc = MagicMock()
+        doc.to_dict.return_value = {"season": 2025, "rows": [{"season": 2025, "week": 1}]}
+        mock_firestore.collection.return_value.stream.return_value = [doc]
+
+        get_all_elo_history()
+        get_all_elo_history()
+
+        assert mock_firestore.collection.return_value.stream.call_count == 1
+        cs.clear_data_cache()
+
 
 class TestNnWeeklyAccuracyCache:
     """Tests for get_nn_weekly_accuracy_season / get_all_nn_weekly_accuracy /
@@ -301,6 +319,61 @@ class TestNnWeeklyAccuracyCache:
 
         all_rows = get_all_nn_weekly_accuracy()
         assert [r["season"] for r in all_rows] == [2006, 2025]
+
+    def test_get_all_firestore_is_cached_across_calls(self, mock_firestore, monkeypatch):
+        """Task 7: repeated calls must not re-stream the whole collection."""
+        import services.cache_service as cs
+        monkeypatch.setattr(cs, "_USE_LOCAL", False)
+        cs.clear_data_cache()
+
+        from services.cache_service import get_all_nn_weekly_accuracy
+
+        doc = MagicMock()
+        doc.to_dict.return_value = {"season": 2025, "rows": [{"season": 2025, "week": 1}]}
+        mock_firestore.collection.return_value.stream.return_value = [doc]
+
+        get_all_nn_weekly_accuracy()
+        get_all_nn_weekly_accuracy()
+
+        assert mock_firestore.collection.return_value.stream.call_count == 1
+        cs.clear_data_cache()
+
+    def test_get_all_elo_and_nn_weekly_share_one_signal_domain(self, mock_firestore, monkeypatch):
+        """Both collections are cached under the same DOMAIN_ADMIN_ANALYTICS
+        bucket -- an elo write clearing the whole domain also forces a
+        re-stream of nn_weekly_accuracy, an accepted low-cost trade for
+        admin-only traffic (see design doc SS4)."""
+        import services.cache_service as cs
+        monkeypatch.setattr(cs, "_USE_LOCAL", False)
+        cs.clear_data_cache()
+
+        from services.cache_service import get_all_elo_history, get_all_nn_weekly_accuracy
+
+        elo_doc = MagicMock()
+        elo_doc.to_dict.return_value = {"season": 2025, "rows": [{"season": 2025, "week": 1}]}
+        acc_doc = MagicMock()
+        acc_doc.to_dict.return_value = {"season": 2025, "rows": [{"season": 2025, "week": 1}]}
+
+        def fake_collection(name):
+            col = MagicMock()
+            col.stream.return_value = [elo_doc] if name == "elo_history" else [acc_doc]
+            return col
+        mock_firestore.collection.side_effect = fake_collection
+
+        get_all_elo_history()
+        bucket = cs.get_domain(cs.DOMAIN_ADMIN_ANALYTICS)
+        assert "elo_history" in bucket and "nn_weekly_accuracy" not in bucket
+
+        get_all_nn_weekly_accuracy()
+        bucket = cs.get_domain(cs.DOMAIN_ADMIN_ANALYTICS)
+        assert "elo_history" in bucket and "nn_weekly_accuracy" in bucket
+
+        cs.clear_domain(cs.DOMAIN_ADMIN_ANALYTICS)  # simulate a single admin_analytics_updated signal
+        get_all_elo_history()
+        # both were wiped by the one signal -- elo re-streamed, nn_weekly not yet re-fetched
+        bucket = cs.get_domain(cs.DOMAIN_ADMIN_ANALYTICS)
+        assert "elo_history" in bucket and "nn_weekly_accuracy" not in bucket
+        cs.clear_data_cache()
 
 
 def test_merge_game_predictions_includes_edge_vs_vegas():
