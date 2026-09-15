@@ -18,6 +18,31 @@ def _make_players_df():
     ])
 
 
+def test_signal_data_update_writes_domain_specific_field(mock_firestore):
+    from services.db_service import signal_data_update
+    from services.cache_service import DOMAIN_ACTIVE
+
+    signal_data_update(DOMAIN_ACTIVE)
+
+    mock_firestore.collection.assert_called_with("metadata")
+    mock_firestore.collection.return_value.document.assert_called_with("cache_control")
+    set_call = mock_firestore.collection.return_value.document.return_value.set
+    set_call.assert_called_once()
+    args, kwargs = set_call.call_args
+    assert list(args[0].keys()) == ["active_updated"]
+    assert kwargs.get("merge") is True
+
+def test_signal_data_update_defaults_to_static_domain(mock_firestore):
+    from services.db_service import signal_data_update
+
+    signal_data_update()  # no argument -- must match every pre-existing call site's intent
+
+    set_call = mock_firestore.collection.return_value.document.return_value.set
+    args, kwargs = set_call.call_args
+    assert list(args[0].keys()) == ["static_updated"]
+    assert kwargs.get("merge") is True
+
+
 def test_get_player_by_id_uses_warm_cache(monkeypatch):
     """get_player_by_id reads from cache when it is warm — no Firestore call."""
     from services import cache_service

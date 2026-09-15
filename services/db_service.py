@@ -116,18 +116,24 @@ def get_db():
     from firebase_admin import firestore
     return firestore.client()
 
-def signal_data_update():
-    """Signals all application instances to invalidate their caches."""
-    if os.environ.get("USE_LOCAL_DATA", "False").lower() == "true":
+def signal_data_update(domain: str = "static") -> None:
+    """Signal that `domain`'s cached data changed, so every process (this
+    one and, via the 60s remote-check poll, any other -- including
+    winspool-predict-daily, which never shares memory with the web service)
+    knows to refresh that domain's cache.
+
+    Writes with merge=True: metadata/cache_control holds one field per
+    domain in the same document, and a bare .set() would wipe every other
+    domain's field.
+    """
+    from services.cache_service import DOMAIN_SIGNAL_FIELDS
+    db = get_db()
+    if db is None:
         return
-    try:
-        db = get_db()
-        if db:
-            db.collection("metadata").document("cache_control").set({
-                "last_update": time.time()
-            })
-    except Exception as e:
-        logger.warning("Failed to signal remote cache update: %s", e)
+    field = DOMAIN_SIGNAL_FIELDS[domain]
+    db.collection("metadata").document("cache_control").set(
+        {field: time.time()}, merge=True
+    )
 
 
 def get_collection_df(collection_name: str, filters: list = None) -> pd.DataFrame:

@@ -136,7 +136,7 @@ def test_load_data_cache_ttl_expiry_triggers_refetch(monkeypatch, tmp_path):
 # ── Issue #92: remote Firestore cache invalidation signal ────────────────────
 
 def test_remote_cache_invalidation_calls_clear_when_remote_is_newer(monkeypatch):
-    """When Firestore reports a newer last_update, clear_data_cache() is called."""
+    """When Firestore reports a newer active_updated signal, the active domain is cleared."""
     monkeypatch.setenv("USE_LOCAL_DATA", "false")
 
     import services.cache_service as cs
@@ -151,18 +151,39 @@ def test_remote_cache_invalidation_calls_clear_when_remote_is_newer(monkeypatch)
 
     mock_ctrl = MagicMock()
     mock_ctrl.exists = True
-    mock_ctrl.to_dict.return_value = {"last_update": remote_ts}
+    mock_ctrl.to_dict.return_value = {"active_updated": remote_ts}
 
     mock_db = MagicMock()
     mock_db.collection.return_value.document.return_value.get.return_value = mock_ctrl
 
     try:
         with patch("services.db_service.get_db", return_value=mock_db), \
-             patch("services.data_service.clear_data_cache") as mock_clear, \
+             patch("services.cache_service.clear_domain") as mock_clear_domain, \
              patch("services.data_service.get_collection_df", return_value=pd.DataFrame()):
             load_data()
 
-        mock_clear.assert_called_once()
+        mock_clear_domain.assert_called_once_with(cs.DOMAIN_ACTIVE)
     finally:
         cs.clear_data_cache()
         cs._LAST_REMOTE_CHECK = 0
+
+
+def test_check_remote_signals_clears_only_domains_with_newer_signal(mock_firestore, monkeypatch):
+    import time
+    from services.data_service import check_remote_signals
+    import services.cache_service as cs
+
+    cs.set_domain(cs.DOMAIN_ACTIVE, "old-active", timestamp=100.0)
+    cs.set_domain(cs.DOMAIN_STATIC, "old-static", timestamp=100.0)
+    monkeypatch.setattr(cs, "_LAST_REMOTE_CHECK", 0)
+
+    mock_doc = MagicMock()
+    mock_doc.exists = True
+    mock_doc.to_dict.return_value = {"active_updated": 200.0, "static_updated": 50.0}
+    mock_firestore.collection.return_value.document.return_value.get.return_value = mock_doc
+
+    check_remote_signals(use_local=False)
+
+    assert cs.get_domain(cs.DOMAIN_ACTIVE) is None       # 200 > 100 -> cleared
+    assert cs.get_domain(cs.DOMAIN_STATIC) == "old-static"  # 50 < 100 -> untouched
+    cs.clear_data_cache()  # cleanup

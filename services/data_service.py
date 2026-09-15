@@ -33,6 +33,37 @@ from services.cache_service import (
     clear_data_cache, _cache_key
 )
 
+def check_remote_signals(use_local: bool) -> None:
+    """Poll metadata/cache_control (at most once per _REMOTE_CHECK_INTERVAL)
+    and clear any cache domain whose remote signal is newer than what this
+    process has cached -- the only channel by which a separate process
+    (winspool-predict-daily, or another web-service instance) can tell this
+    process its cached data is stale.
+    """
+    import services.cache_service as cs
+    current_time = time.time()
+    if use_local or (current_time - cs._LAST_REMOTE_CHECK) <= cs._REMOTE_CHECK_INTERVAL:
+        return
+    cs._LAST_REMOTE_CHECK = current_time
+    try:
+        from services.db_service import get_db
+        db = get_db()
+        if not db:
+            return
+        ctrl = db.collection("metadata").document("cache_control").get(timeout=5)
+        if not ctrl.exists:
+            return
+        remote = ctrl.to_dict()
+        for domain, field in cs.DOMAIN_SIGNAL_FIELDS.items():
+            remote_ts = remote.get(field, 0)
+            if remote_ts > cs.get_domain_timestamp(domain):
+                logger.info("Remote invalidation detected for domain '%s' (remote=%s, local=%s).",
+                            domain, remote_ts, cs.get_domain_timestamp(domain))
+                cs.clear_domain(domain)
+    except Exception as e:
+        logger.warning("Failed to check remote cache control: %s", e)
+
+
 def load_data(year: int = None):
     """
     Loads data for the given season year with smart caching.
@@ -51,37 +82,8 @@ def load_data(year: int = None):
 
     # 1. Check for remote invalidation signals if it's been a while
     current_time = time.time()
-    
-    # We need to access and potentially update the module-level globals in cache_service
-    import services.cache_service as cs
-    
-    # Only check remote cache control if we are NOT using local data.
-    # Checking remote Firestore when using local data forces SDK initialization, causing a 12s hang.
-    if not use_local and (current_time - cs._LAST_REMOTE_CHECK) > cs._REMOTE_CHECK_INTERVAL:
-        cs._LAST_REMOTE_CHECK = current_time
-        if is_debug:
-            logger.debug("Triggering remote Firestore cache_control check...")
-        try:
-            # We use a raw Firestore fetch here to avoid circular dependencies
-            from services.db_service import get_db
-            db = get_db()
-            if db:
-                # Add a timeout to prevent hanging the whole request if Firestore is slow
-                ctrl = db.collection("metadata").document("cache_control").get(timeout=5)
-                if ctrl.exists:
-                    remote_ts = ctrl.to_dict().get("last_update", 0)
-                    # If remote signal is newer than our local cache creation for this key
-                    key = _cache_key(year)
-                    local_ts = _CACHE_TIMESTAMPS.get(key, 0)
-                    if remote_ts > local_ts:
-                        logger.info("Remote invalidation detected (remote=%s, local=%s). Clearing cache.", remote_ts, local_ts)
-                        clear_data_cache()
-                elif is_debug:
-                    logger.debug("Remote cache_control document not found.")
-        except Exception as e:
-            logger.warning("Failed to check remote cache control: %s", e)
-    elif is_debug and use_local:
-        logger.debug("Skipped remote Firestore cache_control check because USE_LOCAL_DATA=True.")
+
+    check_remote_signals(use_local)
 
     key = _cache_key(year)
     master_key = _cache_key(None)
