@@ -5,7 +5,6 @@ import pandas as pd
 import numpy as np
 import firebase_admin
 from firebase_admin import credentials, firestore
-import time
 
 RAWDATA_DIR = pathlib.Path(__file__).parent.parent / "rawdata"
 POOL_START_YEAR = 2013  # Earliest season in the pool
@@ -35,17 +34,23 @@ def initialize_firebase():
     return firestore.client()
 
 
-def batch_upload(db, collection_name, dataframe, id_col=None):
-    """Upload a DataFrame to Firestore in batches of 400."""
+def batch_upload(db, collection_name, dataframe, id_col=None, diff_before_write=False) -> int:
+    """Upload a DataFrame to Firestore in batches of 400.
+
+    When diff_before_write=True, reads the current stored value for every
+    row that has a derivable, stable doc_id and skips the .set() call for
+    any row whose value is already identical -- trades N writes for N reads
+    when most rows are unchanged, which is the common case for a job that
+    reruns the same mostly-final data on a fixed schedule.
+
+    Returns the number of documents actually written.
+    """
     print(f"Uploading {len(dataframe)} records to {collection_name}...")
     collection_ref = db.collection(collection_name)
-    batch = db.batch()
-    count = 0
-    total_committed = 0
 
+    rows_with_ids = []
     for _, row in dataframe.iterrows():
         doc_data = row.dropna().to_dict()
-
         if id_col and id_col in doc_data:
             doc_id = str(doc_data[id_col])
         elif "season" in doc_data and "team" in doc_data:
@@ -54,11 +59,30 @@ def batch_upload(db, collection_name, dataframe, id_col=None):
             doc_id = str(doc_data["game_id"])
         else:
             doc_id = None
+        rows_with_ids.append((doc_id, doc_data))
 
+    if diff_before_write:
+        diffable = [(doc_id, doc_data) for doc_id, doc_data in rows_with_ids if doc_id]
+        existing = {}
+        if diffable:
+            refs = [collection_ref.document(doc_id) for doc_id, _ in diffable]
+            for snap in db.get_all(refs):
+                if snap.exists:
+                    existing[snap.id] = snap.to_dict()
+        filtered = []
+        for doc_id, doc_data in rows_with_ids:
+            if doc_id and existing.get(doc_id) == doc_data:
+                continue  # unchanged -- skip the write
+            filtered.append((doc_id, doc_data))
+        rows_with_ids = filtered
+
+    batch = db.batch()
+    count = 0
+    total_committed = 0
+    for doc_id, doc_data in rows_with_ids:
         doc_ref = collection_ref.document(doc_id) if doc_id else collection_ref.document()
         batch.set(doc_ref, doc_data)
         count += 1
-
         if count == 400:
             batch.commit()
             total_committed += count
@@ -69,9 +93,9 @@ def batch_upload(db, collection_name, dataframe, id_col=None):
     if count > 0:
         batch.commit()
         total_committed += count
-        print(f"  ...committed {total_committed} records")
 
-    print(f"Successfully uploaded {collection_name}!")
+    print(f"Successfully uploaded {collection_name}! ({total_committed} of {len(dataframe)} records written)")
+    return total_committed
 
 
 def load_games() -> pd.DataFrame:
@@ -132,7 +156,21 @@ def compute_standings(games: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(records).sort_values(["season", "team"]).reset_index(drop=True)
 
 
-def sync_nfl_data():
+def sync_nfl_data(seasons: tuple = None):
+    """Sync nfl_games/nfl_standings to Firestore.
+
+    seasons=None (the normal daily run): scopes to the active season only
+    -- historical seasons don't change absent a manual correction, so the
+    daily job has no routine reason to rewrite them. Pass an explicit
+    (min, max) tuple to force a full-range backfill/correction.
+    """
+    # services.db_service.get_db() (used below by signal_data_update())
+    # returns None whenever USE_LOCAL_DATA is true in the environment,
+    # regardless of this script's own separate initialize_firebase()
+    # connection -- see CLAUDE.md's "any script that writes to Firestore
+    # must force USE_LOCAL_DATA=False" gotcha.
+    os.environ["USE_LOCAL_DATA"] = "False"
+
     print("Initializing Firebase...")
     db = initialize_firebase()
 
@@ -140,19 +178,37 @@ def sync_nfl_data():
     df_games = load_games()
     print(f"  {len(df_games)} games loaded ({int(df_games['season'].min())}–{int(df_games['season'].max())})")
 
+    if seasons is not None:
+        lo, hi = seasons
+        scoped_games = df_games[(df_games["season"] >= lo) & (df_games["season"] <= hi)].copy()
+        print(f"  Scoped to explicit season range {lo}-{hi} ({len(scoped_games)} games)")
+    else:
+        active_season = int(df_games["season"].max())
+        scoped_games = df_games[df_games["season"] == active_season].copy()
+        print(f"  Scoped to active season {active_season} ({len(scoped_games)} games)")
+
     print("Computing standings from game results...")
-    df_standings = compute_standings(df_games)
-    seasons_with_standings = sorted(df_standings["season"].unique())
-    print(f"  {len(df_standings)} team-seasons computed ({seasons_with_standings[0]}–{seasons_with_standings[-1]})")
+    df_standings = compute_standings(scoped_games)
 
-    batch_upload(db, "nfl_standings", df_standings)
-    batch_upload(db, "nfl_games", df_games)
+    standings_written = batch_upload(db, "nfl_standings", df_standings, diff_before_write=True)
+    games_written = batch_upload(db, "nfl_games", scoped_games, diff_before_write=True)
 
-    print("Signaling cache invalidation...")
-    db.collection("metadata").document("cache_control").set({"last_update": time.time()})
+    if standings_written or games_written:
+        print("Signaling cache invalidation...")
+        from services.db_service import signal_data_update
+        from services.cache_service import DOMAIN_ACTIVE, DOMAIN_HISTORICAL
+        domain = DOMAIN_HISTORICAL if seasons is not None and seasons[1] < int(df_games["season"].max()) else DOMAIN_ACTIVE
+        signal_data_update(domain)
+    else:
+        print("No changes -- skipping cache invalidation signal.")
 
     print("Daily sync completed successfully!")
 
 
 if __name__ == "__main__":
-    sync_nfl_data()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seasons", type=int, nargs=2, metavar=("MIN", "MAX"),
+                         help="Force a full-range sync (manual backfill/correction) instead of active-season-only")
+    args = parser.parse_args()
+    sync_nfl_data(seasons=tuple(args.seasons) if args.seasons else None)
