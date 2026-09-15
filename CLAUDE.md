@@ -253,8 +253,8 @@ deeper in the call stack. A normal local dev `.env` has `USE_LOCAL_DATA=True`,
 so a new script that pushes to Firestore must set
 `os.environ["USE_LOCAL_DATA"] = "False"` near the top, before importing
 anything from `services.db_service` (see `refresh_local_pkls.py`,
-`cache_builder.py`, `run_predictions.py`, `smart_refresh.py`, and
-`compute_elo.py --firestore` for the established pattern). Historically this
+`cache_builder.py`, `smart_refresh.py`, and `compute_elo.py --firestore` for
+the established pattern). Historically this
 failed silently rather than raising — a bare `except Exception` around the
 Firestore call would catch `None.collection(...)`'s `AttributeError` and only
 `logger.error` it, so the script would print a false success message. That's

@@ -41,8 +41,7 @@ import pandas as pd
 from services.data_service import load_data, get_available_years, get_latest_week_for_year
 from services.db_service import set_preseason_predictions
 from services.cache_service import (
-    write_cache, is_cache_final, write_game_predictions,
-    get_game_predictions, merge_thin_game_predictions,
+    write_game_predictions, get_game_predictions, merge_thin_game_predictions,
 )
 import services.analysis_service as analysis
 from services.prediction_service import PredictionService
@@ -56,14 +55,6 @@ from services.nn_feature_engine import (
 from services.constants import UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 import services.live_score_service as live_scores
 from services.email_service import send_alert_email
-
-ANALYTICS = [
-    'wins_pool_standings',
-    'player_winlossmatrix',
-    'schedule_enriched',
-    'weekbyweek',
-]
-
 
 def _build_pred_lookup(ft: pd.DataFrame, nn_svc, xgb_svc, lr_svc) -> dict:
     """Thin wrapper around the shared build_ensemble_lookup."""
@@ -296,23 +287,18 @@ def build_year(standings, games, players, draft_order, draft_results,
         except Exception as e:
             print(f"  [warn] Live sync failed: {e}")
 
-    # --- Wins Pool Standings ---
-    analytic = 'wins_pool_standings'
     final_flag = is_past_season or (latest_week >= 18)  # 18 weeks in NFL regular season
-    if not force and is_cache_final(analytic, year, latest_week):
-        print(f"  [skip] {analytic} year={year} week={latest_week} already final")
-    else:
-        try:
-            df = analysis.calculate_wins_pool_standings(standings, draft_results, players, year)
-            write_cache(analytic, year, latest_week, df.to_dict(orient='records'), is_final=final_flag)
-            print(f"  [ok]   {analytic} year={year} week={latest_week} is_final={final_flag}")
-        except Exception as e:
-            print(f"  [err]  {analytic}: {e}")
 
     # --- Schedule enriched (for the live schedule view and h2h matrix) ---
+    # Skips any past season outright unless --force: a completed season's
+    # games/predictions never change, so there's no reason to recompute and
+    # re-write game_predictions for it every day (this used to be gated by
+    # analytics_cache's now-removed is_cache_final() finality tracking --
+    # is_past_season alone is the correct, simpler replacement, matching the
+    # active-season-only write scoping established elsewhere in this plan).
     analytic = 'schedule_enriched'
-    if not force and is_past_season and is_cache_final(analytic, year, latest_week):
-        print(f"  [skip] {analytic} year={year} week={latest_week} already final")
+    if not force and is_past_season:
+        print(f"  [skip] {analytic} year={year} (past season, use --force to recompute)")
     else:
         try:
             schedule_df = analysis.get_enriched_schedule(games, draft_results, players, year)
@@ -367,84 +353,6 @@ def build_year(standings, games, players, draft_order, draft_results,
                     print(f"  [ok]   game_predictions year={year} "
                           f"({len(pmap)} refreshed, {len(merged)} total)")
 
-            # Store only the columns the web app needs to avoid huge payloads
-            cols = ['week', 'gameday', 'home_team', 'away_team', 'home_score', 'away_score',
-                    'result', 'fullName_home', 'fullName_away', 'spread_line', 'total_line',
-                    'home_moneyline', 'home_spread_odds', 'pred_winner', 'pred_su_conf',
-                    'pred_ats_pick', 'pred_prob']
-            cols_present = [c for c in cols if c in schedule_df.columns]
-            slim = schedule_df[cols_present].copy()
-            write_cache(analytic, year, latest_week, slim.to_dict(orient='records'), is_final=final_flag)
-            print(f"  [ok]   {analytic} year={year} week={latest_week} is_final={final_flag}")
-        except Exception as e:
-            print(f"  [err]  {analytic}: {e}")
-
-    # --- Player win-loss matrix ---
-    analytic = 'player_winlossmatrix'
-    if not force and is_past_season and is_cache_final(analytic, year, latest_week):
-        print(f"  [skip] {analytic} year={year} already final")
-    else:
-        try:
-            schedule_df = analysis.get_enriched_schedule(games, draft_results, players, year)
-            matrix = analysis.player_winlossmatrix(schedule_df)
-            if not matrix.empty:
-                # Store as nested dict for easy template rendering
-                write_cache(analytic, year, latest_week,
-                            {'index': list(matrix.index), 'columns': list(matrix.columns),
-                             'data': matrix.values.tolist()}, is_final=final_flag)
-                print(f"  [ok]   {analytic} year={year} week={latest_week} is_final={final_flag}")
-        except Exception as e:
-            print(f"  [err]  {analytic}: {e}")
-
-    # --- Week-by-week wins ---
-    analytic = 'weekbyweek'
-    if not force and is_past_season and is_cache_final(analytic, year, latest_week):
-        print(f"  [skip] {analytic} year={year} already final")
-    else:
-        try:
-            schedule_df = analysis.get_enriched_schedule(games, draft_results, players, year)
-            wbw = analysis.player_winsbyWeek(schedule_df)
-            write_cache(analytic, year, latest_week,
-                        {'index': list(wbw.index), 'columns': list(wbw.columns),
-                         'data': wbw.values.tolist()}, is_final=final_flag)
-            print(f"  [ok]   {analytic} year={year} week={latest_week} is_final={final_flag}")
-        except Exception as e:
-            print(f"  [err]  {analytic}: {e}")
-
-    # --- Prediction Snapshot (portfolio projections for each player) ---
-    analytic = 'prediction_snapshot'
-    if not force and is_past_season and is_cache_final(analytic, year, latest_week):
-        print(f"  [skip] {analytic} year={year} already final")
-    else:
-        try:
-            engine = _get_engine()
-
-            yr_games = full_games[full_games['season'] == year].copy() if not full_games.empty else pd.DataFrame()
-            # Deduplicate by (week, home_team, away_team) — the same matchup can appear with
-            # different game_ids if daily_nfl_sync uploaded the schedule multiple times
-            if not yr_games.empty:
-                yr_games = yr_games.drop_duplicates(subset=['week', 'home_team', 'away_team'])
-            team_projections = engine.get_team_projected_wins(yr_games, n_sims=5000)
-
-            # Build per-player portfolio projections
-            yr_drafts = draft_results[draft_results['season'] == year]
-            player_projections = []
-            if not yr_drafts.empty and 'playerId' in yr_drafts.columns and 'team' in yr_drafts.columns:
-                for pid in yr_drafts['playerId'].dropna().unique():
-                    pid = int(pid)
-                    teams = yr_drafts[yr_drafts['playerId'] == pid]['team'].dropna().tolist()
-                    if not teams:
-                        continue
-                    proj = engine.project_portfolio_wins(teams, yr_games, n_sims=500)
-                    proj['playerId'] = pid
-                    proj['teams'] = teams
-                    player_projections.append(proj)
-
-            snapshot = {
-                'team_projections': team_projections,
-                'player_projections': player_projections,
-            }
-            write_cache(analytic, year, latest_week, snapshot, is_final=final_flag)
             print(f"  [ok]   {analytic} year={year} week={latest_week} is_final={final_flag}")
         except Exception as e:
             print(f"  [err]  {analytic}: {e}")
@@ -453,14 +361,14 @@ def build_year(standings, games, players, draft_order, draft_results,
     # model_version is None when this run's model loading failed (see main()'s
     # except branch) -- mirrors pred_lookup={} silently skipping game_predictions
     # for the same reason, rather than writing under an unknown model version.
-    # Also gated to year >= current_year (or --force): every other analytic
-    # block above skips already-finalized past seasons via is_past_season/
-    # is_cache_final, but the historical preseason_predictions docs (written
-    # only by predict_season.py, which never set a `locked` field at all)
-    # read back as unlocked -- without this gate, an unscoped daily run over
-    # ~12 years would silently regenerate and lock every completed season's
-    # projections with the current model, corrupting the admin model-vs-
-    # consensus page, the draft recap, and history views.
+    # Also gated to year >= current_year (or --force): schedule_enriched above
+    # skips an already-completed past season outright, but the historical
+    # preseason_predictions docs (written only by predict_season.py, which
+    # never set a `locked` field at all) read back as unlocked -- without this
+    # gate, an unscoped daily run over ~12 years would silently regenerate and
+    # lock every completed season's projections with the current model,
+    # corrupting the admin model-vs-consensus page, the draft recap, and
+    # history views.
     if model_version and (year >= current_year or force):
         try:
             engine = _get_engine()

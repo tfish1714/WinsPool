@@ -14,12 +14,9 @@ import pytest
 # Firestore/cache-touching note: most tests here mock `main()` or `build_year()`
 # entirely, so nothing real is exercised. The exception is
 # TestPreseasonPredictionsWiring's tests that call `build_year()` directly
-# (not `main()`) -- those run all five real analytic blocks inside
-# `build_year()`, including `write_cache()`/`is_cache_final()`, which would
-# otherwise write to the developer's actual local `.local_db/analytics/`
-# cache as a side effect. Those tests patch `write_cache`/`is_cache_final`
-# explicitly to prevent that; every Firestore call within them
-# (`set_preseason_predictions`, `NNProjectionEngine`) is also mocked.
+# (not `main()`) -- those run the real schedule_enriched/preseason_predictions
+# blocks inside `build_year()`; every Firestore call within them
+# (`set_preseason_predictions`, `NNProjectionEngine`) is mocked.
 import firebase_admin as _firebase_admin
 with patch.object(_firebase_admin, "_apps", {"__test__": object()}), \
      patch("firebase_admin.firestore.client"):
@@ -178,13 +175,11 @@ class TestYearsToBuildWiring:
 
 
 class TestPreseasonPredictionsWiring:
-    @patch("scripts.cache_builder.is_cache_final", return_value=False)
-    @patch("scripts.cache_builder.write_cache")
     @patch("scripts.cache_builder.live_scores.sync_live_scores_to_df")
     @patch("scripts.cache_builder.set_preseason_predictions")
     @patch("scripts.cache_builder.NNProjectionEngine")
     def test_writes_unlocked_for_current_season(
-        self, mock_engine_cls, mock_set, mock_sync_live, mock_write_cache, mock_is_final,
+        self, mock_engine_cls, mock_set, mock_sync_live,
     ):
         from scripts.cache_builder import build_year
         import pandas as pd
@@ -229,12 +224,10 @@ class TestPreseasonPredictionsWiring:
     # every unscoped daily run. See test_skips_write_for_past_season_even_
     # with_no_locked_field_in_existing_docs below for the real-world scenario
     # this protects against.
-    @patch("scripts.cache_builder.is_cache_final", return_value=False)
-    @patch("scripts.cache_builder.write_cache")
     @patch("scripts.cache_builder.set_preseason_predictions")
     @patch("scripts.cache_builder.NNProjectionEngine")
     def test_writes_locked_for_past_season(
-        self, mock_engine_cls, mock_set, mock_write_cache, mock_is_final,
+        self, mock_engine_cls, mock_set,
     ):
         from scripts.cache_builder import build_year
         import pandas as pd
@@ -262,12 +255,10 @@ class TestPreseasonPredictionsWiring:
         # never be written -- the write block is gated off entirely.
         mock_set.assert_not_called()
 
-    @patch("scripts.cache_builder.is_cache_final", return_value=False)
-    @patch("scripts.cache_builder.write_cache")
     @patch("scripts.cache_builder.set_preseason_predictions")
     @patch("scripts.cache_builder.NNProjectionEngine")
     def test_skips_write_for_past_season_even_with_no_locked_field_in_existing_docs(
-        self, mock_engine_cls, mock_set, mock_write_cache, mock_is_final,
+        self, mock_engine_cls, mock_set,
     ):
         """The real-world bug scenario: every historical preseason_predictions
         doc was written by predict_season.py, which never sets a `locked`
@@ -304,12 +295,10 @@ class TestPreseasonPredictionsWiring:
 
         mock_set.assert_not_called()
 
-    @patch("scripts.cache_builder.is_cache_final", return_value=False)
-    @patch("scripts.cache_builder.write_cache")
     @patch("scripts.cache_builder.set_preseason_predictions")
     @patch("scripts.cache_builder.NNProjectionEngine")
     def test_force_allows_writing_past_season(
-        self, mock_engine_cls, mock_set, mock_write_cache, mock_is_final,
+        self, mock_engine_cls, mock_set,
     ):
         """--force is the intentional manual-override escape hatch: it must
         still allow writing (and relocking) an already-completed season."""
@@ -338,12 +327,10 @@ class TestPreseasonPredictionsWiring:
         mock_set.assert_called_once()
         assert mock_set.call_args.kwargs["force"] is True
 
-    @patch("scripts.cache_builder.is_cache_final", return_value=False)
-    @patch("scripts.cache_builder.write_cache")
     @patch("scripts.cache_builder.set_preseason_predictions")
     @patch("scripts.cache_builder.NNProjectionEngine")
     def test_skips_write_when_model_version_none(
-        self, mock_engine_cls, mock_set, mock_write_cache, mock_is_final,
+        self, mock_engine_cls, mock_set,
     ):
         """model_version=None signals model loading failed this run (mirrors
         pred_lookup={} for game_predictions) -- must not attempt the write."""

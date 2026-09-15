@@ -346,7 +346,7 @@ def main():
         # is true, regardless of the use_local=False passed to
         # write_elo_history_season below -- so on a normal local dev machine
         # this must be forced before any Firestore write is attempted, same as
-        # refresh_local_pkls.py / cache_builder.py / run_predictions.py do.
+        # refresh_local_pkls.py / cache_builder.py / smart_refresh.py do.
         os.environ["USE_LOCAL_DATA"] = "False"
 
     print("=" * 65)

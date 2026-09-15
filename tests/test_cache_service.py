@@ -2,34 +2,7 @@ import pytest
 import pandas as pd
 import time
 from unittest.mock import patch, MagicMock
-from services.cache_service import get_cached, write_cache, clear_data_cache
-
-def test_local_cache_read_write(tmp_path, monkeypatch):
-    """Round-trip: write analytics cache entry, read it back, assert equal."""
-    monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
-    monkeypatch.setattr("services.cache_service._LOCAL_CACHE_DIR", tmp_path)
-    from services.cache_service import write_cache, get_cached
-    payload = {"test_key": 42, "nested": {"a": 1}}
-    write_cache("test_metric", 2024, 1, payload)
-    result = get_cached("test_metric", 2024, 1)
-    assert result == payload
-
-@patch("services.cache_service._USE_LOCAL", False)
-def test_remote_firestore_cache_read(mock_firestore):
-    """
-    Verify that in production mode, analytics data explicitly fetches
-    from the 'analytics_cache' Firestore collection.
-    """
-    mock_doc = MagicMock()
-    mock_doc.exists = True
-    mock_doc.to_dict.return_value = {"data": '{"some": "value"}'}
-    
-    mock_firestore.collection.return_value.document.return_value.get.return_value = mock_doc
-    
-    result = get_cached("test_analytic", 2024, 1)
-    assert result == {"some": "value"}
-    mock_firestore.collection.assert_called_with("analytics_cache")
-    mock_firestore.collection.return_value.document.assert_called_with("test_analytic_2024_1")
+from services.cache_service import clear_data_cache
 
 def test_set_and_get_domain_round_trips():
     from services.cache_service import set_domain, get_domain, DOMAIN_ACTIVE, clear_domain

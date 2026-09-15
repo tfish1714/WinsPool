@@ -651,7 +651,7 @@ def set_preseason_predictions(season: int, projections: dict, model_version: str
     A team's existing doc is skipped (not overwritten) when it's already
     locked=True and force=False -- this preserves "what we predicted before a
     completed season started" once that season is over, the same protection
-    game_predictions' locked flag and analytics_cache's is_cache_final() gate
+    game_predictions' locked flag and cache_builder.py's is_past_season gate
     already give every other prediction store in this app. locked=True is
     stamped on every doc this call DOES write, set to the `locked` param
     (callers pass whatever final_flag they've already computed for the
