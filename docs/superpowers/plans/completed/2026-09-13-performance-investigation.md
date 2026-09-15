@@ -31,7 +31,7 @@
 
 This task locks in the report's structure and pre-fills the motivating finding already confirmed during brainstorming (re-verify the numbers live rather than copying them stale, since a few hours may have passed).
 
-- [ ] **Step 1: Re-confirm the Cloud Run scaling config**
+- [x] **Step 1: Re-confirm the Cloud Run scaling config**
 
 Run:
 ```bash
@@ -39,7 +39,7 @@ gcloud run services describe winspool --region=us-east1 --format="value(spec.tem
 ```
 Expected: output contains `autoscaling.knative.dev/maxScale=1` and does **not** contain `autoscaling.knative.dev/minScale` (confirming it's still at the default of 0). If a `minScale` annotation is now present, someone changed this since the spec was written — record the actual current values instead of assuming the spec's numbers still hold.
 
-- [ ] **Step 2: Create the report file**
+- [x] **Step 2: Create the report file**
 
 ```markdown
 # Performance Investigation Report
@@ -76,7 +76,7 @@ Confirmed live via `gcloud run services describe winspool --region=us-east1 --fo
 
 Fill in the `<...>` placeholders with real values from Step 1 and real `date` output — this file must never contain literal `<...>` once saved.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/superpowers/specs/completed/2026-09-13-performance-investigation-report.md
@@ -95,7 +95,7 @@ git commit -m "docs: scaffold performance investigation report"
 
 Pulls real request-latency percentiles, cold-start (startup) latency, and instance-count-over-time data for the `winspool` service via the Cloud Monitoring REST API v3. These exact queries were run and confirmed working during planning — reuse them, don't reinvent the query shape.
 
-- [ ] **Step 1: Query p50/p95 request latency for successful (2xx) requests**
+- [x] **Step 1: Query p50/p95 request latency for successful (2xx) requests**
 
 ```bash
 TOKEN=$(gcloud auth print-access-token)
@@ -111,7 +111,7 @@ done
 ```
 Expected: two real millisecond numbers (p50 and p95), not "NO DATA". If "NO DATA", the service had zero 2xx traffic in the window — record that fact instead of a number.
 
-- [ ] **Step 2: Query cold-start (container startup) latency**
+- [x] **Step 2: Query cold-start (container startup) latency**
 
 ```bash
 TOKEN=$(gcloud auth print-access-token)
@@ -124,7 +124,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 ```
 Expected: one or more `timeSeries` entries (one per revision that started up in the window) with a p95 startup latency in milliseconds. Record the highest value seen (worst cold start) and how many distinct revisions/entries appeared (each entry is one cold-start event's revision, not a total count — note that limitation in the report rather than treating "number of entries" as "number of cold starts").
 
-- [ ] **Step 3: Query instance count over time to visualize scale-to-zero pattern**
+- [x] **Step 3: Query instance count over time to visualize scale-to-zero pattern**
 
 ```bash
 TOKEN=$(gcloud auth print-access-token)
@@ -143,7 +143,7 @@ print(f'{len(pts)} hourly points, {zero_hours} hours at zero instances ({100*zer
 ```
 Expected: a real point count and a percentage of hours spent at zero instances. A high percentage (e.g. >30%) directly corroborates frequent cold starts; a low percentage means the service rarely scales to zero and cold starts are less frequent than the config alone suggests — report whichever is actually true.
 
-- [ ] **Step 4: Check request-concurrency clustering against `maxScale=1`**
+- [x] **Step 4: Check request-concurrency clustering against `maxScale=1`**
 
 ```bash
 TOKEN=$(gcloud auth print-access-token)
@@ -161,7 +161,7 @@ print(f'peak concurrent requests in any hour this week: {max(vals) if vals else 
 ```
 Expected: a peak concurrency number. Cloud Run's default per-instance concurrency limit is 80 — a peak nowhere near that means `maxScale=1` is not currently a real bottleneck (even though it's still a latent risk if traffic grows, e.g. a full 10-player live draft). A peak approaching 80 means it's a live, current problem, not just theoretical. Report which case actually holds.
 
-- [ ] **Step 5: Write findings into the report**
+- [x] **Step 5: Write findings into the report**
 
 Replace the `## Backend / Cloud Run` placeholder with the real numbers from Steps 1-4, e.g.:
 
@@ -176,7 +176,7 @@ Replace the `## Backend / Cloud Run` placeholder with the real numbers from Step
 **Interpretation:** <write 2-4 sentences connecting these numbers to the motivating finding — does the p50/p95 gap and time-at-zero data actually support "cold starts are the cause," or does the data tell a different story? State plainly which it is.>
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add docs/superpowers/specs/completed/2026-09-13-performance-investigation-report.md
@@ -196,7 +196,7 @@ git commit -m "docs: add backend/Cloud Run performance findings"
 
 `services/db_service.py` is this app's sole Firestore access layer for player/game/draft data (per `CLAUDE.md`'s Data Flow & Caching section); `services/cache_service.py` and `services/data_service.py` additionally read/write a few collections directly (`analytics_cache`, `elo_history`, `nn_weekly_accuracy`, `game_predictions`). This task enumerates all of it with file:line citations — no estimating, no "probably touches Firestore."
 
-- [ ] **Step 1: Enumerate every Firestore collection reference in the web app's own code**
+- [x] **Step 1: Enumerate every Firestore collection reference in the web app's own code**
 
 ```bash
 grep -rn "\.collection(" services/ routes/ --include="*.py" | grep -v "^services/db_service.py" | sort
@@ -204,13 +204,13 @@ grep -n "\.collection(" services/db_service.py | sort
 ```
 Read through the output. For each distinct collection name found, note: which file(s)/function(s) reference it, and whether that access happens on every request (uncached) or behind `data_service.load_data()`'s or `cache_service.py`'s in-memory cache.
 
-- [ ] **Step 2: Trace which routes call which cached-vs-uncached paths**
+- [x] **Step 2: Trace which routes call which cached-vs-uncached paths**
 
 For each of the app's main user-facing surfaces — standings/leaderboard, draft room (HTTP routes + the `/ws` WebSocket), admin dashboard, mock draft, recap, auth/login, chat, push subscription — identify (via `grep -n "load_data\|get_db\|\.collection(" routes/*.py`) whether that surface's Firestore reads go through the cached `load_data()` path or hit Firestore directly and, if directly, whether that function itself does any caching (e.g. `get_game_predictions` in `cache_service.py`).
 
 Pay particular attention to the live draft WebSocket flow (`routes/draft_routes.py`) — it is the app's highest-concurrency code path (up to 10 real players against one draft simultaneously) and per-pick behavior matters more here than on any other page.
 
-- [ ] **Step 3: Write the web-app inventory into the report**
+- [x] **Step 3: Write the web-app inventory into the report**
 
 ```markdown
 ## Firestore Usage
@@ -225,7 +225,7 @@ Pay particular attention to the live draft WebSocket flow (`routes/draft_routes.
 **Live draft WebSocket (`routes/draft_routes.py`):** <2-4 sentences on what Firestore access happens per pick, and whether that scales acceptably to a full 10-player draft based on the code alone (this is a code-level judgment here; Task 4's aggregate metric will show whether the real numbers back it up).>
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/superpowers/specs/completed/2026-09-13-performance-investigation-report.md
@@ -244,14 +244,14 @@ git commit -m "docs: add web-app Firestore code-path inventory"
 
 Covers the other half of the whole-system Firestore picture: the 4 scheduled Cloud Run Jobs, plus the real aggregate read/write volume for the whole project (which the per-code-path inventory alone can't produce, since Cloud Monitoring's Firestore metrics aren't broken down by caller).
 
-- [ ] **Step 1: Enumerate each scheduled job's Firestore access**
+- [x] **Step 1: Enumerate each scheduled job's Firestore access**
 
 ```bash
 grep -n "\.collection(\|--firestore" scripts/run_cron.py scripts/cache_builder.py scripts/sync_live_scores.py scripts/schedule_kickoffs.py scripts/sync_nflverse_data.py scripts/compute_elo.py scripts/daily_nfl_sync.py
 ```
 For each of the 4 actual Cloud Run Jobs (`winspool-sync-daily` → `run_cron.py`'s chain, `winspool-predict-daily` → `cache_builder.py`, `winspool-live-scores` → `sync_live_scores.py`, `winspool-schedule-kickoffs` → `schedule_kickoffs.py`), note which collections it writes to (per `CLAUDE.md`'s Firestore-collection table) and how often it runs (per `CLAUDE.md`'s Scheduled Jobs table — `winspool-live-scores` every 5 minutes in-season is the standout).
 
-- [ ] **Step 2: Pull real execution frequency/duration for `winspool-live-scores`**
+- [x] **Step 2: Pull real execution frequency/duration for `winspool-live-scores`**
 
 ```bash
 gcloud run jobs executions list --region=us-east1 --format="table(metadata.name,status.startTime,status.completionTime)" \
@@ -259,7 +259,7 @@ gcloud run jobs executions list --region=us-east1 --format="table(metadata.name,
 ```
 Confirm the actual real-world cadence (should be ~every 5 minutes) and typical duration (compute from `startTime`/`completionTime` on a few rows). Each execution's own Firestore access (per Step 1's code reading) times this real frequency is this job's actual weekly Firestore load — do the arithmetic and include it.
 
-- [ ] **Step 3: Pull aggregate project-wide Firestore read/write counts for the 7-day window**
+- [x] **Step 3: Pull aggregate project-wide Firestore read/write counts for the 7-day window**
 
 ```bash
 TOKEN=$(gcloud auth print-access-token)
@@ -275,7 +275,7 @@ done
 ```
 Expected: three real integers (total document reads/writes/deletes, project-wide, for the whole week). These numbers are project-wide, not per-service — note that limitation plainly in the report rather than attributing the total to any one cause without evidence.
 
-- [ ] **Step 4: Write findings into the report**
+- [x] **Step 4: Write findings into the report**
 
 ```markdown
 ### Scheduled jobs
@@ -296,7 +296,7 @@ Expected: three real integers (total document reads/writes/deletes, project-wide
 **Interpretation:** <2-4 sentences: is this volume large for an app this size? Does it correlate plausibly with winspool-live-scores' 5-minute cadence plus real user traffic, based on the code-level access patterns found in Task 3 and Step 1 above? Be specific about what you can and can't attribute confidently given these metrics aren't broken down by caller.>
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/superpowers/specs/completed/2026-09-13-performance-investigation-report.md
@@ -315,20 +315,20 @@ git commit -m "docs: add scheduled-jobs Firestore audit and aggregate usage metr
 
 `services/cache_service.py:118` defines `_CACHE_TTL_SECONDS = 3600` (1 hour) — the single in-memory TTL governing both `data_service.py::load_data()`'s main cache and `cache_service.py`'s own cached reads. This task judges whether that one number is still well-sized now that Tasks 3-4 have produced a real picture of what's hitting Firestore, rather than the solo-dev-era assumptions it was originally tuned against.
 
-- [ ] **Step 1: Read the TTL's current rationale**
+- [x] **Step 1: Read the TTL's current rationale**
 
 ```bash
 grep -n -B2 -A2 "_CACHE_TTL_SECONDS" services/cache_service.py
 ```
 Note the existing inline comment's stated rationale (as of planning time: "long enough to avoid Firestore spam on every request, short enough to catch same-day data changes").
 
-- [ ] **Step 2: Reason about sizing against Tasks 3-4's findings**
+- [x] **Step 2: Reason about sizing against Tasks 3-4's findings**
 
 Answer directly, using the real numbers already gathered — no new commands needed for this step:
 - Given the real aggregate Firestore read volume (Task 4, Step 3) and the web-app inventory (Task 3), does 1 hour look too short (real spam), too long (stale data risk for a user-facing page), or about right?
 - Does the live-draft WebSocket path (Task 3, Step 2) bypass this TTL in a way that matters (e.g. does draft state need to be much fresher than 1 hour, and if so, does it already get that via a different mechanism)?
 
-- [ ] **Step 3: Write the recommendation into the report**
+- [x] **Step 3: Write the recommendation into the report**
 
 ```markdown
 ### Cache TTL sizing (`cache_service.py:118`, `_CACHE_TTL_SECONDS`)
@@ -338,7 +338,7 @@ Current value: 3600s (1 hour), shared by `data_service.py::load_data()`'s main c
 **Recommendation:** <"keep at 1 hour" / "raise to X" / "lower to X" / "leave as-is but note Y", with the reasoning from Step 2 stated concretely, citing the real numbers from Tasks 3-4 rather than restating the original rationale unexamined.>
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/superpowers/specs/completed/2026-09-13-performance-investigation-report.md
@@ -357,30 +357,30 @@ git commit -m "docs: add cache TTL sizing recommendation"
 
 Runs a real Lighthouse audit against the live production URL, authenticated, at both mobile and desktop viewports, on the two highest-traffic pages: standings and the draft room.
 
-- [ ] **Step 1: Load the chrome-devtools-mcp tools**
+- [x] **Step 1: Load the chrome-devtools-mcp tools**
 
 These are deferred tools in this environment — load them before use:
 ```
 ToolSearch query: "select:mcp__plugin_chrome-devtools-mcp_chrome-devtools__new_page,mcp__plugin_chrome-devtools-mcp_chrome-devtools__navigate_page,mcp__plugin_chrome-devtools-mcp_chrome-devtools__fill,mcp__plugin_chrome-devtools-mcp_chrome-devtools__click,mcp__plugin_chrome-devtools-mcp_chrome-devtools__wait_for,mcp__plugin_chrome-devtools-mcp_chrome-devtools__lighthouse_audit,mcp__plugin_chrome-devtools-mcp_chrome-devtools__resize_page"
 ```
 
-- [ ] **Step 2: Log in as `e2e-test-01` against production**
+- [x] **Step 2: Log in as `e2e-test-01` against production**
 
 Open a new page at `https://winspool-62mntiyu5a-ue.a.run.app`, fill in the real signin form with `e2e-test-01@winspool.internal` / the password from `.env`'s `E2E_TEST_PLAYER_PASSWORD`, submit, and wait for the signin overlay to disappear — the same real-UI login flow `tests_e2e/test_standings.py::_login` uses, just driven via chrome-devtools-mcp tools instead of Playwright. Do not bypass this with a direct API call — Lighthouse needs a real authenticated browser session (cookies set the normal way) to measure what a real user's browser actually does.
 
-- [ ] **Step 3: Desktop Lighthouse audit — standings**
+- [x] **Step 3: Desktop Lighthouse audit — standings**
 
 Navigate to `/wins-pool` (or whatever the standings page resolves to for this account — check the nav after login if unsure), then run `lighthouse_audit` at the default desktop viewport. Record LCP, CLS, and INP (or TBT if this Lighthouse version doesn't report INP directly).
 
-- [ ] **Step 4: Desktop Lighthouse audit — draft room**
+- [x] **Step 4: Desktop Lighthouse audit — draft room**
 
 Navigate to `/draft`, run `lighthouse_audit` again. Note: if no season currently has an active draft, this page may render a "no active draft" state rather than the full draft room — record which state was actually measured, don't assume it was the full interactive draft room.
 
-- [ ] **Step 5: Mobile Lighthouse audits — both pages**
+- [x] **Step 5: Mobile Lighthouse audits — both pages**
 
 Resize the page to the ~390px mobile width `CLAUDE.md` calls out (`resize_page`), then repeat Steps 3-4's `lighthouse_audit` calls for both pages at that width.
 
-- [ ] **Step 6: Write findings into the report**
+- [x] **Step 6: Write findings into the report**
 
 ```markdown
 ## Frontend Core Web Vitals
@@ -399,7 +399,7 @@ Audited against production (`https://winspool-62mntiyu5a-ue.a.run.app`), authent
 **Interpretation:** <2-4 sentences: do any of these numbers fall outside Google's "good" thresholds (LCP < 2.5s, CLS < 0.1, INP < 200ms)? If the draft room was measured in its placeholder state rather than the real interactive room, say so as a known gap rather than treating the number as representative.>
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add docs/superpowers/specs/completed/2026-09-13-performance-investigation-report.md
@@ -419,7 +419,7 @@ git commit -m "docs: add frontend Core Web Vitals findings"
 
 Pulls the whole report together into concrete, prioritized recommendations — the actual deliverable of this investigation — and archives the design spec now that its investigation is done.
 
-- [ ] **Step 1: Write the Recommendations section**
+- [x] **Step 1: Write the Recommendations section**
 
 Read back through every section of the report written so far, then write:
 
@@ -436,13 +436,13 @@ Ordered by expected impact / effort ratio, highest first. None of these are appl
 If any area's findings didn't support the motivating finding as strongly as expected, say so plainly here rather than forcing a narrative — this section's job is accuracy, not confirming the hypothesis from Task 1.
 ```
 
-- [ ] **Step 2: Move the design spec to completed/**
+- [x] **Step 2: Move the design spec to completed/**
 
 ```bash
 git mv docs/superpowers/specs/2026-09-13-performance-investigation-design.md docs/superpowers/specs/completed/2026-09-13-performance-investigation-design.md
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/superpowers/specs/completed/2026-09-13-performance-investigation-report.md
