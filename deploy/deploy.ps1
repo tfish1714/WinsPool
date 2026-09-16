@@ -38,6 +38,7 @@ if (-not $appBaseUrl) {
 }
 $fromEmail = Get-DotEnvValue "FROM_EMAIL"     # optional -- code falls back to onboarding@resend.dev
 $alertEmail = Get-DotEnvValue "ALERT_EMAIL"   # optional -- omits Reply-To on the draft-order email if unset
+$bettingAlertEmail = Get-DotEnvValue "BETTING_ALERT_EMAIL"  # used only by the one-time `gcloud run jobs create` in Task 5's docs -- deploy.ps1 itself only updates job images, not their env vars
 
 # Web Push (VAPID) -- optional, but silently no-ops end-to-end without all
 # three: services/push_service.py refuses to send with no VAPID_PUBLIC/PRIVATE_KEY,
@@ -127,7 +128,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[DEPLOY] Updating scheduled Cloud Run Jobs to the freshly built images..." -ForegroundColor Cyan
-$syncJobs = @("winspool-sync-daily", "winspool-live-scores", "winspool-schedule-kickoffs")
+$syncJobs = @("winspool-sync-daily", "winspool-live-scores", "winspool-schedule-kickoffs", "winspool-betting-alert")
 foreach ($job in $syncJobs) {
     gcloud run jobs update $job --image=$SYNC_IMAGE --region=us-east1 --project=$PROJECT_ID
     if ($LASTEXITCODE -ne 0) {

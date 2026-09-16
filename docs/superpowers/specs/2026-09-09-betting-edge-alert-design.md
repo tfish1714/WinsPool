@@ -111,6 +111,58 @@ lines stabilize after the schedule is confirmed.
 own `MAX_RETRIES` env var matching its `--max-retries` (default 3, matching
 every other job) or alerting fails open on retry.
 
+## One-time GCP provisioning (not yet run)
+
+Mirrors `docs/superpowers/plans/completed/2026-08-19-scheduled-jobs.md` Task 9.
+Requires `gcloud` authenticated against `fishbone-wins-pool`. Run manually
+(not as an unattended step) once `Dockerfile.sync` has been rebuilt with this
+job's code (a normal `deploy.ps1` run handles the rebuild+push once
+`winspool-betting-alert` is in `$syncJobs`, but the job itself must exist
+before an `update` will find it):
+
+```bash
+# 1. Create the Cloud Run Job (reuses the existing winspool-sync image and
+#    winspool-scheduler service account/secrets from the original 4-job setup)
+gcloud run jobs create winspool-betting-alert \
+  --image=us-east1-docker.pkg.dev/fishbone-wins-pool/winspool/winspool-sync:latest \
+  --command=python --args=scripts/betting_edge_alert_weekly.py \
+  --set-secrets=FIREBASE_CREDENTIALS=FIREBASE_CREDENTIALS:latest,RESEND_API_KEY=RESEND_API_KEY:latest \
+  --set-env-vars=ALERT_EMAIL=fischerthomasg@gmail.com,BETTING_ALERT_EMAIL=fischerthomasg@gmail.com,MAX_RETRIES=3 \
+  --region=us-east1 --project=fishbone-wins-pool
+
+# 2. Grant the existing scheduler service account run.invoker (same account
+#    the other 4 jobs already use)
+gcloud run jobs add-iam-policy-binding winspool-betting-alert \
+  --member="serviceAccount:winspool-scheduler@fishbone-wins-pool.iam.gserviceaccount.com" \
+  --role="roles/run.invoker" \
+  --region=us-east1 --project=fishbone-wins-pool
+
+# 3. Create the Cloud Scheduler trigger -- Tuesdays, 10:30 UTC (30min after
+#    winspool-schedule-kickoffs-trigger's 10:00 UTC run), Sept 1 - Feb 10
+#    in-season window (two-job split for the year-wrap, same pattern as the
+#    original 4 jobs' Task 9)
+gcloud scheduler jobs create http winspool-betting-alert-trigger \
+  --schedule="30 10 * 9-12 2" \
+  --uri="https://us-east1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/fishbone-wins-pool/jobs/winspool-betting-alert:run" \
+  --http-method=POST \
+  --oauth-service-account-email=winspool-scheduler@fishbone-wins-pool.iam.gserviceaccount.com \
+  --time-zone="UTC" --location=us-east1 --project=fishbone-wins-pool
+
+gcloud scheduler jobs create http winspool-betting-alert-trigger-feb \
+  --schedule="30 10 1-10 2 2" \
+  --uri="https://us-east1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/fishbone-wins-pool/jobs/winspool-betting-alert:run" \
+  --http-method=POST \
+  --oauth-service-account-email=winspool-scheduler@fishbone-wins-pool.iam.gserviceaccount.com \
+  --time-zone="UTC" --location=us-east1 --project=fishbone-wins-pool
+```
+
+Verify: `gcloud run jobs list --region=us-east1 --project=fishbone-wins-pool` shows
+`winspool-betting-alert`; `gcloud scheduler jobs list --location=us-east1` shows
+both triggers, state `ENABLED`. Smoke-test with
+`gcloud run jobs execute winspool-betting-alert --region=us-east1 --project=fishbone-wins-pool`
+and confirm either an email lands at `BETTING_ALERT_EMAIL` or the execution
+logs show the no-edges skip message.
+
 ## Out of scope
 
 - Any change to what players see — this is admin/owner-only.
