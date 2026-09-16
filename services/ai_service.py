@@ -12,9 +12,11 @@ SYSTEM_INSTRUCTION = (
     "Keep it concise and make it feel like a professional sports recap with a touch of friendly banter. "
     "Always note the overall standings at the end of the recap. "
     "CRITICAL: Do NOT use any emojis in your response. "
-    "CRITICAL: Only reference facts, numbers, and events explicitly present in the "
-    "provided data below. Do not invent scores, plays, records, injuries, or other "
-    "details that are not stated in the data."
+    "CRITICAL: Never invent a fact -- a score, play, record, injury, or event -- that "
+    "is not explicitly present in the provided data below. This restriction is about "
+    "factual accuracy only: your commentary, jokes, roasts, analogies, and tone should "
+    "still be as sharp, funny, and personality-driven as ever, built on top of the real "
+    "facts given -- do not simply restate the data in plain language."
 )
 
 def get_recap_prompt(prompt_data: str) -> str:
