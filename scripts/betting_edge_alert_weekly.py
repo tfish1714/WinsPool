@@ -53,7 +53,41 @@ def main():
     )
 
     if not summary["validated_angle_matches"] and not summary["raw_edge_outliers"]:
-        print(f"[betting_edge_alert] No edges found for {target_season} week {target_week}. Skipping email.")
+        # Distinguish a genuinely quiet week (expected, fine) from a broken
+        # pipeline (no prediction docs for this week, or no game has an
+        # edge_vs_vegas value at all -- expected, silently, forever, with no
+        # alerting otherwise). Cheap: just iterates the already-loaded
+        # predictions_by_season[target_season] dict for this week's games,
+        # same game_key parsing pattern as betting_screener_service.screen_games.
+        week_preds = predictions_by_season.get(target_season, {})
+        game_count = 0
+        explanation_count = 0
+        edge_count = 0
+        for game_key, pred in week_preds.items():
+            parts = game_key.split("_")
+            if len(parts) != 3:
+                continue
+            wk_str, _ht, _at = parts
+            try:
+                wk = int(wk_str.lstrip("W"))
+            except ValueError:
+                continue
+            if wk != target_week:
+                continue
+            game_count += 1
+            ex = pred.get("explanation") or {}
+            if ex:
+                explanation_count += 1
+            edge = ex.get("edge_vs_vegas")
+            if edge is None:
+                edge = pred.get("edge_vs_vegas")
+            if edge is not None:
+                edge_count += 1
+        print(
+            f"[betting_edge_alert] No edges found for {target_season} week {target_week} "
+            f"({game_count} games, {explanation_count} with explanation, "
+            f"{edge_count} with edge_vs_vegas). Skipping email."
+        )
         return
 
     to_email = os.environ.get("BETTING_ALERT_EMAIL")
@@ -62,6 +96,17 @@ def main():
         return
 
     sent = send_betting_edge_email(to_email, summary)
+    if not sent:
+        # send_betting_edge_email (via email_service._send) returns False
+        # rather than raising when RESEND_API_KEY is unset or the Resend API
+        # call itself fails. Without raising here, _run_with_alerting() never
+        # sees an exception, so a misconfigured env (missing secret, bad key)
+        # would fail this job silently, every week, forever -- see Finding 5
+        # of the 2026-09-15 final review.
+        raise RuntimeError(
+            f"send_betting_edge_email returned False for {target_season} week "
+            f"{target_week} -- check RESEND_API_KEY/BETTING_ALERT_EMAIL config"
+        )
     print(
         f"[betting_edge_alert] {target_season} week {target_week}: "
         f"{len(summary['validated_angle_matches'])} validated angle match(es), "

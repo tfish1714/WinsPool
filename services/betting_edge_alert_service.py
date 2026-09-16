@@ -17,6 +17,20 @@ Two tiers, both computed independently and never gating each other:
    |edge_vs_vegas| exceeds a threshold, read directly from the same
    explanation dict screen_games/scan_angles use -- not backtest-validated
    by itself, so kept in a clearly separate list for the email to label.
+
+Note on `explanation` availability: `explanation` (elo_diff, roster deltas,
+vegas_line, etc.) is only populated by a manual
+`scripts/backfill_schedule_predictions.py --features` run for the relevant
+season -- no scheduled job writes it. The automated daily job
+(cache_builder.py) only refreshes `model_spread`/`edge_vs_vegas` at the TOP
+LEVEL of each prediction dict via merge_thin_game_predictions, and never
+touches `explanation`. find_raw_edge_outliers falls back to those top-level
+fields when `explanation` is absent or incomplete (see below), but
+find_validated_angle_matches has no such fallback -- its scan_angles/
+screen_games dependencies need the full `explanation` payload (elo_diff,
+roster deltas, etc.), so that tier stays silently empty for any season where
+a manual backfill was never run. This is a pre-existing dependency shared
+with the admin betting screener, not something new introduced by this job.
 """
 from __future__ import annotations
 
@@ -35,10 +49,14 @@ def find_raw_edge_outliers(
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
 ) -> list[dict]:
     """Upcoming games where |edge_vs_vegas| >= edge_threshold, sorted by
-    magnitude descending. Reads edge_vs_vegas/vegas_line straight from each
-    game's `explanation` dict (the source both betting_screener_service and
-    pattern_scanner_service already read), and pred_ats_pick from the
-    top-level pred_dict (which side the model favors ATS)."""
+    magnitude descending. Prefers edge_vs_vegas/model_spread from each game's
+    `explanation` dict (the source both betting_screener_service and
+    pattern_scanner_service already read), falling back to the top-level
+    pred dict fields of the same name when `explanation` is missing or
+    doesn't have them -- the top-level fields are what cache_builder.py's
+    daily automated run actually refreshes (see module docstring); pred_ats_pick
+    is read straight from the top-level pred_dict (which side the model
+    favors ATS)."""
     preds = predictions_by_season.get(target_season, {})
     outliers = []
     for game_key, pred in preds.items():
@@ -55,14 +73,24 @@ def find_raw_edge_outliers(
 
         ex = pred.get("explanation") or {}
         edge = ex.get("edge_vs_vegas")
+        if edge is None:
+            edge = pred.get("edge_vs_vegas")
         if edge is None or abs(edge) < edge_threshold:
             continue
+
+        model_spread = ex.get("model_spread")
+        if model_spread is None:
+            model_spread = pred.get("model_spread")
 
         outliers.append({
             "season": target_season, "week": wk,
             "home_team": ht, "away_team": at,
             "edge_vs_vegas": edge,
-            "model_spread": ex.get("model_spread"),
+            "model_spread": model_spread,
+            # vegas_line has no top-level equivalent in the real prediction
+            # dict shape -- it's a display-only context field that only ever
+            # lives inside `explanation`, never written by the automated
+            # daily job. No fallback is possible here.
             "vegas_line": ex.get("vegas_line"),
             "ats_pick": pred.get("pred_ats_pick"),
         })

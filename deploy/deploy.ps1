@@ -128,6 +128,18 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[DEPLOY] Updating scheduled Cloud Run Jobs to the freshly built images..." -ForegroundColor Cyan
+# winspool-predict-daily is updated FIRST, before the $syncJobs loop below --
+# $syncJobs includes winspool-betting-alert, which is not yet provisioned in
+# GCP (see Finding 1 of the 2026-09-15 final review) and will make
+# `gcloud run jobs update` error out. Updating winspool-predict-daily first
+# guarantees it always gets the freshly built (several-minutes-to-build,
+# TensorFlow-installing) image regardless of what happens to any job in
+# $syncJobs.
+gcloud run jobs update winspool-predict-daily --image=$PREDICT_IMAGE --region=us-east1 --project=$PROJECT_ID
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Failed to update job winspool-predict-daily." -ForegroundColor Red
+    exit 1
+}
 $syncJobs = @("winspool-sync-daily", "winspool-live-scores", "winspool-schedule-kickoffs", "winspool-betting-alert")
 foreach ($job in $syncJobs) {
     gcloud run jobs update $job --image=$SYNC_IMAGE --region=us-east1 --project=$PROJECT_ID
@@ -135,11 +147,6 @@ foreach ($job in $syncJobs) {
         Write-Host "[ERROR] Failed to update job $job." -ForegroundColor Red
         exit 1
     }
-}
-gcloud run jobs update winspool-predict-daily --image=$PREDICT_IMAGE --region=us-east1 --project=$PROJECT_ID
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] Failed to update job winspool-predict-daily." -ForegroundColor Red
-    exit 1
 }
 
 Write-Host "[SUCCESS] Scheduled jobs updated!" -ForegroundColor Green

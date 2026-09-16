@@ -132,7 +132,7 @@ SMTP_SERVER/PORT/USER/...   # Legacy email delivery (optional; Resend is now the
 RESEND_API_KEY=...          # Resend API key — primary email provider (alerts, recaps, MFA codes)
 FROM_EMAIL=...              # Resend sender address (default onboarding@resend.dev — no domain verified yet)
 APP_BASE_URL=...            # Base URL for links embedded in outbound emails (default http://localhost:8000; prod uses the Cloud Run service URL)
-ALERT_EMAIL=...             # Recipient for send_alert_email() job-failure alerts — set on all 4 scheduled Cloud Run Jobs
+ALERT_EMAIL=...             # Recipient for send_alert_email() job-failure alerts — set on all 4 currently-provisioned scheduled Cloud Run Jobs; winspool-betting-alert will need this too once it's provisioned (see Scheduled Jobs)
 BETTING_ALERT_EMAIL=...     # Recipient for the weekly betting-edge-alert email (scripts/betting_edge_alert_weekly.py) -- deliberately separate from ALERT_EMAIL (job-failure alerts), even though they'll likely be the same address
 BETTING_EDGE_THRESHOLD=...  # Optional; |edge_vs_vegas| points above which a game is flagged as a raw (unvalidated) edge outlier in the weekly alert email. Default 3.0.
 MAX_RETRIES=...             # Must match the job's own --max-retries, or alerting fails open (see Scheduled Jobs)
@@ -327,10 +327,13 @@ Each registry tracks all versions and designates `latest` and `best`. When retra
 
 ### Scheduled Jobs
 
-Four Cloud Run Jobs run in production, orchestrated by Cloud Scheduler
-(recurring) and Cloud Tasks (one-off, dynamically scheduled). All 4 are
-live, in-season only (Aug/Sept 1 – Feb 10), in `us-east1` of the
-`fishbone-wins-pool` GCP project. See
+Five Cloud Run Jobs are designed to run in production, orchestrated by Cloud
+Scheduler (recurring) and Cloud Tasks (one-off, dynamically scheduled). Four
+are live, in-season only (Aug/Sept 1 – Feb 10), in `us-east1` of the
+`fishbone-wins-pool` GCP project; the fifth, `winspool-betting-alert`, is
+implemented but not yet provisioned in GCP — see
+`docs/superpowers/specs/2026-09-09-betting-edge-alert-design.md`'s "One-time
+GCP provisioning" section for the still-pending manual setup. See
 `docs/superpowers/specs/completed/2026-08-19-scheduled-jobs-design.md` for
 the full design and `docs/superpowers/plans/completed/2026-08-19-scheduled-jobs.md`
 for how the GCP infrastructure itself was provisioned (Task 9 — one-time setup, not
@@ -342,7 +345,7 @@ repeated by normal deploys).
 | `winspool-predict-daily` | `scripts/cache_builder.py` | Daily 9:15 UTC (same Aug–Jan / Feb 1–10 split) | Regenerates predictions/analytics cache; the only job that installs `requirements-ml.txt` (`Dockerfile.predict`). Also now owns `preseason_predictions` (previously written only by a human running `predict_season.py` manually) — it refreshes the current/next season's team win projections daily and locks them once that season is complete (`locked=True`), so a later unscoped run won't silently overwrite a finished season's projections with the current model. Only runs the write for `year >= current_year` (or `--force`); a completed past season is skipped entirely. **Footgun**: manually re-running `predict_season.py` on any season writes a payload with no `locked` field at all, which silently clears the lock — it's now effectively a manual-override tool, not a routine one. |
 | `winspool-live-scores` | `scripts/sync_live_scores.py` | Every 5 min (Sept–Jan `winspool-live-scores-trigger`; Feb 1–10 `-trigger-feb`) | Authoritative re-sync (narrow, last-7-days `nfl_games` window) + best-effort ESPN live-score overlay (`is_live`/`clock`/`period`) — **only overlays games nflverse's own `schedules` data source carries, which never includes preseason (`game_type="PRE"`) games at all**, confirmed 2026-08-21 |
 | `winspool-schedule-kickoffs` | `scripts/schedule_kickoffs.py` | Weekly, Tuesdays 10:00 UTC, Sept–Jan (`winspool-schedule-kickoffs-trigger`) | Reads the upcoming week's real kickoff times, enqueues 3 Cloud Tasks per kickoff cluster against the Cloud Run Jobs Admin API: sync (kickoff−75min), routine predict (kickoff−60min), and an ESPN-aware `cache_builder.py --resimulate` re-run (kickoff−20min, `RESIMULATE_LEAD_MINUTES` in `schedule_kickoffs.py` — must fire after the routine predict run, not before, or the routine run's stale prediction overwrites the fresher one; still unvalidated against a real measured runtime) |
-| `winspool-betting-alert` | `scripts/betting_edge_alert_weekly.py` | Weekly, Tuesdays shortly after `winspool-schedule-kickoffs-trigger`'s 10:00 UTC run (exact offset tuned once it's clear how quickly lines stabilize) | Composes `pattern_scanner_service.scan_angles` + `betting_screener_service.screen_games` into a weekly validated-angle-match + raw-`edge_vs_vegas`-outlier summary; emails `BETTING_ALERT_EMAIL` only if either tier is non-empty (no-spam). Personal alert, never player-facing. Uses `Dockerfile.sync` (no ML deps). |
+| `winspool-betting-alert` **(not yet provisioned)** | `scripts/betting_edge_alert_weekly.py` | Weekly, Tuesdays shortly after `winspool-schedule-kickoffs-trigger`'s 10:00 UTC run (exact offset tuned once it's clear how quickly lines stabilize) | Composes `pattern_scanner_service.scan_angles` + `betting_screener_service.screen_games` into a weekly validated-angle-match + raw-`edge_vs_vegas`-outlier summary; emails `BETTING_ALERT_EMAIL` only if either tier is non-empty (no-spam). Personal alert, never player-facing. Uses `Dockerfile.sync` (no ML deps). |
 
 **Two Docker images**, split by dependency weight:
 - `Dockerfile.sync` (`python:3.10-slim`, `requirements.txt` only) — used by `winspool-sync-daily`, `winspool-live-scores`, `winspool-schedule-kickoffs`, `winspool-betting-alert`.
@@ -426,10 +429,13 @@ actually sends on the job's final retry attempt, comparing Cloud Run's
 auto-injected `CLOUD_RUN_TASK_ATTEMPT` against this env var — Cloud Run does
 NOT auto-inject the configured max-retries itself, so without `MAX_RETRIES`
 set, every attempt sends its own alert (4 emails per failure at the default
-`maxRetries=3`, i.e. 4 total attempts). All 4 jobs currently have
-`MAX_RETRIES=3` to match their (default, never overridden) `--max-retries=3`.
-If you ever change a job's `--max-retries`, update its `MAX_RETRIES` env var
-to match, or alerting silently reverts to "fail open" (always sends).
+`maxRetries=3`, i.e. 4 total attempts). All 4 currently-provisioned jobs have
+`MAX_RETRIES=3` to match their (default, never overridden) `--max-retries=3`;
+`winspool-betting-alert` will need the same `MAX_RETRIES=3` treatment once
+it's actually provisioned (its spec's `gcloud run jobs create` command
+already includes it — see Scheduled Jobs above). If you ever change a job's
+`--max-retries`, update its `MAX_RETRIES` env var to match, or alerting
+silently reverts to "fail open" (always sends).
 
 See **Scheduled Jobs** (under Architecture, above) for the full set of
 Cloud Scheduler/Cloud Tasks triggers running in production.
