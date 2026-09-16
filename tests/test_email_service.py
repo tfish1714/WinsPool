@@ -251,3 +251,45 @@ def test_send_betting_edge_email_handles_empty_angle_matches(mock_getenv, mock_s
     call_params = mock_send.call_args[0][0]
     assert "Validated angle matches" not in call_params["html"]
     assert "Raw edge outliers" in call_params["html"]
+
+
+@patch("services.email_service.resend.Emails.send")
+@patch("services.email_service.os.getenv", return_value="re_test_key")
+def test_send_betting_edge_email_escapes_html_in_user_fields(mock_getenv, mock_send):
+    """HTML-significant characters in user-sourced fields (team names, condition labels,
+    ats_pick) are escaped to prevent injection. Regression test: verifies html.escape()
+    is not dropped from any interpolated field."""
+    mock_send.return_value = {"id": "bet125"}
+    week_summary = {
+        "season": 2026, "week": 3,
+        "validated_angle_matches": [{
+            "metric": "ats",
+            "conditions": [{"feature": "test", "label": "Label with <script> tag", "min": 50.0}],
+            "train_rate": 0.62, "train_n": 120, "test_rate": 0.58, "test_n": 30,
+            "games": [{"home_team": "K&C", "away_team": "S<F>", "matched_sides": ["home"]}],
+        }],
+        "raw_edge_outliers": [{
+            "home_team": "BUF & MIA", "away_team": "DEN<test>", "edge_vs_vegas": 4.5,
+            "model_spread": 3.0, "vegas_line": -1.5, "ats_pick": "BUF & Co",
+        }],
+    }
+
+    result = send_betting_edge_email("owner@x.com", week_summary)
+
+    assert result is True
+    call_params = mock_send.call_args[0][0]
+    html_output = call_params["html"]
+
+    # Verify escaped versions ARE present
+    assert "&lt;script&gt;" in html_output
+    assert "&lt;test&gt;" in html_output
+    assert "K&amp;C" in html_output
+    assert "S&lt;F&gt;" in html_output
+    assert "BUF &amp; MIA" in html_output
+    assert "BUF &amp; Co" in html_output
+
+    # Verify raw unescaped versions are NOT present (malicious content)
+    assert "<script>" not in html_output
+    assert "<test>" not in html_output
+    assert "K&C" not in html_output or "K&amp;C" in html_output  # & alone is ambiguous
+    assert "S<F>" not in html_output

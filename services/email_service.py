@@ -126,7 +126,9 @@ def send_betting_edge_email(to_email: str, week_summary: dict) -> bool:
             for o in outliers
         )
         sections.append(
-            f"<h3>Raw edge outliers (unvalidated -- not backtested)</h3><ul>{rows}</ul>"
+            f"<div style=\"border-left: 4px solid #d97706; padding-left: 12px; margin: 16px 0;\">"
+            f"<h3 style=\"margin-top: 0; color: #92400e;\">Raw edge outliers (unvalidated -- not backtested)</h3>"
+            f"<ul>{rows}</ul></div>"
         )
 
     html_body = f"<p>Week {week}, {season} season:</p>" + "".join(sections)
