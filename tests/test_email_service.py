@@ -1,7 +1,7 @@
 from unittest.mock import patch, MagicMock
 from services.email_service import (
     send_weekly_recap_email, send_mfa_code_email, send_alert_email, send_draft_order_email,
-    send_on_the_clock_email,
+    send_on_the_clock_email, send_betting_edge_email,
 )
 
 
@@ -199,3 +199,55 @@ def test_send_multi_disabled_via_env_var_never_calls_resend(mock_send, monkeypat
 
     assert result is True
     mock_send.assert_not_called()
+
+
+@patch("services.email_service.resend.Emails.send")
+@patch("services.email_service.os.getenv", return_value="re_test_key")
+def test_send_betting_edge_email_includes_both_tiers(mock_getenv, mock_send):
+    mock_send.return_value = {"id": "bet123"}
+    week_summary = {
+        "season": 2026, "week": 3,
+        "validated_angle_matches": [{
+            "metric": "ats",
+            "conditions": [{"feature": "elo_diff", "label": "Elo Diff", "min": 50.0}],
+            "train_rate": 0.62, "train_n": 120, "test_rate": 0.58, "test_n": 30,
+            "games": [{"home_team": "KC", "away_team": "SF", "matched_sides": ["home"]}],
+        }],
+        "raw_edge_outliers": [{
+            "home_team": "BUF", "away_team": "MIA", "edge_vs_vegas": 4.5,
+            "model_spread": 3.0, "vegas_line": -1.5, "ats_pick": "BUF",
+        }],
+    }
+
+    result = send_betting_edge_email("owner@x.com", week_summary)
+
+    assert result is True
+    mock_send.assert_called_once()
+    call_params = mock_send.call_args[0][0]
+    assert call_params["to"] == ["owner@x.com"]
+    assert call_params["subject"] == "[WinsPool] Week 3 betting edges"
+    assert "Elo Diff" in call_params["html"]
+    assert "KC" in call_params["html"] and "SF" in call_params["html"]
+    assert "BUF" in call_params["html"] and "MIA" in call_params["html"]
+    assert "4.5" in call_params["html"]
+
+
+@patch("services.email_service.resend.Emails.send")
+@patch("services.email_service.os.getenv", return_value="re_test_key")
+def test_send_betting_edge_email_handles_empty_angle_matches(mock_getenv, mock_send):
+    """Caller (the script) decides whether to send at all when both tiers are
+    empty -- this function itself must not crash if given an empty tier."""
+    mock_send.return_value = {"id": "bet124"}
+    week_summary = {
+        "season": 2026, "week": 3,
+        "validated_angle_matches": [],
+        "raw_edge_outliers": [{
+            "home_team": "BUF", "away_team": "MIA", "edge_vs_vegas": -4.5,
+            "model_spread": -3.0, "vegas_line": 1.5, "ats_pick": "MIA",
+        }],
+    }
+    result = send_betting_edge_email("owner@x.com", week_summary)
+    assert result is True
+    call_params = mock_send.call_args[0][0]
+    assert "Validated angle matches" not in call_params["html"]
+    assert "Raw edge outliers" in call_params["html"]
