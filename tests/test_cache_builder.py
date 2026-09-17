@@ -748,6 +748,49 @@ class TestResimulateModeWiring:
         mock_publish.assert_called_once()
 
 
+class TestWeeklyBackfillStep:
+    def test_runs_backfill_on_tuesday(self):
+        import scripts.cache_builder as cb
+        from datetime import datetime, timezone
+        tuesday = datetime(2026, 9, 22, 9, 15, tzinfo=timezone.utc)  # a real Tuesday
+        with patch.object(cb, "_run_weekly_backfill_if_tuesday") as mock_step, \
+             patch.object(cb, "load_data", return_value=(pd.DataFrame(), pd.DataFrame(),
+                                                          pd.DataFrame(), pd.DataFrame(),
+                                                          pd.DataFrame(), pd.DataFrame(),
+                                                          pd.DataFrame())), \
+             patch.object(cb, "get_available_years", return_value=[]), \
+             patch.object(cb, "_years_to_build", return_value=[]), \
+             patch.object(cb, "NNPredictionService", side_effect=Exception("skip ML load")), \
+             patch("sys.argv", ["cache_builder.py", "--skip-sync"]):
+            cb.main()
+        mock_step.assert_called_once()
+
+    def test_subprocess_only_runs_on_tuesday(self):
+        """_run_weekly_backfill_if_tuesday itself gates on weekday()."""
+        import scripts.cache_builder as cb
+        from datetime import datetime, timezone
+        monday = datetime(2026, 9, 21, 9, 15, tzinfo=timezone.utc)
+        with patch("scripts.cache_builder.datetime") as mock_dt, \
+             patch.object(cb.subprocess, "run") as mock_run:
+            mock_dt.now.return_value = monday
+            cb._run_weekly_backfill_if_tuesday()
+        mock_run.assert_not_called()
+
+    def test_subprocess_invoked_with_firestore_flag_on_tuesday(self):
+        import scripts.cache_builder as cb
+        from datetime import datetime, timezone
+        tuesday = datetime(2026, 9, 22, 9, 15, tzinfo=timezone.utc)
+        with patch("scripts.cache_builder.datetime") as mock_dt, \
+             patch.object(cb.subprocess, "run") as mock_run:
+            mock_dt.now.return_value = tuesday
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            cb._run_weekly_backfill_if_tuesday()
+        mock_run.assert_called_once()
+        called_args = mock_run.call_args[0][0]
+        assert "backfill_schedule_predictions.py" in called_args[1]
+        assert "--firestore" in called_args
+
+
 class TestApplyPredictionsCarriesExplanation:
     def test_feature_table_branch_carries_explanation_through(self):
         """pred_lookup entries already include a full explanation dict

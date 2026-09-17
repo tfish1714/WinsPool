@@ -14,6 +14,7 @@ import json
 import argparse
 import pathlib
 import subprocess
+from datetime import datetime, timezone
 
 # Ensure project root is on the path
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -448,6 +449,34 @@ def _sync_rawdata() -> None:
               f"{result.stderr.strip()[:500]}")
 
 
+def _run_weekly_backfill_if_tuesday() -> None:
+    """Grade the prior week's predictions via the feature table once a
+    week, on the first day every game in that week (including Monday Night
+    Football) is guaranteed final. See docs/superpowers/specs/2026-09-17-
+    qb-availability-and-prediction-freshness-design.md Part D for why
+    Tuesday and not Thursday/Sunday, and why this runs as a conditional step
+    inside winspool-predict-daily's own daily job rather than a new
+    Cloud Scheduler trigger or Docker image (this job's image already has
+    the ML dependencies backfill_schedule_predictions.py needs;
+    winspool-schedule-kickoffs' does not).
+    """
+    if datetime.now(timezone.utc).weekday() != 1:  # Monday=0, Tuesday=1
+        return
+    print("[cache_builder] Tuesday -- running weekly backfill lock-in...")
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS_DIR / "backfill_schedule_predictions.py"), "--firestore"],
+        capture_output=True, text=True, timeout=600,
+        cwd=str(SCRIPTS_DIR.parent),
+    )
+    stdout_tail = result.stdout.strip().splitlines()[-20:]
+    print("[cache_builder] weekly backfill summary:")
+    for line in stdout_tail:
+        print(f"  {line}")
+    if result.returncode != 0:
+        print(f"[warn] backfill_schedule_predictions.py exited non-zero (non-fatal): "
+              f"{result.stderr.strip()[:500]}")
+
+
 def _years_to_build(available_years: list, games: pd.DataFrame) -> list:
     """Years this job should process for the full-sweep (no --year) case.
 
@@ -573,6 +602,8 @@ def main():
                    draft_order_rules, year, current_year, all_games=games,
                    force=args.force, pred_lookup=pred_lookup,
                    model_version=model_version)
+
+    _run_weekly_backfill_if_tuesday()
 
     # Signal the predictions_active domain (games/standings, players, etc.
     # are untouched by this script -- see docs/superpowers/specs/
