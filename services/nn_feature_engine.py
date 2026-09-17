@@ -2052,6 +2052,90 @@ def _load_injury_flags(rd: Path) -> pd.DataFrame:
     return flags
 
 
+def _load_qb_report_status(rd: Path) -> pd.DataFrame:
+    """Per-player weekly official injury report status for QBs.
+
+    Returns columns: season, week, team, gsis_id, report_status.
+    Covers 2009+ (injuries availability); earlier seasons return empty.
+    """
+    empty = pd.DataFrame(columns=["season", "week", "team", "gsis_id", "report_status"])
+    df = _load_multi_season("injuries/injuries_*.csv", rd)
+    if df.empty:
+        return empty
+    df = df[df["position"] == "QB"].copy()
+    df["season"] = pd.to_numeric(df["season"], errors="coerce")
+    df["week"] = pd.to_numeric(df["week"], errors="coerce")
+    df["team"] = df["team"].apply(_normalize_team)
+    return df.dropna(subset=["season", "week"])[
+        ["season", "week", "team", "gsis_id", "report_status"]
+    ]
+
+
+def _load_qb_reserve_status(rd: Path) -> pd.DataFrame:
+    """Per-player weekly Reserve/IR roster status for QBs -- catches
+    season-ending injuries that often drop off the weekly injury report
+    entirely rather than staying tagged 'Out'.
+
+    Returns columns: season, week, team, gsis_id (row presence == on
+    Reserve/IR that week). Covers 2002+ (weekly_rosters availability).
+    """
+    empty = pd.DataFrame(columns=["season", "week", "team", "gsis_id"])
+    df = _load_multi_season("weekly_rosters/roster_weekly_*.csv", rd)
+    if df.empty:
+        return empty
+    df = df[(df["position"] == "QB") & (df["status"] == "RES")].copy()
+    df["season"] = pd.to_numeric(df["season"], errors="coerce")
+    df["week"] = pd.to_numeric(df["week"], errors="coerce")
+    df["team"] = df["team"].apply(_normalize_team)
+    return df.dropna(subset=["season", "week"])[["season", "week", "team", "gsis_id"]]
+
+
+def _load_qb_snap_shares(rd: Path) -> pd.DataFrame:
+    """Per-player weekly share of the team's QB offensive snaps.
+
+    snap_counts is keyed by pfr_player_id, not gsis_id -- cross-walked via
+    rosters/roster_{year}.csv, which carries both IDs per player. A player
+    with no crosswalk match is dropped from the result (the caller treats a
+    missing row as "no snap data available," not "0% snaps").
+
+    Returns columns: season, week, team, gsis_id, snap_share.
+    """
+    empty = pd.DataFrame(columns=["season", "week", "team", "gsis_id", "snap_share"])
+    sc = _load_multi_season("snap_counts/snap_counts_*.csv", rd)
+    if sc.empty:
+        return empty
+    sc = sc[sc["position"] == "QB"].copy()
+    if "game_type" in sc.columns:
+        sc = sc[sc["game_type"] == "REG"]
+    sc["season"] = pd.to_numeric(sc["season"], errors="coerce")
+    sc["week"] = pd.to_numeric(sc["week"], errors="coerce")
+    sc["team"] = sc["team"].apply(_normalize_team)
+    sc["offense_snaps"] = pd.to_numeric(sc.get("offense_snaps", 0), errors="coerce").fillna(0.0)
+    sc = sc.dropna(subset=["season", "week", "pfr_player_id"])
+    if sc.empty:
+        return empty
+
+    roster = _load_multi_season("rosters/roster_*.csv", rd)
+    if roster.empty or "pfr_id" not in roster.columns or "gsis_id" not in roster.columns:
+        return empty
+    crosswalk = (
+        roster.dropna(subset=["pfr_id", "gsis_id"])
+        .drop_duplicates(subset=["pfr_id"])[["pfr_id", "gsis_id"]]
+    )
+    sc = sc.merge(crosswalk, left_on="pfr_player_id", right_on="pfr_id", how="inner")
+    if sc.empty:
+        return empty
+
+    totals = (
+        sc.groupby(["season", "week", "team"])["offense_snaps"]
+        .sum().reset_index().rename(columns={"offense_snaps": "total_snaps"})
+    )
+    sc = sc.merge(totals, on=["season", "week", "team"], how="left")
+    sc["total_snaps"] = sc["total_snaps"].clip(lower=1)
+    sc["snap_share"] = sc["offense_snaps"] / sc["total_snaps"]
+    return sc[["season", "week", "team", "gsis_id", "snap_share"]]
+
+
 # ---------------------------------------------------------------------------
 # Build Master Feature Table (V2)
 # ---------------------------------------------------------------------------

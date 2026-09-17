@@ -1,6 +1,7 @@
 """Unit tests for the redesigned nn_feature_engine feature set."""
 import numpy as np
 import pandas as pd
+import pytest
 
 from services.nn_feature_engine import FEATURE_COLUMNS
 
@@ -699,4 +700,93 @@ class TestLoadDeclaredStarters:
         from services.nn_feature_engine import _load_declared_starters
         result = _load_declared_starters(tmp_path)
         assert list(result.columns) == ["season", "week", "team", "gsis_id"]
+        assert result.empty
+
+
+# ---------------------------------------------------------------------------
+# Task 2: QB Availability Loaders (injury report, reserve status, snap share)
+# ---------------------------------------------------------------------------
+
+class TestLoadQbReportStatus:
+    def test_returns_qb_rows_with_status(self, tmp_path):
+        from services.nn_feature_engine import _load_qb_report_status
+        inj_dir = tmp_path / "injuries"
+        inj_dir.mkdir()
+        pd.DataFrame([
+            {"season": 2026, "week": 2, "team": "SEA", "position": "QB",
+             "gsis_id": "00-0100", "report_status": "Out"},
+            {"season": 2026, "week": 2, "team": "SEA", "position": "WR",
+             "gsis_id": "00-0200", "report_status": "Questionable"},
+        ]).to_csv(inj_dir / "injuries_2026.csv", index=False)
+
+        result = _load_qb_report_status(tmp_path)
+        assert len(result) == 1
+        assert result.iloc[0]["gsis_id"] == "00-0100"
+        assert result.iloc[0]["report_status"] == "Out"
+
+    def test_missing_file_returns_empty_frame(self, tmp_path):
+        from services.nn_feature_engine import _load_qb_report_status
+        result = _load_qb_report_status(tmp_path)
+        assert list(result.columns) == ["season", "week", "team", "gsis_id", "report_status"]
+        assert result.empty
+
+
+class TestLoadQbReserveStatus:
+    def test_returns_only_reserve_rows(self, tmp_path):
+        from services.nn_feature_engine import _load_qb_reserve_status
+        wr_dir = tmp_path / "weekly_rosters"
+        wr_dir.mkdir()
+        pd.DataFrame([
+            {"season": 2026, "week": 2, "team": "SEA", "position": "QB",
+             "gsis_id": "00-0100", "status": "RES"},
+            {"season": 2026, "week": 2, "team": "SEA", "position": "QB",
+             "gsis_id": "00-0101", "status": "ACT"},
+        ]).to_csv(wr_dir / "roster_weekly_2026.csv", index=False)
+
+        result = _load_qb_reserve_status(tmp_path)
+        assert len(result) == 1
+        assert result.iloc[0]["gsis_id"] == "00-0100"
+
+
+class TestLoadQbSnapShares:
+    def test_computes_share_of_team_qb_snaps(self, tmp_path):
+        from services.nn_feature_engine import _load_qb_snap_shares
+        sc_dir = tmp_path / "snap_counts"
+        sc_dir.mkdir()
+        pd.DataFrame([
+            {"season": 2026, "week": 1, "team": "SEA", "position": "QB",
+             "game_type": "REG", "pfr_player_id": "DarnSa00", "offense_snaps": 5},
+            {"season": 2026, "week": 1, "team": "SEA", "position": "QB",
+             "game_type": "REG", "pfr_player_id": "LockDr00", "offense_snaps": 45},
+        ]).to_csv(sc_dir / "snap_counts_2026.csv", index=False)
+
+        roster_dir = tmp_path / "rosters"
+        roster_dir.mkdir()
+        pd.DataFrame([
+            {"pfr_id": "DarnSa00", "gsis_id": "00-0100"},
+            {"pfr_id": "LockDr00", "gsis_id": "00-0101"},
+        ]).to_csv(roster_dir / "roster_2026.csv", index=False)
+
+        result = _load_qb_snap_shares(tmp_path)
+        darnold = result[result["gsis_id"] == "00-0100"].iloc[0]
+        lock = result[result["gsis_id"] == "00-0101"].iloc[0]
+        assert darnold["snap_share"] == pytest.approx(0.1)
+        assert lock["snap_share"] == pytest.approx(0.9)
+
+    def test_unmatched_pfr_id_dropped_not_crashed(self, tmp_path):
+        """A snap-count player with no roster ID crosswalk entry is dropped,
+        not treated as 0% -- fails open at the caller instead."""
+        from services.nn_feature_engine import _load_qb_snap_shares
+        sc_dir = tmp_path / "snap_counts"
+        sc_dir.mkdir()
+        pd.DataFrame([
+            {"season": 2026, "week": 1, "team": "SEA", "position": "QB",
+             "game_type": "REG", "pfr_player_id": "Unknown00", "offense_snaps": 50},
+        ]).to_csv(sc_dir / "snap_counts_2026.csv", index=False)
+        roster_dir = tmp_path / "rosters"
+        roster_dir.mkdir()
+        pd.DataFrame([{"pfr_id": "SomeoneElse00", "gsis_id": "00-9999"}]).to_csv(
+            roster_dir / "roster_2026.csv", index=False)
+
+        result = _load_qb_snap_shares(tmp_path)
         assert result.empty
