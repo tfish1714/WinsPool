@@ -1428,78 +1428,101 @@ def _build_profile_z_table(seasons: list, rawdata_dir) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Snap-Count QB Starter Flag
+# QB Starter Availability (sticky reference starter)
 # ---------------------------------------------------------------------------
 
-def compute_starter_qb_flags(snap_counts: pd.DataFrame) -> dict:
-    """Detect when a team's expected season QB starter is no longer playing.
+def compute_qb_availability_flags(seasons: list, rawdata_dir) -> dict:
+    """Per-team, per-week QB starter availability signal.
 
-    Expected starter = QB with most offense_snaps across weeks 1-3 of that season.
-    Flag fires (1.0) from week 4+ when that QB takes <20% of team QB snaps.
-    Returns {(season, week, team): 1.0 if starter out else 0.0}.
-    Covers 2012+ (snap_counts availability); earlier seasons not included.
+    See docs/superpowers/specs/2026-09-17-qb-availability-and-prediction-
+    freshness-design.md Part A for the full design and decided edge cases.
+
+    A team's "reference starter" starts as whoever the depth chart declared
+    pre-week-1, and only reassigns after two consecutive weeks of both (a)
+    the current reference having no Out/Doubtful/Reserve entry and (b) a
+    different QB holding >65% of the team's QB snaps.
+
+    Returns {(season, week, team): 1.0 if the week's reference starter is
+    unavailable that week, else 0.0}. The snap-share leg of the
+    availability check (not the flip-detection leg) only fires for weeks
+    with real snap data -- i.e. it naturally never fires for a future,
+    unplayed game.
     """
-    if snap_counts.empty:
-        return {}
+    rd = Path(rawdata_dir)
+    declared = _load_declared_starters(rd)
+    report   = _load_qb_report_status(rd)
+    reserve  = _load_qb_reserve_status(rd)
+    snaps    = _load_qb_snap_shares(rd)
 
-    sc = snap_counts.copy()
-    if "game_type" in sc.columns:
-        sc = sc[sc["game_type"] == "REG"].copy()
-
-    sc["season"] = pd.to_numeric(sc["season"], errors="coerce")
-    sc["week"]   = pd.to_numeric(sc["week"],   errors="coerce")
-    sc["team"]   = sc["team"].apply(_normalize_team)
-    sc["offense_snaps"] = pd.to_numeric(sc.get("offense_snaps", 0), errors="coerce").fillna(0)
-    sc = sc.dropna(subset=["season", "week", "team"])
-
-    qbs = sc[sc["position"] == "QB"].copy()
-    if qbs.empty:
-        return {}
-
-    id_col = next(
-        (c for c in ["pfr_player_id", "gsis_id", "player_name"] if c in qbs.columns),
-        None,
-    )
-    if id_col is None:
-        return {}
-
-    # Season expected starter: QB with most combined snaps in weeks 1–3
-    early = qbs[qbs["week"].between(1, 3)]
-    starter_map = (
-        early.groupby(["season", "team", id_col], as_index=False)["offense_snaps"]
-        .sum()
-        .sort_values("offense_snaps", ascending=False)
-        .groupby(["season", "team"], as_index=False)
-        .first()[["season", "team", id_col]]
-        .rename(columns={id_col: "starter_id"})
-    )
-
-    # From week 4 onward, compare starter snaps to total team QB snaps
-    week4 = qbs[qbs["week"] >= 4].copy()
-    week4 = week4.merge(starter_map, on=["season", "team"], how="left")
-
-    total_snaps = (
-        week4.groupby(["season", "week", "team"], as_index=False)["offense_snaps"]
-        .sum()
-        .rename(columns={"offense_snaps": "total_qb_snaps"})
-    )
-    starter_snaps = (
-        week4[week4[id_col] == week4["starter_id"]]
-        .groupby(["season", "week", "team"], as_index=False)["offense_snaps"]
-        .sum()
-        .rename(columns={"offense_snaps": "starter_snaps"})
-    )
-
-    result = total_snaps.merge(starter_snaps, on=["season", "week", "team"], how="left")
-    result["starter_snaps"]   = result["starter_snaps"].fillna(0.0)
-    result["total_qb_snaps"]  = result["total_qb_snaps"].clip(lower=1)
-    result["starter_pct"]     = result["starter_snaps"] / result["total_qb_snaps"]
-    result["flag"]            = (result["starter_pct"] < 0.20).astype(float)
-
-    return {
-        (int(r.season), int(r.week), r.team): float(r.flag)
-        for r in result[["season", "week", "team", "flag"]].itertuples(index=False)
+    declared_map = {
+        (int(r.season), int(r.week), r.team): r.gsis_id
+        for r in declared.itertuples(index=False)
     }
+
+    out_rows = report[report["report_status"].isin(["Out", "Doubtful"])] if not report.empty else report
+    report_out = set(zip(out_rows["season"], out_rows["week"], out_rows["gsis_id"])) if not out_rows.empty else set()
+    reserve_set = set(zip(reserve["season"], reserve["week"], reserve["gsis_id"])) if not reserve.empty else set()
+
+    snap_by_team_week: dict = {}
+    for r in snaps.itertuples(index=False):
+        snap_by_team_week.setdefault((r.season, r.week, r.team), {})[r.gsis_id] = r.snap_share
+
+    flags: dict = {}
+    for season in seasons:
+        season_keys = [(s, w, t) for (s, w, t) in declared_map if s == season]
+        if not season_keys:
+            continue
+        teams = sorted({t for (_, _, t) in season_keys})
+
+        # Weeks span every source, not just declared -- a week can carry an
+        # injury/reserve/snap signal with no depth-chart snapshot of its own
+        # (e.g. a mid-season IR move that never got a fresh depth-chart pull).
+        season_weeks = {w for (_, w, _) in season_keys}
+        if not report.empty:
+            season_weeks |= set(report.loc[report["season"] == season, "week"])
+        if not reserve.empty:
+            season_weeks |= set(reserve.loc[reserve["season"] == season, "week"])
+        if not snaps.empty:
+            season_weeks |= set(snaps.loc[snaps["season"] == season, "week"])
+        weeks = sorted(season_weeks)
+
+        for team in teams:
+            reference = declared_map.get((season, weeks[0], team))
+            challenger_streak: list = []
+
+            for wk in weeks:
+                if reference is None:
+                    flags[(season, wk, team)] = 0.0
+                    continue
+
+                ref_out     = (season, wk, reference) in report_out
+                ref_reserve = (season, wk, reference) in reserve_set
+                week_shares = snap_by_team_week.get((season, wk, team), {})
+                ref_share   = week_shares.get(reference)
+                ref_low_snaps = ref_share is not None and ref_share < 0.20
+
+                flags[(season, wk, team)] = (
+                    1.0 if (ref_out or ref_reserve or ref_low_snaps) else 0.0
+                )
+
+                if ref_out or ref_reserve:
+                    challenger_streak = []
+                    continue
+
+                challenger = max(
+                    ((gid, share) for gid, share in week_shares.items()
+                     if gid != reference and share > 0.65),
+                    key=lambda x: x[1], default=None,
+                )
+                challenger_streak = (challenger_streak + [challenger[0] if challenger else None])[-2:]
+
+                if (len(challenger_streak) == 2
+                        and challenger_streak[0] is not None
+                        and challenger_streak[0] == challenger_streak[1]):
+                    reference = challenger_streak[0]
+                    challenger_streak = []
+
+    return flags
 
 
 # ---------------------------------------------------------------------------
@@ -2181,7 +2204,6 @@ def build_master_feature_table(
     box = _load_box_stats_from_weekly(rd)
     pressure = _load_pressure_stats(rd)
     snap_counts = _load_multi_season("snap_counts/snap_counts_*.csv", rd)
-    starter_qb_flags = compute_starter_qb_flags(snap_counts)
     nflverse_rosters = _load_multi_season("rosters/roster_*.csv", rd)
     stats_team_weekly = _load_multi_season("stats_team/stats_team_week_*.csv", rd)
     roster_cache = compute_roster_features(snap_counts, nflverse_rosters, team_stats=stats_team_weekly)

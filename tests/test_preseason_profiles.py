@@ -1091,7 +1091,6 @@ class TestProfileZTableOverrideInFeatureTable:
              patch.object(fe, "_load_rolling_epa", return_value=pd.DataFrame()), \
              patch.object(fe, "_load_trench_rolling_stats", return_value=pd.DataFrame()), \
              patch.object(fe, "_load_multi_season", return_value=pd.DataFrame()), \
-             patch.object(fe, "compute_starter_qb_flags", return_value={}), \
              patch.object(fe, "compute_roster_features", return_value={}), \
              patch.object(fe, "compute_roster_performance", return_value={}), \
              patch.object(fe, "_build_profile_z_table", return_value=profile_table):
@@ -1122,7 +1121,6 @@ class TestProfileZTableOverrideInFeatureTable:
              patch.object(fe, "_load_rolling_epa", return_value=pd.DataFrame()), \
              patch.object(fe, "_load_trench_rolling_stats", return_value=pd.DataFrame()), \
              patch.object(fe, "_load_multi_season", return_value=pd.DataFrame()), \
-             patch.object(fe, "compute_starter_qb_flags", return_value={}), \
              patch.object(fe, "compute_roster_features", return_value={}), \
              patch.object(fe, "compute_roster_performance", return_value={}), \
              patch.object(fe, "_build_profile_z_table", return_value=profile_table):
@@ -1151,7 +1149,6 @@ class TestProfileZTableOverrideInFeatureTable:
              patch.object(fe, "_load_rolling_epa", return_value=pd.DataFrame()), \
              patch.object(fe, "_load_trench_rolling_stats", return_value=pd.DataFrame()), \
              patch.object(fe, "_load_multi_season", return_value=pd.DataFrame()), \
-             patch.object(fe, "compute_starter_qb_flags", return_value={}), \
              patch.object(fe, "compute_roster_features", return_value={}), \
              patch.object(fe, "compute_roster_performance", return_value={}), \
              patch.object(fe, "_build_profile_z_table", return_value=profile_table):

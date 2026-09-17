@@ -2,6 +2,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+from unittest.mock import patch
 
 from services.nn_feature_engine import FEATURE_COLUMNS
 
@@ -833,3 +834,124 @@ class TestLoadQbSnapShares:
         # So matched QB should be 40/50 = 0.8, NOT 1.0
         assert matched["snap_share"] == pytest.approx(0.8), \
             f"Matched QB with 40 snaps out of 50 total should be 0.8, got {matched['snap_share']}"
+
+
+# ---------------------------------------------------------------------------
+# Task 3: QB Availability Flags (sticky-reference algorithm)
+# ---------------------------------------------------------------------------
+
+class TestComputeQbAvailabilityFlags:
+    def _patch_loaders(self, declared, report, reserve, snaps):
+        import services.nn_feature_engine as nfe
+        return [
+            patch.object(nfe, "_load_declared_starters", return_value=pd.DataFrame(declared)),
+            patch.object(nfe, "_load_qb_report_status", return_value=pd.DataFrame(report)),
+            patch.object(nfe, "_load_qb_reserve_status", return_value=pd.DataFrame(reserve)),
+            patch.object(nfe, "_load_qb_snap_shares", return_value=pd.DataFrame(snaps)),
+        ]
+
+    def test_healthy_starter_all_season_flags_zero(self, tmp_path):
+        from services.nn_feature_engine import compute_qb_availability_flags
+        declared = [{"season": 2026, "week": w, "team": "AAA", "gsis_id": "QB1"} for w in [1, 2, 3]]
+        patches = self._patch_loaders(declared, [], [], [])
+        with patches[0], patches[1], patches[2], patches[3]:
+            result = compute_qb_availability_flags([2026], tmp_path)
+        assert result == {
+            (2026, 1, "AAA"): 0.0, (2026, 2, "AAA"): 0.0, (2026, 3, "AAA"): 0.0,
+        }
+
+    def test_starter_hurt_mid_game_week1_still_flags_via_snap_share(self, tmp_path):
+        """Regression for the SEA/MIN case: week-1 starter identified from
+        the depth chart (not from who happened to play the most snaps that
+        game), then flagged unavailable in week 2 via the injury report."""
+        from services.nn_feature_engine import compute_qb_availability_flags
+        declared = [{"season": 2026, "week": 1, "team": "SEA", "gsis_id": "DARNOLD"}]
+        report = [{"season": 2026, "week": 2, "team": "SEA", "gsis_id": "DARNOLD",
+                   "report_status": "Out"}]
+        # Week 1's own snaps show the backup played most of the game -- must
+        # NOT be used to override the depth-chart-declared starter.
+        snaps = [
+            {"season": 2026, "week": 1, "team": "SEA", "gsis_id": "DARNOLD", "snap_share": 0.10},
+            {"season": 2026, "week": 1, "team": "SEA", "gsis_id": "LOCK", "snap_share": 0.90},
+        ]
+        patches = self._patch_loaders(declared, report, [], snaps)
+        with patches[0], patches[1], patches[2], patches[3]:
+            result = compute_qb_availability_flags([2026], tmp_path)
+        assert result[(2026, 1, "SEA")] == 1.0  # Darnold at 10% snaps -> unavailable that week too
+        assert result[(2026, 2, "SEA")] == 1.0  # Darnold on injury report
+
+    def test_reserve_status_flags_when_injury_report_silent(self, tmp_path):
+        """A season-ending IR move often drops off the weekly injury report
+        entirely -- the Reserve/IR roster status leg must catch it anyway."""
+        from services.nn_feature_engine import compute_qb_availability_flags
+        declared = [{"season": 2026, "week": w, "team": "SEA", "gsis_id": "DARNOLD"} for w in [1, 2]]
+        reserve = [{"season": 2026, "week": 2, "team": "SEA", "gsis_id": "DARNOLD"}]
+        patches = self._patch_loaders(declared, [], reserve, [])
+        with patches[0], patches[1], patches[2], patches[3]:
+            result = compute_qb_availability_flags([2026], tmp_path)
+        assert result[(2026, 2, "SEA")] == 1.0
+
+    def test_single_week_healthy_rest_does_not_flip_reference(self, tmp_path):
+        """One week of a healthy backup (no injury/reserve entry for the
+        starter) must not permanently reassign the reference -- only two
+        CONSECUTIVE weeks of a >65% snap-share challenger does."""
+        from services.nn_feature_engine import compute_qb_availability_flags
+        declared = [{"season": 2026, "week": w, "team": "AAA", "gsis_id": "STARTER"} for w in [1, 2, 3]]
+        snaps = [
+            {"season": 2026, "week": 1, "team": "AAA", "gsis_id": "STARTER", "snap_share": 1.0},
+            {"season": 2026, "week": 2, "team": "AAA", "gsis_id": "STARTER", "snap_share": 0.05},
+            {"season": 2026, "week": 2, "team": "AAA", "gsis_id": "BACKUP", "snap_share": 0.95},
+            {"season": 2026, "week": 3, "team": "AAA", "gsis_id": "STARTER", "snap_share": 1.0},
+        ]
+        patches = self._patch_loaders(declared, [], [], snaps)
+        with patches[0], patches[1], patches[2], patches[3]:
+            result = compute_qb_availability_flags([2026], tmp_path)
+        # Week 2 itself reads as unavailable (starter under 20% snaps that week)...
+        assert result[(2026, 2, "AAA")] == 1.0
+        # ...but week 3 the starter is back and the reference never flipped.
+        assert result[(2026, 3, "AAA")] == 0.0
+
+    def test_two_consecutive_weeks_of_healthy_benching_flips_reference(self, tmp_path):
+        """A genuine benching (or a resolving preseason committee): the
+        reference flips to the new starter, and the flag then tracks THEM,
+        not the original starter."""
+        from services.nn_feature_engine import compute_qb_availability_flags
+        declared = [{"season": 2026, "week": w, "team": "AAA", "gsis_id": "STARTER"} for w in [1, 2, 3, 4]]
+        snaps = [
+            {"season": 2026, "week": w, "team": "AAA", "gsis_id": "STARTER", "snap_share": 0.05}
+            for w in [2, 3, 4]
+        ] + [
+            {"season": 2026, "week": w, "team": "AAA", "gsis_id": "BACKUP", "snap_share": 0.95}
+            for w in [2, 3, 4]
+        ]
+        patches = self._patch_loaders(declared, [], [], snaps)
+        with patches[0], patches[1], patches[2], patches[3]:
+            result = compute_qb_availability_flags([2026], tmp_path)
+        # Week 4: reference has flipped to BACKUP, who is playing at 95% ->
+        # available, even though the ORIGINAL starter is still at 5%.
+        assert result[(2026, 4, "AAA")] == 0.0
+
+    def test_reference_stays_pinned_while_starter_has_any_injury_entry(self, tmp_path):
+        """Even if a backup holds the job for weeks, the reference does NOT
+        flip while the original starter still shows an Out/Doubtful entry --
+        only a healthy-but-benched starter can lose the reference."""
+        from services.nn_feature_engine import compute_qb_availability_flags
+        declared = [{"season": 2026, "week": w, "team": "AAA", "gsis_id": "STARTER"} for w in [1, 2, 3, 4]]
+        report = [
+            {"season": 2026, "week": w, "team": "AAA", "gsis_id": "STARTER", "report_status": "Out"}
+            for w in [2, 3, 4]
+        ]
+        snaps = [
+            {"season": 2026, "week": w, "team": "AAA", "gsis_id": "BACKUP", "snap_share": 1.0}
+            for w in [2, 3, 4]
+        ]
+        patches = self._patch_loaders(declared, report, [], snaps)
+        with patches[0], patches[1], patches[2], patches[3]:
+            result = compute_qb_availability_flags([2026], tmp_path)
+        for w in [2, 3, 4]:
+            assert result[(2026, w, "AAA")] == 1.0, f"week {w} should still flag -- starter still Out"
+
+    def test_missing_declared_starter_fails_open(self, tmp_path):
+        from services.nn_feature_engine import compute_qb_availability_flags
+        result = compute_qb_availability_flags([2026], tmp_path)
+        assert result == {}
