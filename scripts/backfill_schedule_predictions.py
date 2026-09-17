@@ -42,18 +42,15 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
-import numpy as np
 import pandas as pd
 
-from services.nn_feature_engine import (
-    build_master_feature_table, _normalize_team, compute_qb_availability_flags, RAWDATA_DIR,
-)
+from services.nn_feature_engine import build_master_feature_table, _normalize_team
 from services.nn_prediction_service import NNPredictionService, build_ensemble_lookup
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
-from services.nn_projection_engine import NNProjectionEngine
+from services.nn_projection_engine import NNProjectionEngine, build_mc_prediction_entry
 from services.cache_service import get_game_predictions, write_game_predictions, write_prediction_features
-from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, PROB_CLIP_MIN, PROB_CLIP_MAX, SPREAD_TO_PROB_SCALE
+from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 from services.feature_audit_service import compute_feature_audit
 
 
@@ -125,25 +122,12 @@ def _build_predictions_map(year: int, ft_lookup: dict,
         profile_dict = {row["team"]: row.to_dict() for _, row in engine._team_profiles.iterrows()}
         sim = engine.simulate_season(schedule_df, n_sims=10_000,
                                      completed_results=completed_results)
-        qb_avail = compute_qb_availability_flags([year], RAWDATA_DIR)
-
-        def _pf(d, col, default=0.0):
-            v = d.get(col, default)
-            try:
-                return float(v) if v is not None and not (isinstance(v, float) and np.isnan(v)) else default
-            except (TypeError, ValueError):
-                return default
 
         for key, gp in sim["game_probs"].items():
             if key in played_keys:
                 continue  # never overwrite a locked feature-table prediction
-            ht   = gp["home_team"]
-            at   = gp["away_team"]
-            wk   = gp["week"]
-            hp   = gp["mean_prob"]
-            winner = ht if hp >= 0.5 else at
-            conf   = round(max(hp, 1.0 - hp) * 100, 1)
-            ms     = gp["model_spread"]
+            ht = gp["home_team"]
+            wk = gp["week"]
 
             # Vegas line from schedule if available
             sched_row = schedule_df[
@@ -154,69 +138,20 @@ def _build_predictions_map(year: int, ft_lookup: dict,
             if not sched_row.empty and pd.notna(sched_row.iloc[0].get("spread_line")):
                 sl_val = float(sched_row.iloc[0]["spread_line"])
 
-            edge   = round(ms - sl_val, 1) if sl_val is not None else None
-            ats    = ht if ms > (sl_val or 0) else at
-            vhp    = (round(1.0 / (1.0 + np.exp(-sl_val / SPREAD_TO_PROB_SCALE)), 4)
-                      if sl_val is not None else None)
-
-            h_prof = profile_dict.get(ht, {})
-            a_prof = profile_dict.get(at, {})
-
-            elo_diff_val     = round(_pf(h_prof, "elo_pre", 1500) - _pf(a_prof, "elo_pre", 1500), 1)
-            roster_delta_val = round(_pf(h_prof, "roster_talent_delta") - _pf(a_prof, "roster_talent_delta"), 3)
-            pass_epa_val     = round(
-                (_pf(h_prof, "off_pass_epa_roll") - _pf(a_prof, "def_pass_epa_roll"))
-                - (_pf(a_prof, "off_pass_epa_roll") - _pf(h_prof, "def_pass_epa_roll")), 3
+            # Shared with cache_builder.py's own MC fallback -- see
+            # build_mc_prediction_entry()'s docstring for why the explanation
+            # payload must be built in exactly one place. QB availability
+            # comes off the engine (initialize() already computed it) rather
+            # than a second compute_qb_availability_flags() pass over the same
+            # 4 file globs.
+            entry = build_mc_prediction_entry(
+                engine, gp, year, spread_line=sl_val, profile_dict=profile_dict,
+                source="mc_simulation (10000 trials)",
             )
-            rush_epa_val     = round(
-                (_pf(h_prof, "off_rush_epa_roll") - _pf(a_prof, "def_rush_epa_roll"))
-                - (_pf(a_prof, "off_rush_epa_roll") - _pf(h_prof, "def_rush_epa_roll")), 3
-            )
-            trench_val       = round(_pf(h_prof, "trench_score") - _pf(a_prof, "trench_score"), 1)
-            point_diff_val   = round(_pf(h_prof, "margin_roll") - _pf(a_prof, "margin_roll"), 2)
-
-            # Week-aware roster value (same source simulate_season() actually
-            # fed the model -- see NNProjectionEngine.lookup_roster_value())
-            # instead of the flat prior-season profile average used above.
-            h_rv = engine.lookup_roster_value(ht, int(wk))
-            a_rv = engine.lookup_roster_value(at, int(wk))
-            off_roster_val = round(
-                _pf(h_rv, "off_roster_value") - _pf(a_rv, "off_roster_value"), 3
-            )
-            def_roster_val = round(
-                _pf(h_rv, "def_roster_value") - _pf(a_rv, "def_roster_value"), 3
-            )
-
-            result[key] = {
-                "pred_prob":     round(hp, 4),
-                "pred_winner":   winner,
-                "pred_su_conf":  conf,
-                "pred_ats_pick": ats,
-                "model_spread":  ms,
-                "edge_vs_vegas": edge,
-                "locked": False,
-                "explanation": {
-                    "vegas_line":           sl_val,
-                    "vegas_home_prob":      vhp,
-                    "model_spread":         ms,
-                    "edge_vs_vegas":        edge,
-                    "elo_diff":             elo_diff_val,
-                    "roster_delta":         roster_delta_val,
-                    "pass_epa_matchup":     pass_epa_val,
-                    "rush_epa_matchup":     rush_epa_val,
-                    "early_down_matchup":   0.0,
-                    "turnover_margin":      0.0,
-                    "point_diff_advantage": point_diff_val,
-                    "home_qb_out":          qb_avail.get((year, int(wk), ht), 0.0),
-                    "away_qb_out":          qb_avail.get((year, int(wk), at), 0.0),
-                    "rest_advantage":       0.0,
-                    "travel_disadvantage":  0.0,
-                    "trench_dominance":     trench_val,
-                    "off_roster_value":     off_roster_val,
-                    "def_roster_value":     def_roster_val,
-                    "source": "mc_simulation (10000 trials)",
-                },
-            }
+            entry["locked"] = False
+            if entry.get("explanation") is None:
+                entry.pop("explanation", None)
+            result[key] = entry
 
     if not force:
         existing = get_game_predictions(year)

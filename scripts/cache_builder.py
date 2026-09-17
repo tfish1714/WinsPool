@@ -46,7 +46,9 @@ from services.cache_service import (
 )
 import services.analysis_service as analysis
 from services.prediction_service import PredictionService
-from services.nn_projection_engine import NNProjectionEngine
+from services.nn_projection_engine import (
+    NNProjectionEngine, build_mc_prediction_entry, derive_prediction_scalars,
+)
 from services.nn_prediction_service import NNPredictionService, build_ensemble_lookup
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
@@ -84,49 +86,58 @@ def _build_completed_results(games: pd.DataFrame, year: int) -> dict:
     return completed
 
 
-def _derive_prediction_fields(ht: str, at: str, mean_prob: float, model_spread: float, spread_line) -> dict:
-    """Shared winner/confidence/ATS-pick/edge-vs-vegas/explanation derivation
-    from a simulate_season() game_probs_out entry -- used by both
-    _apply_predictions()'s fallback branch and _publish_game_probs() so
-    the two call sites can't independently drift (previously only one of
-    them wrote model_spread, and neither computed edge_vs_vegas from it,
-    leaving a stale/inconsistent pair for anything reading edge_vs_vegas,
-    e.g. services/betting_screener_service.py). Also builds a matching
-    `explanation` dict (previously only backfill_schedule_predictions.py's
-    own, separate fallback branch did this) so the daily cache_builder job
-    doesn't leave `explanation` frozen at whatever a manual backfill run
-    last wrote."""
-    winner = ht if mean_prob >= 0.5 else at
-    conf = round(max(mean_prob, 1.0 - mean_prob) * 100, 1)
-    ats = winner
-    edge_vs_vegas = None
-    if pd.notna(spread_line):
-        try:
-            sl_val = float(spread_line)
-            ats = ht if model_spread > sl_val else at
-            edge_vs_vegas = round(model_spread - sl_val, 1)
-        except (ValueError, TypeError):
-            pass
-    return {
-        "pred_winner": winner,
-        "pred_su_conf": conf,
-        "pred_ats_pick": ats,
-        "model_spread": model_spread,
-        "edge_vs_vegas": edge_vs_vegas,
-        "explanation": {
-            "vegas_line": float(spread_line) if pd.notna(spread_line) else None,
-            "model_spread": model_spread,
-            "edge_vs_vegas": edge_vs_vegas,
-            "source": "mc_simulation (daily cache_builder)",
-        },
-    }
+def _build_mc_entry(engine, gp: dict, year: int, spread_line, profile_dict: dict = None,
+                    source: str = "mc_simulation (daily cache_builder)") -> dict:
+    """One stored-prediction entry for a Monte-Carlo-simulated game.
+
+    Thin wrapper over the shared
+    services.nn_projection_engine.build_mc_prediction_entry() -- the single
+    place the rich 19-key `explanation` payload is built, so this daily job
+    and backfill_schedule_predictions.py's weekly run write the SAME shape for
+    the same future game.
+
+    Two local rules on top of it:
+      * no engine (can't build an explanation at all) -> scalar fields only.
+      * an explanation that came back None is dropped, not written.
+    Either way `explanation` is then absent from the entry, and
+    cache_service.merge_thin_game_predictions() leaves whatever is already
+    stored for that game alone. That matters because the merge is per-key and
+    shallow: writing ANY explanation dict replaces the stored one wholesale,
+    so a thinner one silently destroys the rest of its fields (this is exactly
+    how the daily run used to wipe home_qb_out/away_qb_out/elo_diff/the EPA
+    matchups/etc. off every future game between weekly backfills).
+    """
+    if engine is not None:
+        entry = build_mc_prediction_entry(
+            engine, gp, year, spread_line=spread_line,
+            profile_dict=profile_dict, source=source,
+        )
+    else:
+        entry = derive_prediction_scalars(
+            gp['home_team'], gp['away_team'], float(gp['mean_prob']),
+            gp['model_spread'], spread_line,
+        )
+        entry.pop('vegas_line', None)
+        entry['pred_prob'] = round(float(gp['mean_prob']), 4)
+    if entry.get('explanation') is None:
+        entry.pop('explanation', None)
+    return entry
 
 
-def _publish_game_probs(game_ids: list, games: pd.DataFrame, year: int, game_probs: dict) -> int:
+def _publish_game_probs(game_ids: list, games: pd.DataFrame, year: int, game_probs: dict,
+                        engine=None) -> int:
     """Publish only game_ids' entries from a simulate_season() game_probs_out
     dict into game_predictions, via the same merge-preserving path
     build_year() already uses -- every other stored game (including richer
     fields like model_spread/edge_vs_vegas the merge preserves) is untouched.
+
+    With `engine` (the initialize()d NNProjectionEngine that produced
+    game_probs), each published entry also carries the full `explanation`
+    payload from build_mc_prediction_entry() -- the same one
+    backfill_schedule_predictions.py writes. Without it, `explanation` is
+    omitted entirely so whatever richer dict is already stored survives the
+    merge (never replaced by a thinner one -- see merge_thin_game_predictions,
+    which merges per key, not per key-within-explanation).
     """
     target = games[games["game_id"].astype(str).isin(game_ids)].copy()
     if target.empty:
@@ -144,18 +155,9 @@ def _publish_game_probs(game_ids: list, games: pd.DataFrame, year: int, game_pro
         gp = game_probs.get(key)
         if not gp:
             continue
-        hp = gp['mean_prob']
-        ms = gp['model_spread']
-        spread = row.get('spread_line')
-        derived = _derive_prediction_fields(ht, at, hp, ms, spread)
-        pmap[key] = {
-            'pred_prob':      round(hp, 4),
-            'pred_winner':    derived['pred_winner'],
-            'pred_su_conf':   derived['pred_su_conf'],
-            'pred_ats_pick':  derived['pred_ats_pick'],
-            'model_spread':   derived['model_spread'],
-            'edge_vs_vegas':  derived['edge_vs_vegas'],
-        }
+        entry = _build_mc_entry(engine, gp, year, row.get('spread_line'),
+                                source="mc_simulation (resimulate)")
+        pmap[key] = entry
 
     if not pmap:
         print("[cache_builder] --resimulate: no predictions produced for requested games")
@@ -226,6 +228,15 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
         except Exception:
             game_probs = {}
 
+        # Built once for the whole season rather than per game.
+        profile_dict = None
+        if game_probs:
+            try:
+                profile_dict = {r["team"]: r.to_dict()
+                                for _, r in fallback_engine._team_profiles.iterrows()}
+            except Exception:
+                profile_dict = None
+
         for i in unplayed_idx:
             row = schedule_df.iloc[i]
             ht = _normalize_team(str(row.get('home_team', '') or ''))
@@ -237,17 +248,15 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
             gp = game_probs.get(key)
             if not gp:
                 continue
-            hp = gp['mean_prob']
-            ms = gp['model_spread']
-            spread = row.get('spread_line')
-            derived = _derive_prediction_fields(ht, at, hp, ms, spread)
-            pred_winners[i] = derived['pred_winner']
-            pred_confs[i]   = derived['pred_su_conf']
-            pred_ats[i]     = derived['pred_ats_pick']
-            pred_probs[i]   = round(hp, 4)
-            pred_spreads[i] = derived['model_spread']
-            pred_edges[i]   = derived['edge_vs_vegas']
-            explanations[i] = derived['explanation']
+            entry = _build_mc_entry(fallback_engine, gp, year, row.get('spread_line'),
+                                    profile_dict=profile_dict)
+            pred_winners[i] = entry['pred_winner']
+            pred_confs[i]   = entry['pred_su_conf']
+            pred_ats[i]     = entry['pred_ats_pick']
+            pred_probs[i]   = entry['pred_prob']
+            pred_spreads[i] = entry['model_spread']
+            pred_edges[i]   = entry['edge_vs_vegas']
+            explanations[i] = entry.get('explanation')
 
     out = schedule_df.copy()
     out['pred_winner']  = pred_winners
@@ -557,7 +566,8 @@ def main():
         completed_results = _build_completed_results(yr_games, year)
         sim = engine.simulate_season(yr_games, n_sims=RESIMULATE_N_SIMS, completed_results=completed_results)
 
-        n = _publish_game_probs(game_ids, games, year, sim.get("game_probs", {}))
+        n = _publish_game_probs(game_ids, games, year, sim.get("game_probs", {}),
+                                engine=engine)
         print(f"[cache_builder] --resimulate: published {n} prediction(s).")
 
         try:
