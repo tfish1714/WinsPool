@@ -789,6 +789,70 @@ class TestComputePreseasonPlayerProfilesDataQualityWarnings:
         assert not any("dl_perf == 0.0" in r.message for r in caplog.records)
 
 
+class TestWeekAwareRosterSnapshot:
+    def _write_common_files(self, tmp_path, season=2026):
+        """depth_chart/advstats/snap_counts shared by both roster scenarios below."""
+        prior = season - 1
+        (tmp_path / "depth_charts").mkdir(exist_ok=True)
+        pd.concat([_fake_depth_chart(), _fake_def_depth_chart()], ignore_index=True).to_csv(
+            tmp_path / "depth_charts" / f"depth_charts_{season}.csv", index=False)
+        (tmp_path / "pfr_advstats").mkdir(exist_ok=True)
+        _fake_def_advstats().to_csv(
+            tmp_path / "pfr_advstats" / f"advstats_week_def_{prior}.csv", index=False)
+        (tmp_path / "snap_counts").mkdir(exist_ok=True)
+        pd.concat([_fake_snap_counts(), _fake_def_snap_counts()], ignore_index=True).to_csv(
+            tmp_path / "snap_counts" / f"snap_counts_{prior}.csv", index=False)
+
+    def test_week_param_reads_weekly_rosters_not_current_roster_file(self, tmp_path):
+        """The 'current' rosters/roster_{year}.csv is mutated to a DIFFERENT
+        roster than week 1's weekly_rosters snapshot -- week=1 must use the
+        weekly_rosters content, not the mutated current file."""
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        self._write_common_files(tmp_path)
+
+        week1_roster = pd.concat([_fake_roster(), _fake_def_roster()], ignore_index=True)
+        week1_roster["week"] = 1
+
+        # "Current" roster file has since drifted (e.g. an OL cut, replaced
+        # by a much younger/less experienced player) -- simulates today's
+        # roster file no longer matching what existed at week 1's kickoff.
+        # birth_date (not years_exp, which nn_feature_engine never reads) is
+        # what actually feeds the age multiplier behind ol_av.
+        drifted_roster = week1_roster.copy()
+        drifted_roster.loc[drifted_roster["position"] == "T", "birth_date"] = "2004-01-01"
+
+        (tmp_path / "weekly_rosters").mkdir(exist_ok=True)
+        week1_roster.to_csv(tmp_path / "weekly_rosters" / f"roster_weekly_{2026}.csv", index=False)
+        (tmp_path / "rosters").mkdir(exist_ok=True)
+        drifted_roster.to_csv(tmp_path / "rosters" / f"roster_{2026}.csv", index=False)
+
+        week1_result = compute_preseason_player_profiles(2026, tmp_path, week=1)
+        latest_result = compute_preseason_player_profiles(2026, tmp_path, week=None)
+
+        assert week1_result["AAA"]["ol_av"] != latest_result["AAA"]["ol_av"], (
+            "week=1 must use weekly_rosters' week-1 snapshot, not the "
+            "mutated 'current' rosters/roster_{year}.csv"
+        )
+
+    def test_week_param_omitted_keeps_reading_current_roster_file(self, tmp_path):
+        """Default behavior (week=None) must be unchanged -- this is the
+        path NNProjectionEngine.simulate_season() relies on for future games."""
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        self._write_common_files(tmp_path)
+        (tmp_path / "rosters").mkdir(exist_ok=True)
+        pd.concat([_fake_roster(), _fake_def_roster()], ignore_index=True).to_csv(
+            tmp_path / "rosters" / f"roster_{2026}.csv", index=False)
+
+        result = compute_preseason_player_profiles(2026, tmp_path)  # no weekly_rosters/ dir at all
+        assert "AAA" in result
+
+    def test_missing_weekly_rosters_file_returns_empty_when_week_given(self, tmp_path):
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        self._write_common_files(tmp_path)
+        result = compute_preseason_player_profiles(2026, tmp_path, week=1)
+        assert result == {}
+
+
 class TestNNProjectionEngineInitialize:
     def test_preseason_profiles_set_when_snap_empty(self, tmp_path, monkeypatch):
         """When no 2026 snap data exists, initialize() should set _preseason_profiles."""
@@ -997,6 +1061,21 @@ class TestPreseasonEloBoost:
         assert state[team_idx["BAD"],  0] == pytest.approx(1500.0)
 
 
+def test_build_profile_z_table_keys_include_week(tmp_path):
+    from services.nn_feature_engine import _build_profile_z_table
+    from unittest.mock import patch
+    with patch(
+        "services.nn_feature_engine.compute_preseason_player_profiles",
+        return_value={"AAA": {"dl_perf": 1.0, "qb_tier": 1.0, "ol_av": 1.0,
+                               "off_pass_epa": 1.0, "def_pass_epa": 1.0},
+                      "BBB": {"dl_perf": -1.0, "qb_tier": -1.0, "ol_av": -1.0,
+                              "off_pass_epa": -1.0, "def_pass_epa": -1.0}},
+    ):
+        result = _build_profile_z_table([(2026, 1), (2026, 2)], tmp_path)
+    assert (2026, 1, "AAA") in result
+    assert (2026, 2, "AAA") in result
+
+
 class TestBuildProfileZTable:
     def _make_raw_profiles(self):
         """Minimal two-team profile dict as returned by compute_preseason_player_profiles."""
@@ -1015,9 +1094,9 @@ class TestBuildProfileZTable:
         profiles = self._make_raw_profiles()
         with patch("services.nn_feature_engine.compute_preseason_player_profiles",
                    return_value=profiles):
-            table = _build_profile_z_table([2024], rawdata_dir=".")
-        assert (2024, "AAA") in table
-        assert (2024, "BBB") in table
+            table = _build_profile_z_table([(2024, 1)], rawdata_dir=".")
+        assert (2024, 1, "AAA") in table
+        assert (2024, 1, "BBB") in table
 
     def test_z_scores_sum_to_zero_across_teams(self):
         from services.nn_feature_engine import _build_profile_z_table
@@ -1025,10 +1104,10 @@ class TestBuildProfileZTable:
         profiles = self._make_raw_profiles()
         with patch("services.nn_feature_engine.compute_preseason_player_profiles",
                    return_value=profiles):
-            table = _build_profile_z_table([2024], rawdata_dir=".")
+            table = _build_profile_z_table([(2024, 1)], rawdata_dir=".")
         dims = ["dl_perf", "qb_tier", "ol_av", "off_pass_epa", "def_pass_epa"]
         for d in dims:
-            total = table[(2024, "AAA")][d] + table[(2024, "BBB")][d]
+            total = table[(2024, 1, "AAA")][d] + table[(2024, 1, "BBB")][d]
             assert abs(total) < 1e-6, f"{d} z-scores don't sum to 0: {total}"
 
     def test_stronger_team_has_positive_dl_z(self):
@@ -1037,28 +1116,29 @@ class TestBuildProfileZTable:
         profiles = self._make_raw_profiles()
         with patch("services.nn_feature_engine.compute_preseason_player_profiles",
                    return_value=profiles):
-            table = _build_profile_z_table([2024], rawdata_dir=".")
+            table = _build_profile_z_table([(2024, 1)], rawdata_dir=".")
         # AAA has higher dl_perf (500 vs 200) so should have positive z
-        assert table[(2024, "AAA")]["dl_perf"] > 0
-        assert table[(2024, "BBB")]["dl_perf"] < 0
+        assert table[(2024, 1, "AAA")]["dl_perf"] > 0
+        assert table[(2024, 1, "BBB")]["dl_perf"] < 0
 
     def test_empty_profiles_returns_no_entry_for_season(self):
         from services.nn_feature_engine import _build_profile_z_table
         from unittest.mock import patch
         with patch("services.nn_feature_engine.compute_preseason_player_profiles",
                    return_value={}):
-            table = _build_profile_z_table([2024], rawdata_dir=".")
+            table = _build_profile_z_table([(2024, 1)], rawdata_dir=".")
         assert not any(k[0] == 2024 for k in table)
 
-    def test_multiple_seasons_both_populated(self):
+    def test_multiple_season_weeks_all_populated(self):
         from services.nn_feature_engine import _build_profile_z_table
         from unittest.mock import patch
         profiles = self._make_raw_profiles()
         with patch("services.nn_feature_engine.compute_preseason_player_profiles",
                    return_value=profiles):
-            table = _build_profile_z_table([2023, 2024], rawdata_dir=".")
+            table = _build_profile_z_table([(2023, 1), (2024, 1), (2024, 2)], rawdata_dir=".")
         assert any(k[0] == 2023 for k in table)
-        assert any(k[0] == 2024 for k in table)
+        assert (2024, 1, "AAA") in table
+        assert (2024, 2, "AAA") in table
 
 
 class TestProfileZTableOverrideInFeatureTable:
@@ -1082,7 +1162,7 @@ class TestProfileZTableOverrideInFeatureTable:
                   "off_pass_epa": 0.8, "def_pass_epa": -0.3}
         bal_z = {"dl_perf": -0.5, "qb_tier": 0.2, "ol_av": -0.3,
                   "off_pass_epa": 0.3, "def_pass_epa": 0.1}
-        profile_table = {(2024, "KC"): kc_z, (2024, "BAL"): bal_z}
+        profile_table = {(2024, 1, "KC"): kc_z, (2024, 1, "BAL"): bal_z}
 
         with patch.object(fe, "_load_schedule", return_value=sched), \
              patch.object(fe, "_load_elo", return_value=pd.DataFrame()), \
@@ -1112,7 +1192,7 @@ class TestProfileZTableOverrideInFeatureTable:
                   "off_pass_epa": 0.0, "def_pass_epa": 0.0}
         bal_z = {"dl_perf": 0.0, "qb_tier": -1.0, "ol_av": -1.0,
                   "off_pass_epa": 0.0, "def_pass_epa": 0.0}
-        profile_table = {(2024, "KC"): kc_z, (2024, "BAL"): bal_z}
+        profile_table = {(2024, 1, "KC"): kc_z, (2024, 1, "BAL"): bal_z}
 
         with patch.object(fe, "_load_schedule", return_value=sched), \
              patch.object(fe, "_load_elo", return_value=pd.DataFrame()), \
@@ -1140,7 +1220,7 @@ class TestProfileZTableOverrideInFeatureTable:
                   "off_pass_epa": 1.0, "def_pass_epa": -1.0}
         bal_z = {"dl_perf": 0.0, "qb_tier": 0.0, "ol_av": 0.0,
                   "off_pass_epa": 0.0, "def_pass_epa": 0.0}
-        profile_table = {(2024, "KC"): kc_z, (2024, "BAL"): bal_z}
+        profile_table = {(2024, 1, "KC"): kc_z, (2024, 1, "BAL"): bal_z}
 
         with patch.object(fe, "_load_schedule", return_value=sched), \
              patch.object(fe, "_load_elo", return_value=pd.DataFrame()), \

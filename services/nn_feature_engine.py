@@ -1267,27 +1267,44 @@ def _normalize_depth_chart(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def compute_preseason_player_profiles(target_season: int, rawdata_dir) -> dict:
+def compute_preseason_player_profiles(target_season: int, rawdata_dir, week: int = None) -> dict:
     """Build per-team EPA quality estimates from projected roster + prior-season player stats.
 
     Replaces compute_preseason_roster_features() for all position groups.
     Returns {team: {off_pass_epa, off_rush_epa, def_pass_epa, def_rush_epa,
                     ol_av, dl_perf, qb_tier}}.
     Returns {} if required files (roster or depth_charts) are missing.
+
+    Args:
+        week: When given, uses that week's own roster snapshot
+            (weekly_rosters/roster_weekly_{target_season}.csv, filtered to
+            this week) instead of the rolling "current" roster file --
+            needed to grade an already-played week without picking up
+            roster changes that happened afterward. None (default) keeps
+            reading the latest snapshot, which is correct when projecting a
+            game that hasn't been played yet.
     """
     prior = target_season - 1
     rd = Path(rawdata_dir)
 
-    roster_path  = rd / "rosters"      / f"roster_{target_season}.csv"
     dc_path      = rd / "depth_charts" / f"depth_charts_{target_season}.csv"
     adv_def_path = rd / "pfr_advstats" / f"advstats_week_def_{prior}.csv"
     snap_path    = rd / "snap_counts"  / f"snap_counts_{prior}.csv"
 
+    if week is not None:
+        roster_path = rd / "weekly_rosters" / f"roster_weekly_{target_season}.csv"
+    else:
+        roster_path = rd / "rosters" / f"roster_{target_season}.csv"
+
     if not roster_path.exists() or not dc_path.exists():
         return {}
 
-    roster      = pd.read_csv(roster_path, low_memory=False)
-    depth_chart = pd.read_csv(dc_path,     low_memory=False)
+    roster = pd.read_csv(roster_path, low_memory=False)
+    if week is not None:
+        roster = roster[pd.to_numeric(roster["week"], errors="coerce") == week]
+        if roster.empty:
+            return {}
+    depth_chart = pd.read_csv(dc_path, low_memory=False)
 
     depth_chart = _normalize_depth_chart(depth_chart)
 
@@ -1398,18 +1415,20 @@ def compute_preseason_player_profiles(target_season: int, rawdata_dir) -> dict:
     return raw
 
 
-def _build_profile_z_table(seasons: list, rawdata_dir) -> dict:
-    """Compute cross-team z-scores for 5 profile dimensions for each season.
+def _build_profile_z_table(season_weeks: list, rawdata_dir) -> dict:
+    """Compute cross-team z-scores for 5 profile dimensions for each
+    (season, week) pair, using that week's own roster snapshot.
 
-    Returns {(season, team): {dl_perf, qb_tier, ol_av, off_pass_epa, def_pass_epa}}
-    where each value is that team's z-score within the season's 32-team distribution.
-    Seasons where compute_preseason_player_profiles returns {} are skipped silently.
+    Returns {(season, week, team): {dl_perf, qb_tier, ol_av, off_pass_epa, def_pass_epa}}
+    where each value is that team's z-score within that week's 32-team
+    distribution. Pairs where compute_preseason_player_profiles returns {}
+    are skipped silently.
     """
     _DIMS = ["dl_perf", "qb_tier", "ol_av", "off_pass_epa", "def_pass_epa"]
     table: dict = {}
-    for season in seasons:
+    for season, week in season_weeks:
         try:
-            profiles = compute_preseason_player_profiles(season, rawdata_dir)
+            profiles = compute_preseason_player_profiles(season, rawdata_dir, week=week)
         except Exception:
             continue
         if not profiles:
@@ -1420,7 +1439,7 @@ def _build_profile_z_table(seasons: list, rawdata_dir) -> dict:
         mu  = {d: float(np.mean(v)) for d, v in vals.items()}
         sig = {d: max(float(np.std(v)), 1e-6) for d, v in vals.items()}
         for team in teams:
-            table[(season, team)] = {
+            table[(season, week, team)] = {
                 d: float((profiles[team].get(d, mu[d]) - mu[d]) / sig[d])
                 for d in _DIMS
             }
@@ -2614,13 +2633,14 @@ def build_master_feature_table(
     # preseason player profiles. This matches what _precompute_static_features()
     # feeds the models at inference time, fixing the scale mismatch that was
     # inverting predictions for outlier teams (e.g. elite DL).
-    _profile_seasons = [s for s in sched["season"].unique() if s >= 2020]
-    if _profile_seasons:
-        _pz = _build_profile_z_table(sorted(_profile_seasons), rd)
+    _profile_rows = sched[sched["season"] >= 2020][["season", "week"]].drop_duplicates()
+    _season_weeks = list(_profile_rows.itertuples(index=False, name=None))
+    if _season_weeks:
+        _pz = _build_profile_z_table(_season_weeks, rd)
         if _pz:
             def _apply_profile_overrides(row):
-                hz = _pz.get((int(row["season"]), row["home_team"]))
-                az = _pz.get((int(row["season"]), row["away_team"]))
+                hz = _pz.get((int(row["season"]), int(row["week"]), row["home_team"]))
+                az = _pz.get((int(row["season"]), int(row["week"]), row["away_team"]))
                 if hz is None or az is None:
                     return row
                 row["def_pressure_diff"]      = hz["dl_perf"] - az["dl_perf"]
