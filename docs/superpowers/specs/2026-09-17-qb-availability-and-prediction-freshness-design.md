@@ -63,17 +63,29 @@ data during the investigation (see each section's "Evidence").
    team's week-1 kickoff. (Not "most week-1 snaps" — that misattributes the
    starter when they're hurt mid-game, as both SEA and MIN show right now.)
 2. **Each subsequent week**, the reference starter carries forward unchanged
-   *unless* both of the following are true as of that week:
-   - the current reference starter has no `Out`/`Doubtful` injury-report
-     entry that week (the same definition used by the flag itself, below —
-     `Questionable` does not block the flip, since a questionable player
-     typically does play) **and** no Reserve/IR roster status, **and**
-   - they are **not** the current depth-chart `pos_rank=1` at QB.
+   *unless*, over the current week **and** the immediately preceding week
+   (two consecutive weeks), both of the following hold:
+   - the reference starter has no `Out`/`Doubtful` injury-report entry and no
+     Reserve/IR roster status in *either* week (the same definition used by
+     the flag itself, below — `Questionable` does not block the flip, since
+     a questionable player typically does play), **and**
+   - a different QB has held a clear snap-share majority (>65% of the team's
+     offensive QB snaps) in *both* of those weeks.
 
-   Only then does the reference starter flip to whoever the depth chart
-   currently names as `pos_rank=1`. This is what distinguishes "hurt, still
-   the guy" (stays pinned, e.g. Darnold/Murray this week) from "healthy, but
-   lost the job" (flips to the new guy).
+   Only then does the reference starter flip to that other QB. Depth chart
+   is used only for the initial week-1 identification (step 1) — from week 2
+   on, snap share is the signal for "who's actually playing," not the depth
+   chart label, because depth-chart updates can lag a real change by days.
+
+   Requiring **two consecutive weeks**, not one, is deliberate: it's what
+   keeps a single late-season "meaningless game, rest the healthy starter"
+   week from permanently flipping the reference to the backup — a genuine
+   benching (or a preseason committee resolving into one clear starter, see
+   below) persists past a single week; a one-off rest game doesn't. This is
+   what distinguishes "hurt, still the guy" (stays pinned, e.g.
+   Darnold/Murray this week) from "healthy, but lost the job" (flips to the
+   new guy) from "healthy, just resting for one unimportant game" (also stays
+   pinned).
 3. **Availability flag for week W** = `1.0` if the week-W reference starter is
    any of:
    - on the official injury report as `Out` or `Doubtful` that week, or
@@ -124,16 +136,23 @@ modules, avoids duplicating the sticky-reference logic three times.
 
 ### Explicitly decided edge cases
 
-- A backup filling in for one game while the starter is merely resting
-  (healthy, not on any report) but returns next week as the depth chart's #1
-  the whole time: flag stays `0.0` throughout — the sticky-reference flip
-  requires the *reference starter* to be off the depth chart's #1 spot, which
-  never happens here.
-- Committee/rotation situations (~50/50 snap split, no reference starter
-  concept clearly established): the depth-chart-based initial identification
-  avoids treating this as ambiguous — whoever's `pos_rank=1` pre-kickoff is
-  the reference, snap-count only matters for the *available/unavailable*
-  check, not for establishing who "the starter" is.
+- **Late-season "meaningless game, rest the healthy starter" week** (e.g.
+  playoff seed already locked, backup plays one week 17/18 game): the
+  two-consecutive-week requirement on the flip means this does not
+  permanently reassign the reference starter to the backup. A single rest
+  week is indistinguishable, by design, from a backup simply filling in for
+  one game — both stay pinned to the real starter.
+- **Preseason committee, unresolved at week 1** (no snap data exists yet):
+  the depth-chart-based initial identification (step 1) picks whoever is
+  `pos_rank=1` pre-kickoff as the starting reference, so there's always a
+  definite answer even when the team itself hasn't fully committed.
+- **Committee that resolves into one clear starter as the season goes on**:
+  once one QB holds >65% snap share for two consecutive weeks while the
+  other has no injury/reserve designation, the reference flips to the
+  emerging starter — this is the same two-week-sustained-snap-share rule as
+  the "lost the job after injury" case above, not a special case. From that
+  point on, the injury/availability flag tracks the newly-established
+  starter, not whoever was originally `pos_rank=1`.
 - Missing data (bye weeks, sync lag, pre-2009/pre-2001 seasons per source):
   fail open to `0.0` (assume available), matching existing conventions
   throughout this file.
@@ -219,3 +238,13 @@ when it runs).
 - Not adding a UI indicator distinguishing "flag from official injury report"
   vs. "flag from snap-count inference" — both fold into the same
   `home_qb_injury_flag`/`away_qb_injury_flag` value by design (Part A).
+
+## Alternative considered for Part A: dedicated feature (needs retraining)
+
+Folding the signal into the existing `home_qb_injury_flag`/`away_qb_injury_flag`
+(this spec's choice) ships without retraining, but conflates "starter out"
+with a single binary the model already had. A dedicated feature column would
+let the model weight starter-continuity separately from official injury
+reports, at the cost of a retrain before it does anything. Deferred as a
+backlog stub: see
+`docs/superpowers/specs/2026-09-17-qb-starter-feature-column-design.md`.
