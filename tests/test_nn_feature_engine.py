@@ -747,6 +747,12 @@ class TestLoadQbReserveStatus:
         assert len(result) == 1
         assert result.iloc[0]["gsis_id"] == "00-0100"
 
+    def test_missing_file_returns_empty_frame(self, tmp_path):
+        from services.nn_feature_engine import _load_qb_reserve_status
+        result = _load_qb_reserve_status(tmp_path)
+        assert list(result.columns) == ["season", "week", "team", "gsis_id"]
+        assert result.empty
+
 
 class TestLoadQbSnapShares:
     def test_computes_share_of_team_qb_snaps(self, tmp_path):
@@ -790,3 +796,40 @@ class TestLoadQbSnapShares:
 
         result = _load_qb_snap_shares(tmp_path)
         assert result.empty
+
+    def test_missing_file_returns_empty_frame(self, tmp_path):
+        from services.nn_feature_engine import _load_qb_snap_shares
+        result = _load_qb_snap_shares(tmp_path)
+        assert list(result.columns) == ["season", "week", "team", "gsis_id", "snap_share"]
+        assert result.empty
+
+    def test_matched_qb_share_uses_all_qb_totals_not_just_matched(self, tmp_path):
+        """REGRESSION: team-week snap totals must include ALL QBs in snap_counts,
+        even those without a roster crosswalk. If totals were computed only from
+        matched QBs, unmatched teammates would be invisible and inflated the matched
+        player's snap_share. E.g., matched QB with 40 snaps + unmatched QB with 10
+        snaps should give matched QB 40/50=0.8, not 40/40=1.0."""
+        from services.nn_feature_engine import _load_qb_snap_shares
+        sc_dir = tmp_path / "snap_counts"
+        sc_dir.mkdir()
+        pd.DataFrame([
+            {"season": 2026, "week": 1, "team": "SEA", "position": "QB",
+             "game_type": "REG", "pfr_player_id": "MatchedQb", "offense_snaps": 40},
+            {"season": 2026, "week": 1, "team": "SEA", "position": "QB",
+             "game_type": "REG", "pfr_player_id": "UnmatchedQb", "offense_snaps": 10},
+        ]).to_csv(sc_dir / "snap_counts_2026.csv", index=False)
+
+        roster_dir = tmp_path / "rosters"
+        roster_dir.mkdir()
+        pd.DataFrame([
+            {"pfr_id": "MatchedQb", "gsis_id": "00-0100"},
+            # UnmatchedQb intentionally omitted from roster to simulate no crosswalk
+        ]).to_csv(roster_dir / "roster_2026.csv", index=False)
+
+        result = _load_qb_snap_shares(tmp_path)
+        assert len(result) == 1  # Only matched QB in output
+        matched = result.iloc[0]
+        # Denominator must be 50 (all QBs), not 40 (only matched)
+        # So matched QB should be 40/50 = 0.8, NOT 1.0
+        assert matched["snap_share"] == pytest.approx(0.8), \
+            f"Matched QB with 40 snaps out of 50 total should be 0.8, got {matched['snap_share']}"

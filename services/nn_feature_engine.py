@@ -2066,7 +2066,7 @@ def _load_qb_report_status(rd: Path) -> pd.DataFrame:
     df["season"] = pd.to_numeric(df["season"], errors="coerce")
     df["week"] = pd.to_numeric(df["week"], errors="coerce")
     df["team"] = df["team"].apply(_normalize_team)
-    return df.dropna(subset=["season", "week"])[
+    return df.dropna(subset=["season", "week", "team"])[
         ["season", "week", "team", "gsis_id", "report_status"]
     ]
 
@@ -2087,7 +2087,7 @@ def _load_qb_reserve_status(rd: Path) -> pd.DataFrame:
     df["season"] = pd.to_numeric(df["season"], errors="coerce")
     df["week"] = pd.to_numeric(df["week"], errors="coerce")
     df["team"] = df["team"].apply(_normalize_team)
-    return df.dropna(subset=["season", "week"])[["season", "week", "team", "gsis_id"]]
+    return df.dropna(subset=["season", "week", "team"])[["season", "week", "team", "gsis_id"]]
 
 
 def _load_qb_snap_shares(rd: Path) -> pd.DataFrame:
@@ -2097,6 +2097,11 @@ def _load_qb_snap_shares(rd: Path) -> pd.DataFrame:
     rosters/roster_{year}.csv, which carries both IDs per player. A player
     with no crosswalk match is dropped from the result (the caller treats a
     missing row as "no snap data available," not "0% snaps").
+
+    CRITICAL: team-week snap totals are computed from ALL QBs in snap_counts
+    (before crosswalk filtering), so the denominator reflects true team snap volume
+    even when some QBs have no roster crosswalk. This prevents inflating a matched
+    player's snap_share when an unmatched teammate is dropped.
 
     Returns columns: season, week, team, gsis_id, snap_share.
     """
@@ -2115,6 +2120,13 @@ def _load_qb_snap_shares(rd: Path) -> pd.DataFrame:
     if sc.empty:
         return empty
 
+    # Compute team-week totals from RAW snap_counts (before crosswalk filtering)
+    # This ensures the denominator reflects ALL QBs who played, not just the matched ones
+    totals = (
+        sc.groupby(["season", "week", "team"])["offense_snaps"]
+        .sum().reset_index().rename(columns={"offense_snaps": "total_snaps"})
+    )
+
     roster = _load_multi_season("rosters/roster_*.csv", rd)
     if roster.empty or "pfr_id" not in roster.columns or "gsis_id" not in roster.columns:
         return empty
@@ -2122,14 +2134,12 @@ def _load_qb_snap_shares(rd: Path) -> pd.DataFrame:
         roster.dropna(subset=["pfr_id", "gsis_id"])
         .drop_duplicates(subset=["pfr_id"])[["pfr_id", "gsis_id"]]
     )
+    # Inner join drops unmatched QBs from output, but they're already in the totals above
     sc = sc.merge(crosswalk, left_on="pfr_player_id", right_on="pfr_id", how="inner")
     if sc.empty:
         return empty
 
-    totals = (
-        sc.groupby(["season", "week", "team"])["offense_snaps"]
-        .sum().reset_index().rename(columns={"offense_snaps": "total_snaps"})
-    )
+    # Merge pre-computed totals (based on ALL QBs) onto matched rows only
     sc = sc.merge(totals, on=["season", "week", "team"], how="left")
     sc["total_snaps"] = sc["total_snaps"].clip(lower=1)
     sc["snap_share"] = sc["offense_snaps"] / sc["total_snaps"]
