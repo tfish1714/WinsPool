@@ -45,7 +45,9 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 import numpy as np
 import pandas as pd
 
-from services.nn_feature_engine import build_master_feature_table, _normalize_team
+from services.nn_feature_engine import (
+    build_master_feature_table, _normalize_team, compute_qb_availability_flags, RAWDATA_DIR,
+)
 from services.nn_prediction_service import NNPredictionService, build_ensemble_lookup
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
@@ -123,6 +125,7 @@ def _build_predictions_map(year: int, ft_lookup: dict,
         profile_dict = {row["team"]: row.to_dict() for _, row in engine._team_profiles.iterrows()}
         sim = engine.simulate_season(schedule_df, n_sims=10_000,
                                      completed_results=completed_results)
+        qb_avail = compute_qb_availability_flags([year], RAWDATA_DIR)
 
         def _pf(d, col, default=0.0):
             v = d.get(col, default)
@@ -204,8 +207,8 @@ def _build_predictions_map(year: int, ft_lookup: dict,
                     "early_down_matchup":   0.0,
                     "turnover_margin":      0.0,
                     "point_diff_advantage": point_diff_val,
-                    "home_qb_out":          0.0,
-                    "away_qb_out":          0.0,
+                    "home_qb_out":          qb_avail.get((year, int(wk), ht), 0.0),
+                    "away_qb_out":          qb_avail.get((year, int(wk), at), 0.0),
                     "rest_advantage":       0.0,
                     "travel_disadvantage":  0.0,
                     "trench_dominance":     trench_val,

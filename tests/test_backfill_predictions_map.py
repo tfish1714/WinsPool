@@ -141,3 +141,32 @@ class TestExplanationRosterValue:
         explanation = result["W02_KC_BUF"]["explanation"]
         assert explanation["off_roster_value"] == pytest.approx(0.0)
         assert explanation["def_roster_value"] == pytest.approx(0.0)
+
+
+class TestExplanationQbAvailability:
+    def test_home_away_qb_out_come_from_availability_flags_not_hardcoded_zero(self):
+        schedule_df = pd.DataFrame([_schedule_row("KC", "BUF", 2)])
+        ft_lookup = {}
+
+        fake_engine = MagicMock()
+        fake_engine._team_profiles = pd.DataFrame(columns=["team"])
+        fake_engine.lookup_roster_value.return_value = {}
+        fake_engine.simulate_season.return_value = {
+            "game_probs": {
+                "W02_KC_BUF": {
+                    "home_team": "KC", "away_team": "BUF", "week": 2,
+                    "mean_prob": 0.6, "model_spread": -2.5,
+                },
+            },
+        }
+        with patch.object(bsp, "NNProjectionEngine", return_value=fake_engine), \
+             patch.object(bsp, "get_game_predictions", return_value={}), \
+             patch.object(bsp, "compute_qb_availability_flags",
+                          return_value={(2025, 2, "KC"): 1.0}):
+            result = bsp._build_predictions_map(
+                2025, ft_lookup, schedule_df, pd.DataFrame(), force=True,
+            )
+
+        explanation = result["W02_KC_BUF"]["explanation"]
+        assert explanation["home_qb_out"] == 1.0
+        assert explanation["away_qb_out"] == 0.0
