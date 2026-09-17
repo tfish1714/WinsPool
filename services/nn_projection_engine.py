@@ -23,6 +23,7 @@ from services.nn_feature_engine import (
     _normalize_team,
     compute_preseason_roster_features,
     compute_preseason_player_profiles,
+    compute_qb_availability_flags,
 )
 from services.nn_prediction_service import (
     NNPredictionService,
@@ -59,6 +60,7 @@ class NNProjectionEngine:
         self._roster_value_cache: Dict[Tuple[int, int, str], dict] = {}
         self._rv_weeks_by_team: Dict[str, list] = {}
         self._preseason_profiles: dict = {}  # {team: {off_pass_epa, off_rush_epa, ...}}
+        self._qb_availability: Dict[Tuple[int, int, str], float] = {}
         # Legacy attributes kept as empty defaults so _precompute_static_features fallback
         # doesn't AttributeError on older code paths
         self._preseason_roster: dict = {}
@@ -76,6 +78,12 @@ class NNProjectionEngine:
                 roster-value cache below.
         """
         self._season = season
+        try:
+            self._qb_availability = compute_qb_availability_flags([season], RAWDATA_DIR)
+        except Exception as exc:
+            logger.warning("QB availability flags unavailable for %d: %s", season, exc)
+            self._qb_availability = {}
+
         feature_table = build_master_feature_table(min_season=2020, max_season=season - 1)
         self._team_profiles = self._build_team_profiles(feature_table, season - 1)
 
@@ -343,8 +351,12 @@ class NNProjectionEngine:
             # Game-context static values
             feat[col_idx["home_field_advantage"]]   = 1.0
             feat[col_idx["rest_advantage"]]         = 0.0
-            feat[col_idx["home_qb_injury_flag"]]    = 0.0
-            feat[col_idx["away_qb_injury_flag"]]    = 0.0
+            feat[col_idx["home_qb_injury_flag"]] = self._qb_availability.get(
+                (self._season, int(wk), ht), 0.0
+            )
+            feat[col_idx["away_qb_injury_flag"]] = self._qb_availability.get(
+                (self._season, int(wk), at), 0.0
+            )
             feat[col_idx["playoff_flag"]]           = 0.0
             feat[col_idx["week"]]                   = float(wk)
             feat[col_idx["div_game_flag"]]          = float(game.get("div_game", 0) or 0)
