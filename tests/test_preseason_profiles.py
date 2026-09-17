@@ -1140,6 +1140,48 @@ class TestBuildProfileZTable:
         assert (2024, 1, "AAA") in table
         assert (2024, 2, "AAA") in table
 
+    def test_shared_per_season_inputs_loaded_once_per_season_not_per_week(self):
+        """Perf regression: the depth-chart/advstats/snap-count/EPA files and
+        the weekly_rosters file don't vary week-to-week, so they must be read
+        once per SEASON. Before this, every (season, week) pair re-read all of
+        them -- ~20x the file I/O on the pipeline's heaviest function."""
+        from services.nn_feature_engine import _build_profile_z_table
+        from unittest.mock import patch
+        profiles = self._make_raw_profiles()
+        season_weeks = [(2023, w) for w in range(1, 19)] + [(2024, 1), (2024, 2)]
+
+        with patch("services.nn_feature_engine._load_profile_shared_inputs",
+                   return_value={"roster_mode": "weekly"}) as mock_load, \
+             patch("services.nn_feature_engine.compute_preseason_player_profiles",
+                   return_value=profiles) as mock_profiles:
+            table = _build_profile_z_table(season_weeks, rawdata_dir=".")
+
+        assert mock_load.call_count == 2, (
+            f"expected one shared load per season (2), got {mock_load.call_count}"
+        )
+        assert mock_profiles.call_count == len(season_weeks)
+        # and the loaded object is actually handed to every week's call
+        for call in mock_profiles.call_args_list:
+            assert call.kwargs["shared_inputs"] == {"roster_mode": "weekly"}
+        assert (2023, 18, "AAA") in table and (2024, 2, "AAA") in table
+
+    def test_failing_pair_is_logged_not_silently_swallowed(self, caplog):
+        """A raising compute_preseason_player_profiles must stay fail-open but
+        become observable -- otherwise a schema change silently zeroes out all
+        5 profile-override features with no log output at all."""
+        import logging
+        from services.nn_feature_engine import _build_profile_z_table
+        from unittest.mock import patch
+        with patch("services.nn_feature_engine._load_profile_shared_inputs",
+                   return_value=None), \
+             patch("services.nn_feature_engine.compute_preseason_player_profiles",
+                   side_effect=KeyError("week")), \
+             caplog.at_level(logging.WARNING, logger="services.nn_feature_engine"):
+            table = _build_profile_z_table([(2024, 3)], rawdata_dir=".")
+        assert table == {}
+        assert "season=2024" in caplog.text
+        assert "week=3" in caplog.text
+
 
 class TestProfileZTableOverrideInFeatureTable:
     """Verify that build_master_feature_table() applies profile z-score overrides for 2020+."""
@@ -1239,6 +1281,42 @@ class TestProfileZTableOverrideInFeatureTable:
         # a_q = 0
         # roster_talent_delta = 1.0 - 0.0 = 1.0
         assert abs(row["roster_talent_delta"] - 1.0) < 0.01
+
+    def test_unplayed_weeks_are_not_profile_built(self, tmp_path, monkeypatch):
+        """Perf: an unplayed future week (home_win is null) is dropped from the
+        feature table a few lines later anyway, and has no roster snapshot yet
+        -- it must never trigger its own profile build."""
+        import services.nn_feature_engine as fe
+        import numpy as np
+        from unittest.mock import patch
+
+        sched = pd.DataFrame([
+            {"season": 2024, "week": 1, "home_team": "KC", "away_team": "BAL",
+             "game_type": "REG", "home_win": 1, "result": 7.0, "spread_line": -3.0},
+            # Week 9 hasn't been played yet
+            {"season": 2024, "week": 9, "home_team": "KC", "away_team": "BAL",
+             "game_type": "REG", "home_win": np.nan, "result": np.nan,
+             "spread_line": -1.0},
+        ])
+        captured = {}
+
+        def _capture(season_weeks, rawdata_dir):
+            captured["season_weeks"] = list(season_weeks)
+            return {}
+
+        with patch.object(fe, "_load_schedule", return_value=sched), \
+             patch.object(fe, "_load_elo", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_box_stats_from_weekly", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_pressure_stats", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_rolling_epa", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_trench_rolling_stats", return_value=pd.DataFrame()), \
+             patch.object(fe, "_load_multi_season", return_value=pd.DataFrame()), \
+             patch.object(fe, "compute_roster_features", return_value={}), \
+             patch.object(fe, "compute_roster_performance", return_value={}), \
+             patch.object(fe, "_build_profile_z_table", side_effect=_capture):
+            fe.build_master_feature_table(min_season=2024, max_season=2024)
+
+        assert captured["season_weeks"] == [(2024, 1)]
 
 
 class TestPreseasonFeatureOverridesPostRetrain:

@@ -1267,22 +1267,24 @@ def _normalize_depth_chart(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def compute_preseason_player_profiles(target_season: int, rawdata_dir, week: int = None) -> dict:
-    """Build per-team EPA quality estimates from projected roster + prior-season player stats.
+def _load_profile_shared_inputs(target_season: int, rawdata_dir, weekly: bool = False) -> dict | None:
+    """Load every compute_preseason_player_profiles() input that does NOT vary
+    week-to-week within a season, so a caller grading many weeks of the same
+    season (see _build_profile_z_table) reads each file once instead of once
+    per week.
 
-    Replaces compute_preseason_roster_features() for all position groups.
-    Returns {team: {off_pass_epa, off_rush_epa, def_pass_epa, def_rush_epa,
-                    ol_av, dl_perf, qb_tier}}.
-    Returns {} if required files (roster or depth_charts) are missing.
+    Only the roster SNAPSHOT genuinely varies by week, and even then it lives
+    in a single per-season file (weekly_rosters/roster_weekly_{season}.csv)
+    that this loads whole -- callers filter it to their week. Everything else
+    (this season's depth chart, the prior seasons' advstats/snap_counts/player
+    EPA) is identical for every week of the season.
 
     Args:
-        week: When given, uses that week's own roster snapshot
-            (weekly_rosters/roster_weekly_{target_season}.csv, filtered to
-            this week) instead of the rolling "current" roster file --
-            needed to grade an already-played week without picking up
-            roster changes that happened afterward. None (default) keeps
-            reading the latest snapshot, which is correct when projecting a
-            game that hasn't been played yet.
+        weekly: True loads weekly_rosters/roster_weekly_{season}.csv (all
+            weeks, unfiltered); False loads the rolling rosters/roster_{season}.csv.
+
+    Returns None when a required file (roster or depth_charts) is missing,
+    which callers translate into an empty profile dict.
     """
     prior = target_season - 1
     rd = Path(rawdata_dir)
@@ -1291,22 +1293,16 @@ def compute_preseason_player_profiles(target_season: int, rawdata_dir, week: int
     adv_def_path = rd / "pfr_advstats" / f"advstats_week_def_{prior}.csv"
     snap_path    = rd / "snap_counts"  / f"snap_counts_{prior}.csv"
 
-    if week is not None:
+    if weekly:
         roster_path = rd / "weekly_rosters" / f"roster_weekly_{target_season}.csv"
     else:
         roster_path = rd / "rosters" / f"roster_{target_season}.csv"
 
     if not roster_path.exists() or not dc_path.exists():
-        return {}
+        return None
 
     roster = pd.read_csv(roster_path, low_memory=False)
-    if week is not None:
-        roster = roster[pd.to_numeric(roster["week"], errors="coerce") == week]
-        if roster.empty:
-            return {}
-    depth_chart = pd.read_csv(dc_path, low_memory=False)
-
-    depth_chart = _normalize_depth_chart(depth_chart)
+    depth_chart = _normalize_depth_chart(pd.read_csv(dc_path, low_memory=False))
 
     _REQUIRED_DC_COLS = {"team", "pos_abb", "pos_rank", "player_name", "gsis_id"}
     missing_dc_cols = _REQUIRED_DC_COLS - set(depth_chart.columns)
@@ -1348,6 +1344,64 @@ def compute_preseason_player_profiles(target_season: int, rawdata_dir, week: int
     for back in range(1, DL_BLEND_SEASONS):
         s = prior - back
         player_epa_by_season[s] = _load_player_epa(s, rawdata_dir)
+
+    return {
+        "roster_mode":           "weekly" if weekly else "season",
+        "roster":                roster,
+        "depth_chart":           depth_chart,
+        "def_advstats":          def_advstats,
+        "snap_counts":           snap_counts,
+        "def_advstats_by_season": def_advstats_by_season,
+        "snap_counts_by_season":  snap_counts_by_season,
+        "player_epa":            player_epa,
+        "player_epa_by_season":  player_epa_by_season,
+    }
+
+
+def compute_preseason_player_profiles(target_season: int, rawdata_dir, week: int = None,
+                                      shared_inputs: dict = None) -> dict:
+    """Build per-team EPA quality estimates from projected roster + prior-season player stats.
+
+    Replaces compute_preseason_roster_features() for all position groups.
+    Returns {team: {off_pass_epa, off_rush_epa, def_pass_epa, def_rush_epa,
+                    ol_av, dl_perf, qb_tier}}.
+    Returns {} if required files (roster or depth_charts) are missing.
+
+    Args:
+        week: When given, uses that week's own roster snapshot
+            (weekly_rosters/roster_weekly_{target_season}.csv, filtered to
+            this week) instead of the rolling "current" roster file --
+            needed to grade an already-played week without picking up
+            roster changes that happened afterward. None (default) keeps
+            reading the latest snapshot, which is correct when projecting a
+            game that hasn't been played yet.
+        shared_inputs: Optional pre-loaded per-season data from
+            _load_profile_shared_inputs() -- lets a caller iterating many
+            weeks of one season (see _build_profile_z_table) avoid re-reading
+            the same depth-chart/advstats/snap-count/EPA files once per week.
+            Ignored (and reloaded) when it was built for the other roster mode.
+    """
+    expected_mode = "weekly" if week is not None else "season"
+    if not shared_inputs or shared_inputs.get("roster_mode") != expected_mode:
+        shared_inputs = _load_profile_shared_inputs(
+            target_season, rawdata_dir, weekly=(week is not None),
+        )
+    if not shared_inputs:
+        return {}
+
+    roster = shared_inputs["roster"]
+    if week is not None:
+        roster = roster[pd.to_numeric(roster["week"], errors="coerce") == week].copy()
+        if roster.empty:
+            return {}
+
+    depth_chart           = shared_inputs["depth_chart"]
+    def_advstats          = shared_inputs["def_advstats"]
+    snap_counts           = shared_inputs["snap_counts"]
+    def_advstats_by_season = shared_inputs["def_advstats_by_season"]
+    snap_counts_by_season  = shared_inputs["snap_counts_by_season"]
+    player_epa            = shared_inputs["player_epa"]
+    player_epa_by_season  = shared_inputs["player_epa_by_season"]
 
     off = _preseason_offense(
         depth_chart, player_epa, roster, snap_counts, target_season,
@@ -1422,27 +1476,63 @@ def _build_profile_z_table(season_weeks: list, rawdata_dir) -> dict:
     Returns {(season, week, team): {dl_perf, qb_tier, ol_av, off_pass_epa, def_pass_epa}}
     where each value is that team's z-score within that week's 32-team
     distribution. Pairs where compute_preseason_player_profiles returns {}
-    are skipped silently.
+    are skipped (a pair that raises is skipped too, but logged -- see below).
+
+    Pairs are grouped by season so every per-season-invariant input (depth
+    chart, prior seasons' advstats/snap_counts/player EPA, and the single
+    weekly_rosters file all weeks are sliced out of) is read ONCE per season
+    rather than once per (season, week). A full multi-season build is ~19
+    weeks per season, so loading per week made this -- the heaviest function
+    in the pipeline -- do roughly 20x the file I/O it needs to.
     """
     _DIMS = ["dl_perf", "qb_tier", "ol_av", "off_pass_epa", "def_pass_epa"]
     table: dict = {}
+
+    weeks_by_season: dict = {}
     for season, week in season_weeks:
+        weeks_by_season.setdefault(season, []).append(week)
+
+    for season in sorted(weeks_by_season):
+        # Best-effort: a failure here just means every week of this season
+        # loads its own copy (the pre-caching behavior), not that the season
+        # is skipped.
         try:
-            profiles = compute_preseason_player_profiles(season, rawdata_dir, week=week)
-        except Exception:
-            continue
-        if not profiles:
-            continue
-        teams = list(profiles.keys())
-        vals = {d: np.array([profiles[t].get(d, 0.0) for t in teams], dtype=float)
-                for d in _DIMS}
-        mu  = {d: float(np.mean(v)) for d, v in vals.items()}
-        sig = {d: max(float(np.std(v)), 1e-6) for d, v in vals.items()}
-        for team in teams:
-            table[(season, week, team)] = {
-                d: float((profiles[team].get(d, mu[d]) - mu[d]) / sig[d])
-                for d in _DIMS
-            }
+            shared = _load_profile_shared_inputs(season, rawdata_dir, weekly=True)
+        except Exception as exc:
+            logger.warning(
+                "_build_profile_z_table: shared per-season input load failed for "
+                "season=%s (%s) -- falling back to per-week loads", season, exc,
+            )
+            shared = None
+
+        for week in weeks_by_season[season]:
+            try:
+                profiles = compute_preseason_player_profiles(
+                    season, rawdata_dir, week=week, shared_inputs=shared,
+                )
+            except Exception as exc:
+                # Fail open (this table only OVERRIDES rolling-stat feature
+                # values), but never silently: if e.g. weekly_rosters ever
+                # loses a column the profile builder needs, every pair raises
+                # and all 5 profile-override features quietly revert to their
+                # pre-override values. Logging is the only way that's visible.
+                logger.warning(
+                    "_build_profile_z_table: profile build failed for season=%s "
+                    "week=%s: %s", season, week, exc,
+                )
+                continue
+            if not profiles:
+                continue
+            teams = list(profiles.keys())
+            vals = {d: np.array([profiles[t].get(d, 0.0) for t in teams], dtype=float)
+                    for d in _DIMS}
+            mu  = {d: float(np.mean(v)) for d, v in vals.items()}
+            sig = {d: max(float(np.std(v)), 1e-6) for d, v in vals.items()}
+            for team in teams:
+                table[(season, week, team)] = {
+                    d: float((profiles[team].get(d, mu[d]) - mu[d]) / sig[d])
+                    for d in _DIMS
+                }
     return table
 
 
@@ -2633,7 +2723,14 @@ def build_master_feature_table(
     # preseason player profiles. This matches what _precompute_static_features()
     # feeds the models at inference time, fixing the scale mismatch that was
     # inverting predictions for outlier teams (e.g. elite DL).
-    _profile_rows = sched[sched["season"] >= 2020][["season", "week"]].drop_duplicates()
+    # Only PLAYED weeks: rows with a null home_win are unplayed games that the
+    # dropna() a few lines below discards anyway, and a future week has no
+    # roster snapshot yet -- building a profile for it is a guaranteed-empty
+    # file read per future week of the current season.
+    _profile_scope = sched[sched["season"] >= 2020]
+    if "home_win" in _profile_scope.columns:
+        _profile_scope = _profile_scope[_profile_scope["home_win"].notna()]
+    _profile_rows = _profile_scope[["season", "week"]].drop_duplicates()
     _season_weeks = list(_profile_rows.itertuples(index=False, name=None))
     if _season_weeks:
         _pz = _build_profile_z_table(_season_weeks, rd)
