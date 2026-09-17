@@ -790,6 +790,65 @@ class TestWeeklyBackfillStep:
         assert "backfill_schedule_predictions.py" in called_args[1]
         assert "--firestore" in called_args
 
+    def test_scoped_to_the_current_season_only(self):
+        """backfill_schedule_predictions.py's own default is every season back
+        to 2006 -- all of them already locked. Re-grading them weekly is pure
+        waste and makes the 600s timeout far likelier to bite."""
+        import scripts.cache_builder as cb
+        from datetime import datetime, timezone
+        tuesday = datetime(2026, 9, 22, 9, 15, tzinfo=timezone.utc)
+        with patch("scripts.cache_builder.datetime") as mock_dt, \
+             patch.object(cb.subprocess, "run") as mock_run:
+            mock_dt.now.return_value = tuesday
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            cb._run_weekly_backfill_if_tuesday(2026)
+        called_args = mock_run.call_args[0][0]
+        assert called_args[-3:] == ["--seasons", "2026", "2026"]
+
+    def test_timeout_is_non_fatal(self):
+        """Regression: a TimeoutExpired used to propagate out of main() into
+        _run_with_alerting(), failing the WHOLE daily job (and triggering
+        Cloud Run retries of the entire build) over an optional weekly step."""
+        import subprocess as sp
+        import scripts.cache_builder as cb
+        from datetime import datetime, timezone
+        tuesday = datetime(2026, 9, 22, 9, 15, tzinfo=timezone.utc)
+        with patch("scripts.cache_builder.datetime") as mock_dt, \
+             patch.object(cb.subprocess, "run",
+                          side_effect=sp.TimeoutExpired(cmd="backfill", timeout=600)):
+            mock_dt.now.return_value = tuesday
+            cb._run_weekly_backfill_if_tuesday(2026)  # must not raise
+
+    def test_unexpected_subprocess_error_is_non_fatal(self):
+        import scripts.cache_builder as cb
+        from datetime import datetime, timezone
+        tuesday = datetime(2026, 9, 22, 9, 15, tzinfo=timezone.utc)
+        with patch("scripts.cache_builder.datetime") as mock_dt, \
+             patch.object(cb.subprocess, "run", side_effect=OSError("no interpreter")):
+            mock_dt.now.return_value = tuesday
+            cb._run_weekly_backfill_if_tuesday(2026)  # must not raise
+
+    def test_runs_after_the_cache_invalidation_signal(self):
+        """A slow or failing weekly backfill must never delay (or, on a raise,
+        skip) the predictions_active invalidation for the daily predictions
+        this job just wrote."""
+        import scripts.cache_builder as cb
+        order = []
+        with patch.object(cb, "_run_weekly_backfill_if_tuesday",
+                          side_effect=lambda *a, **k: order.append("backfill")), \
+             patch("services.db_service.signal_data_update",
+                   side_effect=lambda *a, **k: order.append("signal")), \
+             patch.object(cb, "load_data", return_value=(pd.DataFrame(), pd.DataFrame(),
+                                                          pd.DataFrame(), pd.DataFrame(),
+                                                          pd.DataFrame(), pd.DataFrame(),
+                                                          pd.DataFrame())), \
+             patch.object(cb, "get_available_years", return_value=[]), \
+             patch.object(cb, "_years_to_build", return_value=[]), \
+             patch.object(cb, "NNPredictionService", side_effect=Exception("skip ML load")), \
+             patch("sys.argv", ["cache_builder.py", "--skip-sync"]):
+            cb.main()
+        assert order == ["signal", "backfill"]
+
 
 class TestApplyPredictionsCarriesExplanation:
     def test_feature_table_branch_carries_explanation_through(self):

@@ -458,7 +458,7 @@ def _sync_rawdata() -> None:
               f"{result.stderr.strip()[:500]}")
 
 
-def _run_weekly_backfill_if_tuesday() -> None:
+def _run_weekly_backfill_if_tuesday(current_year: int = None) -> None:
     """Grade the prior week's predictions via the feature table once a
     week, on the first day every game in that week (including Monday Night
     Football) is guaranteed final. See docs/superpowers/specs/2026-09-17-
@@ -468,22 +468,44 @@ def _run_weekly_backfill_if_tuesday() -> None:
     Cloud Scheduler trigger or Docker image (this job's image already has
     the ML dependencies backfill_schedule_predictions.py needs;
     winspool-schedule-kickoffs' does not).
+
+    Scoped to `current_year` alone: backfill_schedule_predictions.py's own
+    default is every season back to 2006, and every one of those is already
+    `locked` -- re-grading them weekly is pure waste and makes the timeout
+    below far more likely to be the thing that decides the outcome.
+
+    Wholly non-fatal, by design: this is a once-a-week nicety bolted onto a
+    job whose actual purpose is the daily prediction/analytics rebuild that
+    has already finished by the time it runs. A TimeoutExpired here used to
+    propagate out of main() into _run_with_alerting(), failing the ENTIRE
+    job and triggering Cloud Run retries of the whole build.
     """
     if datetime.now(timezone.utc).weekday() != 1:  # Monday=0, Tuesday=1
         return
     print("[cache_builder] Tuesday -- running weekly backfill lock-in...")
-    result = subprocess.run(
-        [sys.executable, str(SCRIPTS_DIR / "backfill_schedule_predictions.py"), "--firestore"],
-        capture_output=True, text=True, timeout=600,
-        cwd=str(SCRIPTS_DIR.parent),
-    )
-    stdout_tail = result.stdout.strip().splitlines()[-20:]
+    cmd = [sys.executable, str(SCRIPTS_DIR / "backfill_schedule_predictions.py"), "--firestore"]
+    if current_year:
+        cmd += ["--seasons", str(current_year), str(current_year)]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=600,
+            cwd=str(SCRIPTS_DIR.parent),
+        )
+    except subprocess.TimeoutExpired:
+        print("[warn] backfill_schedule_predictions.py timed out after 600s "
+              "(non-fatal) -- the daily build itself already completed")
+        return
+    except Exception as e:
+        print(f"[warn] backfill_schedule_predictions.py could not be run "
+              f"(non-fatal): {e}")
+        return
+    stdout_tail = (result.stdout or "").strip().splitlines()[-20:]
     print("[cache_builder] weekly backfill summary:")
     for line in stdout_tail:
         print(f"  {line}")
     if result.returncode != 0:
         print(f"[warn] backfill_schedule_predictions.py exited non-zero (non-fatal): "
-              f"{result.stderr.strip()[:500]}")
+              f"{(result.stderr or '').strip()[:500]}")
 
 
 def _years_to_build(available_years: list, games: pd.DataFrame) -> list:
@@ -613,11 +635,12 @@ def main():
                    force=args.force, pred_lookup=pred_lookup,
                    model_version=model_version)
 
-    _run_weekly_backfill_if_tuesday()
-
     # Signal the predictions_active domain (games/standings, players, etc.
     # are untouched by this script -- see docs/superpowers/specs/
     # 2026-09-14-cache-mutability-redesign-design.md SS2/SS3).
+    # Runs BEFORE the weekly backfill step: that step is a slow, optional,
+    # once-a-week extra, and the daily predictions it would otherwise delay
+    # invalidation of are already written at this point.
     print("\n[cache_builder] Signaling predictions_active cache invalidation...")
     try:
         from services.cache_service import DOMAIN_PREDICTIONS_ACTIVE
@@ -625,6 +648,8 @@ def main():
         signal_data_update(DOMAIN_PREDICTIONS_ACTIVE)
     except Exception as e:
         print(f"  [err] Failed to signal cache invalidation: {e}")
+
+    _run_weekly_backfill_if_tuesday(current_year)
 
     print("\n[cache_builder] Done.")
 
