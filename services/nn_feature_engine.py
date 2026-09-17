@@ -1605,8 +1605,11 @@ def _load_declared_starters(rd: Path) -> pd.DataFrame:
         old["season"] = pd.to_numeric(old["season"], errors="coerce")
         old["week"] = pd.to_numeric(old["week"], errors="coerce")
         old["team"] = old["club_code"].apply(_normalize_team)
+        old = old.dropna(subset=["season", "week", "gsis_id"])
+        old["season"] = old["season"].astype(int)
+        old["week"] = old["week"].astype(int)
         starters.append(
-            old.dropna(subset=["season", "week"])[["season", "week", "team", "gsis_id"]]
+            old[["season", "week", "team", "gsis_id"]]
         )
 
     if "dt" in dc.columns and "gsis_id" in dc.columns and "pos_abb" in dc.columns:
@@ -1636,9 +1639,13 @@ def _load_declared_starters(rd: Path) -> pd.DataFrame:
                     new.sort_values("dt")[["season", "team", "dt", "gsis_id"]],
                     left_on="kickoff_date", right_on="dt",
                     by=["season", "team"], direction="backward",
+                    allow_exact_matches=False,
                 )
+                matched = matched.dropna(subset=["gsis_id"])
+                matched["season"] = matched["season"].astype(int)
+                matched["week"] = matched["week"].astype(int)
                 starters.append(
-                    matched.dropna(subset=["gsis_id"])[["season", "week", "team", "gsis_id"]]
+                    matched[["season", "week", "team", "gsis_id"]]
                 )
 
     if not starters:

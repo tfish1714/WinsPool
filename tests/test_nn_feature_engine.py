@@ -639,7 +639,6 @@ class TestLoadDeclaredStarters:
     def test_new_schema_resolves_snapshot_before_kickoff(self, tmp_path):
         """New-schema depth charts are dt-timestamped, not week-indexed --
         resolve against the schedule's own kickoff date via merge_asof."""
-        from unittest.mock import patch
         from services.nn_feature_engine import _load_declared_starters
         dc_dir = tmp_path / "depth_charts"
         dc_dir.mkdir()
@@ -650,18 +649,51 @@ class TestLoadDeclaredStarters:
              "gsis_id": "00-0101", "pos_abb": "QB", "pos_rank": 1},
         ]).to_csv(dc_dir / "depth_charts_2026.csv", index=False)
 
-        mock_schedule = pd.DataFrame([
-            {"season": 2026, "week": 1, "gameday": "2026-09-09"},
-            {"season": 2026, "week": 2, "gameday": "2026-09-20"},
-        ])
+        sched_dir = tmp_path / "schedules"
+        sched_dir.mkdir()
+        pd.DataFrame([
+            {"season": 2026, "week": 1, "home_team": "SEA", "away_team": "NE",
+             "game_type": "REG", "gameday": "2026-09-09", "home_score": None, "away_score": None,
+             "roof": "outdoors", "temp": 60.0, "wind": 10.0, "location": "Home",
+             "home_rest": 7, "away_rest": 7, "div_game": 0, "surface": "grass"},
+            {"season": 2026, "week": 2, "home_team": "ARI", "away_team": "SEA",
+             "game_type": "REG", "gameday": "2026-09-20", "home_score": None, "away_score": None,
+             "roof": "dome", "temp": 72.0, "wind": 0.0, "location": "Home",
+             "home_rest": 7, "away_rest": 7, "div_game": 0, "surface": "turf"},
+        ]).to_csv(sched_dir / "games.csv", index=False)
 
-        with patch("services.nn_feature_engine._load_schedule", return_value=mock_schedule):
-            result = _load_declared_starters(tmp_path)
-
+        result = _load_declared_starters(tmp_path)
         wk1 = result[(result["season"] == 2026) & (result["week"] == 1) & (result["team"] == "SEA")]
         assert wk1.iloc[0]["gsis_id"] == "00-0100"  # Sept 5 snapshot -- before Sept 9 kickoff
         wk2 = result[(result["season"] == 2026) & (result["week"] == 2) & (result["team"] == "SEA")]
         assert wk2.iloc[0]["gsis_id"] == "00-0101"  # Sept 14 snapshot -- before Sept 20 kickoff
+
+    def test_new_schema_strictly_before_kickoff_excludes_exact_match(self, tmp_path):
+        """Verify merge_asof uses allow_exact_matches=False: dt==kickoff_date is NOT a match."""
+        from services.nn_feature_engine import _load_declared_starters
+        dc_dir = tmp_path / "depth_charts"
+        dc_dir.mkdir()
+        # Snapshot at exact kickoff time should NOT be used; earlier snapshot should win
+        pd.DataFrame([
+            {"dt": "2026-09-08T00:00:00Z", "team": "SEA", "player_name": "QB Old",
+             "gsis_id": "00-9998", "pos_abb": "QB", "pos_rank": 1},
+            {"dt": "2026-09-09T00:00:00Z", "team": "SEA", "player_name": "Sam Darnold",
+             "gsis_id": "00-0100", "pos_abb": "QB", "pos_rank": 1},
+        ]).to_csv(dc_dir / "depth_charts_2026.csv", index=False)
+
+        sched_dir = tmp_path / "schedules"
+        sched_dir.mkdir()
+        pd.DataFrame([
+            {"season": 2026, "week": 1, "home_team": "SEA", "away_team": "NE",
+             "game_type": "REG", "gameday": "2026-09-09", "home_score": None, "away_score": None,
+             "roof": "outdoors", "temp": 60.0, "wind": 10.0, "location": "Home",
+             "home_rest": 7, "away_rest": 7, "div_game": 0, "surface": "grass"},
+        ]).to_csv(sched_dir / "games.csv", index=False)
+
+        result = _load_declared_starters(tmp_path)
+        wk1 = result[(result["season"] == 2026) & (result["week"] == 1) & (result["team"] == "SEA")]
+        # Should use Sept 8 snapshot (before kickoff), NOT Sept 9 exact match
+        assert wk1.iloc[0]["gsis_id"] == "00-9998", "merge_asof should reject exact match (allow_exact_matches=False)"
 
     def test_missing_depth_charts_returns_empty_frame(self, tmp_path):
         from services.nn_feature_engine import _load_declared_starters
