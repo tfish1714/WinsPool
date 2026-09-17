@@ -84,13 +84,17 @@ def _build_completed_results(games: pd.DataFrame, year: int) -> dict:
 
 
 def _derive_prediction_fields(ht: str, at: str, mean_prob: float, model_spread: float, spread_line) -> dict:
-    """Shared winner/confidence/ATS-pick/edge-vs-vegas derivation from a
-    simulate_season() game_probs_out entry -- used by both
+    """Shared winner/confidence/ATS-pick/edge-vs-vegas/explanation derivation
+    from a simulate_season() game_probs_out entry -- used by both
     _apply_predictions()'s fallback branch and _publish_game_probs() so
     the two call sites can't independently drift (previously only one of
     them wrote model_spread, and neither computed edge_vs_vegas from it,
     leaving a stale/inconsistent pair for anything reading edge_vs_vegas,
-    e.g. services/betting_screener_service.py)."""
+    e.g. services/betting_screener_service.py). Also builds a matching
+    `explanation` dict (previously only backfill_schedule_predictions.py's
+    own, separate fallback branch did this) so the daily cache_builder job
+    doesn't leave `explanation` frozen at whatever a manual backfill run
+    last wrote."""
     winner = ht if mean_prob >= 0.5 else at
     conf = round(max(mean_prob, 1.0 - mean_prob) * 100, 1)
     ats = winner
@@ -108,6 +112,12 @@ def _derive_prediction_fields(ht: str, at: str, mean_prob: float, model_spread: 
         "pred_ats_pick": ats,
         "model_spread": model_spread,
         "edge_vs_vegas": edge_vs_vegas,
+        "explanation": {
+            "vegas_line": float(spread_line) if pd.notna(spread_line) else None,
+            "model_spread": model_spread,
+            "edge_vs_vegas": edge_vs_vegas,
+            "source": "mc_simulation (daily cache_builder)",
+        },
     }
 
 
@@ -178,6 +188,7 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
     pred_probs: list = [None] * n
     pred_spreads: list = [None] * n
     pred_edges: list = [None] * n
+    explanations: list = [None] * n
 
     unplayed_idx: list = []
 
@@ -195,6 +206,7 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
             pred_probs[i]   = pred['pred_prob']
             pred_spreads[i] = pred.get('model_spread')
             pred_edges[i]   = pred.get('edge_vs_vegas')
+            explanations[i] = pred.get('explanation')
             continue
 
         # Not in feature table — unplayed future game, queue for simulate_season()
@@ -234,6 +246,7 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
             pred_probs[i]   = round(hp, 4)
             pred_spreads[i] = derived['model_spread']
             pred_edges[i]   = derived['edge_vs_vegas']
+            explanations[i] = derived['explanation']
 
     out = schedule_df.copy()
     out['pred_winner']  = pred_winners
@@ -242,6 +255,7 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
     out['pred_prob']    = pred_probs
     out['model_spread']   = pred_spreads
     out['edge_vs_vegas']  = pred_edges
+    out['explanation'] = explanations
     return out
 
 
@@ -319,7 +333,7 @@ def build_year(standings, games, players, draft_order, draft_results,
             # future games, which pred_lookup alone would miss.
             pred_cols = ['week', 'home_team', 'away_team', 'pred_winner',
                          'pred_su_conf', 'pred_ats_pick', 'pred_prob',
-                         'model_spread', 'edge_vs_vegas']
+                         'model_spread', 'edge_vs_vegas', 'explanation']
             pc = [c for c in pred_cols if c in schedule_df.columns]
             if 'pred_winner' in pc:
                 pmap = {}
@@ -345,6 +359,9 @@ def build_year(standings, games, players, draft_order, draft_results,
                         ev = r.get('edge_vs_vegas')
                         if pd.notna(ev):
                             entry['edge_vs_vegas'] = ev
+                        exp = r.get('explanation')
+                        if isinstance(exp, dict):
+                            entry['explanation'] = exp
                         pmap[f"W{int(wk):02d}_{ht}_{at}"] = entry
                 if pmap:
                     existing = get_game_predictions(year)

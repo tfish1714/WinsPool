@@ -746,3 +746,68 @@ class TestResimulateModeWiring:
             main()  # must not raise
 
         mock_publish.assert_called_once()
+
+
+class TestApplyPredictionsCarriesExplanation:
+    def test_feature_table_branch_carries_explanation_through(self):
+        """pred_lookup entries already include a full explanation dict
+        (built by build_ensemble_lookup) -- it must survive into the output,
+        not be dropped."""
+        from scripts.cache_builder import _apply_predictions
+        schedule = pd.DataFrame([
+            {"home_team": "WAS", "away_team": "KC", "week": 3, "result": 3.0},
+        ])
+        pred_lookup = {(2026, 3, "WAS", "KC"): {
+            "pred_winner": "WAS", "pred_su_conf": 70.0,
+            "pred_ats_pick": "WAS", "pred_prob": 0.7,
+            "model_spread": 4.5, "edge_vs_vegas": 1.0,
+            "explanation": {"elo_diff": 12.3, "vegas_line": 3.0},
+        }}
+        out = _apply_predictions(schedule, 2026, pred_lookup, fallback_engine=MagicMock())
+        assert out.iloc[0]["explanation"] == {"elo_diff": 12.3, "vegas_line": 3.0}
+
+    def test_fallback_branch_builds_an_explanation_not_none(self):
+        from scripts.cache_builder import _apply_predictions
+        schedule = pd.DataFrame([
+            {"home_team": "WAS", "away_team": "KC", "week": 3, "result": None,
+             "spread_line": -2.5},
+        ])
+        fallback_engine = MagicMock()
+        fallback_engine._team_profiles = pd.DataFrame(columns=["team"])
+        fallback_engine.simulate_season.return_value = {
+            "game_probs": {
+                "W03_WAS_KC": {"mean_prob": 0.62, "model_spread": -3.0,
+                               "home_team": "WAS", "away_team": "KC", "week": 3},
+            },
+        }
+        out = _apply_predictions(schedule, 2026, {}, fallback_engine=fallback_engine)
+        assert out.iloc[0]["explanation"] is not None
+        assert out.iloc[0]["explanation"]["model_spread"] == -3.0
+
+
+class TestBuildYearWritesExplanation:
+    def test_explanation_included_in_daily_pmap_when_present(self):
+        """Regression: the daily thin-write only ever sent pred_winner/
+        pred_su_conf/pred_ats_pick/pred_prob/model_spread/edge_vs_vegas --
+        explanation silently never refreshed after the first backfill run."""
+        import scripts.cache_builder as cb
+        schedule_df_with_explanation = pd.DataFrame([
+            {"week": 3, "home_team": "WAS", "away_team": "KC",
+             "pred_winner": "WAS", "pred_su_conf": 70.0, "pred_ats_pick": "WAS",
+             "pred_prob": 0.7, "model_spread": 4.5, "edge_vs_vegas": 1.0,
+             "explanation": {"elo_diff": 12.3}},
+        ])
+        captured = {}
+        with patch.object(cb, "get_game_predictions", return_value={}), \
+             patch.object(cb, "merge_thin_game_predictions", side_effect=lambda existing, fresh: fresh), \
+             patch.object(cb, "write_game_predictions", side_effect=lambda year, merged: captured.update(merged)), \
+             patch.object(cb.analysis, "get_enriched_schedule", return_value=schedule_df_with_explanation), \
+             patch.object(cb, "_apply_predictions", return_value=schedule_df_with_explanation), \
+             patch.object(cb, "NNProjectionEngine"), \
+             patch.object(cb, "live_scores"):
+            cb.build_year(
+                pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+                pd.DataFrame(), pd.DataFrame(), year=2026, current_year=2026,
+                force=True,
+            )
+        assert captured["W03_WAS_KC"]["explanation"] == {"elo_diff": 12.3}
