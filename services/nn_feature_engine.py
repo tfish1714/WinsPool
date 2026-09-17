@@ -2386,6 +2386,27 @@ def build_master_feature_table(
     else:
         sched["home_qb_injury_flag"] = 0.0
         sched["away_qb_injury_flag"] = 0.0
+
+    # --- QB Starter Availability (sticky-reference signal, OR'd into the
+    # same two flags -- see compute_qb_availability_flags' docstring) ---
+    qb_avail = compute_qb_availability_flags(
+        sorted(sched["season"].dropna().unique().astype(int).tolist()), rd
+    )
+    sched["home_qb_injury_flag"] = sched.apply(
+        lambda r: max(
+            r["home_qb_injury_flag"],
+            qb_avail.get((int(r["season"]), int(r["week"]), r["home_team"]), 0.0),
+        ),
+        axis=1,
+    )
+    sched["away_qb_injury_flag"] = sched.apply(
+        lambda r: max(
+            r["away_qb_injury_flag"],
+            qb_avail.get((int(r["season"]), int(r["week"]), r["away_team"]), 0.0),
+        ),
+        axis=1,
+    )
+
     # Legacy aux cols for any downstream that still reads them
     sched["home_qb_out"] = sched["home_qb_injury_flag"]
     sched["away_qb_out"] = sched["away_qb_injury_flag"]

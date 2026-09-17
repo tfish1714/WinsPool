@@ -498,6 +498,59 @@ def test_both_qbs_injured_distinguishable(tmp_path):
     assert not buf.empty and float(buf["away_qb_injury_flag"].iloc[0]) == 1.0
 
 
+def test_qb_availability_signal_ors_into_injury_flag(tmp_path):
+    """A team whose declared starter is benched-via-snap-count (no official
+    injury report entry at all) must still show home_qb_injury_flag == 1.0
+    after this merge -- proving the new signal actually reaches the table,
+    not just the official injury report."""
+    from services.nn_feature_engine import build_master_feature_table
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+
+    dc_dir = rd / "depth_charts"
+    dc_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([
+        {"club_code": "KC", "week": 1, "game_type": "REG", "depth_team": 1,
+         "full_name": "KC Starter", "gsis_id": "KC-STARTER", "depth_position": "QB"},
+        {"club_code": "KC", "week": 2, "game_type": "REG", "depth_team": 1,
+         "full_name": "KC Starter", "gsis_id": "KC-STARTER", "depth_position": "QB"},
+        {"club_code": "KC", "week": 3, "game_type": "REG", "depth_team": 1,
+         "full_name": "KC Starter", "gsis_id": "KC-STARTER", "depth_position": "QB"},
+        {"club_code": "BUF", "week": 1, "game_type": "REG", "depth_team": 1,
+         "full_name": "BUF Starter", "gsis_id": "BUF-STARTER", "depth_position": "QB"},
+        {"club_code": "BUF", "week": 2, "game_type": "REG", "depth_team": 1,
+         "full_name": "BUF Starter", "gsis_id": "BUF-STARTER", "depth_position": "QB"},
+        {"club_code": "BUF", "week": 3, "game_type": "REG", "depth_team": 1,
+         "full_name": "BUF Starter", "gsis_id": "BUF-STARTER", "depth_position": "QB"},
+    ]).to_csv(dc_dir / "depth_charts_2024.csv", index=False)
+
+    sc_dir = rd / "snap_counts"
+    sc_dir.mkdir(parents=True, exist_ok=True)
+    roster_dir = rd / "rosters"
+    roster_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([
+        {"pfr_id": "KCBACKUP0", "gsis_id": "KC-BACKUP", "birth_date": "1999-01-01", "season": 2024},
+        {"pfr_id": "KCSTART00", "gsis_id": "KC-STARTER", "birth_date": "1998-01-01", "season": 2024},
+    ]).to_csv(roster_dir / "roster_2024.csv", index=False)
+    pd.DataFrame([
+        # KC week 1: starter plays
+        {"season": 2024, "week": 1, "team": "KC", "position": "QB", "game_type": "REG",
+         "pfr_player_id": "KCSTART00", "offense_snaps": 60, "defense_snaps": 0},
+        # KC weeks 2-3: starter benched (0 snaps), backup plays (healthy -- no injury report entry)
+        {"season": 2024, "week": 2, "team": "KC", "position": "QB", "game_type": "REG",
+         "pfr_player_id": "KCSTART00", "offense_snaps": 0, "defense_snaps": 0},
+        {"season": 2024, "week": 2, "team": "KC", "position": "QB", "game_type": "REG",
+         "pfr_player_id": "KCBACKUP0", "offense_snaps": 60, "defense_snaps": 0},
+        {"season": 2024, "week": 3, "team": "KC", "position": "QB", "game_type": "REG",
+         "pfr_player_id": "KCSTART00", "offense_snaps": 0, "defense_snaps": 0},
+        {"season": 2024, "week": 3, "team": "KC", "position": "QB", "game_type": "REG",
+         "pfr_player_id": "KCBACKUP0", "offense_snaps": 60, "defense_snaps": 0},
+    ]).to_csv(sc_dir / "snap_counts_2024.csv", index=False)
+
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    wk3 = df[df["week"] == 3].iloc[0]
+    assert wk3["home_qb_injury_flag"] == 1.0  # KC is home in the shared fixture
+
+
 def test_home_field_advantage_neutral_is_zero(tmp_path):
     """home_field_advantage must be 0.0 for games with location=='Neutral'."""
     from services.nn_feature_engine import build_master_feature_table
