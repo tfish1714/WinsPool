@@ -955,3 +955,24 @@ class TestComputeQbAvailabilityFlags:
         from services.nn_feature_engine import compute_qb_availability_flags
         result = compute_qb_availability_flags([2026], tmp_path)
         assert result == {}
+
+    def test_reference_initializes_from_teams_own_earliest_week_not_season_minimum(self, tmp_path):
+        """Regression: a team whose depth chart wasn't resolved until week 3
+        (no declared-starter row for weeks 1-2, e.g. crosswalk/timing gap)
+        must still initialize its reference from ITS OWN earliest declared
+        week -- not fail open to 0.0 for its whole season just because some
+        OTHER team in the same season has a week-1 entry."""
+        from services.nn_feature_engine import compute_qb_availability_flags
+        declared = (
+            [{"season": 2026, "week": w, "team": "TEAM_A", "gsis_id": "A_QB"} for w in [1, 2, 3]]
+            + [{"season": 2026, "week": 3, "team": "TEAM_B", "gsis_id": "B_QB"}]
+        )
+        report = [{"season": 2026, "week": 3, "team": "TEAM_B", "gsis_id": "B_QB",
+                   "report_status": "Out"}]
+        patches = self._patch_loaders(declared, report, [], [])
+        with patches[0], patches[1], patches[2], patches[3]:
+            result = compute_qb_availability_flags([2026], tmp_path)
+        assert result[(2026, 3, "TEAM_B")] == 1.0, (
+            "TEAM_B's own week-3 declared starter should have been picked up "
+            "as the reference, not left None because TEAM_A has a week-1 row"
+        )

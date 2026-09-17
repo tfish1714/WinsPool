@@ -1460,12 +1460,18 @@ def compute_qb_availability_flags(seasons: list, rawdata_dir) -> dict:
     }
 
     out_rows = report[report["report_status"].isin(["Out", "Doubtful"])] if not report.empty else report
-    report_out = set(zip(out_rows["season"], out_rows["week"], out_rows["gsis_id"])) if not out_rows.empty else set()
-    reserve_set = set(zip(reserve["season"], reserve["week"], reserve["gsis_id"])) if not reserve.empty else set()
+    report_out = (
+        {(int(s), int(w), g) for s, w, g in zip(out_rows["season"], out_rows["week"], out_rows["gsis_id"])}
+        if not out_rows.empty else set()
+    )
+    reserve_set = (
+        {(int(s), int(w), g) for s, w, g in zip(reserve["season"], reserve["week"], reserve["gsis_id"])}
+        if not reserve.empty else set()
+    )
 
     snap_by_team_week: dict = {}
     for r in snaps.itertuples(index=False):
-        snap_by_team_week.setdefault((r.season, r.week, r.team), {})[r.gsis_id] = r.snap_share
+        snap_by_team_week.setdefault((int(r.season), int(r.week), r.team), {})[r.gsis_id] = r.snap_share
 
     flags: dict = {}
     for season in seasons:
@@ -1487,7 +1493,17 @@ def compute_qb_availability_flags(seasons: list, rawdata_dir) -> dict:
         weeks = sorted(season_weeks)
 
         for team in teams:
-            reference = declared_map.get((season, weeks[0], team))
+            # Initialize from THIS team's own earliest declared week, not
+            # the season-wide minimum -- a team whose depth chart wasn't
+            # resolved until week 3 must not fail open to 0.0 for weeks
+            # 1-3 just because some OTHER team has a week-1 entry.
+            team_declared_weeks = sorted(
+                w for (s, w, t) in season_keys if t == team
+            )
+            reference = (
+                declared_map.get((season, team_declared_weeks[0], team))
+                if team_declared_weeks else None
+            )
             challenger_streak: list = []
 
             for wk in weeks:
