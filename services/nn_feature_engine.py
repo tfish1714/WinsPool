@@ -1558,6 +1558,94 @@ def _load_schedule(rd: Path) -> pd.DataFrame:
     return df
 
 
+def _load_declared_starters(rd: Path) -> pd.DataFrame:
+    """Depth-chart-declared starting QB per (season, week, team).
+
+    Old schema (pre-2025: club_code/depth_team/week/game_type) is already
+    per-week -- used directly, no timestamp resolution needed.
+    New schema (2025+: dt/gsis_id) is a continuous snapshot timeline --
+    resolved against the schedule's own earliest kickoff date per week via
+    merge_asof, picking the latest snapshot strictly before that date.
+
+    Returns columns: season, week, team, gsis_id.
+    """
+    empty = pd.DataFrame(columns=["season", "week", "team", "gsis_id"])
+
+    # Load all depth_charts files and extract season from filename
+    files = sorted(glob.glob(str(rd / "depth_charts" / "depth_charts_*.csv")))
+    if not files:
+        return empty
+
+    frames = []
+    for fpath in files:
+        # Extract season from filename: depth_charts_YYYY.csv -> YYYY
+        basename = Path(fpath).stem  # "depth_charts_2023"
+        season_str = basename.split("_")[-1]
+        season = pd.to_numeric(season_str, errors="coerce")
+        if pd.isna(season):
+            continue
+
+        df = _read_csv_safe(fpath)
+        if not df.empty:
+            df["season"] = season
+            frames.append(df)
+
+    if not frames:
+        return empty
+
+    dc = pd.concat(frames, ignore_index=True)
+    if dc.empty:
+        return empty
+
+    starters = []
+
+    if "club_code" in dc.columns:
+        old = dc[(dc.get("game_type") == "REG") & (dc.get("depth_position") == "QB")].copy()
+        old = old[old["depth_team"].astype(str).isin(["1", "1.0"])]
+        old["season"] = pd.to_numeric(old["season"], errors="coerce")
+        old["week"] = pd.to_numeric(old["week"], errors="coerce")
+        old["team"] = old["club_code"].apply(_normalize_team)
+        starters.append(
+            old.dropna(subset=["season", "week"])[["season", "week", "team", "gsis_id"]]
+        )
+
+    if "dt" in dc.columns and "gsis_id" in dc.columns and "pos_abb" in dc.columns:
+        schedule = _load_schedule(rd)
+        if not schedule.empty:
+            kickoffs = (
+                schedule.groupby(["season", "week"])["gameday"]
+                .min().reset_index().rename(columns={"gameday": "kickoff_date"})
+            )
+            kickoffs["kickoff_date"] = pd.to_datetime(kickoffs["kickoff_date"], errors="coerce")
+
+            new = dc[dc["pos_abb"] == "QB"].copy()
+            new["team"] = new["team"].apply(_normalize_team)
+            new["season"] = pd.to_numeric(new["season"], errors="coerce")
+            new["pos_rank"] = pd.to_numeric(new["pos_rank"], errors="coerce")
+            new = new[new["pos_rank"] == 1]
+            new["dt"] = pd.to_datetime(new["dt"], utc=True, errors="coerce").dt.tz_localize(None)
+            new = new.dropna(subset=["season", "dt"])
+
+            if not new.empty:
+                teams_per_season = new[["season", "team"]].drop_duplicates()
+                targets = kickoffs.merge(teams_per_season, on="season", how="inner")
+                targets = targets.dropna(subset=["kickoff_date"])
+
+                matched = pd.merge_asof(
+                    targets.sort_values("kickoff_date"),
+                    new.sort_values("dt")[["season", "team", "dt", "gsis_id"]],
+                    left_on="kickoff_date", right_on="dt",
+                    by=["season", "team"], direction="backward",
+                )
+                starters.append(
+                    matched.dropna(subset=["gsis_id"])[["season", "week", "team", "gsis_id"]]
+                )
+
+    if not starters:
+        return empty
+    return pd.concat(starters, ignore_index=True)
+
+
 def _load_rolling_epa(rd: Path) -> pd.DataFrame:
     """Load per-play EPA and rush YPC with 8 rolling prior-game columns.
 

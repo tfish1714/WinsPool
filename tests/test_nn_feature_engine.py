@@ -613,3 +613,58 @@ def test_load_elo_empty_when_csv_and_firestore_both_missing(tmp_path):
         df = _load_elo(tmp_path)
 
     assert df.empty
+
+
+class TestLoadDeclaredStarters:
+    def test_old_schema_uses_own_week_directly(self, tmp_path):
+        """Pre-2025 depth charts are already per-week -- no dt resolution needed."""
+        from services.nn_feature_engine import _load_declared_starters
+        dc_dir = tmp_path / "depth_charts"
+        dc_dir.mkdir()
+        pd.DataFrame([
+            {"club_code": "AAA", "week": 1, "game_type": "REG", "depth_team": 1,
+             "full_name": "QB Alpha", "gsis_id": "00-0001", "depth_position": "QB"},
+            {"club_code": "AAA", "week": 2, "game_type": "REG", "depth_team": 1,
+             "full_name": "QB Bravo", "gsis_id": "00-0002", "depth_position": "QB"},
+            {"club_code": "AAA", "week": 1, "game_type": "REG", "depth_team": 2,
+             "full_name": "QB Backup", "gsis_id": "00-0003", "depth_position": "QB"},
+        ]).to_csv(dc_dir / "depth_charts_2023.csv", index=False)
+
+        result = _load_declared_starters(tmp_path)
+        row = result[(result["season"] == 2023) & (result["week"] == 1) & (result["team"] == "AAA")]
+        assert row.iloc[0]["gsis_id"] == "00-0001"
+        row2 = result[(result["season"] == 2023) & (result["week"] == 2) & (result["team"] == "AAA")]
+        assert row2.iloc[0]["gsis_id"] == "00-0002"
+
+    def test_new_schema_resolves_snapshot_before_kickoff(self, tmp_path):
+        """New-schema depth charts are dt-timestamped, not week-indexed --
+        resolve against the schedule's own kickoff date via merge_asof."""
+        from unittest.mock import patch
+        from services.nn_feature_engine import _load_declared_starters
+        dc_dir = tmp_path / "depth_charts"
+        dc_dir.mkdir()
+        pd.DataFrame([
+            {"dt": "2026-09-05T00:00:00Z", "team": "SEA", "player_name": "Sam Darnold",
+             "gsis_id": "00-0100", "pos_abb": "QB", "pos_rank": 1},
+            {"dt": "2026-09-14T00:00:00Z", "team": "SEA", "player_name": "Drew Lock",
+             "gsis_id": "00-0101", "pos_abb": "QB", "pos_rank": 1},
+        ]).to_csv(dc_dir / "depth_charts_2026.csv", index=False)
+
+        mock_schedule = pd.DataFrame([
+            {"season": 2026, "week": 1, "gameday": "2026-09-09"},
+            {"season": 2026, "week": 2, "gameday": "2026-09-20"},
+        ])
+
+        with patch("services.nn_feature_engine._load_schedule", return_value=mock_schedule):
+            result = _load_declared_starters(tmp_path)
+
+        wk1 = result[(result["season"] == 2026) & (result["week"] == 1) & (result["team"] == "SEA")]
+        assert wk1.iloc[0]["gsis_id"] == "00-0100"  # Sept 5 snapshot -- before Sept 9 kickoff
+        wk2 = result[(result["season"] == 2026) & (result["week"] == 2) & (result["team"] == "SEA")]
+        assert wk2.iloc[0]["gsis_id"] == "00-0101"  # Sept 14 snapshot -- before Sept 20 kickoff
+
+    def test_missing_depth_charts_returns_empty_frame(self, tmp_path):
+        from services.nn_feature_engine import _load_declared_starters
+        result = _load_declared_starters(tmp_path)
+        assert list(result.columns) == ["season", "week", "team", "gsis_id"]
+        assert result.empty
