@@ -1,7 +1,7 @@
 """services/betting_edge_alert_service.py -- orchestrates the existing
 betting screener (services.betting_screener_service.screen_games) and
 pattern scanner (services.pattern_scanner_service.scan_angles) into a single
-weekly summary for the winspool-betting-alert Cloud Run Job. Pure logic, no
+weekly summary for scripts/betting_edge_alert_weekly.py. Pure logic, no
 Firestore/network -- callers pass in already-loaded predictions_by_season /
 games_df, same as both services it composes. Never touches the NN+XGB+LR
 ensemble.

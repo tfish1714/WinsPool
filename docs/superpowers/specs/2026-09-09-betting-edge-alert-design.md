@@ -96,29 +96,34 @@ reading Firestore rather than stale local pickles.
   `[WinsPool Alert]` failure path, distinct from a normal "no edges this
   week" no-op.
 
-**New Cloud Run Job**: `winspool-betting-alert`, using the existing
-`Dockerfile.sync` image (`python:3.10-slim`, `requirements.txt` only) — the
-screener/scanner never touch the NN+XGB+LR ensemble, so no ML dependencies
-are needed, keeping this job as cheap as the sync/live-scores jobs rather
-than needing the heavier `Dockerfile.predict` image.
+**No new Cloud Run Job or Cloud Scheduler trigger.** `scripts/schedule_kickoffs.py`
+(`winspool-schedule-kickoffs`, Tuesdays ~10:00 UTC) calls this script as a
+plain subprocess step (`_run_betting_alert()`) right after it finishes
+enqueuing that week's kickoff Cloud Tasks — both already share the
+`Dockerfile.sync` image (`python:3.10-slim`, `requirements.txt` only), the
+screener/scanner never touch the NN+XGB+LR ensemble so there's no
+ML-dependency mismatch to avoid, and by the time `winspool-schedule-kickoffs`
+runs each Tuesday that week's schedule is confirmed and its Vegas lines are
+already posted — so no separate, independently-tuned trigger offset is
+needed either. A screener bug can't fail the actual kickoff-scheduling job:
+`_run_betting_alert()` is wholly non-fatal and only called after the kickoff
+enqueue loop has already succeeded.
 
-**New Cloud Scheduler trigger**: `winspool-betting-alert-trigger`, Tuesdays,
-shortly after `winspool-schedule-kickoffs-trigger`'s 10:00 UTC run — exact
-offset (e.g. +30min) to be tuned once it's clear how quickly that week's
-lines stabilize after the schedule is confirmed.
+**`MAX_RETRIES`**: no separate env var needed. This now runs inside
+`winspool-schedule-kickoffs`' own execution, so `betting_edge_alert_weekly.py`'s
+`_run_with_alerting()` reads the same `CLOUD_RUN_TASK_ATTEMPT`/`MAX_RETRIES`
+that job already has set (matching its own `--max-retries=3`).
 
-**`MAX_RETRIES`**: per the existing gotcha in CLAUDE.md, this job needs its
-own `MAX_RETRIES` env var matching its `--max-retries` (default 3, matching
-every other job) or alerting fails open on retry.
+## One-time GCP provisioning
 
-## One-time GCP provisioning (not yet run)
+None. No new Cloud Run Job, IAM binding, or Cloud Scheduler trigger — this
+piggybacks entirely on `winspool-schedule-kickoffs`, which is already
+provisioned. A normal `deploy.ps1` run rebuilds and redeploys that job's
+image with `betting_edge_alert_weekly.py` included, same as any other change
+under `scripts/`.
 
-Mirrors `docs/superpowers/plans/completed/2026-08-19-scheduled-jobs.md` Task 9.
-Requires `gcloud` authenticated against `fishbone-wins-pool`. Run manually
-(not as an unattended step) once `Dockerfile.sync` has been rebuilt with this
-job's code (a normal `deploy.ps1` run handles the rebuild+push once
-`winspool-betting-alert` is in `$syncJobs`, but the job itself must exist
-before an `update` will find it):
+<details>
+<summary>Superseded: original standalone-job provisioning plan (not run)</summary>
 
 ```bash
 # 1. Create the Cloud Run Job (reuses the existing winspool-sync image and
@@ -162,6 +167,14 @@ both triggers, state `ENABLED`. Smoke-test with
 `gcloud run jobs execute winspool-betting-alert --region=us-east1 --project=fishbone-wins-pool`
 and confirm either an email lands at `BETTING_ALERT_EMAIL` or the execution
 logs show the no-edges skip message.
+
+</details>
+
+To smoke-test the actual (piggyback) design instead: after a deploy,
+`gcloud run jobs execute winspool-schedule-kickoffs --region=us-east1 --project=fishbone-wins-pool`
+and confirm its logs show a `[schedule_kickoffs] Running weekly betting-edge
+alert...` line followed by either a sent-email confirmation or the no-edges
+skip message.
 
 ## Out of scope
 

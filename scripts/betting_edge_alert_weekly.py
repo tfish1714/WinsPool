@@ -1,8 +1,11 @@
-"""scripts/betting_edge_alert_weekly.py -- winspool-betting-alert Cloud Run
-Job entrypoint. Runs weekly (Tuesdays, shortly after winspool-schedule-kickoffs'
-10:00 UTC run -- see docs/superpowers/specs/2026-09-09-betting-edge-alert-design.md),
-in-season only (gated by the Cloud Scheduler trigger's own cron window, not
-in-script -- matching every other scheduled job in this repo).
+"""scripts/betting_edge_alert_weekly.py -- weekly betting-edge alert email.
+
+Not its own Cloud Run Job: run as a plain subprocess step of
+winspool-schedule-kickoffs, right after that job enqueues the week's kickoff
+Cloud Tasks (see scripts/schedule_kickoffs.py::_run_betting_alert() and
+docs/superpowers/specs/2026-09-09-betting-edge-alert-design.md). In-season
+gating and the weekly Tuesday cadence both come from that job's own Cloud
+Scheduler trigger -- nothing in this script re-checks either.
 
 Personal alert only (project owner, one recipient via BETTING_ALERT_EMAIL) --
 never player-facing. Read-only: composes the existing betting screener

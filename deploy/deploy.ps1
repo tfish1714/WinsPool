@@ -38,7 +38,6 @@ if (-not $appBaseUrl) {
 }
 $fromEmail = Get-DotEnvValue "FROM_EMAIL"     # optional -- code falls back to onboarding@resend.dev
 $alertEmail = Get-DotEnvValue "ALERT_EMAIL"   # optional -- omits Reply-To on the draft-order email if unset
-$bettingAlertEmail = Get-DotEnvValue "BETTING_ALERT_EMAIL"  # used only by the one-time `gcloud run jobs create` in Task 5's docs -- deploy.ps1 itself only updates job images, not their env vars
 
 # Web Push (VAPID) -- optional, but silently no-ops end-to-end without all
 # three: services/push_service.py refuses to send with no VAPID_PUBLIC/PRIVATE_KEY,
@@ -128,25 +127,18 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[DEPLOY] Updating scheduled Cloud Run Jobs to the freshly built images..." -ForegroundColor Cyan
-# winspool-predict-daily is updated FIRST, before the $syncJobs loop below --
-# $syncJobs includes winspool-betting-alert, which is not yet provisioned in
-# GCP (see Finding 1 of the 2026-09-15 final review) and will make
-# `gcloud run jobs update` error out. Updating winspool-predict-daily first
-# guarantees it always gets the freshly built (several-minutes-to-build,
-# TensorFlow-installing) image regardless of what happens to any job in
-# $syncJobs.
-gcloud run jobs update winspool-predict-daily --image=$PREDICT_IMAGE --region=us-east1 --project=$PROJECT_ID
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] Failed to update job winspool-predict-daily." -ForegroundColor Red
-    exit 1
-}
-$syncJobs = @("winspool-sync-daily", "winspool-live-scores", "winspool-schedule-kickoffs", "winspool-betting-alert")
+$syncJobs = @("winspool-sync-daily", "winspool-live-scores", "winspool-schedule-kickoffs")
 foreach ($job in $syncJobs) {
     gcloud run jobs update $job --image=$SYNC_IMAGE --region=us-east1 --project=$PROJECT_ID
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] Failed to update job $job." -ForegroundColor Red
         exit 1
     }
+}
+gcloud run jobs update winspool-predict-daily --image=$PREDICT_IMAGE --region=us-east1 --project=$PROJECT_ID
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Failed to update job winspool-predict-daily." -ForegroundColor Red
+    exit 1
 }
 
 Write-Host "[SUCCESS] Scheduled jobs updated!" -ForegroundColor Green

@@ -1,6 +1,8 @@
-"""Tests for scripts/betting_edge_alert_weekly.py -- the winspool-betting-alert
-Cloud Run Job entrypoint. Mirrors the mocking style of test_sync_live_scores.py:
-mock every service call, verify the orchestration (no real Firestore/network)."""
+"""Tests for scripts/betting_edge_alert_weekly.py -- run as a subprocess step
+of winspool-schedule-kickoffs (scripts/schedule_kickoffs.py::_run_betting_alert(),
+see tests/test_schedule_kickoffs.py::TestRunBettingAlert), not its own Cloud
+Run Job. Mirrors the mocking style of test_sync_live_scores.py: mock every
+service call, verify the orchestration (no real Firestore/network)."""
 import pandas as pd
 import pytest
 from unittest.mock import patch, MagicMock
