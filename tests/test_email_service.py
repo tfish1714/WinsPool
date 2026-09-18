@@ -234,6 +234,42 @@ def test_send_betting_edge_email_includes_both_tiers(mock_getenv, mock_send):
 
 @patch("services.email_service.resend.Emails.send")
 @patch("services.email_service.os.getenv", return_value="re_test_key")
+def test_send_betting_edge_email_highlights_the_actual_pick(mock_getenv, mock_send):
+    """The reader must be able to see which TEAM to bet at a glance -- both
+    tiers must render a bolded/colored team abbreviation, and the angle-match
+    tier must translate matched_sides ('home'/'away') into the actual team
+    name rather than leaving the literal side label in the email."""
+    mock_send.return_value = {"id": "bet126"}
+    week_summary = {
+        "season": 2026, "week": 3,
+        "validated_angle_matches": [{
+            "metric": "ats",
+            "conditions": [{"feature": "elo_diff", "label": "Elo Diff", "min": 50.0}],
+            "train_rate": 0.62, "train_n": 120, "test_rate": 0.58, "test_n": 30,
+            "games": [{"home_team": "KC", "away_team": "SF", "matched_sides": ["home"]}],
+        }],
+        "raw_edge_outliers": [{
+            "home_team": "BUF", "away_team": "MIA", "edge_vs_vegas": 4.5,
+            "model_spread": 3.0, "vegas_line": -1.5, "ats_pick": "BUF",
+        }],
+    }
+
+    result = send_betting_edge_email("owner@x.com", week_summary)
+
+    assert result is True
+    html_output = mock_send.call_args[0][0]["html"]
+    # The angle-match section must name the actual team (KC), not the raw
+    # side label -- "matched_sides": ["home"] must not surface as literal
+    # "(home)" text anywhere.
+    assert "(home)" not in html_output and "(away)" not in html_output
+    # Both picks (KC for the angle match, BUF for the raw outlier) must be
+    # wrapped in a bold/colored <strong> tag, not just plain text.
+    assert '<strong style="font-weight:700; color:#059669;">KC</strong>' in html_output
+    assert '<strong style="font-weight:700; color:#059669;">BUF</strong>' in html_output
+
+
+@patch("services.email_service.resend.Emails.send")
+@patch("services.email_service.os.getenv", return_value="re_test_key")
 def test_send_betting_edge_email_handles_empty_angle_matches(mock_getenv, mock_send):
     """Caller (the script) decides whether to send at all when both tiers are
     empty -- this function itself must not crash if given an empty tier."""

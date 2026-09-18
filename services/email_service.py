@@ -95,6 +95,13 @@ def send_betting_edge_email(to_email: str, week_summary: dict) -> bool:
 
     sections = []
 
+    # Both sections bold+color the actual pick so it's unambiguous at a
+    # glance which side to bet, not just which game is flagged.
+    pick_style = "font-weight:700; color:#059669;"  # green, matches the app's accent-green
+
+    def _pick_html(team: str) -> str:
+        return f"<strong style=\"{pick_style}\">{html.escape(str(team))}</strong>"
+
     angle_matches = week_summary.get("validated_angle_matches") or []
     if angle_matches:
         rows = []
@@ -103,8 +110,14 @@ def send_betting_edge_email(to_email: str, week_summary: dict) -> bool:
                 f"{c['label']} {'>=' if 'min' in c else '<='} {c.get('min', c.get('max'))}"
                 for c in m["conditions"]
             )
-            games_text = "; ".join(
-                f"{g['away_team']} @ {g['home_team']} ({'/'.join(g['matched_sides'])})"
+            verb = "Bet" if m["metric"] == "ats" else "Pick"
+            games_html = "; ".join(
+                f"{html.escape(str(g['away_team']))} @ {html.escape(str(g['home_team']))} "
+                f"&mdash; {verb} "
+                + "/".join(
+                    _pick_html(g["home_team"] if side == "home" else g["away_team"])
+                    for side in g["matched_sides"]
+                )
                 for g in m["games"]
             )
             test_rate_text = (
@@ -113,7 +126,7 @@ def send_betting_edge_email(to_email: str, week_summary: dict) -> bool:
             rows.append(
                 f"<li><strong>{html.escape(cond_text)}</strong> "
                 f"({m['metric'].upper()}, train {m['train_rate']:.1%} n={m['train_n']}, "
-                f"held-out {test_rate_text})<br>{html.escape(games_text)}</li>"
+                f"held-out {test_rate_text})<br>{games_html}</li>"
             )
         sections.append(f"<h3>Validated angle matches</h3><ul>{''.join(rows)}</ul>")
 
@@ -121,7 +134,7 @@ def send_betting_edge_email(to_email: str, week_summary: dict) -> bool:
     if outliers:
         rows = "".join(
             f"<li>{html.escape(str(o['away_team']))} @ {html.escape(str(o['home_team']))}: "
-            f"model favors {html.escape(str(o['ats_pick']))} by {o['edge_vs_vegas']:+.1f} vs Vegas "
+            f"model favors {_pick_html(o['ats_pick'])} by {o['edge_vs_vegas']:+.1f} vs Vegas "
             f"(model {o['model_spread']}, Vegas {o['vegas_line']})</li>"
             for o in outliers
         )
