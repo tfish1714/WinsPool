@@ -913,16 +913,21 @@ class TestComputeQbAvailabilityFlags:
             (2026, 1, "AAA"): 0.0, (2026, 2, "AAA"): 0.0, (2026, 3, "AAA"): 0.0,
         }
 
-    def test_starter_hurt_mid_game_week1_still_flags_via_snap_share(self, tmp_path):
-        """Regression for the SEA/MIN case: week-1 starter identified from
-        the depth chart (not from who happened to play the most snaps that
-        game), then flagged unavailable in week 2 via the injury report."""
+    def test_starter_hurt_mid_game_week1_flags_week2_not_week1(self, tmp_path):
+        """Regression for the SEA/MIN case, corrected: a starter's OWN
+        snap share for week wk is only knowable after week wk's game is
+        played, so it must never be used to set week wk's own flag -- doing
+        so lets a week's own outcome leak into "explaining"/grading that
+        same week's prediction (and into training on hindsight the model
+        will never have at real prediction time). Darnold got hurt mid-game
+        in week 1 (no pre-game injury report entry that week) -- week 1
+        itself must read healthy; week 1's now-known low snap share
+        legitimately carries forward to flag week 2, on top of week 2's own
+        injury report."""
         from services.nn_feature_engine import compute_qb_availability_flags
         declared = [{"season": 2026, "week": 1, "team": "SEA", "gsis_id": "DARNOLD"}]
         report = [{"season": 2026, "week": 2, "team": "SEA", "gsis_id": "DARNOLD",
                    "report_status": "Out"}]
-        # Week 1's own snaps show the backup played most of the game -- must
-        # NOT be used to override the depth-chart-declared starter.
         snaps = [
             {"season": 2026, "week": 1, "team": "SEA", "gsis_id": "DARNOLD", "snap_share": 0.10},
             {"season": 2026, "week": 1, "team": "SEA", "gsis_id": "LOCK", "snap_share": 0.90},
@@ -930,8 +935,22 @@ class TestComputeQbAvailabilityFlags:
         patches = self._patch_loaders(declared, report, [], snaps)
         with patches[0], patches[1], patches[2], patches[3]:
             result = compute_qb_availability_flags([2026], tmp_path)
-        assert result[(2026, 1, "SEA")] == 1.0  # Darnold at 10% snaps -> unavailable that week too
-        assert result[(2026, 2, "SEA")] == 1.0  # Darnold on injury report
+        assert result[(2026, 1, "SEA")] == 0.0  # unknowable before week 1's own kickoff
+        assert result[(2026, 2, "SEA")] == 1.0  # week 1's snap share now known + week 2's own report
+
+    def test_first_evaluated_week_never_uses_its_own_snap_share(self, tmp_path):
+        """A team's very first evaluated week has no prior week to check --
+        its own (only-knowable-after-the-fact) snap share must never
+        substitute, even when it's the only signal available."""
+        from services.nn_feature_engine import compute_qb_availability_flags
+        declared = [{"season": 2026, "week": 1, "team": "SEA", "gsis_id": "DARNOLD"}]
+        snaps = [
+            {"season": 2026, "week": 1, "team": "SEA", "gsis_id": "DARNOLD", "snap_share": 0.05},
+        ]
+        patches = self._patch_loaders(declared, [], [], snaps)
+        with patches[0], patches[1], patches[2], patches[3]:
+            result = compute_qb_availability_flags([2026], tmp_path)
+        assert result[(2026, 1, "SEA")] == 0.0
 
     def test_reserve_status_flags_when_injury_report_silent(self, tmp_path):
         """A season-ending IR move often drops off the weekly injury report
@@ -947,22 +966,31 @@ class TestComputeQbAvailabilityFlags:
     def test_single_week_healthy_rest_does_not_flip_reference(self, tmp_path):
         """One week of a healthy backup (no injury/reserve entry for the
         starter) must not permanently reassign the reference -- only two
-        CONSECUTIVE weeks of a >65% snap-share challenger does."""
+        CONSECUTIVE weeks of a >65% snap-share challenger does. Also
+        exercises the corrected snap-share carry-forward: week 2's own low
+        snap share is unknowable before week 2's kickoff (flags[2]==0.0),
+        but legitimately informs week 3 (flags[3]==1.0) since it's now in
+        the past; week 4 reads healthy again once the starter's most
+        recent (week 3) snap share is normal."""
         from services.nn_feature_engine import compute_qb_availability_flags
-        declared = [{"season": 2026, "week": w, "team": "AAA", "gsis_id": "STARTER"} for w in [1, 2, 3]]
+        declared = [{"season": 2026, "week": w, "team": "AAA", "gsis_id": "STARTER"} for w in [1, 2, 3, 4]]
         snaps = [
             {"season": 2026, "week": 1, "team": "AAA", "gsis_id": "STARTER", "snap_share": 1.0},
             {"season": 2026, "week": 2, "team": "AAA", "gsis_id": "STARTER", "snap_share": 0.05},
             {"season": 2026, "week": 2, "team": "AAA", "gsis_id": "BACKUP", "snap_share": 0.95},
             {"season": 2026, "week": 3, "team": "AAA", "gsis_id": "STARTER", "snap_share": 1.0},
+            {"season": 2026, "week": 4, "team": "AAA", "gsis_id": "STARTER", "snap_share": 1.0},
         ]
         patches = self._patch_loaders(declared, [], [], snaps)
         with patches[0], patches[1], patches[2], patches[3]:
             result = compute_qb_availability_flags([2026], tmp_path)
-        # Week 2 itself reads as unavailable (starter under 20% snaps that week)...
-        assert result[(2026, 2, "AAA")] == 1.0
-        # ...but week 3 the starter is back and the reference never flipped.
-        assert result[(2026, 3, "AAA")] == 0.0
+        # Week 2's own low snap share isn't knowable before week 2's kickoff...
+        assert result[(2026, 2, "AAA")] == 0.0
+        # ...but it's known by week 3's kickoff, and legitimately flags week 3.
+        assert result[(2026, 3, "AAA")] == 1.0
+        # By week 4 the starter's most recent (week 3) snap share is normal
+        # again, and the reference never flipped (only one week of benching).
+        assert result[(2026, 4, "AAA")] == 0.0
 
     def test_two_consecutive_weeks_of_healthy_benching_flips_reference(self, tmp_path):
         """A genuine benching (or a resolving preseason committee): the

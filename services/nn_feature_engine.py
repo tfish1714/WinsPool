@@ -1553,9 +1553,15 @@ def compute_qb_availability_flags(seasons: list, rawdata_dir) -> dict:
 
     Returns {(season, week, team): 1.0 if the week's reference starter is
     unavailable that week, else 0.0}. The snap-share leg of the
-    availability check (not the flip-detection leg) only fires for weeks
-    with real snap data -- i.e. it naturally never fires for a future,
-    unplayed game.
+    availability check always reads the reference starter's PRIOR week's
+    snap share, never that week's own -- a team's week-wk snap distribution
+    isn't knowable until week wk's game has been played, so using it to set
+    week wk's own flag would leak that week's own outcome into "explaining"
+    or grading that same week's prediction (and into training on hindsight
+    a real prediction can never have). See
+    docs/superpowers/specs/2026-09-18-qb-availability-snap-share-leakage-
+    design.md. It naturally never fires for a future, unplayed game either
+    way (no snap data yet for any week).
     """
     rd = Path(rawdata_dir)
     declared = _load_declared_starters(rd)
@@ -1622,9 +1628,15 @@ def compute_qb_availability_flags(seasons: list, rawdata_dir) -> dict:
 
                 ref_out     = (season, wk, reference) in report_out
                 ref_reserve = (season, wk, reference) in reserve_set
+                # Strictly prior week -- see the docstring above for why.
+                prev_shares   = snap_by_team_week.get((season, wk - 1, team), {})
+                prev_ref_share = prev_shares.get(reference)
+                ref_low_snaps = prev_ref_share is not None and prev_ref_share < 0.20
+
+                # This week's own snap shares are still used below, purely to
+                # detect a challenger for FUTURE reference reassignment -- that
+                # only ever affects week wk+1 onward, never week wk's own flag.
                 week_shares = snap_by_team_week.get((season, wk, team), {})
-                ref_share   = week_shares.get(reference)
-                ref_low_snaps = ref_share is not None and ref_share < 0.20
 
                 flags[(season, wk, team)] = (
                     1.0 if (ref_out or ref_reserve or ref_low_snaps) else 0.0
