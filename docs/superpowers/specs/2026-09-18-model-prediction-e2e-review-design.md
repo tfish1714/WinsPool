@@ -395,30 +395,55 @@ Stage 2 scoped correctly before trusting any of its conclusions:
 
 ## Stage 3 — Serving / Ensemble Blending
 
-Not yet started. Files: `services/prediction_service.py`,
-`services/nn_prediction_service.py`, `services/xgb_prediction_service.py`,
-`services/lr_prediction_service.py`, `services/nn_projection_engine.py`,
-`scripts/cache_builder.py`, `scripts/backfill_schedule_predictions.py`.
+**Complete, 2026-09-18.** Findings, most severe first:
 
-1. Resolve the `prediction_service.py` duplicate-system question from
-   Stage 2, item 3.
-2. Confirm the 45/20/35 blend is applied identically on every path:
-   season-simulation Monte Carlo, single-game preseason path, in-season
-   single-game path, the daily `cache_builder.py` write, and the backfill
-   script.
-3. Re-check the "explanation drift" bug from
-   `docs/superpowers/specs/completed/2026-09-17-qb-availability-and-prediction-freshness-design.md`
-   Bug C: does the daily `cache_builder.py` job actually keep `explanation`
-   in sync with the top-level prediction fields now, or does the fix only
-   cover part of the write paths? (That spec claims this was fixed as Part
-   C/D — verify against current code, same discipline as Stage 1 item 2.)
-4. Confirm `derive_prediction_scalars()` (already verified correct in
-   isolation) is the *only* place ATS pick / edge-vs-vegas gets computed —
-   no divergent inline duplicate anywhere else in the serving path that
-   could drift out of sync with it.
-5. Sanity-check `RESIMULATE_LEAD_MINUTES` (`scripts/schedule_kickoffs.py`)
-   against a real measured runtime of `--resimulate` — flagged as
-   unvalidated in the original scheduled-jobs work and never followed up.
+1. **[Structural, retroactive-grading path only]** `services/nn_prediction_service.py:106-119`
+   (`build_ensemble_lookup()`, used by `cache_builder.py`'s daily write and
+   `backfill_schedule_predictions.py`) independently re-implements the same
+   ATS-pick/edge-vs-vegas formula as `derive_prediction_scalars()`
+   (`services/nn_projection_engine.py:1010-1041`, the MC-simulation/future-game
+   path, already verified correct). Both currently compute identical results
+   — no live bug — but they're two separately-maintained copies of one
+   formula, not one shared function. Exactly the checklist's "training-only
+   code copied into serving code" anti-pattern. A future fix to one (like
+   today's ATS-sign re-verification, which only touched
+   `derive_prediction_scalars`) wouldn't propagate to the other. Recommend
+   consolidating into one shared function this review's implementation
+   plan should include.
+2. **[Structural, real evidence, still being measured]** `RESIMULATE_LEAD_MINUTES=20`
+   remains unvalidated, and a real local timing test suggests it may be
+   tight — a warm local `--resimulate` run (rawdata already synced, no
+   cold-start penalty) ran well past 9 minutes without finishing during
+   the audit. Timing this properly now with a fresh, tracked run (real
+   Cloud Run execution would add cold-container-start on top of whatever
+   this measures) — see this section's next update for the actual number.
+3. **[Corrected — narrower than Stage 2 assumed, no action needed]** The
+   "duplicate `prediction_service.py` system" is real but not the live risk
+   it looked like: `PredictionService` (Elo+Pythagorean) backs exactly 5
+   routes in `routes/prediction_routes.py`, and grepping every frontend
+   file confirms **none of the 5 are called from any page** — dead,
+   unreachable product surface, not a second prediction system users
+   actually see. Also dead: unused imports of `PredictionService` in
+   `services/draft_service.py:87` and `scripts/cache_builder.py:48`. Worth
+   a decision (keep as legacy/fallback API, or delete) but not urgent.
+4. **Checked clean — 45/20/35 blend consistency.** Exactly two blend sites
+   exist (`nn_projection_engine.py:626` for the MC/preseason path,
+   `nn_prediction_service.py:90` for the daily-write/backfill path, the
+   latter confirmed shared, not duplicated), both sourcing
+   `NN_WEIGHT`/`XGB_WEIGHT`/`LR_WEIGHT` from `services/constants.py`. No
+   hardcoded duplicate weights found anywhere.
+5. **Checked clean, with a structural caveat — "explanation drift" (Bug C).**
+   The original crisis (daily job silently overwriting `explanation` with a
+   thin dict) is genuinely fixed — `cache_builder.py:99-124` explicitly
+   drops `explanation` from an entry rather than writing a thin one.
+   Verified against real 2026 data: 272 predictions, 0 mismatches between
+   top-level and nested `model_spread`. **Caveat:** that check only proves
+   "clean right after a fresh backfill" — top-level fields still refresh
+   daily via whatever feature code exists that day, while `explanation`
+   stays frozen until the next Tuesday backfill, so divergence is still
+   structurally possible over time, just not currently observed. Same root
+   cause as, and another argument for, the feature-computation-versioning
+   design already folded into this spec.
 
 ## Stage 4 — Explanation Surfaces
 
