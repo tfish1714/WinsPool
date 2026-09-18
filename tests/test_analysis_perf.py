@@ -62,13 +62,13 @@ def test_wins_by_week_total_row(simple_schedule):
 # -- get_remaining_games ------------------------------------------------------
 
 def test_remaining_games_basic():
-    """Existing test: 1 away game + 1 both-player game = 3 remaining."""
+    """1 away game + 1 both-teams-owned game (still 1 real game) = 2 remaining."""
     df = pd.DataFrame([
         {"result": pd.NA, "fullName_away": "TFish", "fullName_home": "Opp"},
         {"result": pd.NA, "fullName_away": "TFish", "fullName_home": "TFish"},
         {"result": 10.0, "fullName_away": "TFish", "fullName_home": "Opp"},  # played
     ])
-    assert get_remaining_games("TFish", df) == 3
+    assert get_remaining_games("TFish", df) == 2
 
 
 def test_remaining_games_no_remaining():

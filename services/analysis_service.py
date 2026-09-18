@@ -84,11 +84,12 @@ def get_remaining_games(player: str, schedule: pd.DataFrame) -> int:
         (schedule['result'].isna() | (schedule['result'] == UNDRAFTED_SENTINEL)) &
         ((schedule['fullName_away'] == player) | (schedule['fullName_home'] == player))
     ]
-    if filtered.empty:
-        return 0
-    return int(np.where(
-        filtered['fullName_away'] == filtered['fullName_home'], 2, 1
-    ).sum())
+    # Each remaining row is one real game, worth at most one additional win
+    # -- even when the player owns both teams (fullName_away ==
+    # fullName_home), only one of those two teams can actually win, so it
+    # must still count as 1, not 2 (counting it twice let max_wins credit
+    # an impossible double-win from a single game).
+    return len(filtered)
 
 def player_winsbyWeek(schedule: pd.DataFrame, sorted_players: List[str] = None) -> pd.DataFrame:
     """Return a DataFrame of cumulative wins per player broken down by week."""
