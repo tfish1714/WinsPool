@@ -142,6 +142,10 @@ async function loadWeekGames(season, week, containerId) {
                 <td style="padding:4px 8px;text-align:center;">${_pgCorrectIcon(g.is_correct)}</td>
                 <td style="padding:4px 8px;">${_pgFmtSpread(g.model_spread, g.home_team, g.away_team)}</td>
                 ${vegasCols}
+                <td style="padding:4px 8px;">
+                    ${g.pred_ats_pick != null ? _esc(g.pred_ats_pick) : '<span style="color:var(--text-secondary);">—</span>'}
+                </td>
+                <td style="padding:4px 8px;text-align:center;">${_pgCorrectIcon(g.is_correct_ats)}</td>
             </tr>`;
         }).join('');
 
@@ -156,9 +160,11 @@ async function loadWeekGames(season, week, containerId) {
                         <th style="padding:4px 8px;text-align:left;">Matchup</th>
                         <th style="padding:4px 8px;text-align:left;">Model Pick</th>
                         <th style="padding:4px 8px;text-align:left;">Actual</th>
-                        <th style="padding:4px 8px;text-align:center;">✓/✗</th>
+                        <th style="padding:4px 8px;text-align:center;">SU ✓/✗</th>
                         <th style="padding:4px 8px;text-align:left;">Model Line</th>
                         ${vegasHeaders}
+                        <th style="padding:4px 8px;text-align:left;">ATS Pick</th>
+                        <th style="padding:4px 8px;text-align:center;">ATS ✓/✗</th>
                     </tr>
                 </thead>
                 <tbody>${gameRows}</tbody>
@@ -190,11 +196,13 @@ window._openGameFeatureModal = async function(season, week, away, home) {
         const vegasSpread = _pgFmtSpread(c.vegas_line,   c.home_team, c.away_team);
         const edge        = _pgEdgeStr(c.edge_vs_vegas,  c.home_team, c.away_team);
         const correct     = _pgCorrectIcon(c.is_correct);
+        const correctAts  = _pgCorrectIcon(c.is_correct_ats);
         return `
             <div style="display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap;
                         padding:0.75rem 0 1rem;border-bottom:1px solid var(--glass-border);margin-bottom:1rem;font-size:0.85rem;">
                 ${scoreStr ? `<span style="font-size:1rem;">${scoreStr}</span>` : ''}
-                ${scoreStr ? correct : ''}
+                ${scoreStr ? `<span style="color:var(--text-secondary);">SU ${correct}</span>` : ''}
+                ${scoreStr && c.is_correct_ats != null ? `<span style="color:var(--text-secondary);">ATS ${correctAts}</span>` : ''}
                 <span style="color:var(--text-secondary);">
                     Model: <strong style="color:var(--text-primary);">${modelSpread}</strong>
                 </span>

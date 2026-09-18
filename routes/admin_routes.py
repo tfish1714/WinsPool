@@ -499,20 +499,41 @@ async def get_predictions_games(season: int, week: int, _: dict = Depends(requir
             if edge_vs_vegas is None and model_spread is not None and vegas_line is not None:
                 edge_vs_vegas = round(model_spread - vegas_line, 1)
 
+            # ATS grading: did pred_ats_pick's team actually cover the Vegas line?
+            # vegas_line convention matches model_spread: positive = home favored,
+            # so home covers when actual home margin exceeds vegas_line; a margin
+            # exactly equal to the line is a push (graded as None, not counted).
+            pred_ats_pick = pred.get("pred_ats_pick")
+            is_correct_ats = None
+            home_score = result_entry.get("home_score") if isinstance(result_entry, dict) else None
+            away_score = result_entry.get("away_score") if isinstance(result_entry, dict) else None
+            if (pred_ats_pick is not None and vegas_line is not None
+                    and home_score is not None and away_score is not None):
+                home_margin = home_score - away_score
+                if home_margin > vegas_line:
+                    covered = ht
+                elif home_margin < vegas_line:
+                    covered = at
+                else:
+                    covered = None  # push
+                if covered is not None:
+                    is_correct_ats = (_normalize_team(str(pred_ats_pick)) == covered)
+
             games.append({
-                "key":           key,
-                "away_team":     at,
-                "home_team":     ht,
-                "pred_winner":   pw,
-                "pred_su_conf":  pred.get("pred_su_conf"),
-                "model_spread":  model_spread,
-                "vegas_line":    vegas_line,
-                "edge_vs_vegas": edge_vs_vegas,
-                "pred_ats_pick": pred.get("pred_ats_pick"),
-                "actual_winner": actual_winner,
-                "home_score":    result_entry.get("home_score") if isinstance(result_entry, dict) else None,
-                "away_score":    result_entry.get("away_score") if isinstance(result_entry, dict) else None,
-                "is_correct":    is_correct,
+                "key":            key,
+                "away_team":      at,
+                "home_team":      ht,
+                "pred_winner":    pw,
+                "pred_su_conf":   pred.get("pred_su_conf"),
+                "model_spread":   model_spread,
+                "vegas_line":     vegas_line,
+                "edge_vs_vegas":  edge_vs_vegas,
+                "pred_ats_pick":  pred_ats_pick,
+                "actual_winner":  actual_winner,
+                "home_score":     home_score,
+                "away_score":     away_score,
+                "is_correct":     is_correct,
+                "is_correct_ats": is_correct_ats,
             })
 
         def _sort_key(g):
