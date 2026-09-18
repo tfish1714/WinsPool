@@ -282,6 +282,47 @@ Checklist:
    `nn_feature_engine.py`) — confirm Elo for week N's prediction only
    incorporates results through week N-1.
 
+### Stage 1b — Feature improvement: opponent-adjusted EPA (DVOA-style)
+
+Distinct sub-goal, added 2026-09-18: not "is what's there correct" (items
+1-4 above), but "is there a better feature to add." Promoted from
+backlog (see prior memory note on the DVOA idea, 2026-09-09) now that
+Stage 1 is auditing this exact file anyway.
+
+- **What exists today:** `pass_epa_matchup`/`rush_epa_matchup`/
+  `early_down_matchup` (`FEATURE_COLUMNS`, computed at
+  `services/nn_feature_engine.py:2390-2398`) are a **raw** matchup delta —
+  `(home_off − away_def) − (away_off − home_def)` — not opponent-adjusted.
+  No strength-of-schedule regression, no situational weighting (down/
+  distance), no garbage-time exclusion. A team's raw offensive EPA against
+  a string of bad defenses reads the same as the same EPA against good
+  ones.
+- **What's being asked for:** an EPA-based proxy for DVOA (Football
+  Outsiders/FTN's opponent-adjusted efficiency metric) — covering both
+  offense and defense. Real DVOA is proprietary with no public API or free
+  feed, so this means building an approximation, not ingesting the real
+  thing.
+- **Data already available:** `rawdata/pbp/play_by_play_{year}.csv` is
+  already synced locally back to 1999 (confirmed 2026-09-18, no gap to
+  fill before starting) — this is the right source for a from-scratch
+  opponent-adjustment (per-play EPA with the actual opponent faced that
+  play, not just a season-level average).
+- **Scope reality check:** this changes `FEATURE_COLUMNS`, which means (per
+  CLAUDE.md and [[project_ml_de_vegas]]'s prior cycle) a full retrain of
+  NN/XGB/LR plus walk-forward validation (`scripts/walk_forward_validate.py`)
+  before it's trustworthy — not a quick add, and not something to bundle
+  into the same pass as Stage 1's correctness fixes. Treat as its own
+  follow-up spec once Stage 1's correctness checklist is done: scope the
+  actual opponent-adjustment methodology (regression-based SOS adjustment
+  vs. a simpler weighted-opponent-average proxy) as a full brainstorming
+  pass, not decided here.
+- **Sequencing:** do Stage 1's correctness checklist (items 1-4) first —
+  no point building a new feature on top of a feature-engine file that
+  might still have live causality bugs. This sub-goal is the natural
+  next step after Stage 1 is clean, before or alongside Stage 2's
+  promotion-gate work (a new feature is exactly the kind of change the
+  promotion gate should be gating).
+
 ## Stage 2 — Training (`train_nn_model.py`/`train_xgb_model.py`/`train_lr_model.py`)
 
 **Run once on 2026-09-18, then re-run the same day under corrected
