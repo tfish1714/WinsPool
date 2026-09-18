@@ -1,7 +1,8 @@
 # Model Prediction Pipeline — End-to-End Review
 
 **Date:** 2026-09-18
-**Status:** Designed — ready for implementation plan (review phase only; fixes get their own plans per finding)
+**Status:** Audit complete (all 4 stages) — ready to consolidate findings and
+write implementation plans per fix (see "Rollout")
 
 ## Origin
 
@@ -197,9 +198,16 @@ The backlog doc's open questions, answered:
   this spec exists to prevent. Today added a third: the snap-share fix
   itself, deployed 2026-09-18 with no way to mark which predictions were
   computed before vs. after it, other than session memory.
-- **Storage:** alongside `ensemble_version` in `prediction_features` docs
-  (`services/cache_service.py::write_prediction_features()`), stamped from
-  whatever commit SHA is checked out at write time.
+- **Storage — corrected by Stage 4's finding:** not just `prediction_features`
+  docs. Stage 4 found the *prediction* record itself
+  (`game_predictions`/`.local_db/game_predictions_{year}.json`) carries no
+  `model_version`/`ensemble_version` field anywhere, top-level or inside
+  `explanation` — so there's currently no way, even in principle, to know
+  which model produced a given locked prediction's win probability, not
+  just whether its feature audit matches. The commit-SHA stamp needs to
+  land on both: `prediction_features` docs (alongside `ensemble_version`,
+  as originally scoped) *and* every `game_predictions` entry written by
+  `cache_builder.py`'s daily write and `backfill_schedule_predictions.py`.
 - **Retroactive backfill:** no — forward-only from whenever this lands.
   Not worth trying to reconstruct which commit produced historical rows.
 
@@ -453,36 +461,58 @@ Stage 2 scoped correctly before trusting any of its conclusions:
 
 ## Stage 4 — Explanation Surfaces
 
-Not yet started. Files: `routes/api_routes.py` (`/api/predictions/explain`),
-`routes/admin_routes.py` (`/api/prediction_features`),
-`static/js/schedule_explain.js`, `static/js/admin_accuracy.js`.
+**Complete, 2026-09-18.** Findings, most severe first:
 
-1. Does `/api/predictions/explain` read the actual stored prediction's
-   `explanation` dict, or recompute fresh at request time? If the latter,
-   it can drift from whatever `is_correct`/`is_correct_ats` the per-game
-   table shows for the same game (same class of risk as Stage 3 item 3).
-2. Does `/api/prediction_features` (the Feature Debug modal's data source)
-   correspond to the *same* model version as the stored prediction being
-   displayed, or could it reflect a different (e.g. since-retrained)
-   model's feature audit than the win probability shown alongside it? This
-   is the exact display-side symptom of the versioning gap now designed
-   in "Feature computation versioning" above — once the version stamp
-   lands, this check becomes "does the modal show it," not "can we even
-   tell."
-3. Confirm SU/ATS grade, edge, and Vegas-line numbers are consistent
-   between the per-game table (`admin_accuracy.js`) and both modals for
-   the same game — spot-check a handful of real graded games, not just
-   the two already checked during the modal-routing fix (NE@SEA, SF@LA).
-   While here, also check the explain modal against
-   `docs/superpowers/specs/2026-09-18-betting-pick-type-clarity-design.md`
-   (split out separately, 2026-09-18) — whether a shown pick is ATS or
-   moneyline/SU should be as unambiguous here as it is in the per-game
-   table's separate labeled columns.
-4. The modal-routing bug (button class collision, fixed 2026-09-18,
-   `22eb702`) was found by inspection, not a systematic check — confirm no
-   sibling collision exists elsewhere between `schedule_explain.js`'s
-   document-level delegated listeners and any other page's own button
-   classes.
+1. **[Structural, confirmed, retroactive-grading path — expands the
+   already-folded-in feature-computation-versioning design]** There's no
+   version join at all, and it's more fundamental than that design assumed:
+   `services/cache_service.py::get_prediction_features(season)` (called
+   with no explicit version from `api_routes.py:372`) returns "whichever
+   `--features` backfill ran last for the season," full stop — no way to
+   ask for a specific version. Worse: a real locked prediction
+   (`.local_db/game_predictions_2026.json`, key `W01_SEA_NE`, inspected
+   directly) carries **no `model_version`/`ensemble_version` field
+   anywhere** — not top-level, not inside `explanation`. It's not just
+   that the feature audit *might* be stale relative to the prediction it
+   explains — there is structurally no way, even in principle, to verify
+   which model version produced any given locked prediction's win
+   probability. The already-designed fix needs to stamp the *prediction*
+   record itself, not just the feature-audit doc — updating "Folded-in
+   designs" above to reflect this. Severity: retroactive grading/
+   explanation only, the live win-probability number itself isn't wrong,
+   only its historical provenance is unrecoverable.
+2. **Checked clean — `/api/predictions/explain` reads the real stored
+   prediction, does not recompute.** `routes/api_routes.py:236-237`:
+   `get_game_predictions(season)` → `preds.get(key)`. One narrow, scoped
+   fallback (patches in `spread_line` from `nfl_games` and recomputes only
+   `edge_vs_vegas` if `explanation.vegas_line` is missing) — not a drift
+   risk. Note: this endpoint never returns `is_correct`/`is_correct_ats` at
+   all (see finding 3b).
+3a. **Checked clean, by construction — SU/ATS consistency between the
+   per-game table and the Feature Debug modal.** `admin_accuracy.js`'s
+   `_scoreSummaryHtml` reads `is_correct`/`is_correct_ats` from
+   `_gameCache`, the exact same object the per-game table renders from —
+   never independently re-fetched or recomputed. Structurally impossible
+   for these two to disagree.
+3b. **Gap, not a bug — the "Why TEAM?" modal never shows SU/ATS grade at
+   all.** Not inconsistent with the other surfaces (finding 2's endpoint
+   doesn't carry those fields), just incomplete relative to them. Fold
+   into the version-stamp/explanation-consistency work (finding 1) rather
+   than treating as new scope.
+3c. **Narrows `docs/superpowers/specs/2026-09-18-betting-pick-type-clarity-design.md`
+   — both modals are already unambiguous.** `schedule_explain.js` renders
+   an explicitly labeled "ATS Pick" card (gold-highlighted when it differs
+   from the straight-up pick); the Feature Debug modal already shows
+   separately-labeled SU/ATS grade lines (verified in-browser earlier
+   today). The ambiguity that stub spec found is confined to the
+   betting-alert email (already partially fixed today, `4b9b114`) and the
+   admin betting screener — updating that stub to reflect the narrower
+   scope.
+4. **Checked clean — no other class collision.** `schedule_explain.js`'s
+   delegated listener targets exactly one class, `.pred-explain-btn`; grep
+   confirms no stray reintroduction anywhere, and the file is loaded by
+   exactly 2 templates (`admin.html`, `schedule.html`) — no third page to
+   worry about.
 
 ## Out of scope
 
@@ -498,31 +528,83 @@ Not yet started. Files: `routes/api_routes.py` (`/api/predictions/explain`),
 
 ## Rollout
 
-1. Run Stage 1 fresh (prior sub-agent was killed mid-run).
-2. Run Stages 3 and 4.
-3. Consolidate all four stages' findings into one severity-ordered list,
-   scored against the "Review checklist and anti-patterns" section above.
-4. Decide, with the user, which findings become their own implementation
-   plans (via `superpowers:writing-plans`) and in what order. At minimum,
-   expect:
-   - A Stage 2 model rollback-or-retrain decision.
-   - Implementing the training-time promotion gate (above) — small,
-     self-contained, directly prevents today's XGB v9/LR v7 bug from
-     recurring, reasonable to do early regardless of what else is found.
-   - Implementing the feature-computation-version stamp (above) — small,
-     self-contained, makes every subsequent regrade in this review
-     provable rather than remembered.
-   - Deciding whether live weekly drift monitoring gets built now or
-     stays backlog once the promotion gate exists (it covers a different,
-     rarer failure mode: a model that passed promotion but degraded
-     in-season).
-5. Update the two original backlog docs
+### All 4 stages complete (2026-09-18) — consolidated findings, most severe first
+
+1. **[Severe → downgraded to structural]** Same-week snap-share leakage in
+   `compute_qb_availability_flags()` — **fixed, committed, deployed**
+   (`2b3df61`). The Stage 2 model-quality finding that initially looked
+   severe was itself corrected twice (invalid leaky-generation comparison,
+   then a noise-vs-signal check) down to: no proven live regression, but a
+   real structural gap (items 3-5 below).
+2. **[Structural, confirmed twice — Stage 4 expands Stage-2-era scope]**
+   No feature-computation-version stamp anywhere: not on
+   `prediction_features` docs (as originally scoped) *and*, per Stage 4,
+   not on `game_predictions` entries either — there's no way to know which
+   model or which feature-engine commit produced any given locked
+   prediction. Design complete ("Folded-in designs" above); not yet
+   implemented.
+3. **[Structural, confirmed]** No training-time promotion gate — nothing
+   stopped XGB v9/LR v7 from becoming `latest` despite being the weakest
+   of their own honest feature-schema generation. Design complete
+   (schema-scoped, corrected after the de-Vegas mistake); not yet
+   implemented.
+4. **[Structural, confirmed]** Two independently-maintained copies of the
+   ATS-pick/edge-vs-vegas formula (`nn_prediction_service.py::build_ensemble_lookup`,
+   `nn_projection_engine.py::derive_prediction_scalars`) — currently
+   consistent, but a future fix to one wouldn't propagate to the other.
+   Not yet designed as its own item; straightforward consolidation into
+   one shared function.
+5. **[Structural, measured, not yet acted on]** `RESIMULATE_LEAD_MINUTES=20`
+   is tight — a real warm-environment run took 443.8s (37% of budget)
+   before any Cloud Run cold-start penalty. Not broken today; worth
+   increasing the lead time or profiling `engine.initialize()` before it
+   is.
+6. **[Minor, low priority]** Dead code: `compute_preseason_roster_features()`
+   (Stage 1) and `PredictionService`'s 5 unreachable routes plus 2 dead
+   imports (Stage 3) — safe to delete whenever convenient, zero functional
+   risk either way.
+7. **[Gap, not a bug, low priority]** The "Why TEAM?" modal never shows
+   SU/ATS grade (Stage 4, finding 3b) — fold into the version-stamp work
+   rather than treating as separate scope.
+8. **[Presentation only, already partially fixed]** Betting pick-type
+   clarity (ATS vs. moneyline/SU) — confined to the betting-alert email
+   (partially fixed today, `4b9b114`) and the admin betting screener, per
+   Stage 4's finding that both explanation modals are already unambiguous.
+   See `docs/superpowers/specs/2026-09-18-betting-pick-type-clarity-design.md`
+   (needs updating to reflect this narrower scope).
+
+### Next steps
+
+1. Decide, with the user, which findings above become their own
+   implementation plans (via `superpowers:writing-plans`) and in what
+   order. Suggested order, cheapest/highest-leverage first:
+   - #3 (promotion gate) and #2 (version stamp) together — #3 depends on
+     #2 existing to be trustworthy per its own design, so they're
+     naturally one plan, not two.
+   - #4 (consolidate the duplicated ATS/edge formula) — small, mechanical,
+     no design work needed beyond picking which implementation is the
+     source of truth.
+   - #5 (resimulate timing) — needs a profiling pass on
+     `engine.initialize()` before deciding whether to extend the lead
+     time or optimize the bottleneck.
+   - #6/#7/#8 — low-priority cleanup, batch into whichever other PR is
+     already touching the relevant file.
+   - The Stage 2 model rollback-or-retrain decision — explicitly deferred
+     until #2/#3 exist, so a retrain (if chosen) doesn't just repeat the
+     same unmeasured process.
+   - Live weekly drift monitoring (folded-in design, separate from the
+     promotion gate) — still backlog-shaped; decide whether it's worth
+     building now or waiting to see if the promotion gate alone is enough.
+2. Update `docs/superpowers/specs/2026-09-18-betting-pick-type-clarity-design.md`
+   to reflect Stage 4's narrower scope finding (modals are fine; only the
+   email and admin screener need work).
+3. Update the two original backlog docs
    (`2026-08-22-model-quality-drift-monitoring-design.md`,
-   `2026-08-22-feature-computation-versioning-design.md`) with a
-   "superseded by this spec" pointer, and move them to `completed/` once
-   the promotion-gate and version-stamp pieces actually land (design is
-   done here; implementation is what completes them).
-6. Re-run the same regrade pattern used for the snap-share fix
+   `2026-08-22-feature-computation-versioning-design.md`) — already point
+   to this spec; move them to `completed/` once the promotion-gate and
+   version-stamp pieces actually land (design is done here; implementation
+   is what completes them).
+4. Re-run the same regrade pattern used for the snap-share fix
    (`backfill_schedule_predictions.py --force --features [--firestore]` +
    `weekly_model_eval.py --firestore`) once real fixes land, so Week 1
    2026's stamped accuracy number keeps reflecting the current state of
