@@ -115,12 +115,12 @@ async function loadWeekGames(season, week, containerId) {
             return `<tr style="${rowBg}">
                 <td style="padding:4px 8px;">
                     <span style="font-weight:600;">${_esc(g.away_team)} @ ${_esc(g.home_team)}</span>
-                    <button class="pred-explain-btn"
+                    <button class="acc-feature-debug-btn"
                         data-season="${season}"
                         data-week="${week}"
                         data-home="${g.home_team}"
                         data-away="${g.away_team}"
-                        title="Why this prediction?"
+                        title="Feature debug (raw model inputs, weighting, SU/ATS grade)"
                         style="background:none; border:1px solid rgba(251,191,36,0.3); border-radius:50%; width:22px; height:22px; cursor:pointer; color:var(--accent-gold); font-size:12px; padding:0; line-height:22px; text-align:center; flex-shrink:0; margin-left:6px; vertical-align:middle;">?</button>
                 </td>
                 <td style="padding:4px 8px;color:${pickColor};">
@@ -632,4 +632,19 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape' && modal && modal.classList.contains('open')) _closeModal();
     });
+});
+
+// Delegated listener for the per-game "?" button -- rows are rendered
+// dynamically by loadWeekGames() well after DOMContentLoaded, so a
+// static querySelectorAll+addEventListener at init time would miss them.
+// Deliberately a distinct class (acc-feature-debug-btn, not
+// schedule_explain.js's pred-explain-btn) so its own document-level
+// delegated listener doesn't intercept this click and open its "Why
+// TEAM?" explanation modal instead of this feature-debug one.
+document.addEventListener('click', e => {
+    const btn = e.target.closest('.acc-feature-debug-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    const { season, week, home, away } = btn.dataset;
+    window._openGameFeatureModal(season, week, away, home);
 });
