@@ -387,6 +387,11 @@ Not yet started. Files: `routes/api_routes.py` (`/api/predictions/explain`),
    between the per-game table (`admin_accuracy.js`) and both modals for
    the same game — spot-check a handful of real graded games, not just
    the two already checked during the modal-routing fix (NE@SEA, SF@LA).
+   While here, also check the explain modal against
+   `docs/superpowers/specs/2026-09-18-betting-pick-type-clarity-design.md`
+   (split out separately, 2026-09-18) — whether a shown pick is ATS or
+   moneyline/SU should be as unambiguous here as it is in the per-game
+   table's separate labeled columns.
 4. The modal-routing bug (button class collision, fixed 2026-09-18,
    `22eb702`) was found by inspection, not a systematic check — confirm no
    sibling collision exists elsewhere between `schedule_explain.js`'s
