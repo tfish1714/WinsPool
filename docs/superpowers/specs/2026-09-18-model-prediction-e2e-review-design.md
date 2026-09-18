@@ -291,22 +291,42 @@ different, incomparable feature-schema generation. It was (see "Folded-in
 designs" → "Model quality gating" above for the full correction). Re-run
 Stage 2 scoped correctly before trusting any of its conclusions:
 
-1. **[Corrected, needs re-audit]** Within the honest (no-`spread_line`)
-   feature schema, XGB v9/LR v7 ("latest") are the weakest of their own
-   generation (XGB v4-v9 AUC 0.582→0.538, LR v2-v7 AUC 0.583→0.556) — real,
-   but a 0.54-0.60 range, not "coin-flip vs. 0.66." **Do not roll back to
-   `best` as currently labeled** — for XGB that's v3, for LR that's v1,
-   both from before the de-Vegas pass and both still carrying `spread_line`
-   as an input feature; rolling back would silently reintroduce the exact
-   leakage that pass existed to remove. The re-audit should instead: (a)
-   confirm the same-schema-only framing above is right by checking every
-   other registry entry's `feature_columns`, not just the ones already
-   spot-checked; (b) since training data range and hyperparameters are
-   identical across the whole honest cohort for XGB (confirmed), determine
-   whether the decline traces to specific `nn_feature_engine.py` changes
-   between each retrain date (May 26 - Aug 22) or is plausibly just noise
-   from the ~48-game held-out test window; (c) only decide retrain-vs-roll
-   forward once that's answered, and only against a same-schema baseline.
+1. **[Re-audited 2026-09-18 — downgraded from "severe" to "structural, not
+   proven"]** Within the honest (no-`spread_line`) feature schema, XGB
+   v9/LR v7 ("latest") are the *numerically* weakest of their own
+   generation (XGB v4-v9 AUC 0.582→0.538, LR v2-v7 AUC 0.583→0.556), with
+   identical training data range/hyperparameters across the whole XGB
+   cohort (confirmed) — so no config difference explains it. 28 commits
+   touched `services/nn_feature_engine.py` between the v6 and v9 training
+   dates (2026-05-26 to 2026-08-22), including real bugs alongside
+   deliberate redesigns (`off_rush_epa`'s scale was wrong by ~5 orders of
+   magnitude, ±30K vs. the intended ±0.1, until a fix landed mid-window;
+   the preseason multi-season blend's minimum-sample-size gate was lost
+   and re-added twice) — a plausible mechanism for real drift.
+
+   **But:** the held-out test set is only ~48 games (season 2025, weeks
+   16-18). At that size, accuracy alone carries a standard error around
+   ±7 percentage points from sampling noise alone. The entire observed
+   spread across the honest cohort (0.538-0.597 AUC) sits well within
+   what pure noise could produce — **this data cannot distinguish "v9 is
+   a real regression" from "this is noise."** Do not treat the numeric
+   ranking as proof the current model is broken.
+
+   **Do not roll back to `best` as currently labeled either way** — for
+   XGB that's v3, for LR that's v1, both from before the de-Vegas pass and
+   both still carrying `spread_line` as an input feature; rolling back
+   would silently reintroduce the exact leakage that pass existed to
+   remove.
+
+   **What's actually actionable here:** not "fix the model," but the
+   structural gaps that made this question unanswerable in the first
+   place — no promotion gate (even a noisy one beats none), no
+   feature-computation version stamp (so nobody could even reconstruct
+   which of those 28 commits produced which training run's inputs), and a
+   test set too small to give a confident verdict regardless. Stage 1
+   should separately check whether the `off_rush_epa` scale bug and the
+   twice-lost sample-size gate are fully fixed today, independent of
+   whether they explain any historical metric movement.
 2. **Checked clean:** feature-set parity (all three scripts import the
    same `FEATURE_COLUMNS`), scaler/version pairing, walk-forward (not
    random) train/val/test splitting, blend-weight (45/20/35) constant
