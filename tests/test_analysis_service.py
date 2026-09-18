@@ -68,3 +68,22 @@ def test_get_enriched_schedule_preserves_live_score_fields():
     assert row["live_home_score"] == 7
     assert row["live_away_score"] == 17
     assert row["is_live"] == True
+
+
+def test_get_remaining_games_treats_sentinel_result_as_unplayed():
+    """get_enriched_schedule() (the real caller in production) fills an
+    unplayed game's NaN result with UNDRAFTED_SENTINEL (-1000), same as it
+    does for an undrafted team's games -- compute_team_records() and
+    calculate_playoff_race()'s own win-counting both already account for
+    this by checking `.notna() & != UNDRAFTED_SENTINEL` together.
+    get_remaining_games() checked only `.isna()` and missed the sentinel
+    half, so it silently saw zero remaining games for every player once the
+    schedule had passed through get_enriched_schedule -- this is what
+    actually breaks the Playoff Race page's remaining-games/elimination
+    math from week 1 onward."""
+    from services.constants import UNDRAFTED_SENTINEL
+    df = pd.DataFrame([
+        {"result": UNDRAFTED_SENTINEL, "fullName_away": "TFish", "fullName_home": "Opp"},
+        {"result": 10.0, "fullName_away": "TFish", "fullName_home": "Opp"},
+    ])
+    assert get_remaining_games("TFish", df) == 1

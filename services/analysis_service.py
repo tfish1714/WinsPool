@@ -75,8 +75,13 @@ def format_team_record(team: str, records: Dict[str, Dict[str, int]]) -> str:
 
 def get_remaining_games(player: str, schedule: pd.DataFrame) -> int:
     """Return the count of unplayed games remaining for a player's drafted teams."""
+    # get_enriched_schedule() fills an unplayed game's NaN result with
+    # UNDRAFTED_SENTINEL (-1000), same as it does for an undrafted team's
+    # games -- .isna() alone misses that and undercounts remaining games.
+    # Match compute_team_records()/calculate_playoff_race()'s own
+    # `.notna() & != UNDRAFTED_SENTINEL` pattern for "not a completed game."
     filtered = schedule[
-        (schedule['result'].isna()) &
+        (schedule['result'].isna() | (schedule['result'] == UNDRAFTED_SENTINEL)) &
         ((schedule['fullName_away'] == player) | (schedule['fullName_home'] == player))
     ]
     if filtered.empty:
@@ -514,6 +519,14 @@ def get_enriched_schedule(games, draft_results, players, season):
     live_score_cols = [c for c in ('is_live', 'clock', 'period', 'possession', 'live_home_score', 'live_away_score') if c in final_merged.columns]
     saved_live_scores = final_merged[live_score_cols].copy()
 
+    # result/home_score/away_score are deliberately NOT protected here --
+    # -1000 is this codebase's established "not a completed real game"
+    # marker for these columns (an unplayed game's NaN result is meant to
+    # become -1000, same as an undrafted team's). compute_team_records()
+    # and calculate_playoff_race()'s own win-counting both already filter
+    # on `.notna() & != UNDRAFTED_SENTINEL` together for exactly this
+    # reason. get_remaining_games() is the one place that checked only
+    # `.isna()` and missed the sentinel half -- see the fix there.
     final_merged = final_merged.fillna(UNDRAFTED_SENTINEL)
 
     for col in live_score_cols:
