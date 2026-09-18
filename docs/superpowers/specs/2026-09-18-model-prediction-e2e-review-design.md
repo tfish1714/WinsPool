@@ -70,32 +70,86 @@ section; see "Rollout" for follow-up).
 
 ### Model quality gating (resolves `model-quality-drift-monitoring`)
 
-The backlog doc's open questions (what metric, what threshold, what
-window) assumed the problem was **live, ongoing drift** — a model that was
-good when shipped, degrading over a season from real-world distribution
-shift. That's a real risk and still worth building. But the concrete bug
-actually found is smaller and catchable earlier: **XGB v9 was worse than
-the registry's own `best` (v3) from the moment it was trained**, on the
-identical held-out test set (season 2025, weeks 16-18) — no live window
-needed at all to have caught it. That splits this into two designs:
+**Correction (2026-09-18, same day):** the first pass at this finding
+compared XGB "latest" (v9) against the registry's `best_by` pointer (v3)
+and called it severe (AUC 0.663 → 0.538). That comparison is invalid and
+the recommendation that followed from it ("roll back to `best`") is
+actively wrong. `models/xgb_registry.json` shows v1/v2/v3 all include
+`spread_line` — the actual Vegas line — in `feature_columns`; v4 onward
+does not. That's the "ML De-Vegas Pass" boundary (May 2026, split out in
+its own memory note): `spread_line` was deliberately removed because it
+let the model back-solve the market's own answer instead of predicting
+independently. `best_by` still points at v3 — the leaky generation — so a
+promotion gate that blindly compares against "whatever the registry calls
+best" would have silently reintroduced the exact leakage the de-Vegas pass
+existed to remove. Same shape of mistake, one level up, in the fix for the
+first mistake — worth remembering while designing the gate below.
 
-**1. Training-time promotion gate (new, directly fixes today's bug).**
-Adapted from the `mle-workflow` skill's pattern (ECC project, MIT-licensed,
-evaluated 2026-09-18 — see below): a training script must not write a new
-version as `latest` in its registry unless it clears explicit gates
-against the registry's current `best` on the *same* held-out test set.
+**The honest comparison** (same feature schema, no `spread_line`,
+confirmed identical training data range and hyperparameters across every
+version compared): XGB v4→v9 AUC = 0.582, 0.597, 0.559, 0.573, 0.564,
+**0.538**; LR v2→v7 AUC = 0.583, 0.604, 0.573, 0.576, 0.561, **0.556**.
+There is a real, smaller decline within this honest cohort — "latest" is
+the weakest of its own generation for both models — but it's a 0.54-0.60
+range, not "coin-flip vs. 0.66." Since training config (data range,
+hyperparameters) is identical across the whole honest cohort for XGB, any
+metric drift came from the underlying *feature values* changing between
+each retrain date (`nn_feature_engine.py` was under active, unrelated
+revision this whole period — dynamic MC sim, preseason profiles,
+injury-aware roster value, QB availability), not a training-process bug —
+and could be partly attributable to noise from a small (~48-game)
+held-out test window rather than a real trend. **This is exactly why
+feature-computation versioning has to land before a promotion gate can be
+trusted**: without knowing which `nn_feature_engine.py` commit produced
+each training run's inputs, "compare against best" can't tell a real
+regression apart from three months of unrelated feature changes riding
+along.
+
+The backlog doc's open questions (what metric, what threshold, what
+window) also assumed the problem was **live, ongoing drift** — a model
+that was good when shipped, degrading over a season from real-world
+distribution shift. That's a distinct, still-real risk worth building for
+separately. Two designs, corrected:
+
+**1. Training-time promotion gate (new, directly fixes today's bug) --
+schema-scoped, not "compare against whatever `best_by` says."** Adapted
+from the `mle-workflow` skill's pattern (ECC project, MIT-licensed,
+evaluated 2026-09-18 — see below), corrected for the mistake above: a
+training script must not write a new version as `latest` unless it clears
+explicit gates against the best version **within its own feature-schema
+generation** — comparing against a differently-shaped feature set (e.g.
+one that still had `spread_line`) is comparing against leakage, not a
+quality bar. This depends on feature-computation versioning (below)
+existing first, so the gate has something reliable to scope by; a stopgap
+until then is comparing `feature_columns` lists directly (already present
+in every registry entry) rather than assuming version numbers are
+comparable.
 
 ```python
 # scripts/train_xgb_model.py / train_lr_model.py / train_nn_model.py --
 # after computing this run's test metrics, before writing latest/best:
 
 PROMOTION_GATES = {
-    # (direction, max allowed regression vs. current `best`)
+    # (direction, max allowed regression vs. same-schema best)
     "test_accuracy": ("min", -0.02),   # new must not be >2pp worse
     "test_auc":       ("min", -0.02),
 }
 
-def assert_promotion_ready(new_metrics: dict, best_metrics: dict) -> None:
+def same_schema_best(registry: dict, new_feature_columns: list[str]) -> dict | None:
+    """The best-metrics entry among versions sharing this run's exact
+    feature_columns -- never compare across a feature-set change."""
+    candidates = [
+        v for v in registry.values()
+        if v.get("feature_columns") == new_feature_columns
+    ]
+    if not candidates:
+        return None  # first model of this schema generation -- nothing to gate against yet
+    return max(candidates, key=lambda v: v["metrics"]["test_auc"])["metrics"]
+
+
+def assert_promotion_ready(new_metrics: dict, best_metrics: dict | None) -> None:
+    if best_metrics is None:
+        return  # nothing comparable exists yet; can't gate, don't block
     failures = {
         name: (new_metrics[name], best_metrics[name])
         for name, (direction, tolerance) in PROMOTION_GATES.items()
@@ -103,7 +157,7 @@ def assert_promotion_ready(new_metrics: dict, best_metrics: dict) -> None:
     }
     if failures:
         raise ValueError(
-            f"New model regressed vs. current best on held-out test set: {failures}. "
+            f"New model regressed vs. same-schema best on held-out test set: {failures}. "
             "Not promoting to latest -- investigate before overriding."
         )
 ```
@@ -230,24 +284,29 @@ Checklist:
 
 ## Stage 2 — Training (`train_nn_model.py`/`train_xgb_model.py`/`train_lr_model.py`)
 
-**Already run to completion on 2026-09-18** — do not re-run; act on the
-findings instead:
+**Run once on 2026-09-18, then re-run the same day under corrected
+direction** — the first pass compared "latest" against the registry's
+`best_by` pointer without checking whether `best_by` was itself from a
+different, incomparable feature-schema generation. It was (see "Folded-in
+designs" → "Model quality gating" above for the full correction). Re-run
+Stage 2 scoped correctly before trusting any of its conclusions:
 
-1. **[Severe, unresolved]** Deployed XGB v9 / LR v7 ("latest") score far
-   worse than v1/v3 ("best," per each registry's own `best_by` field, never
-   consulted by any call site) on the identical held-out test set (season
-   2025, weeks 16-18): XGB AUC 0.663 → 0.538, LR test accuracy 60.4% → 50.0%
-   (exactly random). XGB+LR are 55% of the ensemble blend weight. Needs:
-   diff what actually changed in training between the two runs (same data
-   range, so not a data-availability gap) — check whether some version of
-   the snap-share leakage, or another bug from this same review, was
-   present when v9/v7 were trained and is why their *training-time*
-   metrics looked acceptable enough to ship despite generalizing badly.
-   Decide: roll back to `best` now, or retrain properly once Stage 1's
-   findings land (if Stage 1 finds real feature bugs, retraining now would
-   just bake in the same bugs again). Whichever is chosen, the training-time
-   promotion gate designed in "Folded-in designs" below should exist before
-   any future retrain, so this specific failure can't recur silently.
+1. **[Corrected, needs re-audit]** Within the honest (no-`spread_line`)
+   feature schema, XGB v9/LR v7 ("latest") are the weakest of their own
+   generation (XGB v4-v9 AUC 0.582→0.538, LR v2-v7 AUC 0.583→0.556) — real,
+   but a 0.54-0.60 range, not "coin-flip vs. 0.66." **Do not roll back to
+   `best` as currently labeled** — for XGB that's v3, for LR that's v1,
+   both from before the de-Vegas pass and both still carrying `spread_line`
+   as an input feature; rolling back would silently reintroduce the exact
+   leakage that pass existed to remove. The re-audit should instead: (a)
+   confirm the same-schema-only framing above is right by checking every
+   other registry entry's `feature_columns`, not just the ones already
+   spot-checked; (b) since training data range and hyperparameters are
+   identical across the whole honest cohort for XGB (confirmed), determine
+   whether the decline traces to specific `nn_feature_engine.py` changes
+   between each retrain date (May 26 - Aug 22) or is plausibly just noise
+   from the ~48-game held-out test window; (c) only decide retrain-vs-roll
+   forward once that's answered, and only against a same-schema baseline.
 2. **Checked clean:** feature-set parity (all three scripts import the
    same `FEATURE_COLUMNS`), scaler/version pairing, walk-forward (not
    random) train/val/test splitting, blend-weight (45/20/35) constant
