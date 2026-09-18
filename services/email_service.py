@@ -81,6 +81,60 @@ def send_on_the_clock_email(to_email: str, player_name: str, season: int, pick_n
     return _send(to_email, f"You're on the clock — Pick #{pick_number}", html_body)
 
 
+def send_betting_edge_email(to_email: str, week_summary: dict) -> bool:
+    """Send the weekly betting-edge summary (validated angle matches + raw
+    Vegas-edge outliers, from services.betting_edge_alert_service.build_week_summary)
+    to a single recipient. Caller (scripts/betting_edge_alert_weekly.py)
+    already decided both tiers aren't empty -- this never itself decides
+    whether to send, so it renders whatever it's given, including an empty
+    tier (defensive -- lets this function be tested/reused independently of
+    that no-spam decision).
+    """
+    season = week_summary["season"]
+    week = week_summary["week"]
+
+    sections = []
+
+    angle_matches = week_summary.get("validated_angle_matches") or []
+    if angle_matches:
+        rows = []
+        for m in angle_matches:
+            cond_text = " AND ".join(
+                f"{c['label']} {'>=' if 'min' in c else '<='} {c.get('min', c.get('max'))}"
+                for c in m["conditions"]
+            )
+            games_text = "; ".join(
+                f"{g['away_team']} @ {g['home_team']} ({'/'.join(g['matched_sides'])})"
+                for g in m["games"]
+            )
+            test_rate_text = (
+                f"{m['test_rate']:.1%} (n={m['test_n']})" if m["test_rate"] is not None else "n/a"
+            )
+            rows.append(
+                f"<li><strong>{html.escape(cond_text)}</strong> "
+                f"({m['metric'].upper()}, train {m['train_rate']:.1%} n={m['train_n']}, "
+                f"held-out {test_rate_text})<br>{html.escape(games_text)}</li>"
+            )
+        sections.append(f"<h3>Validated angle matches</h3><ul>{''.join(rows)}</ul>")
+
+    outliers = week_summary.get("raw_edge_outliers") or []
+    if outliers:
+        rows = "".join(
+            f"<li>{html.escape(str(o['away_team']))} @ {html.escape(str(o['home_team']))}: "
+            f"model favors {html.escape(str(o['ats_pick']))} by {o['edge_vs_vegas']:+.1f} vs Vegas "
+            f"(model {o['model_spread']}, Vegas {o['vegas_line']})</li>"
+            for o in outliers
+        )
+        sections.append(
+            f"<div style=\"border-left: 4px solid #d97706; padding-left: 12px; margin: 16px 0;\">"
+            f"<h3 style=\"margin-top: 0; color: #92400e;\">Raw edge outliers (unvalidated -- not backtested)</h3>"
+            f"<ul>{rows}</ul></div>"
+        )
+
+    html_body = f"<p>Week {week}, {season} season:</p>" + "".join(sections)
+    return _send(to_email, f"[WinsPool] Week {week} betting edges", html_body)
+
+
 def send_alert_email(subject: str, message: str) -> bool:
     """Send a job-failure alert to the address in ALERT_EMAIL. Returns False (no-op) if unconfigured.
 

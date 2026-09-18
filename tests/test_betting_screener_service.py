@@ -1,5 +1,7 @@
 """Tests for services/betting_screener_service.py -- the Elo/spread/model angle
 backtester behind the admin Betting tab. Pure logic, no Firestore/network."""
+from unittest.mock import patch
+
 import pandas as pd
 import pytest
 
@@ -13,6 +15,7 @@ from services.betting_screener_service import (
     side_matches,
     grade_bet,
     find_next_upcoming_week,
+    load_predictions_by_season,
     screen_games,
 )
 
@@ -312,3 +315,30 @@ class TestScreenGames:
         )
         assert result["filterable_features"]["elo_diff"] == "Elo Diff"
         assert "spread_line" in result["filterable_features"]
+
+
+class TestLoadPredictionsBySeason:
+    def test_skips_seasons_before_backtest_min_season(self):
+        from services.betting_screener_service import BACKTEST_MIN_SEASON
+        games_df = pd.DataFrame([
+            {"season": BACKTEST_MIN_SEASON - 1, "week": 1, "home_team": "KC", "away_team": "SF"},
+            {"season": BACKTEST_MIN_SEASON, "week": 1, "home_team": "KC", "away_team": "SF"},
+        ])
+        with patch("services.betting_screener_service.get_game_predictions") as mock_get:
+            mock_get.side_effect = lambda yr: {"W01_KC_SF": {}} if yr == BACKTEST_MIN_SEASON else {}
+            preds, min_season, max_season = load_predictions_by_season(games_df)
+        assert min_season == BACKTEST_MIN_SEASON
+        assert max_season == BACKTEST_MIN_SEASON
+        assert set(preds.keys()) == {BACKTEST_MIN_SEASON}
+
+    def test_omits_seasons_with_no_predictions(self):
+        games_df = pd.DataFrame([
+            {"season": 2025, "week": 1, "home_team": "KC", "away_team": "SF"},
+            {"season": 2026, "week": 1, "home_team": "KC", "away_team": "SF"},
+        ])
+        with patch("services.betting_screener_service.get_game_predictions") as mock_get:
+            mock_get.side_effect = lambda yr: {"W01_KC_SF": {}} if yr == 2026 else {}
+            preds, min_season, max_season = load_predictions_by_season(games_df)
+        assert set(preds.keys()) == {2026}
+        assert min_season == 2025
+        assert max_season == 2026

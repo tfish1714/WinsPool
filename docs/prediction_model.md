@@ -291,19 +291,55 @@ Zero-filled for seasons before 2018.
 
 ---
 
-### Group 9 — QB Injury Flag (1 feature)
+### Group 9 — QB Health (2 features)
 
 | Feature | What It Measures |
 |---------|-----------------|
-| `qb_injury_flag` | +1 if away QB starter is out, −1 if home QB starter is out, 0 otherwise |
+| `home_qb_injury_flag` | 1.0 if the home team's starting QB is unavailable that week, else 0.0 |
+| `away_qb_injury_flag` | 1.0 if the away team's starting QB is unavailable that week, else 0.0 |
 
-**Computation:** Uses snap-count-based starter detection. A QB is flagged as "starter" if they took >50% of snaps in the prior week. If that QB appears on the injury report as "Out" or "Doubtful", the flag fires.
+Two separate binary flags, not one signed difference: a signed
+`away_qb_out − home_qb_out` collapses to 0 when *both* QBs are out, which is
+indistinguishable from both being healthy.
 
-```
-qb_injury_flag = away_qb_out − home_qb_out
-```
+**Computation:** each flag is the max of two independent signals:
 
-Positive = home team advantage (away QB is missing). Negative = home team disadvantaged.
+1. **Team-level injury report** (`_load_injury_flags()`) — any QB on that
+   team's official weekly report as "Out" or "Doubtful".
+2. **Sticky reference starter** (`compute_qb_availability_flags()`) — a
+   per-(season, week, team) availability signal that tracks *who the actual
+   starter is* rather than assuming a single snap threshold identifies them.
+
+The sticky-reference algorithm (see
+`docs/superpowers/specs/2026-09-17-qb-availability-and-prediction-freshness-design.md`
+Part A for the full design and its decided edge cases):
+
+- **Initial reference starter** = whoever the depth chart declared for that
+  team's own earliest declared week (per team, *not* a season-wide week 1 —
+  a team whose depth chart wasn't resolved until week 3 must not fail open to
+  0.0 for weeks 1–3). For the 2025+ depth-chart schema, which is a continuous
+  snapshot timeline rather than per-week rows, the declared starter is the
+  latest snapshot strictly *before* that week's earliest kickoff.
+- **The flag fires** for a week when the reference starter is on the injury
+  report as Out/Doubtful, is on Reserve/IR that week, **or** took under 20% of
+  the team's QB snaps (the snap leg naturally never fires for a future,
+  unplayed game, which has no snap data at all).
+- **The reference only flips** after *two consecutive* weeks in which the
+  current reference has no Out/Doubtful/Reserve entry and the *same* different
+  QB holds more than 65% of the team's QB snaps. That two-week hysteresis is
+  what keeps a one-week injury fill-in, or a blowout's garbage-time backup
+  snaps, from permanently reassigning the starter.
+
+Weeks are unioned across every source, not just the depth chart — a mid-season
+IR move can carry an injury/reserve/snap signal in a week with no fresh
+depth-chart pull of its own.
+
+The same function is the signal behind the `home_qb_out` / `away_qb_out` fields
+in a stored prediction's `explanation` payload (the admin explain modal, the
+pattern scanner and the betting screener all read them), populated for the
+in-season feature-table path via `build_master_feature_table()`, for season
+simulations via `NNProjectionEngine._precompute_static_features()`, and for
+MC-simulated future games via `build_mc_prediction_entry()`.
 
 ---
 
@@ -521,7 +557,7 @@ re-deriving the math by hand each time:
 | DL performance | `rawdata/stats_team/stats_team_week_*.csv` | 2020–present |
 | Roster value | `rawdata/rosters/`, `rawdata/snap_counts/` | 2000–present |
 | Travel/rest | `rawdata/schedules/games.csv` + city coordinates | all years |
-| QB injury | `rawdata/injuries/injuries_*.csv` | 2009–present |
+| QB health | `rawdata/injuries/injuries_*.csv` (report status, 2009+), `rawdata/depth_charts/depth_charts_*.csv` (declared starter), `rawdata/weekly_rosters/roster_weekly_*.csv` (Reserve/IR, 2002+), `rawdata/snap_counts/snap_counts_*.csv` (QB snap share, 2012+), `rawdata/rosters/roster_*.csv` (pfr_id ↔ gsis_id crosswalk) | 2009–present (full signal); depth-chart/reserve legs only before that |
 | Contextual flags | `rawdata/schedules/games.csv` | all years |
 
 Features with limited historical coverage default to 0 for out-of-range seasons. This means predictions for early seasons (pre-2012) rely more heavily on Elo and EPA.

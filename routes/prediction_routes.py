@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from routes.models import PredictionConfigRequest
+from services.betting_screener_service import load_predictions_by_season
 from services.data_service import load_data
 from services.draft_service import sanitize_state
 from services.response_helpers import server_error
@@ -215,30 +216,6 @@ async def get_nn_weekly_accuracy(_: dict = Depends(require_admin)):
         return server_error()
 
 
-def _load_predictions_by_season(all_games):
-    """{season: {game_key: pred_dict}} for every season from BACKTEST_MIN_SEASON
-    (or the games data's own floor, if later) through the latest season present
-    in `all_games`. Shared by the betting screener and pattern scanner endpoints.
-
-    BACKTEST_MIN_SEASON=2006 is when Elo data starts, but games_df (used to
-    grade ATS/SU outcomes) only goes back to 2013 -- looping earlier seasons
-    would fetch prediction docs that can never be graded (no matching game
-    result), wasting Firestore reads and silently misrepresenting how much
-    history actually backs the reported n.
-    """
-    from services.betting_screener_service import BACKTEST_MIN_SEASON
-    from services.cache_service import get_game_predictions
-
-    max_season = int(all_games["season"].max())
-    min_season = max(BACKTEST_MIN_SEASON, int(all_games["season"].min()))
-    predictions_by_season = {}
-    for yr in range(min_season, max_season + 1):
-        preds = get_game_predictions(yr)
-        if preds:
-            predictions_by_season[yr] = preds
-    return predictions_by_season, min_season, max_season
-
-
 @router.get("/admin/betting/screen")
 async def get_betting_screen(
     season: int | None = None,
@@ -294,7 +271,7 @@ async def get_betting_screen(
             if target_week is None:
                 target_week = 1
 
-        predictions_by_season, min_season, max_season = _load_predictions_by_season(all_games)
+        predictions_by_season, min_season, max_season = load_predictions_by_season(all_games)
 
         result = screen_games(
             predictions_by_season, all_games,
@@ -343,7 +320,7 @@ async def get_betting_pattern_scan(
         if all_games.empty:
             return JSONResponse(status_code=404, content={"error": "No schedule data available."})
 
-        predictions_by_season, min_season, max_season = _load_predictions_by_season(all_games)
+        predictions_by_season, min_season, max_season = load_predictions_by_season(all_games)
 
         result = scan_angles(
             predictions_by_season, all_games,

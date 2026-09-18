@@ -24,7 +24,13 @@ behalf, which is what :run is. This matches Task 9's own Cloud Scheduler
 setup, which uses --oauth-service-account-email against the identical URL.
 The service account still needs run.invoker on the target job either way.
 
-See docs/superpowers/specs/completed/2026-08-19-scheduled-jobs-design.md.
+After enqueuing this week's kickoff tasks, also runs the weekly betting-edge
+alert email (scripts/betting_edge_alert_weekly.py) as a plain subprocess step
+-- see _run_betting_alert() below for why this piggybacks here instead of
+getting its own Cloud Run Job + Cloud Scheduler triggers.
+
+See docs/superpowers/specs/completed/2026-08-19-scheduled-jobs-design.md and
+docs/superpowers/specs/2026-09-09-betting-edge-alert-design.md.
 """
 import os
 import subprocess
@@ -227,6 +233,56 @@ def _sync_schedule_data() -> None:
               f"{result.stderr.strip()[:500]}")
 
 
+def _run_betting_alert() -> None:
+    """Run the weekly betting-edge alert email as a step of this same job,
+    right after this week's kickoff Cloud Tasks are enqueued.
+
+    Piggybacks on winspool-schedule-kickoffs (Tuesdays ~10:00 UTC) rather
+    than getting its own Cloud Run Job + Cloud Scheduler triggers: both jobs
+    already run on the same Dockerfile.sync image (the screener/scanner
+    behind the alert -- services.betting_screener_service /
+    services.pattern_scanner_service -- are read-only and never touch the
+    NN+XGB+LR ensemble, so there's no ML-dependency mismatch to avoid), and
+    by the time this job runs each Tuesday the week's schedule is confirmed
+    and that week's Vegas lines are already posted, so there's no need for
+    a separate, independently-tuned offset/delay either. See
+    docs/superpowers/specs/2026-09-09-betting-edge-alert-design.md.
+
+    Wholly non-fatal, by design: a screener bug must never fail this job's
+    actual purpose (enqueuing the week's kickoff Cloud Tasks), which is why
+    this is called after that enqueue loop already succeeded, not folded
+    into the same try block. betting_edge_alert_weekly.py has its own
+    _run_with_alerting() wrapper that emails
+    '[WinsPool Alert] winspool-betting-alert failed' on an unhandled
+    exception -- this wrapper only needs to keep that subprocess call
+    (timeout, unexpected crash) from propagating into main()'s own
+    except (Exception, SystemExit), which would otherwise misreport a
+    betting-alert problem as "Dynamic kickoff scheduling failed."
+    """
+    print("[schedule_kickoffs] Running weekly betting-edge alert...")
+    cmd = [sys.executable, str(SCRIPTS_DIR / "betting_edge_alert_weekly.py")]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=300,
+            cwd=str(SCRIPTS_DIR.parent),
+        )
+    except subprocess.TimeoutExpired:
+        print("[warn] betting_edge_alert_weekly.py timed out after 300s "
+              "(non-fatal) -- this week's kickoff tasks are already enqueued")
+        return
+    except Exception as e:
+        print(f"[warn] betting_edge_alert_weekly.py could not be run "
+              f"(non-fatal): {e}")
+        return
+    stdout_tail = (result.stdout or "").strip().splitlines()[-20:]
+    print("[schedule_kickoffs] betting-edge alert summary:")
+    for line in stdout_tail:
+        print(f"  {line}")
+    if result.returncode != 0:
+        print(f"[warn] betting_edge_alert_weekly.py exited non-zero (non-fatal, "
+              f"already self-alerted): {(result.stderr or '').strip()[:500]}")
+
+
 def main():
     try:
         from google.cloud import tasks_v2
@@ -246,6 +302,8 @@ def main():
             )
 
         print(f"Enqueued {len(clusters_with_games)} kickoff cluster(s) x 3 tasks for {season} week {week}.")
+
+        _run_betting_alert()
     except (Exception, SystemExit):
         # `except Exception` alone would let `load_games()`'s `sys.exit(1)`
         # (raised as SystemExit, which does not subclass Exception) escape

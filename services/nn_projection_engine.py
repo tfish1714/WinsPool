@@ -23,6 +23,7 @@ from services.nn_feature_engine import (
     _normalize_team,
     compute_preseason_roster_features,
     compute_preseason_player_profiles,
+    compute_qb_availability_flags,
 )
 from services.nn_prediction_service import (
     NNPredictionService,
@@ -59,6 +60,7 @@ class NNProjectionEngine:
         self._roster_value_cache: Dict[Tuple[int, int, str], dict] = {}
         self._rv_weeks_by_team: Dict[str, list] = {}
         self._preseason_profiles: dict = {}  # {team: {off_pass_epa, off_rush_epa, ...}}
+        self._qb_availability: Dict[Tuple[int, int, str], float] = {}
         # Legacy attributes kept as empty defaults so _precompute_static_features fallback
         # doesn't AttributeError on older code paths
         self._preseason_roster: dict = {}
@@ -76,6 +78,12 @@ class NNProjectionEngine:
                 roster-value cache below.
         """
         self._season = season
+        try:
+            self._qb_availability = compute_qb_availability_flags([season], RAWDATA_DIR)
+        except Exception as exc:
+            logger.warning("QB availability flags unavailable for %d: %s", season, exc)
+            self._qb_availability = {}
+
         feature_table = build_master_feature_table(min_season=2020, max_season=season - 1)
         self._team_profiles = self._build_team_profiles(feature_table, season - 1)
 
@@ -343,8 +351,12 @@ class NNProjectionEngine:
             # Game-context static values
             feat[col_idx["home_field_advantage"]]   = 1.0
             feat[col_idx["rest_advantage"]]         = 0.0
-            feat[col_idx["home_qb_injury_flag"]]    = 0.0
-            feat[col_idx["away_qb_injury_flag"]]    = 0.0
+            feat[col_idx["home_qb_injury_flag"]] = self._qb_availability.get(
+                (self._season, int(wk), ht), 0.0
+            )
+            feat[col_idx["away_qb_injury_flag"]] = self._qb_availability.get(
+                (self._season, int(wk), at), 0.0
+            )
             feat[col_idx["playoff_flag"]]           = 0.0
             feat[col_idx["week"]]                   = float(wk)
             feat[col_idx["div_game_flag"]]          = float(game.get("div_game", 0) or 0)
@@ -994,6 +1006,145 @@ class NNProjectionEngine:
             "simulations": n_sims,
             "season_complete": False,
         }
+
+def derive_prediction_scalars(home_team: str, away_team: str, mean_prob: float,
+                              model_spread: float, spread_line=None) -> dict:
+    """Winner / SU confidence / ATS pick / edge-vs-vegas from one
+    simulate_season() game_probs entry.
+
+    Shared by every MC-simulation consumer (scripts/cache_builder.py's
+    fallback + --resimulate paths and scripts/backfill_schedule_predictions.py)
+    so the four fields can't drift apart between them.
+
+    `vegas_line` is returned alongside them as the parsed float (or None) so
+    callers don't have to re-parse spread_line themselves.
+    """
+    winner = home_team if mean_prob >= 0.5 else away_team
+    conf = round(max(mean_prob, 1.0 - mean_prob) * 100, 1)
+    ats = winner
+    edge = None
+    vegas_line = None
+    if spread_line is not None and pd.notna(spread_line):
+        try:
+            vegas_line = float(spread_line)
+            ats = home_team if model_spread > vegas_line else away_team
+            edge = round(model_spread - vegas_line, 1)
+        except (ValueError, TypeError):
+            vegas_line = None
+    return {
+        "pred_winner":   winner,
+        "pred_su_conf":  conf,
+        "pred_ats_pick": ats,
+        "model_spread":  model_spread,
+        "edge_vs_vegas": edge,
+        "vegas_line":    vegas_line,
+    }
+
+
+def _explain_float(d: dict, col: str, default: float = 0.0) -> float:
+    v = d.get(col, default)
+    try:
+        return float(v) if v is not None and not (isinstance(v, float) and np.isnan(v)) else default
+    except (TypeError, ValueError):
+        return default
+
+
+def build_mc_prediction_entry(engine: "NNProjectionEngine", gp: dict, season: int,
+                              spread_line=None, profile_dict: dict = None,
+                              source: str = "mc_simulation") -> dict:
+    """Full stored-prediction payload for ONE Monte-Carlo-simulated game.
+
+    Single source of truth for what a simulate_season()-derived
+    game_predictions entry looks like -- the scalar fields AND the rich
+    `explanation` dict the admin explain modal, the pattern scanner and
+    services/betting_screener_service.py's FILTERABLE_FEATURES all read.
+
+    This exists because cache_builder.py's daily run and
+    backfill_schedule_predictions.py's weekly run write the SAME future
+    games, and cache_service.merge_thin_game_predictions() merges
+    per-key/shallow: whichever of them writes a thinner `explanation`
+    replaces the other's wholesale rather than merging into it. Building
+    both from here keeps that from silently dropping fields (it previously
+    dropped 15 of 19 keys, including the home_qb_out/away_qb_out
+    availability signal, on every non-Tuesday run).
+
+    Args:
+        engine: an initialize()d NNProjectionEngine -- read for
+            _team_profiles (unless profile_dict is passed), lookup_roster_value()
+            and _qb_availability.
+        gp: one simulate_season() game_probs entry
+            {mean_prob, model_spread, home_team, away_team, week}.
+        season: the season `gp`'s week belongs to (keys _qb_availability).
+        spread_line: this game's Vegas line, or None.
+        profile_dict: optional pre-built {team: profile row} so a caller
+            looping over a whole season builds it once.
+        source: free-text provenance stamped into explanation["source"].
+
+    `explanation` comes back None (never a thinner dict) if it can't be built
+    -- callers omit the key entirely in that case, so a previously-stored
+    richer explanation survives the merge.
+    """
+    ht = gp["home_team"]
+    at = gp["away_team"]
+    wk = int(gp["week"])
+    hp = float(gp["mean_prob"])
+    ms = gp["model_spread"]
+
+    entry = derive_prediction_scalars(ht, at, hp, ms, spread_line)
+    sl_val = entry.pop("vegas_line")
+    entry["pred_prob"] = round(hp, 4)
+
+    try:
+        if profile_dict is None:
+            profile_dict = {row["team"]: row.to_dict()
+                            for _, row in engine._team_profiles.iterrows()}
+        h_prof = profile_dict.get(ht, {})
+        a_prof = profile_dict.get(at, {})
+        _pf = _explain_float
+
+        vhp = (round(1.0 / (1.0 + np.exp(-sl_val / SPREAD_TO_PROB_SCALE)), 4)
+               if sl_val is not None else None)
+
+        # Week-aware roster value (the same source simulate_season() actually
+        # fed the model -- see NNProjectionEngine.lookup_roster_value())
+        # instead of the flat prior-season profile average used above.
+        h_rv = engine.lookup_roster_value(ht, wk)
+        a_rv = engine.lookup_roster_value(at, wk)
+
+        qb_avail = getattr(engine, "_qb_availability", None) or {}
+
+        entry["explanation"] = {
+            "vegas_line":           sl_val,
+            "vegas_home_prob":      vhp,
+            "model_spread":         ms,
+            "edge_vs_vegas":        entry["edge_vs_vegas"],
+            "elo_diff":             round(_pf(h_prof, "elo_pre", 1500) - _pf(a_prof, "elo_pre", 1500), 1),
+            "roster_delta":         round(_pf(h_prof, "roster_talent_delta") - _pf(a_prof, "roster_talent_delta"), 3),
+            "pass_epa_matchup":     round(
+                (_pf(h_prof, "off_pass_epa_roll") - _pf(a_prof, "def_pass_epa_roll"))
+                - (_pf(a_prof, "off_pass_epa_roll") - _pf(h_prof, "def_pass_epa_roll")), 3),
+            "rush_epa_matchup":     round(
+                (_pf(h_prof, "off_rush_epa_roll") - _pf(a_prof, "def_rush_epa_roll"))
+                - (_pf(a_prof, "off_rush_epa_roll") - _pf(h_prof, "def_rush_epa_roll")), 3),
+            "early_down_matchup":   0.0,
+            "turnover_margin":      0.0,
+            "point_diff_advantage": round(_pf(h_prof, "margin_roll") - _pf(a_prof, "margin_roll"), 2),
+            "home_qb_out":          qb_avail.get((season, wk, ht), 0.0),
+            "away_qb_out":          qb_avail.get((season, wk, at), 0.0),
+            "rest_advantage":       0.0,
+            "travel_disadvantage":  0.0,
+            "trench_dominance":     round(_pf(h_prof, "trench_score") - _pf(a_prof, "trench_score"), 1),
+            "off_roster_value":     round(_pf(h_rv, "off_roster_value") - _pf(a_rv, "off_roster_value"), 3),
+            "def_roster_value":     round(_pf(h_rv, "def_roster_value") - _pf(a_rv, "def_roster_value"), 3),
+            "source": source,
+        }
+    except Exception as exc:
+        logger.warning("MC explanation build failed for %s W%s %s@%s: %s",
+                       season, wk, at, ht, exc)
+        entry["explanation"] = None
+
+    return entry
+
 
 def enrich_schedule_with_nn_predictions(
     schedule_df: pd.DataFrame,

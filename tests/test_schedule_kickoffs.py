@@ -221,6 +221,86 @@ class TestEnqueueTaskWithOverrides:
         assert routine_task["name"] != resim_task["name"]
 
 
+class TestRunBettingAlert:
+    """_run_betting_alert() piggybacks the weekly betting-edge alert on this
+    job instead of a separate Cloud Run Job -- see
+    docs/superpowers/specs/2026-09-09-betting-edge-alert-design.md. It must
+    never be able to fail this job's actual purpose (enqueuing the week's
+    kickoff Cloud Tasks)."""
+
+    def test_invokes_betting_edge_alert_weekly_script(self):
+        from unittest.mock import MagicMock, patch
+        import scripts.schedule_kickoffs as sk
+        with patch.object(sk.subprocess, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            sk._run_betting_alert()
+        mock_run.assert_called_once()
+        called_args = mock_run.call_args[0][0]
+        assert "betting_edge_alert_weekly.py" in called_args[-1]
+
+    def test_timeout_is_non_fatal(self):
+        from unittest.mock import patch
+        import subprocess as sp
+        import scripts.schedule_kickoffs as sk
+        with patch.object(sk.subprocess, "run",
+                          side_effect=sp.TimeoutExpired(cmd="betting_edge_alert_weekly", timeout=300)):
+            sk._run_betting_alert()  # must not raise
+
+    def test_unexpected_subprocess_error_is_non_fatal(self):
+        from unittest.mock import patch
+        import scripts.schedule_kickoffs as sk
+        with patch.object(sk.subprocess, "run", side_effect=OSError("no interpreter")):
+            sk._run_betting_alert()  # must not raise
+
+    def test_nonzero_returncode_is_non_fatal(self):
+        """The inner script already sends its own '[WinsPool Alert]
+        winspool-betting-alert failed' email via its own _run_with_alerting()
+        -- this wrapper just needs to not propagate the failure itself."""
+        from unittest.mock import MagicMock, patch
+        import scripts.schedule_kickoffs as sk
+        with patch.object(sk.subprocess, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="boom")
+            sk._run_betting_alert()  # must not raise
+
+    def test_main_runs_betting_alert_after_successful_enqueue(self, monkeypatch):
+        """A screener bug must never fail the kickoff-task enqueue this job
+        actually exists for -- _run_betting_alert() must be called only
+        after that enqueue loop has already succeeded, not folded into the
+        same try block that would misreport it as a kickoff-scheduling
+        failure."""
+        from unittest.mock import patch
+        import scripts.schedule_kickoffs as sk
+        order = []
+        monkeypatch.setattr(sk, "_sync_schedule_data", lambda: None)
+        monkeypatch.setattr(sk, "load_games", lambda: pd.DataFrame())
+        monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
+        monkeypatch.setattr(sk, "compute_kickoff_clusters_with_games", lambda games, s, w: [])
+        monkeypatch.setattr(
+            sk, "_run_betting_alert",
+            lambda: order.append("betting_alert"),
+        )
+        with patch("google.cloud.tasks_v2.CloudTasksClient"):
+            sk.main()
+        assert order == ["betting_alert"]
+
+    def test_betting_alert_failure_does_not_trigger_kickoff_failure_alert(self, monkeypatch):
+        """Even if _run_betting_alert() somehow raised, main()'s except
+        block would misreport it as 'Dynamic kickoff scheduling failed' --
+        assert the real _run_betting_alert() (not a mock) can't do that,
+        since it must swallow everything internally."""
+        from unittest.mock import patch
+        import scripts.schedule_kickoffs as sk
+        monkeypatch.setattr(sk, "_sync_schedule_data", lambda: None)
+        monkeypatch.setattr(sk, "load_games", lambda: pd.DataFrame())
+        monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
+        monkeypatch.setattr(sk, "compute_kickoff_clusters_with_games", lambda games, s, w: [])
+        with patch.object(sk.subprocess, "run", side_effect=OSError("no interpreter")), \
+             patch("google.cloud.tasks_v2.CloudTasksClient"), \
+             patch.object(sk, "send_alert_email") as mock_alert:
+            sk.main()
+        mock_alert.assert_not_called()
+
+
 class TestComputeKickoffClustersWithGames:
     def test_pairs_each_cluster_with_its_game_ids(self):
         from scripts.schedule_kickoffs import compute_kickoff_clusters_with_games
