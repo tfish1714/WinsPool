@@ -866,6 +866,7 @@ class TestNNProjectionEngineInitialize:
         with patch("services.nn_projection_engine.NNPredictionService"), \
              patch("services.nn_projection_engine.XGBPredictionService"), \
              patch("services.nn_projection_engine.LRPredictionService"), \
+             patch("services.nn_projection_engine.RAWDATA_DIR", tmp_path), \
              patch("services.nn_projection_engine.build_master_feature_table",
                    return_value=pd.DataFrame()), \
              patch("services.nn_projection_engine.compute_preseason_player_profiles",
@@ -1216,7 +1217,7 @@ class TestProfileZTableOverrideInFeatureTable:
              patch.object(fe, "compute_roster_features", return_value={}), \
              patch.object(fe, "compute_roster_performance", return_value={}), \
              patch.object(fe, "_build_profile_z_table", return_value=profile_table):
-            result = fe.build_master_feature_table(min_season=2024, max_season=2024)
+            result = fe.build_master_feature_table(rawdata_dir=str(tmp_path), min_season=2024, max_season=2024)
 
         assert not result.empty
         row = result.iloc[0]
@@ -1246,7 +1247,7 @@ class TestProfileZTableOverrideInFeatureTable:
              patch.object(fe, "compute_roster_features", return_value={}), \
              patch.object(fe, "compute_roster_performance", return_value={}), \
              patch.object(fe, "_build_profile_z_table", return_value=profile_table):
-            result = fe.build_master_feature_table(min_season=2024, max_season=2024)
+            result = fe.build_master_feature_table(rawdata_dir=str(tmp_path), min_season=2024, max_season=2024)
 
         row = result.iloc[0]
         # off_roster_value_delta = (0.7*1 + 0.3*1) - (0.7*(-1) + 0.3*(-1)) = 1.0 - (-1.0) = 2.0
@@ -1274,7 +1275,7 @@ class TestProfileZTableOverrideInFeatureTable:
              patch.object(fe, "compute_roster_features", return_value={}), \
              patch.object(fe, "compute_roster_performance", return_value={}), \
              patch.object(fe, "_build_profile_z_table", return_value=profile_table):
-            result = fe.build_master_feature_table(min_season=2024, max_season=2024)
+            result = fe.build_master_feature_table(rawdata_dir=str(tmp_path), min_season=2024, max_season=2024)
 
         row = result.iloc[0]
         # h_q = (1+1+1+1+1)/5 = 1.0 (note: def_pass_epa flipped: -(-1)=1)
@@ -1314,7 +1315,7 @@ class TestProfileZTableOverrideInFeatureTable:
              patch.object(fe, "compute_roster_features", return_value={}), \
              patch.object(fe, "compute_roster_performance", return_value={}), \
              patch.object(fe, "_build_profile_z_table", side_effect=_capture):
-            fe.build_master_feature_table(min_season=2024, max_season=2024)
+            fe.build_master_feature_table(rawdata_dir=str(tmp_path), min_season=2024, max_season=2024)
 
         assert captured["season_weeks"] == [(2024, 1)]
 
