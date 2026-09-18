@@ -258,29 +258,43 @@ audit, and don't let the audit sprawl into an unplanned refactor.
 
 ## Stage 1 — Feature Engineering (`services/nn_feature_engine.py`)
 
-**Started, not finished** (a first audit sub-agent was launched and killed
-mid-run on 2026-09-18 — re-launch fresh, don't try to resume).
+**Complete, 2026-09-18 — essentially clean.** One minor finding, everything
+else confirmed clean with cited evidence:
 
-Checklist:
-1. Every rolling/trailing-window feature — rolling EPA (pass/rush,
-   offense/defense), rolling point differential, rolling turnover margin,
-   trench dominance / OL-DL performance, pressure stats — confirm each
-   excludes the current week's own game from its own "as of week N"
-   calculation. Same causality bug class as the QB flag; check case by
-   case, don't assume the fix pattern generalizes without checking.
-2. Confirm the roster-value week-indexing fix from
-   `docs/superpowers/specs/completed/2026-09-17-qb-availability-and-prediction-freshness-design.md`
-   Bug B (roster-derived features reading the *current*, overwritten-in-
-   place `roster_{year}.csv` instead of week-indexed
-   `weekly_rosters/roster_weekly_{year}.csv`) actually holds in the
-   current code — verify against the live code path, not the spec's
-   claim of having fixed it.
-3. Any other data source (injuries, snap_counts, depth_charts,
-   weekly_rosters) used in a way that could read a snapshot from after a
-   graded/explained game's own kickoff.
-4. Elo computation (`scripts/compute_elo.py` and however its output feeds
-   `nn_feature_engine.py`) — confirm Elo for week N's prediction only
-   incorporates results through week N-1.
+1. **[Minor, structural cleanup, no live bug]** `compute_preseason_roster_features()`
+   (`nn_feature_engine.py:375-386`) still has the pre-fix Bug B pattern
+   (reads the non-week-indexed rolling `roster_{year}.csv`), but it's fully
+   dead — zero real call sites anywhere (`grep -rn
+   "compute_preseason_roster_features(" services/ scripts/ routes/ tests/`
+   finds only the `def` itself and an unused import). Its own docstring
+   says it was replaced. No risk today; risk only if someone re-wires it
+   back in without noticing. Worth deleting during whatever PR picks up
+   this review's other Stage 1 cleanup, low priority on its own.
+2. **Rolling features (checklist item 1) — clean.** `_load_rolling_epa`,
+   `_load_trench_rolling_stats`, `_load_box_stats_from_weekly`, the
+   point-differential block, and `_load_pressure_stats` all use the
+   identical `.groupby(...).transform(lambda s: s.expanding().mean().shift(1))`
+   pattern — every one excludes the current week's own row, and the
+   week-1 NaN-fill fallback only uses *prior-season* averages, never
+   current-season same-week data.
+3. **Roster-value week-indexing / Bug B (item 2) — confirmed fixed in the
+   live path.** `services/roster_value_service.py:428` and
+   `nn_feature_engine.py:1297` both read `weekly_rosters/roster_weekly_{season}.csv`;
+   `compute_preseason_player_profiles` takes an explicit `week` arg and
+   filters to it; the EPA inputs blended in always come from the season
+   *before* `target_season`, never same-season in-week stats.
+4. **Other data sources / depth charts (item 3) — clean.**
+   `_load_declared_starters` uses `merge_asof(..., direction="backward")`
+   against each week's own earliest kickoff — picks the latest depth-chart
+   snapshot strictly before kickoff.
+5. **Elo (item 4) — clean.** `scripts/compute_elo.py` captures
+   `home_elo_pre`/`away_elo_pre` before calling `_update_game()`, which
+   only mutates state for later iterations. Causal by construction.
+6. **Bonus, cross-checking Stage 2's git-log dig:** independently confirmed
+   the `off_rush_epa` scale bug is fixed (explicit code comment + correct
+   key separation) and both minimum-sample-size gates (offense, DL) are
+   present today — supports Stage 2's read that the honest-cohort AUC
+   decline isn't explained by these specific bugs still being live.
 
 ### Stage 1b — Feature improvement: opponent-adjusted EPA (DVOA-style)
 
