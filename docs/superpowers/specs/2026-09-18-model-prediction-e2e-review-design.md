@@ -410,13 +410,19 @@ Stage 2 scoped correctly before trusting any of its conclusions:
    `derive_prediction_scalars`) wouldn't propagate to the other. Recommend
    consolidating into one shared function this review's implementation
    plan should include.
-2. **[Structural, real evidence, still being measured]** `RESIMULATE_LEAD_MINUTES=20`
-   remains unvalidated, and a real local timing test suggests it may be
-   tight — a warm local `--resimulate` run (rawdata already synced, no
-   cold-start penalty) ran well past 9 minutes without finishing during
-   the audit. Timing this properly now with a fresh, tracked run (real
-   Cloud Run execution would add cold-container-start on top of whatever
-   this measures) — see this section's next update for the actual number.
+2. **[Structural, now measured — tight, not broken]** `RESIMULATE_LEAD_MINUTES=20`
+   remains unvalidated in production, but a real local timing test gives a
+   concrete number: `python scripts/cache_builder.py --resimulate
+   2026_02_CAR_ATL` (warm environment, real nflverse sync included) took
+   **443.8s (7m 24s)** — sync itself was only 15.8s of that, so ~428s went
+   to `engine.initialize()` (6-season feature table + roster value, per
+   its own docstring) + `simulate_season()`. That's **37% of the entire
+   20-minute budget, before any Cloud Run cold-container-start penalty**
+   (commonly 30-90s+ for a TensorFlow-loading image) is added on top.
+   Not currently broken, but tight enough that the original "unvalidated"
+   flag was well-founded — worth either increasing the lead time or
+   profiling `engine.initialize()` for the actual bottleneck before
+   trusting this close to a real kickoff.
 3. **[Corrected — narrower than Stage 2 assumed, no action needed]** The
    "duplicate `prediction_service.py` system" is real but not the live risk
    it looked like: `PredictionService` (Elo+Pythagorean) backs exactly 5
