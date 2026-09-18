@@ -2,7 +2,7 @@ import { ApiService } from './api.js';
 import { AuthService } from './auth_service.js';
 import { UiRenderer } from './ui_renderer.js?v=5';
 import { WebSocketService } from './websocket_service.js?v=1';
-import { initChat, loadHistory, appendMessage } from './chat.js';
+import { initChat, loadHistory, appendMessage } from './chat.js?v=1';
 
 /**
  * WinsPool Main Application Module (Refactored)

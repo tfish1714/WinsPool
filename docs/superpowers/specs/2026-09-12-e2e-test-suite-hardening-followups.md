@@ -7,13 +7,15 @@
 
 While implementing and finally reviewing the Playwright e2e test suite (harness + login/mock-draft/standings/schedule/admin/nav-parity/live-draft tests), a number of real things surfaced that were deliberately not fixed inline — either because they were genuinely out of scope for the task that found them, or because fixing them well needed more investigation than a fix-loop round allows. The cache-invalidation gap found during this same work already has its own dedicated follow-up (`docs/superpowers/specs/2026-09-12-cache-invalidation-gap-followup.md`) since it's a distinct, higher-severity production bug; everything below is smaller/lower-severity and bundled together.
 
-## 1. Possible real UX bug: chat overlay may cover the pick-confirmation button (UNVERIFIED — check this first)
+## 1. Chat overlay covers the pick-confirmation button — VERIFIED and FIXED (2026-09-15)
 
 `tests_e2e/test_live_draft.py`'s viewport-choice comment states that at Playwright's 1280×720 default, `#selection-preview` sits below the fold and the fixed bottom-right `#chat-overlay` (plus the sticky nav rail) sits on top of `#confirm-pick-btn` wherever the page scrolls it to — "so a real click can never land." The test worked around this with a 1600×1200 viewport plus a programmatic collapse of the chat panel.
 
-This was flagged, not verified: `templates/index.html` does give `#chat-overlay` `position:fixed; bottom:1.5rem; right:1.5rem; z-index:9999; width:320px`, expanded by default, and `#selection-preview`/`#confirm-pick-btn` do live at the top of the right-hand `.available-teams-section` column. 1280×720 is a very common real laptop viewport, and the live draft room is the app's single highest-stakes screen.
+**Verified 2026-09-15** by rendering `/draft` in an iframe pinned to 1280×720 (real Chrome layout, not extrapolation) with the dashboard forced visible: `document.elementFromPoint()` at `#confirm-pick-btn`'s center returned `#chat-messages`, confirming a real click there would never reach the button. Root cause: `#chat-overlay` (`position:fixed; bottom:1.5rem; right:1.5rem; z-index:9999`) is expanded by default with a fixed ~364px footprint, and at viewport heights around 720-800px (common on real laptops — 1366×768, 1280×720, 1440×900 minus browser chrome) that overlay's vertical extent reaches up into `#confirm-pick-btn`'s position near the top of the right-hand column.
 
-**Action:** open a real browser at 1280×720 during an active draft and confirm whether the confirm button is actually obstructed/unclickable. If it reproduces, this is a real production bug on the most important screen in the app, more urgent than anything else in this file.
+**Fixed**: `static/js/chat.js`'s existing mobile auto-collapse (previously `window.innerWidth <= 600` only) now also triggers on `window.innerHeight <= 850`, collapsing the overlay to a ~41px header bar that clears the button. Verified the fix the same way (re-ran the iframe hit-test — `elementFromPoint` now returns `confirm-pick-btn`). Cache-busting query params bumped (`chat.js?v=1`, `main.js?v=10`) so deployed browsers actually pick up the change. Commit `87c7ade`. `pytest tests/` (1033 tests) still green.
+
+No further action needed here — a resize-reactive fix (re-checking on window resize rather than only at WS-connect time) would be more robust but is out of scope; the connect-time check matches the existing mobile pattern and covers the realistic case (viewport size at page load).
 
 ## 2. Nav-parity test: background-sync race (parked, Task 9 ruling)
 

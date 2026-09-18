@@ -11,8 +11,10 @@ let _initialized = false;
 export function initChat(ws) {
     _ws = ws;
     if (!_initialized) {
-        // Auto-collapse on mobile so chat doesn't block the page
-        if (window.innerWidth <= 600) {
+        // Auto-collapse on mobile, and on short viewports where the fixed
+        // bottom-right overlay can sit on top of #confirm-pick-btn (verified
+        // at 1280x720 — a click there lands on the chat panel, not the button)
+        if (window.innerWidth <= 600 || window.innerHeight <= 850) {
             _collapsed = true;
             const body = document.getElementById('chat-body');
             const btn = document.getElementById('chat-collapse-btn');

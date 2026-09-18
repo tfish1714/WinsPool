@@ -1,6 +1,8 @@
 """Unit tests for the redesigned nn_feature_engine feature set."""
 import numpy as np
 import pandas as pd
+import pytest
+from unittest.mock import patch
 
 from services.nn_feature_engine import FEATURE_COLUMNS
 
@@ -496,6 +498,59 @@ def test_both_qbs_injured_distinguishable(tmp_path):
     assert not buf.empty and float(buf["away_qb_injury_flag"].iloc[0]) == 1.0
 
 
+def test_qb_availability_signal_ors_into_injury_flag(tmp_path):
+    """A team whose declared starter is benched-via-snap-count (no official
+    injury report entry at all) must still show home_qb_injury_flag == 1.0
+    after this merge -- proving the new signal actually reaches the table,
+    not just the official injury report."""
+    from services.nn_feature_engine import build_master_feature_table
+    rd = _make_minimal_feature_table_inputs(tmp_path)
+
+    dc_dir = rd / "depth_charts"
+    dc_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([
+        {"club_code": "KC", "week": 1, "game_type": "REG", "depth_team": 1,
+         "full_name": "KC Starter", "gsis_id": "KC-STARTER", "depth_position": "QB"},
+        {"club_code": "KC", "week": 2, "game_type": "REG", "depth_team": 1,
+         "full_name": "KC Starter", "gsis_id": "KC-STARTER", "depth_position": "QB"},
+        {"club_code": "KC", "week": 3, "game_type": "REG", "depth_team": 1,
+         "full_name": "KC Starter", "gsis_id": "KC-STARTER", "depth_position": "QB"},
+        {"club_code": "BUF", "week": 1, "game_type": "REG", "depth_team": 1,
+         "full_name": "BUF Starter", "gsis_id": "BUF-STARTER", "depth_position": "QB"},
+        {"club_code": "BUF", "week": 2, "game_type": "REG", "depth_team": 1,
+         "full_name": "BUF Starter", "gsis_id": "BUF-STARTER", "depth_position": "QB"},
+        {"club_code": "BUF", "week": 3, "game_type": "REG", "depth_team": 1,
+         "full_name": "BUF Starter", "gsis_id": "BUF-STARTER", "depth_position": "QB"},
+    ]).to_csv(dc_dir / "depth_charts_2024.csv", index=False)
+
+    sc_dir = rd / "snap_counts"
+    sc_dir.mkdir(parents=True, exist_ok=True)
+    roster_dir = rd / "rosters"
+    roster_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([
+        {"pfr_id": "KCBACKUP0", "gsis_id": "KC-BACKUP", "birth_date": "1999-01-01", "season": 2024},
+        {"pfr_id": "KCSTART00", "gsis_id": "KC-STARTER", "birth_date": "1998-01-01", "season": 2024},
+    ]).to_csv(roster_dir / "roster_2024.csv", index=False)
+    pd.DataFrame([
+        # KC week 1: starter plays
+        {"season": 2024, "week": 1, "team": "KC", "position": "QB", "game_type": "REG",
+         "pfr_player_id": "KCSTART00", "offense_snaps": 60, "defense_snaps": 0},
+        # KC weeks 2-3: starter benched (0 snaps), backup plays (healthy -- no injury report entry)
+        {"season": 2024, "week": 2, "team": "KC", "position": "QB", "game_type": "REG",
+         "pfr_player_id": "KCSTART00", "offense_snaps": 0, "defense_snaps": 0},
+        {"season": 2024, "week": 2, "team": "KC", "position": "QB", "game_type": "REG",
+         "pfr_player_id": "KCBACKUP0", "offense_snaps": 60, "defense_snaps": 0},
+        {"season": 2024, "week": 3, "team": "KC", "position": "QB", "game_type": "REG",
+         "pfr_player_id": "KCSTART00", "offense_snaps": 0, "defense_snaps": 0},
+        {"season": 2024, "week": 3, "team": "KC", "position": "QB", "game_type": "REG",
+         "pfr_player_id": "KCBACKUP0", "offense_snaps": 60, "defense_snaps": 0},
+    ]).to_csv(sc_dir / "snap_counts_2024.csv", index=False)
+
+    df = build_master_feature_table(rawdata_dir=str(rd), min_season=2024, max_season=2024)
+    wk3 = df[df["week"] == 3].iloc[0]
+    assert wk3["home_qb_injury_flag"] == 1.0  # KC is home in the shared fixture
+
+
 def test_home_field_advantage_neutral_is_zero(tmp_path):
     """home_field_advantage must be 0.0 for games with location=='Neutral'."""
     from services.nn_feature_engine import build_master_feature_table
@@ -613,3 +668,364 @@ def test_load_elo_empty_when_csv_and_firestore_both_missing(tmp_path):
         df = _load_elo(tmp_path)
 
     assert df.empty
+
+
+class TestLoadDeclaredStarters:
+    def test_old_schema_uses_own_week_directly(self, tmp_path):
+        """Pre-2025 depth charts are already per-week -- no dt resolution needed."""
+        from services.nn_feature_engine import _load_declared_starters
+        dc_dir = tmp_path / "depth_charts"
+        dc_dir.mkdir()
+        pd.DataFrame([
+            {"club_code": "AAA", "week": 1, "game_type": "REG", "depth_team": 1,
+             "full_name": "QB Alpha", "gsis_id": "00-0001", "depth_position": "QB"},
+            {"club_code": "AAA", "week": 2, "game_type": "REG", "depth_team": 1,
+             "full_name": "QB Bravo", "gsis_id": "00-0002", "depth_position": "QB"},
+            {"club_code": "AAA", "week": 1, "game_type": "REG", "depth_team": 2,
+             "full_name": "QB Backup", "gsis_id": "00-0003", "depth_position": "QB"},
+        ]).to_csv(dc_dir / "depth_charts_2023.csv", index=False)
+
+        result = _load_declared_starters(tmp_path)
+        row = result[(result["season"] == 2023) & (result["week"] == 1) & (result["team"] == "AAA")]
+        assert row.iloc[0]["gsis_id"] == "00-0001"
+        row2 = result[(result["season"] == 2023) & (result["week"] == 2) & (result["team"] == "AAA")]
+        assert row2.iloc[0]["gsis_id"] == "00-0002"
+
+    def test_new_schema_resolves_snapshot_before_kickoff(self, tmp_path):
+        """New-schema depth charts are dt-timestamped, not week-indexed --
+        resolve against the schedule's own kickoff date via merge_asof."""
+        from services.nn_feature_engine import _load_declared_starters
+        dc_dir = tmp_path / "depth_charts"
+        dc_dir.mkdir()
+        pd.DataFrame([
+            {"dt": "2026-09-05T00:00:00Z", "team": "SEA", "player_name": "Sam Darnold",
+             "gsis_id": "00-0100", "pos_abb": "QB", "pos_rank": 1},
+            {"dt": "2026-09-14T00:00:00Z", "team": "SEA", "player_name": "Drew Lock",
+             "gsis_id": "00-0101", "pos_abb": "QB", "pos_rank": 1},
+        ]).to_csv(dc_dir / "depth_charts_2026.csv", index=False)
+
+        sched_dir = tmp_path / "schedules"
+        sched_dir.mkdir()
+        pd.DataFrame([
+            {"season": 2026, "week": 1, "home_team": "SEA", "away_team": "NE",
+             "game_type": "REG", "gameday": "2026-09-09", "home_score": None, "away_score": None,
+             "roof": "outdoors", "temp": 60.0, "wind": 10.0, "location": "Home",
+             "home_rest": 7, "away_rest": 7, "div_game": 0, "surface": "grass"},
+            {"season": 2026, "week": 2, "home_team": "ARI", "away_team": "SEA",
+             "game_type": "REG", "gameday": "2026-09-20", "home_score": None, "away_score": None,
+             "roof": "dome", "temp": 72.0, "wind": 0.0, "location": "Home",
+             "home_rest": 7, "away_rest": 7, "div_game": 0, "surface": "turf"},
+        ]).to_csv(sched_dir / "games.csv", index=False)
+
+        result = _load_declared_starters(tmp_path)
+        wk1 = result[(result["season"] == 2026) & (result["week"] == 1) & (result["team"] == "SEA")]
+        assert wk1.iloc[0]["gsis_id"] == "00-0100"  # Sept 5 snapshot -- before Sept 9 kickoff
+        wk2 = result[(result["season"] == 2026) & (result["week"] == 2) & (result["team"] == "SEA")]
+        assert wk2.iloc[0]["gsis_id"] == "00-0101"  # Sept 14 snapshot -- before Sept 20 kickoff
+
+    def test_new_schema_strictly_before_kickoff_excludes_exact_match(self, tmp_path):
+        """Verify merge_asof uses allow_exact_matches=False: dt==kickoff_date is NOT a match."""
+        from services.nn_feature_engine import _load_declared_starters
+        dc_dir = tmp_path / "depth_charts"
+        dc_dir.mkdir()
+        # Snapshot at exact kickoff time should NOT be used; earlier snapshot should win
+        pd.DataFrame([
+            {"dt": "2026-09-08T00:00:00Z", "team": "SEA", "player_name": "QB Old",
+             "gsis_id": "00-9998", "pos_abb": "QB", "pos_rank": 1},
+            {"dt": "2026-09-09T00:00:00Z", "team": "SEA", "player_name": "Sam Darnold",
+             "gsis_id": "00-0100", "pos_abb": "QB", "pos_rank": 1},
+        ]).to_csv(dc_dir / "depth_charts_2026.csv", index=False)
+
+        sched_dir = tmp_path / "schedules"
+        sched_dir.mkdir()
+        pd.DataFrame([
+            {"season": 2026, "week": 1, "home_team": "SEA", "away_team": "NE",
+             "game_type": "REG", "gameday": "2026-09-09", "home_score": None, "away_score": None,
+             "roof": "outdoors", "temp": 60.0, "wind": 10.0, "location": "Home",
+             "home_rest": 7, "away_rest": 7, "div_game": 0, "surface": "grass"},
+        ]).to_csv(sched_dir / "games.csv", index=False)
+
+        result = _load_declared_starters(tmp_path)
+        wk1 = result[(result["season"] == 2026) & (result["week"] == 1) & (result["team"] == "SEA")]
+        # Should use Sept 8 snapshot (before kickoff), NOT Sept 9 exact match
+        assert wk1.iloc[0]["gsis_id"] == "00-9998", "merge_asof should reject exact match (allow_exact_matches=False)"
+
+    def test_missing_depth_charts_returns_empty_frame(self, tmp_path):
+        from services.nn_feature_engine import _load_declared_starters
+        result = _load_declared_starters(tmp_path)
+        assert list(result.columns) == ["season", "week", "team", "gsis_id"]
+        assert result.empty
+
+
+# ---------------------------------------------------------------------------
+# Task 2: QB Availability Loaders (injury report, reserve status, snap share)
+# ---------------------------------------------------------------------------
+
+class TestLoadQbReportStatus:
+    def test_returns_qb_rows_with_status(self, tmp_path):
+        from services.nn_feature_engine import _load_qb_report_status
+        inj_dir = tmp_path / "injuries"
+        inj_dir.mkdir()
+        pd.DataFrame([
+            {"season": 2026, "week": 2, "team": "SEA", "position": "QB",
+             "gsis_id": "00-0100", "report_status": "Out"},
+            {"season": 2026, "week": 2, "team": "SEA", "position": "WR",
+             "gsis_id": "00-0200", "report_status": "Questionable"},
+        ]).to_csv(inj_dir / "injuries_2026.csv", index=False)
+
+        result = _load_qb_report_status(tmp_path)
+        assert len(result) == 1
+        assert result.iloc[0]["gsis_id"] == "00-0100"
+        assert result.iloc[0]["report_status"] == "Out"
+
+    def test_missing_file_returns_empty_frame(self, tmp_path):
+        from services.nn_feature_engine import _load_qb_report_status
+        result = _load_qb_report_status(tmp_path)
+        assert list(result.columns) == ["season", "week", "team", "gsis_id", "report_status"]
+        assert result.empty
+
+
+class TestLoadQbReserveStatus:
+    def test_returns_only_reserve_rows(self, tmp_path):
+        from services.nn_feature_engine import _load_qb_reserve_status
+        wr_dir = tmp_path / "weekly_rosters"
+        wr_dir.mkdir()
+        pd.DataFrame([
+            {"season": 2026, "week": 2, "team": "SEA", "position": "QB",
+             "gsis_id": "00-0100", "status": "RES"},
+            {"season": 2026, "week": 2, "team": "SEA", "position": "QB",
+             "gsis_id": "00-0101", "status": "ACT"},
+        ]).to_csv(wr_dir / "roster_weekly_2026.csv", index=False)
+
+        result = _load_qb_reserve_status(tmp_path)
+        assert len(result) == 1
+        assert result.iloc[0]["gsis_id"] == "00-0100"
+
+    def test_missing_file_returns_empty_frame(self, tmp_path):
+        from services.nn_feature_engine import _load_qb_reserve_status
+        result = _load_qb_reserve_status(tmp_path)
+        assert list(result.columns) == ["season", "week", "team", "gsis_id"]
+        assert result.empty
+
+
+class TestLoadQbSnapShares:
+    def test_computes_share_of_team_qb_snaps(self, tmp_path):
+        from services.nn_feature_engine import _load_qb_snap_shares
+        sc_dir = tmp_path / "snap_counts"
+        sc_dir.mkdir()
+        pd.DataFrame([
+            {"season": 2026, "week": 1, "team": "SEA", "position": "QB",
+             "game_type": "REG", "pfr_player_id": "DarnSa00", "offense_snaps": 5},
+            {"season": 2026, "week": 1, "team": "SEA", "position": "QB",
+             "game_type": "REG", "pfr_player_id": "LockDr00", "offense_snaps": 45},
+        ]).to_csv(sc_dir / "snap_counts_2026.csv", index=False)
+
+        roster_dir = tmp_path / "rosters"
+        roster_dir.mkdir()
+        pd.DataFrame([
+            {"pfr_id": "DarnSa00", "gsis_id": "00-0100"},
+            {"pfr_id": "LockDr00", "gsis_id": "00-0101"},
+        ]).to_csv(roster_dir / "roster_2026.csv", index=False)
+
+        result = _load_qb_snap_shares(tmp_path)
+        darnold = result[result["gsis_id"] == "00-0100"].iloc[0]
+        lock = result[result["gsis_id"] == "00-0101"].iloc[0]
+        assert darnold["snap_share"] == pytest.approx(0.1)
+        assert lock["snap_share"] == pytest.approx(0.9)
+
+    def test_unmatched_pfr_id_dropped_not_crashed(self, tmp_path):
+        """A snap-count player with no roster ID crosswalk entry is dropped,
+        not treated as 0% -- fails open at the caller instead."""
+        from services.nn_feature_engine import _load_qb_snap_shares
+        sc_dir = tmp_path / "snap_counts"
+        sc_dir.mkdir()
+        pd.DataFrame([
+            {"season": 2026, "week": 1, "team": "SEA", "position": "QB",
+             "game_type": "REG", "pfr_player_id": "Unknown00", "offense_snaps": 50},
+        ]).to_csv(sc_dir / "snap_counts_2026.csv", index=False)
+        roster_dir = tmp_path / "rosters"
+        roster_dir.mkdir()
+        pd.DataFrame([{"pfr_id": "SomeoneElse00", "gsis_id": "00-9999"}]).to_csv(
+            roster_dir / "roster_2026.csv", index=False)
+
+        result = _load_qb_snap_shares(tmp_path)
+        assert result.empty
+
+    def test_missing_file_returns_empty_frame(self, tmp_path):
+        from services.nn_feature_engine import _load_qb_snap_shares
+        result = _load_qb_snap_shares(tmp_path)
+        assert list(result.columns) == ["season", "week", "team", "gsis_id", "snap_share"]
+        assert result.empty
+
+    def test_matched_qb_share_uses_all_qb_totals_not_just_matched(self, tmp_path):
+        """REGRESSION: team-week snap totals must include ALL QBs in snap_counts,
+        even those without a roster crosswalk. If totals were computed only from
+        matched QBs, unmatched teammates would be invisible and inflated the matched
+        player's snap_share. E.g., matched QB with 40 snaps + unmatched QB with 10
+        snaps should give matched QB 40/50=0.8, not 40/40=1.0."""
+        from services.nn_feature_engine import _load_qb_snap_shares
+        sc_dir = tmp_path / "snap_counts"
+        sc_dir.mkdir()
+        pd.DataFrame([
+            {"season": 2026, "week": 1, "team": "SEA", "position": "QB",
+             "game_type": "REG", "pfr_player_id": "MatchedQb", "offense_snaps": 40},
+            {"season": 2026, "week": 1, "team": "SEA", "position": "QB",
+             "game_type": "REG", "pfr_player_id": "UnmatchedQb", "offense_snaps": 10},
+        ]).to_csv(sc_dir / "snap_counts_2026.csv", index=False)
+
+        roster_dir = tmp_path / "rosters"
+        roster_dir.mkdir()
+        pd.DataFrame([
+            {"pfr_id": "MatchedQb", "gsis_id": "00-0100"},
+            # UnmatchedQb intentionally omitted from roster to simulate no crosswalk
+        ]).to_csv(roster_dir / "roster_2026.csv", index=False)
+
+        result = _load_qb_snap_shares(tmp_path)
+        assert len(result) == 1  # Only matched QB in output
+        matched = result.iloc[0]
+        # Denominator must be 50 (all QBs), not 40 (only matched)
+        # So matched QB should be 40/50 = 0.8, NOT 1.0
+        assert matched["snap_share"] == pytest.approx(0.8), \
+            f"Matched QB with 40 snaps out of 50 total should be 0.8, got {matched['snap_share']}"
+
+
+# ---------------------------------------------------------------------------
+# Task 3: QB Availability Flags (sticky-reference algorithm)
+# ---------------------------------------------------------------------------
+
+class TestComputeQbAvailabilityFlags:
+    def _patch_loaders(self, declared, report, reserve, snaps):
+        import services.nn_feature_engine as nfe
+        return [
+            patch.object(nfe, "_load_declared_starters", return_value=pd.DataFrame(declared)),
+            patch.object(nfe, "_load_qb_report_status", return_value=pd.DataFrame(report)),
+            patch.object(nfe, "_load_qb_reserve_status", return_value=pd.DataFrame(reserve)),
+            patch.object(nfe, "_load_qb_snap_shares", return_value=pd.DataFrame(snaps)),
+        ]
+
+    def test_healthy_starter_all_season_flags_zero(self, tmp_path):
+        from services.nn_feature_engine import compute_qb_availability_flags
+        declared = [{"season": 2026, "week": w, "team": "AAA", "gsis_id": "QB1"} for w in [1, 2, 3]]
+        patches = self._patch_loaders(declared, [], [], [])
+        with patches[0], patches[1], patches[2], patches[3]:
+            result = compute_qb_availability_flags([2026], tmp_path)
+        assert result == {
+            (2026, 1, "AAA"): 0.0, (2026, 2, "AAA"): 0.0, (2026, 3, "AAA"): 0.0,
+        }
+
+    def test_starter_hurt_mid_game_week1_still_flags_via_snap_share(self, tmp_path):
+        """Regression for the SEA/MIN case: week-1 starter identified from
+        the depth chart (not from who happened to play the most snaps that
+        game), then flagged unavailable in week 2 via the injury report."""
+        from services.nn_feature_engine import compute_qb_availability_flags
+        declared = [{"season": 2026, "week": 1, "team": "SEA", "gsis_id": "DARNOLD"}]
+        report = [{"season": 2026, "week": 2, "team": "SEA", "gsis_id": "DARNOLD",
+                   "report_status": "Out"}]
+        # Week 1's own snaps show the backup played most of the game -- must
+        # NOT be used to override the depth-chart-declared starter.
+        snaps = [
+            {"season": 2026, "week": 1, "team": "SEA", "gsis_id": "DARNOLD", "snap_share": 0.10},
+            {"season": 2026, "week": 1, "team": "SEA", "gsis_id": "LOCK", "snap_share": 0.90},
+        ]
+        patches = self._patch_loaders(declared, report, [], snaps)
+        with patches[0], patches[1], patches[2], patches[3]:
+            result = compute_qb_availability_flags([2026], tmp_path)
+        assert result[(2026, 1, "SEA")] == 1.0  # Darnold at 10% snaps -> unavailable that week too
+        assert result[(2026, 2, "SEA")] == 1.0  # Darnold on injury report
+
+    def test_reserve_status_flags_when_injury_report_silent(self, tmp_path):
+        """A season-ending IR move often drops off the weekly injury report
+        entirely -- the Reserve/IR roster status leg must catch it anyway."""
+        from services.nn_feature_engine import compute_qb_availability_flags
+        declared = [{"season": 2026, "week": w, "team": "SEA", "gsis_id": "DARNOLD"} for w in [1, 2]]
+        reserve = [{"season": 2026, "week": 2, "team": "SEA", "gsis_id": "DARNOLD"}]
+        patches = self._patch_loaders(declared, [], reserve, [])
+        with patches[0], patches[1], patches[2], patches[3]:
+            result = compute_qb_availability_flags([2026], tmp_path)
+        assert result[(2026, 2, "SEA")] == 1.0
+
+    def test_single_week_healthy_rest_does_not_flip_reference(self, tmp_path):
+        """One week of a healthy backup (no injury/reserve entry for the
+        starter) must not permanently reassign the reference -- only two
+        CONSECUTIVE weeks of a >65% snap-share challenger does."""
+        from services.nn_feature_engine import compute_qb_availability_flags
+        declared = [{"season": 2026, "week": w, "team": "AAA", "gsis_id": "STARTER"} for w in [1, 2, 3]]
+        snaps = [
+            {"season": 2026, "week": 1, "team": "AAA", "gsis_id": "STARTER", "snap_share": 1.0},
+            {"season": 2026, "week": 2, "team": "AAA", "gsis_id": "STARTER", "snap_share": 0.05},
+            {"season": 2026, "week": 2, "team": "AAA", "gsis_id": "BACKUP", "snap_share": 0.95},
+            {"season": 2026, "week": 3, "team": "AAA", "gsis_id": "STARTER", "snap_share": 1.0},
+        ]
+        patches = self._patch_loaders(declared, [], [], snaps)
+        with patches[0], patches[1], patches[2], patches[3]:
+            result = compute_qb_availability_flags([2026], tmp_path)
+        # Week 2 itself reads as unavailable (starter under 20% snaps that week)...
+        assert result[(2026, 2, "AAA")] == 1.0
+        # ...but week 3 the starter is back and the reference never flipped.
+        assert result[(2026, 3, "AAA")] == 0.0
+
+    def test_two_consecutive_weeks_of_healthy_benching_flips_reference(self, tmp_path):
+        """A genuine benching (or a resolving preseason committee): the
+        reference flips to the new starter, and the flag then tracks THEM,
+        not the original starter."""
+        from services.nn_feature_engine import compute_qb_availability_flags
+        declared = [{"season": 2026, "week": w, "team": "AAA", "gsis_id": "STARTER"} for w in [1, 2, 3, 4]]
+        snaps = [
+            {"season": 2026, "week": w, "team": "AAA", "gsis_id": "STARTER", "snap_share": 0.05}
+            for w in [2, 3, 4]
+        ] + [
+            {"season": 2026, "week": w, "team": "AAA", "gsis_id": "BACKUP", "snap_share": 0.95}
+            for w in [2, 3, 4]
+        ]
+        patches = self._patch_loaders(declared, [], [], snaps)
+        with patches[0], patches[1], patches[2], patches[3]:
+            result = compute_qb_availability_flags([2026], tmp_path)
+        # Week 4: reference has flipped to BACKUP, who is playing at 95% ->
+        # available, even though the ORIGINAL starter is still at 5%.
+        assert result[(2026, 4, "AAA")] == 0.0
+
+    def test_reference_stays_pinned_while_starter_has_any_injury_entry(self, tmp_path):
+        """Even if a backup holds the job for weeks, the reference does NOT
+        flip while the original starter still shows an Out/Doubtful entry --
+        only a healthy-but-benched starter can lose the reference."""
+        from services.nn_feature_engine import compute_qb_availability_flags
+        declared = [{"season": 2026, "week": w, "team": "AAA", "gsis_id": "STARTER"} for w in [1, 2, 3, 4]]
+        report = [
+            {"season": 2026, "week": w, "team": "AAA", "gsis_id": "STARTER", "report_status": "Out"}
+            for w in [2, 3, 4]
+        ]
+        snaps = [
+            {"season": 2026, "week": w, "team": "AAA", "gsis_id": "BACKUP", "snap_share": 1.0}
+            for w in [2, 3, 4]
+        ]
+        patches = self._patch_loaders(declared, report, [], snaps)
+        with patches[0], patches[1], patches[2], patches[3]:
+            result = compute_qb_availability_flags([2026], tmp_path)
+        for w in [2, 3, 4]:
+            assert result[(2026, w, "AAA")] == 1.0, f"week {w} should still flag -- starter still Out"
+
+    def test_missing_declared_starter_fails_open(self, tmp_path):
+        from services.nn_feature_engine import compute_qb_availability_flags
+        result = compute_qb_availability_flags([2026], tmp_path)
+        assert result == {}
+
+    def test_reference_initializes_from_teams_own_earliest_week_not_season_minimum(self, tmp_path):
+        """Regression: a team whose depth chart wasn't resolved until week 3
+        (no declared-starter row for weeks 1-2, e.g. crosswalk/timing gap)
+        must still initialize its reference from ITS OWN earliest declared
+        week -- not fail open to 0.0 for its whole season just because some
+        OTHER team in the same season has a week-1 entry."""
+        from services.nn_feature_engine import compute_qb_availability_flags
+        declared = (
+            [{"season": 2026, "week": w, "team": "TEAM_A", "gsis_id": "A_QB"} for w in [1, 2, 3]]
+            + [{"season": 2026, "week": 3, "team": "TEAM_B", "gsis_id": "B_QB"}]
+        )
+        report = [{"season": 2026, "week": 3, "team": "TEAM_B", "gsis_id": "B_QB",
+                   "report_status": "Out"}]
+        patches = self._patch_loaders(declared, report, [], [])
+        with patches[0], patches[1], patches[2], patches[3]:
+            result = compute_qb_availability_flags([2026], tmp_path)
+        assert result[(2026, 3, "TEAM_B")] == 1.0, (
+            "TEAM_B's own week-3 declared starter should have been picked up "
+            "as the reference, not left None because TEAM_A has a week-1 row"
+        )

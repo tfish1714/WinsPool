@@ -746,3 +746,276 @@ class TestResimulateModeWiring:
             main()  # must not raise
 
         mock_publish.assert_called_once()
+
+
+class TestWeeklyBackfillStep:
+    def test_runs_backfill_on_tuesday(self):
+        import scripts.cache_builder as cb
+        from datetime import datetime, timezone
+        tuesday = datetime(2026, 9, 22, 9, 15, tzinfo=timezone.utc)  # a real Tuesday
+        with patch.object(cb, "_run_weekly_backfill_if_tuesday") as mock_step, \
+             patch.object(cb, "load_data", return_value=(pd.DataFrame(), pd.DataFrame(),
+                                                          pd.DataFrame(), pd.DataFrame(),
+                                                          pd.DataFrame(), pd.DataFrame(),
+                                                          pd.DataFrame())), \
+             patch.object(cb, "get_available_years", return_value=[]), \
+             patch.object(cb, "_years_to_build", return_value=[]), \
+             patch.object(cb, "NNPredictionService", side_effect=Exception("skip ML load")), \
+             patch("sys.argv", ["cache_builder.py", "--skip-sync"]):
+            cb.main()
+        mock_step.assert_called_once()
+
+    def test_subprocess_only_runs_on_tuesday(self):
+        """_run_weekly_backfill_if_tuesday itself gates on weekday()."""
+        import scripts.cache_builder as cb
+        from datetime import datetime, timezone
+        monday = datetime(2026, 9, 21, 9, 15, tzinfo=timezone.utc)
+        with patch("scripts.cache_builder.datetime") as mock_dt, \
+             patch.object(cb.subprocess, "run") as mock_run:
+            mock_dt.now.return_value = monday
+            cb._run_weekly_backfill_if_tuesday()
+        mock_run.assert_not_called()
+
+    def test_subprocess_invoked_with_firestore_flag_on_tuesday(self):
+        import scripts.cache_builder as cb
+        from datetime import datetime, timezone
+        tuesday = datetime(2026, 9, 22, 9, 15, tzinfo=timezone.utc)
+        with patch("scripts.cache_builder.datetime") as mock_dt, \
+             patch.object(cb.subprocess, "run") as mock_run:
+            mock_dt.now.return_value = tuesday
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            cb._run_weekly_backfill_if_tuesday()
+        mock_run.assert_called_once()
+        called_args = mock_run.call_args[0][0]
+        assert "backfill_schedule_predictions.py" in called_args[1]
+        assert "--firestore" in called_args
+
+    def test_scoped_to_the_current_season_only(self):
+        """backfill_schedule_predictions.py's own default is every season back
+        to 2006 -- all of them already locked. Re-grading them weekly is pure
+        waste and makes the 600s timeout far likelier to bite."""
+        import scripts.cache_builder as cb
+        from datetime import datetime, timezone
+        tuesday = datetime(2026, 9, 22, 9, 15, tzinfo=timezone.utc)
+        with patch("scripts.cache_builder.datetime") as mock_dt, \
+             patch.object(cb.subprocess, "run") as mock_run:
+            mock_dt.now.return_value = tuesday
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            cb._run_weekly_backfill_if_tuesday(2026)
+        called_args = mock_run.call_args[0][0]
+        assert called_args[-3:] == ["--seasons", "2026", "2026"]
+
+    def test_timeout_is_non_fatal(self):
+        """Regression: a TimeoutExpired used to propagate out of main() into
+        _run_with_alerting(), failing the WHOLE daily job (and triggering
+        Cloud Run retries of the entire build) over an optional weekly step."""
+        import subprocess as sp
+        import scripts.cache_builder as cb
+        from datetime import datetime, timezone
+        tuesday = datetime(2026, 9, 22, 9, 15, tzinfo=timezone.utc)
+        with patch("scripts.cache_builder.datetime") as mock_dt, \
+             patch.object(cb.subprocess, "run",
+                          side_effect=sp.TimeoutExpired(cmd="backfill", timeout=600)):
+            mock_dt.now.return_value = tuesday
+            cb._run_weekly_backfill_if_tuesday(2026)  # must not raise
+
+    def test_unexpected_subprocess_error_is_non_fatal(self):
+        import scripts.cache_builder as cb
+        from datetime import datetime, timezone
+        tuesday = datetime(2026, 9, 22, 9, 15, tzinfo=timezone.utc)
+        with patch("scripts.cache_builder.datetime") as mock_dt, \
+             patch.object(cb.subprocess, "run", side_effect=OSError("no interpreter")):
+            mock_dt.now.return_value = tuesday
+            cb._run_weekly_backfill_if_tuesday(2026)  # must not raise
+
+    def test_runs_after_the_cache_invalidation_signal(self):
+        """A slow or failing weekly backfill must never delay (or, on a raise,
+        skip) the predictions_active invalidation for the daily predictions
+        this job just wrote."""
+        import scripts.cache_builder as cb
+        order = []
+        with patch.object(cb, "_run_weekly_backfill_if_tuesday",
+                          side_effect=lambda *a, **k: order.append("backfill")), \
+             patch("services.db_service.signal_data_update",
+                   side_effect=lambda *a, **k: order.append("signal")), \
+             patch.object(cb, "load_data", return_value=(pd.DataFrame(), pd.DataFrame(),
+                                                          pd.DataFrame(), pd.DataFrame(),
+                                                          pd.DataFrame(), pd.DataFrame(),
+                                                          pd.DataFrame())), \
+             patch.object(cb, "get_available_years", return_value=[]), \
+             patch.object(cb, "_years_to_build", return_value=[]), \
+             patch.object(cb, "NNPredictionService", side_effect=Exception("skip ML load")), \
+             patch("sys.argv", ["cache_builder.py", "--skip-sync"]):
+            cb.main()
+        assert order == ["signal", "backfill"]
+
+
+class TestApplyPredictionsCarriesExplanation:
+    def test_feature_table_branch_carries_explanation_through(self):
+        """pred_lookup entries already include a full explanation dict
+        (built by build_ensemble_lookup) -- it must survive into the output,
+        not be dropped."""
+        from scripts.cache_builder import _apply_predictions
+        schedule = pd.DataFrame([
+            {"home_team": "WAS", "away_team": "KC", "week": 3, "result": 3.0},
+        ])
+        pred_lookup = {(2026, 3, "WAS", "KC"): {
+            "pred_winner": "WAS", "pred_su_conf": 70.0,
+            "pred_ats_pick": "WAS", "pred_prob": 0.7,
+            "model_spread": 4.5, "edge_vs_vegas": 1.0,
+            "explanation": {"elo_diff": 12.3, "vegas_line": 3.0},
+        }}
+        out = _apply_predictions(schedule, 2026, pred_lookup, fallback_engine=MagicMock())
+        assert out.iloc[0]["explanation"] == {"elo_diff": 12.3, "vegas_line": 3.0}
+
+    def _fallback_engine(self):
+        engine = MagicMock()
+        engine._team_profiles = pd.DataFrame([
+            {"team": "WAS", "elo_pre": 1550.0, "roster_talent_delta": 0.5,
+             "off_pass_epa_roll": 0.1, "off_rush_epa_roll": 0.05,
+             "def_pass_epa_roll": 0.02, "def_rush_epa_roll": 0.01,
+             "margin_roll": 3.0, "trench_score": 2.0},
+            {"team": "KC", "elo_pre": 1500.0, "roster_talent_delta": 0.1,
+             "off_pass_epa_roll": 0.0, "off_rush_epa_roll": 0.0,
+             "def_pass_epa_roll": 0.0, "def_rush_epa_roll": 0.0,
+             "margin_roll": 0.0, "trench_score": 1.0},
+        ])
+        engine._qb_availability = {(2026, 3, "WAS"): 1.0}
+        engine.lookup_roster_value.side_effect = lambda team, week: {
+            "WAS": {"off_roster_value": 2.0, "def_roster_value": 1.0},
+            "KC":  {"off_roster_value": 1.0, "def_roster_value": 0.5},
+        }.get(team, {})
+        engine.simulate_season.return_value = {
+            "game_probs": {
+                "W03_WAS_KC": {"mean_prob": 0.62, "model_spread": -3.0,
+                               "home_team": "WAS", "away_team": "KC", "week": 3},
+            },
+        }
+        return engine
+
+    def test_fallback_branch_builds_an_explanation_not_none(self):
+        from scripts.cache_builder import _apply_predictions
+        schedule = pd.DataFrame([
+            {"home_team": "WAS", "away_team": "KC", "week": 3, "result": None,
+             "spread_line": -2.5},
+        ])
+        out = _apply_predictions(schedule, 2026, {},
+                                 fallback_engine=self._fallback_engine())
+        assert out.iloc[0]["explanation"] is not None
+        assert out.iloc[0]["explanation"]["model_spread"] == -3.0
+
+    def test_fallback_explanation_is_the_rich_shared_one_not_a_thin_4_key_dict(self):
+        """Regression (final-review finding 1): the daily run built its own
+        thin 4-key explanation, and merge_thin_game_predictions replaces the
+        whole explanation dict per key -- so every non-Tuesday run wiped the
+        15 richer keys backfill_schedule_predictions.py had written for the
+        same future game, including the QB-availability flags this branch's
+        whole feature set exists for. Both now build it from the one shared
+        build_mc_prediction_entry()."""
+        from scripts.cache_builder import _apply_predictions
+        schedule = pd.DataFrame([
+            {"home_team": "WAS", "away_team": "KC", "week": 3, "result": None,
+             "spread_line": -2.5},
+        ])
+        out = _apply_predictions(schedule, 2026, {},
+                                 fallback_engine=self._fallback_engine())
+        explanation = out.iloc[0]["explanation"]
+
+        # Exactly the key set scripts/backfill_schedule_predictions.py writes
+        assert set(explanation) == {
+            "vegas_line", "vegas_home_prob", "model_spread", "edge_vs_vegas",
+            "elo_diff", "roster_delta", "pass_epa_matchup", "rush_epa_matchup",
+            "early_down_matchup", "turnover_margin", "point_diff_advantage",
+            "home_qb_out", "away_qb_out", "rest_advantage", "travel_disadvantage",
+            "trench_dominance", "off_roster_value", "def_roster_value", "source",
+        }
+        assert explanation["home_qb_out"] == 1.0
+        assert explanation["away_qb_out"] == 0.0
+        assert explanation["elo_diff"] == pytest.approx(50.0)
+        assert explanation["off_roster_value"] == pytest.approx(1.0)
+        assert explanation["def_roster_value"] == pytest.approx(0.5)
+
+    def test_unbuildable_explanation_is_none_so_the_stored_one_survives(self):
+        """When the explanation can't be built at all, it must come back None
+        -- build_year() then omits the key entirely and the shallow merge
+        leaves the stored richer dict intact. Writing a degraded stand-in
+        instead would destroy it."""
+        from scripts.cache_builder import _apply_predictions
+        schedule = pd.DataFrame([
+            {"home_team": "WAS", "away_team": "KC", "week": 3, "result": None,
+             "spread_line": -2.5},
+        ])
+        engine = self._fallback_engine()
+        engine.lookup_roster_value.side_effect = RuntimeError("roster cache gone")
+
+        out = _apply_predictions(schedule, 2026, {}, fallback_engine=engine)
+        assert out.iloc[0]["pred_winner"] == "WAS"       # scalars still written
+        assert out.iloc[0]["explanation"] is None
+
+
+class TestBuildYearWritesExplanation:
+    def test_explanation_included_in_daily_pmap_when_present(self):
+        """Regression: the daily thin-write only ever sent pred_winner/
+        pred_su_conf/pred_ats_pick/pred_prob/model_spread/edge_vs_vegas --
+        explanation silently never refreshed after the first backfill run."""
+        import scripts.cache_builder as cb
+        schedule_df_with_explanation = pd.DataFrame([
+            {"week": 3, "home_team": "WAS", "away_team": "KC",
+             "pred_winner": "WAS", "pred_su_conf": 70.0, "pred_ats_pick": "WAS",
+             "pred_prob": 0.7, "model_spread": 4.5, "edge_vs_vegas": 1.0,
+             "explanation": {"elo_diff": 12.3}},
+        ])
+        captured = {}
+        with patch.object(cb, "get_game_predictions", return_value={}), \
+             patch.object(cb, "merge_thin_game_predictions", side_effect=lambda existing, fresh: fresh), \
+             patch.object(cb, "write_game_predictions", side_effect=lambda year, merged: captured.update(merged)), \
+             patch.object(cb.analysis, "get_enriched_schedule", return_value=schedule_df_with_explanation), \
+             patch.object(cb, "_apply_predictions", return_value=schedule_df_with_explanation), \
+             patch.object(cb, "NNProjectionEngine"), \
+             patch.object(cb, "live_scores"):
+            cb.build_year(
+                pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+                pd.DataFrame(), pd.DataFrame(), year=2026, current_year=2026,
+                force=True,
+            )
+        assert captured["W03_WAS_KC"]["explanation"] == {"elo_diff": 12.3}
+
+    def test_daily_write_without_an_explanation_keeps_the_stored_richer_one(self):
+        """Regression (final-review finding 1): merge_thin_game_predictions
+        merges per GAME KEY and shallowly, so any explanation in the daily
+        pmap replaces the stored one wholesale. A run that has no explanation
+        for a game must therefore omit the key entirely -- never write a
+        thinner stand-in over the rich dict the weekly backfill stored."""
+        import scripts.cache_builder as cb
+
+        rich = {
+            "vegas_line": -2.5, "model_spread": -3.0, "edge_vs_vegas": -0.5,
+            "elo_diff": 50.0, "home_qb_out": 1.0, "away_qb_out": 0.0,
+            "pass_epa_matchup": 0.12, "source": "mc_simulation (10000 trials)",
+        }
+        stored = {"W03_WAS_KC": {"pred_prob": 0.66, "explanation": rich, "locked": False}}
+
+        # What _apply_predictions hands back when no explanation could be built
+        schedule_df = pd.DataFrame([
+            {"week": 3, "home_team": "WAS", "away_team": "KC",
+             "pred_winner": "WAS", "pred_su_conf": 62.0, "pred_ats_pick": "WAS",
+             "pred_prob": 0.62, "model_spread": -3.0, "edge_vs_vegas": -0.5,
+             "explanation": None},
+        ])
+        captured = {}
+        with patch.object(cb, "get_game_predictions", return_value=stored), \
+             patch.object(cb, "write_game_predictions",
+                          side_effect=lambda year, merged: captured.update(merged)), \
+             patch.object(cb.analysis, "get_enriched_schedule", return_value=schedule_df), \
+             patch.object(cb, "_apply_predictions", return_value=schedule_df), \
+             patch.object(cb, "NNProjectionEngine"), \
+             patch.object(cb, "live_scores"):
+            cb.build_year(
+                pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+                pd.DataFrame(), pd.DataFrame(), year=2026, current_year=2026,
+                force=True,
+            )
+
+        # real merge_thin_game_predictions, not a stub
+        assert captured["W03_WAS_KC"]["explanation"] == rich
+        assert captured["W03_WAS_KC"]["pred_prob"] == 0.62  # scalars still refreshed

@@ -1267,29 +1267,42 @@ def _normalize_depth_chart(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def compute_preseason_player_profiles(target_season: int, rawdata_dir) -> dict:
-    """Build per-team EPA quality estimates from projected roster + prior-season player stats.
+def _load_profile_shared_inputs(target_season: int, rawdata_dir, weekly: bool = False) -> dict | None:
+    """Load every compute_preseason_player_profiles() input that does NOT vary
+    week-to-week within a season, so a caller grading many weeks of the same
+    season (see _build_profile_z_table) reads each file once instead of once
+    per week.
 
-    Replaces compute_preseason_roster_features() for all position groups.
-    Returns {team: {off_pass_epa, off_rush_epa, def_pass_epa, def_rush_epa,
-                    ol_av, dl_perf, qb_tier}}.
-    Returns {} if required files (roster or depth_charts) are missing.
+    Only the roster SNAPSHOT genuinely varies by week, and even then it lives
+    in a single per-season file (weekly_rosters/roster_weekly_{season}.csv)
+    that this loads whole -- callers filter it to their week. Everything else
+    (this season's depth chart, the prior seasons' advstats/snap_counts/player
+    EPA) is identical for every week of the season.
+
+    Args:
+        weekly: True loads weekly_rosters/roster_weekly_{season}.csv (all
+            weeks, unfiltered); False loads the rolling rosters/roster_{season}.csv.
+
+    Returns None when a required file (roster or depth_charts) is missing,
+    which callers translate into an empty profile dict.
     """
     prior = target_season - 1
     rd = Path(rawdata_dir)
 
-    roster_path  = rd / "rosters"      / f"roster_{target_season}.csv"
     dc_path      = rd / "depth_charts" / f"depth_charts_{target_season}.csv"
     adv_def_path = rd / "pfr_advstats" / f"advstats_week_def_{prior}.csv"
     snap_path    = rd / "snap_counts"  / f"snap_counts_{prior}.csv"
 
+    if weekly:
+        roster_path = rd / "weekly_rosters" / f"roster_weekly_{target_season}.csv"
+    else:
+        roster_path = rd / "rosters" / f"roster_{target_season}.csv"
+
     if not roster_path.exists() or not dc_path.exists():
-        return {}
+        return None
 
-    roster      = pd.read_csv(roster_path, low_memory=False)
-    depth_chart = pd.read_csv(dc_path,     low_memory=False)
-
-    depth_chart = _normalize_depth_chart(depth_chart)
+    roster = pd.read_csv(roster_path, low_memory=False)
+    depth_chart = _normalize_depth_chart(pd.read_csv(dc_path, low_memory=False))
 
     _REQUIRED_DC_COLS = {"team", "pos_abb", "pos_rank", "player_name", "gsis_id"}
     missing_dc_cols = _REQUIRED_DC_COLS - set(depth_chart.columns)
@@ -1331,6 +1344,64 @@ def compute_preseason_player_profiles(target_season: int, rawdata_dir) -> dict:
     for back in range(1, DL_BLEND_SEASONS):
         s = prior - back
         player_epa_by_season[s] = _load_player_epa(s, rawdata_dir)
+
+    return {
+        "roster_mode":           "weekly" if weekly else "season",
+        "roster":                roster,
+        "depth_chart":           depth_chart,
+        "def_advstats":          def_advstats,
+        "snap_counts":           snap_counts,
+        "def_advstats_by_season": def_advstats_by_season,
+        "snap_counts_by_season":  snap_counts_by_season,
+        "player_epa":            player_epa,
+        "player_epa_by_season":  player_epa_by_season,
+    }
+
+
+def compute_preseason_player_profiles(target_season: int, rawdata_dir, week: int = None,
+                                      shared_inputs: dict = None) -> dict:
+    """Build per-team EPA quality estimates from projected roster + prior-season player stats.
+
+    Replaces compute_preseason_roster_features() for all position groups.
+    Returns {team: {off_pass_epa, off_rush_epa, def_pass_epa, def_rush_epa,
+                    ol_av, dl_perf, qb_tier}}.
+    Returns {} if required files (roster or depth_charts) are missing.
+
+    Args:
+        week: When given, uses that week's own roster snapshot
+            (weekly_rosters/roster_weekly_{target_season}.csv, filtered to
+            this week) instead of the rolling "current" roster file --
+            needed to grade an already-played week without picking up
+            roster changes that happened afterward. None (default) keeps
+            reading the latest snapshot, which is correct when projecting a
+            game that hasn't been played yet.
+        shared_inputs: Optional pre-loaded per-season data from
+            _load_profile_shared_inputs() -- lets a caller iterating many
+            weeks of one season (see _build_profile_z_table) avoid re-reading
+            the same depth-chart/advstats/snap-count/EPA files once per week.
+            Ignored (and reloaded) when it was built for the other roster mode.
+    """
+    expected_mode = "weekly" if week is not None else "season"
+    if not shared_inputs or shared_inputs.get("roster_mode") != expected_mode:
+        shared_inputs = _load_profile_shared_inputs(
+            target_season, rawdata_dir, weekly=(week is not None),
+        )
+    if not shared_inputs:
+        return {}
+
+    roster = shared_inputs["roster"]
+    if week is not None:
+        roster = roster[pd.to_numeric(roster["week"], errors="coerce") == week].copy()
+        if roster.empty:
+            return {}
+
+    depth_chart           = shared_inputs["depth_chart"]
+    def_advstats          = shared_inputs["def_advstats"]
+    snap_counts           = shared_inputs["snap_counts"]
+    def_advstats_by_season = shared_inputs["def_advstats_by_season"]
+    snap_counts_by_season  = shared_inputs["snap_counts_by_season"]
+    player_epa            = shared_inputs["player_epa"]
+    player_epa_by_season  = shared_inputs["player_epa_by_season"]
 
     off = _preseason_offense(
         depth_chart, player_epa, roster, snap_counts, target_season,
@@ -1398,108 +1469,185 @@ def compute_preseason_player_profiles(target_season: int, rawdata_dir) -> dict:
     return raw
 
 
-def _build_profile_z_table(seasons: list, rawdata_dir) -> dict:
-    """Compute cross-team z-scores for 5 profile dimensions for each season.
+def _build_profile_z_table(season_weeks: list, rawdata_dir) -> dict:
+    """Compute cross-team z-scores for 5 profile dimensions for each
+    (season, week) pair, using that week's own roster snapshot.
 
-    Returns {(season, team): {dl_perf, qb_tier, ol_av, off_pass_epa, def_pass_epa}}
-    where each value is that team's z-score within the season's 32-team distribution.
-    Seasons where compute_preseason_player_profiles returns {} are skipped silently.
+    Returns {(season, week, team): {dl_perf, qb_tier, ol_av, off_pass_epa, def_pass_epa}}
+    where each value is that team's z-score within that week's 32-team
+    distribution. Pairs where compute_preseason_player_profiles returns {}
+    are skipped (a pair that raises is skipped too, but logged -- see below).
+
+    Pairs are grouped by season so every per-season-invariant input (depth
+    chart, prior seasons' advstats/snap_counts/player EPA, and the single
+    weekly_rosters file all weeks are sliced out of) is read ONCE per season
+    rather than once per (season, week). A full multi-season build is ~19
+    weeks per season, so loading per week made this -- the heaviest function
+    in the pipeline -- do roughly 20x the file I/O it needs to.
     """
     _DIMS = ["dl_perf", "qb_tier", "ol_av", "off_pass_epa", "def_pass_epa"]
     table: dict = {}
-    for season in seasons:
+
+    weeks_by_season: dict = {}
+    for season, week in season_weeks:
+        weeks_by_season.setdefault(season, []).append(week)
+
+    for season in sorted(weeks_by_season):
+        # Best-effort: a failure here just means every week of this season
+        # loads its own copy (the pre-caching behavior), not that the season
+        # is skipped.
         try:
-            profiles = compute_preseason_player_profiles(season, rawdata_dir)
-        except Exception:
-            continue
-        if not profiles:
-            continue
-        teams = list(profiles.keys())
-        vals = {d: np.array([profiles[t].get(d, 0.0) for t in teams], dtype=float)
-                for d in _DIMS}
-        mu  = {d: float(np.mean(v)) for d, v in vals.items()}
-        sig = {d: max(float(np.std(v)), 1e-6) for d, v in vals.items()}
-        for team in teams:
-            table[(season, team)] = {
-                d: float((profiles[team].get(d, mu[d]) - mu[d]) / sig[d])
-                for d in _DIMS
-            }
+            shared = _load_profile_shared_inputs(season, rawdata_dir, weekly=True)
+        except Exception as exc:
+            logger.warning(
+                "_build_profile_z_table: shared per-season input load failed for "
+                "season=%s (%s) -- falling back to per-week loads", season, exc,
+            )
+            shared = None
+
+        for week in weeks_by_season[season]:
+            try:
+                profiles = compute_preseason_player_profiles(
+                    season, rawdata_dir, week=week, shared_inputs=shared,
+                )
+            except Exception as exc:
+                # Fail open (this table only OVERRIDES rolling-stat feature
+                # values), but never silently: if e.g. weekly_rosters ever
+                # loses a column the profile builder needs, every pair raises
+                # and all 5 profile-override features quietly revert to their
+                # pre-override values. Logging is the only way that's visible.
+                logger.warning(
+                    "_build_profile_z_table: profile build failed for season=%s "
+                    "week=%s: %s", season, week, exc,
+                )
+                continue
+            if not profiles:
+                continue
+            teams = list(profiles.keys())
+            vals = {d: np.array([profiles[t].get(d, 0.0) for t in teams], dtype=float)
+                    for d in _DIMS}
+            mu  = {d: float(np.mean(v)) for d, v in vals.items()}
+            sig = {d: max(float(np.std(v)), 1e-6) for d, v in vals.items()}
+            for team in teams:
+                table[(season, week, team)] = {
+                    d: float((profiles[team].get(d, mu[d]) - mu[d]) / sig[d])
+                    for d in _DIMS
+                }
     return table
 
 
 # ---------------------------------------------------------------------------
-# Snap-Count QB Starter Flag
+# QB Starter Availability (sticky reference starter)
 # ---------------------------------------------------------------------------
 
-def compute_starter_qb_flags(snap_counts: pd.DataFrame) -> dict:
-    """Detect when a team's expected season QB starter is no longer playing.
+def compute_qb_availability_flags(seasons: list, rawdata_dir) -> dict:
+    """Per-team, per-week QB starter availability signal.
 
-    Expected starter = QB with most offense_snaps across weeks 1-3 of that season.
-    Flag fires (1.0) from week 4+ when that QB takes <20% of team QB snaps.
-    Returns {(season, week, team): 1.0 if starter out else 0.0}.
-    Covers 2012+ (snap_counts availability); earlier seasons not included.
+    See docs/superpowers/specs/2026-09-17-qb-availability-and-prediction-
+    freshness-design.md Part A for the full design and decided edge cases.
+
+    A team's "reference starter" starts as whoever the depth chart declared
+    pre-week-1, and only reassigns after two consecutive weeks of both (a)
+    the current reference having no Out/Doubtful/Reserve entry and (b) a
+    different QB holding >65% of the team's QB snaps.
+
+    Returns {(season, week, team): 1.0 if the week's reference starter is
+    unavailable that week, else 0.0}. The snap-share leg of the
+    availability check (not the flip-detection leg) only fires for weeks
+    with real snap data -- i.e. it naturally never fires for a future,
+    unplayed game.
     """
-    if snap_counts.empty:
-        return {}
+    rd = Path(rawdata_dir)
+    declared = _load_declared_starters(rd)
+    report   = _load_qb_report_status(rd)
+    reserve  = _load_qb_reserve_status(rd)
+    snaps    = _load_qb_snap_shares(rd)
 
-    sc = snap_counts.copy()
-    if "game_type" in sc.columns:
-        sc = sc[sc["game_type"] == "REG"].copy()
-
-    sc["season"] = pd.to_numeric(sc["season"], errors="coerce")
-    sc["week"]   = pd.to_numeric(sc["week"],   errors="coerce")
-    sc["team"]   = sc["team"].apply(_normalize_team)
-    sc["offense_snaps"] = pd.to_numeric(sc.get("offense_snaps", 0), errors="coerce").fillna(0)
-    sc = sc.dropna(subset=["season", "week", "team"])
-
-    qbs = sc[sc["position"] == "QB"].copy()
-    if qbs.empty:
-        return {}
-
-    id_col = next(
-        (c for c in ["pfr_player_id", "gsis_id", "player_name"] if c in qbs.columns),
-        None,
-    )
-    if id_col is None:
-        return {}
-
-    # Season expected starter: QB with most combined snaps in weeks 1–3
-    early = qbs[qbs["week"].between(1, 3)]
-    starter_map = (
-        early.groupby(["season", "team", id_col], as_index=False)["offense_snaps"]
-        .sum()
-        .sort_values("offense_snaps", ascending=False)
-        .groupby(["season", "team"], as_index=False)
-        .first()[["season", "team", id_col]]
-        .rename(columns={id_col: "starter_id"})
-    )
-
-    # From week 4 onward, compare starter snaps to total team QB snaps
-    week4 = qbs[qbs["week"] >= 4].copy()
-    week4 = week4.merge(starter_map, on=["season", "team"], how="left")
-
-    total_snaps = (
-        week4.groupby(["season", "week", "team"], as_index=False)["offense_snaps"]
-        .sum()
-        .rename(columns={"offense_snaps": "total_qb_snaps"})
-    )
-    starter_snaps = (
-        week4[week4[id_col] == week4["starter_id"]]
-        .groupby(["season", "week", "team"], as_index=False)["offense_snaps"]
-        .sum()
-        .rename(columns={"offense_snaps": "starter_snaps"})
-    )
-
-    result = total_snaps.merge(starter_snaps, on=["season", "week", "team"], how="left")
-    result["starter_snaps"]   = result["starter_snaps"].fillna(0.0)
-    result["total_qb_snaps"]  = result["total_qb_snaps"].clip(lower=1)
-    result["starter_pct"]     = result["starter_snaps"] / result["total_qb_snaps"]
-    result["flag"]            = (result["starter_pct"] < 0.20).astype(float)
-
-    return {
-        (int(r.season), int(r.week), r.team): float(r.flag)
-        for r in result[["season", "week", "team", "flag"]].itertuples(index=False)
+    declared_map = {
+        (int(r.season), int(r.week), r.team): r.gsis_id
+        for r in declared.itertuples(index=False)
     }
+
+    out_rows = report[report["report_status"].isin(["Out", "Doubtful"])] if not report.empty else report
+    report_out = (
+        {(int(s), int(w), g) for s, w, g in zip(out_rows["season"], out_rows["week"], out_rows["gsis_id"])}
+        if not out_rows.empty else set()
+    )
+    reserve_set = (
+        {(int(s), int(w), g) for s, w, g in zip(reserve["season"], reserve["week"], reserve["gsis_id"])}
+        if not reserve.empty else set()
+    )
+
+    snap_by_team_week: dict = {}
+    for r in snaps.itertuples(index=False):
+        snap_by_team_week.setdefault((int(r.season), int(r.week), r.team), {})[r.gsis_id] = r.snap_share
+
+    flags: dict = {}
+    for season in seasons:
+        season_keys = [(s, w, t) for (s, w, t) in declared_map if s == season]
+        if not season_keys:
+            continue
+        teams = sorted({t for (_, _, t) in season_keys})
+
+        # Weeks span every source, not just declared -- a week can carry an
+        # injury/reserve/snap signal with no depth-chart snapshot of its own
+        # (e.g. a mid-season IR move that never got a fresh depth-chart pull).
+        season_weeks = {w for (_, w, _) in season_keys}
+        if not report.empty:
+            season_weeks |= set(report.loc[report["season"] == season, "week"])
+        if not reserve.empty:
+            season_weeks |= set(reserve.loc[reserve["season"] == season, "week"])
+        if not snaps.empty:
+            season_weeks |= set(snaps.loc[snaps["season"] == season, "week"])
+        weeks = sorted(season_weeks)
+
+        for team in teams:
+            # Initialize from THIS team's own earliest declared week, not
+            # the season-wide minimum -- a team whose depth chart wasn't
+            # resolved until week 3 must not fail open to 0.0 for weeks
+            # 1-3 just because some OTHER team has a week-1 entry.
+            team_declared_weeks = sorted(
+                w for (s, w, t) in season_keys if t == team
+            )
+            reference = (
+                declared_map.get((season, team_declared_weeks[0], team))
+                if team_declared_weeks else None
+            )
+            challenger_streak: list = []
+
+            for wk in weeks:
+                if reference is None:
+                    flags[(season, wk, team)] = 0.0
+                    continue
+
+                ref_out     = (season, wk, reference) in report_out
+                ref_reserve = (season, wk, reference) in reserve_set
+                week_shares = snap_by_team_week.get((season, wk, team), {})
+                ref_share   = week_shares.get(reference)
+                ref_low_snaps = ref_share is not None and ref_share < 0.20
+
+                flags[(season, wk, team)] = (
+                    1.0 if (ref_out or ref_reserve or ref_low_snaps) else 0.0
+                )
+
+                if ref_out or ref_reserve:
+                    challenger_streak = []
+                    continue
+
+                challenger = max(
+                    ((gid, share) for gid, share in week_shares.items()
+                     if gid != reference and share > 0.65),
+                    key=lambda x: x[1], default=None,
+                )
+                challenger_streak = (challenger_streak + [challenger[0] if challenger else None])[-2:]
+
+                if (len(challenger_streak) == 2
+                        and challenger_streak[0] is not None
+                        and challenger_streak[0] == challenger_streak[1]):
+                    reference = challenger_streak[0]
+                    challenger_streak = []
+
+    return flags
 
 
 # ---------------------------------------------------------------------------
@@ -1556,6 +1704,101 @@ def _load_schedule(rd: Path) -> pd.DataFrame:
     df["surface_type"] = surf.str.contains("turf|artificial").astype(float)
 
     return df
+
+
+def _load_declared_starters(rd: Path) -> pd.DataFrame:
+    """Depth-chart-declared starting QB per (season, week, team).
+
+    Old schema (pre-2025: club_code/depth_team/week/game_type) is already
+    per-week -- used directly, no timestamp resolution needed.
+    New schema (2025+: dt/gsis_id) is a continuous snapshot timeline --
+    resolved against the schedule's own earliest kickoff date per week via
+    merge_asof, picking the latest snapshot strictly before that date.
+
+    Returns columns: season, week, team, gsis_id.
+    """
+    empty = pd.DataFrame(columns=["season", "week", "team", "gsis_id"])
+
+    # Load all depth_charts files and extract season from filename
+    files = sorted(glob.glob(str(rd / "depth_charts" / "depth_charts_*.csv")))
+    if not files:
+        return empty
+
+    frames = []
+    for fpath in files:
+        # Extract season from filename: depth_charts_YYYY.csv -> YYYY
+        basename = Path(fpath).stem  # "depth_charts_2023"
+        season_str = basename.split("_")[-1]
+        season = pd.to_numeric(season_str, errors="coerce")
+        if pd.isna(season):
+            continue
+
+        df = _read_csv_safe(fpath)
+        if not df.empty:
+            df["season"] = season
+            frames.append(df)
+
+    if not frames:
+        return empty
+
+    dc = pd.concat(frames, ignore_index=True)
+    if dc.empty:
+        return empty
+
+    starters = []
+
+    if "club_code" in dc.columns:
+        old = dc[(dc.get("game_type") == "REG") & (dc.get("depth_position") == "QB")].copy()
+        old = old[old["depth_team"].astype(str).isin(["1", "1.0"])]
+        old["season"] = pd.to_numeric(old["season"], errors="coerce")
+        old["week"] = pd.to_numeric(old["week"], errors="coerce")
+        old["team"] = old["club_code"].apply(_normalize_team)
+        old = old.dropna(subset=["season", "week", "gsis_id"])
+        old["season"] = old["season"].astype(int)
+        old["week"] = old["week"].astype(int)
+        starters.append(
+            old[["season", "week", "team", "gsis_id"]]
+        )
+
+    if "dt" in dc.columns and "gsis_id" in dc.columns and "pos_abb" in dc.columns:
+        schedule = _load_schedule(rd)
+        if not schedule.empty:
+            kickoffs = (
+                schedule.groupby(["season", "week"])["gameday"]
+                .min().reset_index().rename(columns={"gameday": "kickoff_date"})
+            )
+            kickoffs["kickoff_date"] = pd.to_datetime(kickoffs["kickoff_date"], errors="coerce")
+
+            new = dc[dc["pos_abb"] == "QB"].copy()
+            new["team"] = new["team"].apply(_normalize_team)
+            new["season"] = pd.to_numeric(new["season"], errors="coerce")
+            new["pos_rank"] = pd.to_numeric(new["pos_rank"], errors="coerce")
+            new = new[new["pos_rank"] == 1]
+            new["dt"] = pd.to_datetime(new["dt"], utc=True, errors="coerce").dt.tz_localize(None)
+            new = new.dropna(subset=["season", "dt"])
+
+            if not new.empty:
+                teams_per_season = new[["season", "team"]].drop_duplicates()
+                targets = kickoffs.merge(teams_per_season, on="season", how="inner")
+                targets = targets.dropna(subset=["kickoff_date"])
+
+                matched = pd.merge_asof(
+                    targets.sort_values("kickoff_date"),
+                    new.sort_values("dt")[["season", "team", "dt", "gsis_id"]],
+                    left_on="kickoff_date", right_on="dt",
+                    by=["season", "team"], direction="backward",
+                    allow_exact_matches=False,
+                )
+                matched = matched.dropna(subset=["gsis_id"])
+                matched["season"] = matched["season"].astype(int)
+                matched["week"] = matched["week"].astype(int)
+                starters.append(
+                    matched[["season", "week", "team", "gsis_id"]]
+                )
+
+    if not starters:
+        return empty
+    return pd.concat(starters, ignore_index=True)
 
 
 def _load_rolling_epa(rd: Path) -> pd.DataFrame:
@@ -1957,6 +2200,100 @@ def _load_injury_flags(rd: Path) -> pd.DataFrame:
     return flags
 
 
+def _load_qb_report_status(rd: Path) -> pd.DataFrame:
+    """Per-player weekly official injury report status for QBs.
+
+    Returns columns: season, week, team, gsis_id, report_status.
+    Covers 2009+ (injuries availability); earlier seasons return empty.
+    """
+    empty = pd.DataFrame(columns=["season", "week", "team", "gsis_id", "report_status"])
+    df = _load_multi_season("injuries/injuries_*.csv", rd)
+    if df.empty:
+        return empty
+    df = df[df["position"] == "QB"].copy()
+    df["season"] = pd.to_numeric(df["season"], errors="coerce")
+    df["week"] = pd.to_numeric(df["week"], errors="coerce")
+    df["team"] = df["team"].apply(_normalize_team)
+    return df.dropna(subset=["season", "week", "team"])[
+        ["season", "week", "team", "gsis_id", "report_status"]
+    ]
+
+
+def _load_qb_reserve_status(rd: Path) -> pd.DataFrame:
+    """Per-player weekly Reserve/IR roster status for QBs -- catches
+    season-ending injuries that often drop off the weekly injury report
+    entirely rather than staying tagged 'Out'.
+
+    Returns columns: season, week, team, gsis_id (row presence == on
+    Reserve/IR that week). Covers 2002+ (weekly_rosters availability).
+    """
+    empty = pd.DataFrame(columns=["season", "week", "team", "gsis_id"])
+    df = _load_multi_season("weekly_rosters/roster_weekly_*.csv", rd)
+    if df.empty:
+        return empty
+    df = df[(df["position"] == "QB") & (df["status"] == "RES")].copy()
+    df["season"] = pd.to_numeric(df["season"], errors="coerce")
+    df["week"] = pd.to_numeric(df["week"], errors="coerce")
+    df["team"] = df["team"].apply(_normalize_team)
+    return df.dropna(subset=["season", "week", "team"])[["season", "week", "team", "gsis_id"]]
+
+
+def _load_qb_snap_shares(rd: Path) -> pd.DataFrame:
+    """Per-player weekly share of the team's QB offensive snaps.
+
+    snap_counts is keyed by pfr_player_id, not gsis_id -- cross-walked via
+    rosters/roster_{year}.csv, which carries both IDs per player. A player
+    with no crosswalk match is dropped from the result (the caller treats a
+    missing row as "no snap data available," not "0% snaps").
+
+    CRITICAL: team-week snap totals are computed from ALL QBs in snap_counts
+    (before crosswalk filtering), so the denominator reflects true team snap volume
+    even when some QBs have no roster crosswalk. This prevents inflating a matched
+    player's snap_share when an unmatched teammate is dropped.
+
+    Returns columns: season, week, team, gsis_id, snap_share.
+    """
+    empty = pd.DataFrame(columns=["season", "week", "team", "gsis_id", "snap_share"])
+    sc = _load_multi_season("snap_counts/snap_counts_*.csv", rd)
+    if sc.empty:
+        return empty
+    sc = sc[sc["position"] == "QB"].copy()
+    if "game_type" in sc.columns:
+        sc = sc[sc["game_type"] == "REG"]
+    sc["season"] = pd.to_numeric(sc["season"], errors="coerce")
+    sc["week"] = pd.to_numeric(sc["week"], errors="coerce")
+    sc["team"] = sc["team"].apply(_normalize_team)
+    sc["offense_snaps"] = pd.to_numeric(sc.get("offense_snaps", 0), errors="coerce").fillna(0.0)
+    sc = sc.dropna(subset=["season", "week", "pfr_player_id"])
+    if sc.empty:
+        return empty
+
+    # Compute team-week totals from RAW snap_counts (before crosswalk filtering)
+    # This ensures the denominator reflects ALL QBs who played, not just the matched ones
+    totals = (
+        sc.groupby(["season", "week", "team"])["offense_snaps"]
+        .sum().reset_index().rename(columns={"offense_snaps": "total_snaps"})
+    )
+
+    roster = _load_multi_season("rosters/roster_*.csv", rd)
+    if roster.empty or "pfr_id" not in roster.columns or "gsis_id" not in roster.columns:
+        return empty
+    crosswalk = (
+        roster.dropna(subset=["pfr_id", "gsis_id"])
+        .drop_duplicates(subset=["pfr_id"])[["pfr_id", "gsis_id"]]
+    )
+    # Inner join drops unmatched QBs from output, but they're already in the totals above
+    sc = sc.merge(crosswalk, left_on="pfr_player_id", right_on="pfr_id", how="inner")
+    if sc.empty:
+        return empty
+
+    # Merge pre-computed totals (based on ALL QBs) onto matched rows only
+    sc = sc.merge(totals, on=["season", "week", "team"], how="left")
+    sc["total_snaps"] = sc["total_snaps"].clip(lower=1)
+    sc["snap_share"] = sc["offense_snaps"] / sc["total_snaps"]
+    return sc[["season", "week", "team", "gsis_id", "snap_share"]]
+
+
 # ---------------------------------------------------------------------------
 # Build Master Feature Table (V2)
 # ---------------------------------------------------------------------------
@@ -1992,7 +2329,6 @@ def build_master_feature_table(
     box = _load_box_stats_from_weekly(rd)
     pressure = _load_pressure_stats(rd)
     snap_counts = _load_multi_season("snap_counts/snap_counts_*.csv", rd)
-    starter_qb_flags = compute_starter_qb_flags(snap_counts)
     nflverse_rosters = _load_multi_season("rosters/roster_*.csv", rd)
     stats_team_weekly = _load_multi_season("stats_team/stats_team_week_*.csv", rd)
     roster_cache = compute_roster_features(snap_counts, nflverse_rosters, team_stats=stats_team_weekly)
@@ -2159,6 +2495,27 @@ def build_master_feature_table(
     else:
         sched["home_qb_injury_flag"] = 0.0
         sched["away_qb_injury_flag"] = 0.0
+
+    # --- QB Starter Availability (sticky-reference signal, OR'd into the
+    # same two flags -- see compute_qb_availability_flags' docstring) ---
+    qb_avail = compute_qb_availability_flags(
+        sorted(sched["season"].dropna().unique().astype(int).tolist()), rd
+    )
+    sched["home_qb_injury_flag"] = sched.apply(
+        lambda r: max(
+            r["home_qb_injury_flag"],
+            qb_avail.get((int(r["season"]), int(r["week"]), r["home_team"]), 0.0),
+        ),
+        axis=1,
+    )
+    sched["away_qb_injury_flag"] = sched.apply(
+        lambda r: max(
+            r["away_qb_injury_flag"],
+            qb_avail.get((int(r["season"]), int(r["week"]), r["away_team"]), 0.0),
+        ),
+        axis=1,
+    )
+
     # Legacy aux cols for any downstream that still reads them
     sched["home_qb_out"] = sched["home_qb_injury_flag"]
     sched["away_qb_out"] = sched["away_qb_injury_flag"]
@@ -2366,13 +2723,21 @@ def build_master_feature_table(
     # preseason player profiles. This matches what _precompute_static_features()
     # feeds the models at inference time, fixing the scale mismatch that was
     # inverting predictions for outlier teams (e.g. elite DL).
-    _profile_seasons = [s for s in sched["season"].unique() if s >= 2020]
-    if _profile_seasons:
-        _pz = _build_profile_z_table(sorted(_profile_seasons), rd)
+    # Only PLAYED weeks: rows with a null home_win are unplayed games that the
+    # dropna() a few lines below discards anyway, and a future week has no
+    # roster snapshot yet -- building a profile for it is a guaranteed-empty
+    # file read per future week of the current season.
+    _profile_scope = sched[sched["season"] >= 2020]
+    if "home_win" in _profile_scope.columns:
+        _profile_scope = _profile_scope[_profile_scope["home_win"].notna()]
+    _profile_rows = _profile_scope[["season", "week"]].drop_duplicates()
+    _season_weeks = list(_profile_rows.itertuples(index=False, name=None))
+    if _season_weeks:
+        _pz = _build_profile_z_table(_season_weeks, rd)
         if _pz:
             def _apply_profile_overrides(row):
-                hz = _pz.get((int(row["season"]), row["home_team"]))
-                az = _pz.get((int(row["season"]), row["away_team"]))
+                hz = _pz.get((int(row["season"]), int(row["week"]), row["home_team"]))
+                az = _pz.get((int(row["season"]), int(row["week"]), row["away_team"]))
                 if hz is None or az is None:
                     return row
                 row["def_pressure_diff"]      = hz["dl_perf"] - az["dl_perf"]

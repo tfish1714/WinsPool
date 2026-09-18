@@ -165,6 +165,7 @@ class TestWebSocketAdminActions:
     def _verify_as_admin(self, ws):
         """Helper: perform the reauthenticate handshake as player 1 (admin)."""
         ws.receive_json()  # consume initial state
+        ws.receive_json()  # consume chat_history
         ws.send_json({"action": "reauthenticate", "playerId": 1})
         # Drain verified + state broadcast
         for _ in range(2):

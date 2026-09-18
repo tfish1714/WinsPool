@@ -41,52 +41,76 @@ def extract_weekly_data(year, week):
     for _, row in weekly_games.iterrows():
         if row['result'] == UNDRAFTED_SENTINEL or row['result'] is None:
             continue
-            
+
         a_pid = row['playerId']
         h_pid = row['playerId_home_draft']
-        
-        if a_pid == UNDRAFTED_SENTINEL or h_pid == UNDRAFTED_SENTINEL or pd.isna(a_pid) or pd.isna(h_pid):
+
+        # A team can play an undrafted opponent (this pool doesn't draft all
+        # 32 teams). Only skip crediting the undrafted side -- skipping the
+        # whole row would also drop the drafted side's result for that game,
+        # undercounting their weekly win/loss record.
+        a_drafted = pd.notna(a_pid) and a_pid != UNDRAFTED_SENTINEL
+        h_drafted = pd.notna(h_pid) and h_pid != UNDRAFTED_SENTINEL
+        if not a_drafted and not h_drafted:
             continue
-            
-        if h_pid not in player_stats:
+
+        if h_drafted and h_pid not in player_stats:
             player_stats[h_pid] = {'wins': 0, 'losses': 0, 'bad_beats': [], 'notable_wins': []}
-        if a_pid not in player_stats:
+        if a_drafted and a_pid not in player_stats:
             player_stats[a_pid] = {'wins': 0, 'losses': 0, 'bad_beats': [], 'notable_wins': []}
 
         home_score = row['home_score']
         away_score = row['away_score']
         margin = abs(home_score - away_score)
-        
+
         if row['result'] > 0: # Home Win
-            player_stats[h_pid]['wins'] += 1
-            player_stats[a_pid]['losses'] += 1
+            if h_drafted:
+                player_stats[h_pid]['wins'] += 1
+            if a_drafted:
+                player_stats[a_pid]['losses'] += 1
+            # Called out regardless of margin: losing outright to a team
+            # nobody drafted is embarrassing on its own, independent of score.
+            if a_drafted and not h_drafted:
+                player_stats[a_pid]['bad_beats'].append(f"Lost outright to a team nobody even drafted ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
             # Bad Beats for Away
             if margin <= 3:
-                player_stats[a_pid]['bad_beats'].append(f"Lost a nail-biter by {margin} ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
-                player_stats[h_pid]['notable_wins'].append(f"Survived a close one by {margin} ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
+                if a_drafted:
+                    player_stats[a_pid]['bad_beats'].append(f"Lost a nail-biter by {margin} ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
+                if h_drafted:
+                    player_stats[h_pid]['notable_wins'].append(f"Survived a close one by {margin} ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
             elif away_score >= 30:
-                player_stats[a_pid]['bad_beats'].append(f"Scored {away_score} and still lost ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
-            
+                if a_drafted:
+                    player_stats[a_pid]['bad_beats'].append(f"Scored {away_score} and still lost ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
+
             # Notable Wins for Home
-            if margin >= 17:
+            if h_drafted and margin >= 17:
                 player_stats[h_pid]['notable_wins'].append(f"Absolute blowout! Won by {margin} ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
-            elif home_score < 14 and row['result'] > 0:
+            elif h_drafted and home_score < 14 and row['result'] > 0:
                 player_stats[h_pid]['notable_wins'].append(f"Ugly win but counts! Scored only {home_score} and escaped ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
 
         else: # Away Win
-            player_stats[a_pid]['wins'] += 1
-            player_stats[h_pid]['losses'] += 1
+            if a_drafted:
+                player_stats[a_pid]['wins'] += 1
+            if h_drafted:
+                player_stats[h_pid]['losses'] += 1
+            # Called out regardless of margin: losing outright to a team
+            # nobody drafted is embarrassing on its own, independent of score.
+            if h_drafted and not a_drafted:
+                player_stats[h_pid]['bad_beats'].append(f"Lost outright to a team nobody even drafted ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
             # Bad Beats for Home
             if margin <= 3:
-                player_stats[h_pid]['bad_beats'].append(f"Heartbreaker! Lost by {margin} ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
-                player_stats[a_pid]['notable_wins'].append(f"Stole a win by {margin} ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
+                if h_drafted:
+                    player_stats[h_pid]['bad_beats'].append(f"Heartbreaker! Lost by {margin} ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
+                if a_drafted:
+                    player_stats[a_pid]['notable_wins'].append(f"Stole a win by {margin} ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
             elif home_score >= 30:
-                player_stats[h_pid]['bad_beats'].append(f"Scored {home_score} and still lost ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
-            
+                if h_drafted:
+                    player_stats[h_pid]['bad_beats'].append(f"Scored {home_score} and still lost ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
+
             # Notable Wins for Away
-            if margin >= 17:
+            if a_drafted and margin >= 17:
                 player_stats[a_pid]['notable_wins'].append(f"Dominant performance! Won by {margin} ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
-            elif away_score < 14 and row['result'] < 0:
+            elif a_drafted and away_score < 14 and row['result'] < 0:
                 player_stats[a_pid]['notable_wins'].append(f"Scrappy win! Scored only {away_score} and still won ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
 
     # 3. Build text for Gemini
@@ -163,8 +187,11 @@ def extract_draft_data(year):
         formatted_roster = []
         proj_wins = 0.0
         for team in roster:
-            if team in preds and preds[team].get('projected_wins') is not None:
-                val = float(preds[team]['projected_wins'])
+            # mean_wins, not projected_wins: projected_wins is rounded to a whole
+            # number, but the running portfolio shown during the draft
+            # (ui_renderer.js) sums mean_wins, so the recap must match that number.
+            if team in preds and preds[team].get('mean_wins') is not None:
+                val = float(preds[team]['mean_wins'])
                 formatted_roster.append(f"{team} ({val})")
                 proj_wins += val
             else:

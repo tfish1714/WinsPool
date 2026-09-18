@@ -61,3 +61,26 @@ class TestConstructorInjection:
         assert engine.svc is fake_nn
         assert engine.xgb_svc is fake_xgb
         assert engine.lr_svc is fake_lr
+
+
+def test_precompute_static_features_uses_qb_availability_not_hardcoded_zero():
+    """Regression: home_qb_injury_flag/away_qb_injury_flag were hardcoded to
+    0.0 for every future game -- this is the actual reason a real starter's
+    injury never reached a live (not-yet-played) prediction."""
+    import pandas as pd
+    from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
+    from services.nn_projection_engine import NNProjectionEngine
+
+    engine = NNProjectionEngine(nn_svc=MagicMock(), xgb_svc=MagicMock(), lr_svc=MagicMock())
+    engine._season = 2026
+    engine._team_profiles = pd.DataFrame([{"team": "SEA"}, {"team": "ARI"}])
+    engine._qb_availability = {(2026, 2, "SEA"): 1.0}
+
+    schedule_df = pd.DataFrame([
+        {"home_team": "ARI", "away_team": "SEA", "week": 2, "div_game": 0, "surface_type": 0},
+    ])
+    feats = engine._precompute_static_features(schedule_df)
+    col_idx = {c: i for i, c in enumerate(NN_FC)}
+    key = "W02_ARI_SEA"
+    assert feats[key][col_idx["away_qb_injury_flag"]] == 1.0  # SEA is away
+    assert feats[key][col_idx["home_qb_injury_flag"]] == 0.0  # ARI has no entry -> fails open

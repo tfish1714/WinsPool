@@ -58,6 +58,7 @@ class TestSkipsSimulationWhenFullyLocked:
         }
         fake_engine = MagicMock()
         fake_engine._team_profiles = pd.DataFrame(columns=["team"])
+        fake_engine._qb_availability = {}
         fake_engine.lookup_roster_value.return_value = {}
         fake_engine.simulate_season.return_value = {
             "game_probs": {
@@ -88,6 +89,7 @@ class TestExplanationRosterValue:
 
         fake_engine = MagicMock()
         fake_engine._team_profiles = pd.DataFrame(columns=["team"])
+        fake_engine._qb_availability = {}
 
         def _fake_lookup(team, week):
             return {
@@ -123,6 +125,7 @@ class TestExplanationRosterValue:
 
         fake_engine = MagicMock()
         fake_engine._team_profiles = pd.DataFrame(columns=["team"])
+        fake_engine._qb_availability = {}
         fake_engine.lookup_roster_value.return_value = {}
         fake_engine.simulate_season.return_value = {
             "game_probs": {
@@ -141,3 +144,61 @@ class TestExplanationRosterValue:
         explanation = result["W02_KC_BUF"]["explanation"]
         assert explanation["off_roster_value"] == pytest.approx(0.0)
         assert explanation["def_roster_value"] == pytest.approx(0.0)
+
+
+class TestExplanationQbAvailability:
+    def test_home_away_qb_out_come_from_the_engines_own_flags(self):
+        """The flags must be read off the already-initialize()d engine
+        (engine._qb_availability), not recomputed by a second
+        compute_qb_availability_flags() pass over the same 4 file globs."""
+        schedule_df = pd.DataFrame([_schedule_row("KC", "BUF", 2)])
+        ft_lookup = {}
+
+        fake_engine = MagicMock()
+        fake_engine._team_profiles = pd.DataFrame(columns=["team"])
+        fake_engine._qb_availability = {(2025, 2, "KC"): 1.0}
+        fake_engine.lookup_roster_value.return_value = {}
+        fake_engine.simulate_season.return_value = {
+            "game_probs": {
+                "W02_KC_BUF": {
+                    "home_team": "KC", "away_team": "BUF", "week": 2,
+                    "mean_prob": 0.6, "model_spread": -2.5,
+                },
+            },
+        }
+        with patch.object(bsp, "NNProjectionEngine", return_value=fake_engine), \
+             patch.object(bsp, "get_game_predictions", return_value={}):
+            result = bsp._build_predictions_map(
+                2025, ft_lookup, schedule_df, pd.DataFrame(), force=True,
+            )
+
+        explanation = result["W02_KC_BUF"]["explanation"]
+        assert explanation["home_qb_out"] == 1.0
+        assert explanation["away_qb_out"] == 0.0
+
+    def test_does_not_recompute_availability_flags(self):
+        """Regression: backfill used to call compute_qb_availability_flags()
+        a couple of lines after engine.initialize() already had."""
+        import services.nn_feature_engine as fe
+        schedule_df = pd.DataFrame([_schedule_row("KC", "BUF", 2)])
+
+        fake_engine = MagicMock()
+        fake_engine._team_profiles = pd.DataFrame(columns=["team"])
+        fake_engine._qb_availability = {}
+        fake_engine.lookup_roster_value.return_value = {}
+        fake_engine.simulate_season.return_value = {
+            "game_probs": {
+                "W02_KC_BUF": {
+                    "home_team": "KC", "away_team": "BUF", "week": 2,
+                    "mean_prob": 0.6, "model_spread": -2.5,
+                },
+            },
+        }
+        with patch.object(bsp, "NNProjectionEngine", return_value=fake_engine), \
+             patch.object(bsp, "get_game_predictions", return_value={}), \
+             patch.object(fe, "compute_qb_availability_flags") as mock_flags:
+            bsp._build_predictions_map(
+                2025, {}, schedule_df, pd.DataFrame(), force=True,
+            )
+
+        mock_flags.assert_not_called()
