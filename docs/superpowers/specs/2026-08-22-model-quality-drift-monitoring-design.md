@@ -1,7 +1,13 @@
 # Model Quality Drift Monitoring
 
 **Date:** 2026-08-22
-**Status:** Not designed — backlog item, split out of the injury-aware-roster-value plan's final MLOps-lens review so it doesn't get lost. Needs a proper brainstorming pass before implementation.
+**Status:** Superseded 2026-09-18 — designed for real, folded into
+`docs/superpowers/specs/2026-09-18-model-prediction-e2e-review-design.md`
+("Folded-in designs" section) once the actual triggering bug (XGB v9/LR v7
+"latest" scoring far worse than "best" from the moment they were trained)
+made this concrete instead of hypothetical. Read that spec instead of this
+stub; move this file to `completed/` once its promotion-gate and live
+drift-monitoring pieces actually land.
 
 ## Origin
 

@@ -1,7 +1,13 @@
 # Feature Computation Versioning
 
 **Date:** 2026-08-22
-**Status:** Not designed — backlog item, split out of the injury-aware-roster-value plan's final MLOps-lens review so it doesn't get lost. Needs a proper brainstorming pass before implementation.
+**Status:** Superseded 2026-09-18 — designed for real, folded into
+`docs/superpowers/specs/2026-09-18-model-prediction-e2e-review-design.md`
+("Folded-in designs" section) once the actual triggering case (the
+2026-09-18 snap-share leakage fix, with no way to mark which stored
+predictions were computed before vs. after it) made this concrete instead
+of hypothetical. Read that spec instead of this stub; move this file to
+`completed/` once the version-stamp piece actually lands.
 
 ## Origin
 

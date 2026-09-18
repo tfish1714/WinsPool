@@ -10,8 +10,8 @@ Investigating "why wasn't Week 1 2026 good" surfaced a real, confirmed bug
 `docs/superpowers/specs/completed/2026-09-18-qb-availability-snap-share-leakage-design.md`)
 within minutes of looking. That fix landed the same day. But the pattern —
 one focused look, one real bug, first try — combined with two things
-already known and sitting unaddressed in the backlog (see "Prior open
-questions this review inherits" below) is what prompted the broader ask:
+already known and sitting unaddressed in the backlog (see "Folded-in
+designs" below) is what prompted the broader ask:
 this pipeline was built up over many separate passes (Elo → EPA → roster
 value → injury-aware grading → QB availability → betting screener, each its
 own plan/spec/review), and there's a real chance other seams like the
@@ -56,31 +56,130 @@ reason to doubt it)
   (`d5955bf`, `bfcb902`), unrelated to the ML pipeline but found during the
   same session.
 
-## Prior open questions this review inherits
+## Folded-in designs: two backlog specs this review resolves
 
-Two backlog specs from a month ago turned out to predict exactly the kind
-of problem this review exists to catch. Read them in full before starting;
-don't re-derive what they already say:
+Two backlog specs from a month ago
+(`docs/superpowers/specs/2026-08-22-model-quality-drift-monitoring-design.md`,
+`docs/superpowers/specs/2026-08-22-feature-computation-versioning-design.md`)
+sat at "Not designed — needs a proper brainstorming pass" since 2026-08-22.
+Both predicted, almost exactly, the kind of problem this review exists to
+catch. Rather than leave them as indefinite backlog, today's findings
+answer most of their own open questions directly — folded in here as real
+designs, superseding the two stub docs (each now carries a pointer to this
+section; see "Rollout" for follow-up).
 
-- `docs/superpowers/specs/2026-08-22-model-quality-drift-monitoring-design.md`
-  — flagged, before any of today's findings existed, that "nothing watches
-  whether the predictions themselves are still good" and that a degraded
-  model "would currently be caught only by a human noticing wrong-looking
-  predictions." That is exactly what happened: XGB v9 (AUC 0.538, barely
-  above coin-flip) and LR v7 (50.0% test accuracy, exactly random) are
-  both currently deployed as "latest," while their own registries'
-  `best_by` field already points at v1/v3 — nothing ever reads it. This
-  review's Stage 2 should determine whether to resolve this backlog item
-  now (wire something up) or roll back/retrain first and design monitoring
-  after.
-- `docs/superpowers/specs/2026-08-22-feature-computation-versioning-design.md`
-  — flagged that stored predictions carry a model-version stamp
-  (`ensemble_version`) but nothing marks which *feature-computation code*
-  produced their inputs. This is why today's regrade of Week 1 2026 has no
-  clean way to prove, from the stored data alone, that it used the
-  post-fix feature logic rather than the pre-fix version — we know it did
-  only because we ran it ourselves, right after landing the fix, and
-  remember doing so. A month from now, nobody would be able to tell.
+### Model quality gating (resolves `model-quality-drift-monitoring`)
+
+The backlog doc's open questions (what metric, what threshold, what
+window) assumed the problem was **live, ongoing drift** — a model that was
+good when shipped, degrading over a season from real-world distribution
+shift. That's a real risk and still worth building. But the concrete bug
+actually found is smaller and catchable earlier: **XGB v9 was worse than
+the registry's own `best` (v3) from the moment it was trained**, on the
+identical held-out test set (season 2025, weeks 16-18) — no live window
+needed at all to have caught it. That splits this into two designs:
+
+**1. Training-time promotion gate (new, directly fixes today's bug).**
+Adapted from the `mle-workflow` skill's pattern (ECC project, MIT-licensed,
+evaluated 2026-09-18 — see below): a training script must not write a new
+version as `latest` in its registry unless it clears explicit gates
+against the registry's current `best` on the *same* held-out test set.
+
+```python
+# scripts/train_xgb_model.py / train_lr_model.py / train_nn_model.py --
+# after computing this run's test metrics, before writing latest/best:
+
+PROMOTION_GATES = {
+    # (direction, max allowed regression vs. current `best`)
+    "test_accuracy": ("min", -0.02),   # new must not be >2pp worse
+    "test_auc":       ("min", -0.02),
+}
+
+def assert_promotion_ready(new_metrics: dict, best_metrics: dict) -> None:
+    failures = {
+        name: (new_metrics[name], best_metrics[name])
+        for name, (direction, tolerance) in PROMOTION_GATES.items()
+        if direction == "min" and new_metrics[name] < best_metrics[name] + tolerance
+    }
+    if failures:
+        raise ValueError(
+            f"New model regressed vs. current best on held-out test set: {failures}. "
+            "Not promoting to latest -- investigate before overriding."
+        )
+```
+
+Needs zero new infrastructure — `models/xgb_registry.json`/`lr_registry.json`
+already store both models' test metrics; this just reads them before the
+write instead of never reading them. Failing loud (raise, not a silent
+skip) matches this codebase's own established alerting pattern
+(`send_alert_email()` on unhandled exception) — wire the training scripts'
+own failure path into that if this is ever run as an automated retrain,
+not just manually.
+
+**2. Live weekly drift monitoring (the backlog doc's original scope, still
+separate, still valid).** A model that *passes* the promotion gate above
+can still degrade in-season from real distribution shift. Piggyback on
+`weekly_model_eval.py`/the existing Tuesday backfill step
+(`cache_builder.py::_run_weekly_backfill_if_tuesday`) rather than
+provisioning a new job — same pattern already used for the betting-alert
+piggyback (PR #120). Compare each week's accuracy against a rolling
+baseline (e.g. trailing 4-week average) rather than a single-week
+threshold, since NFL outcomes are noisy by nature — this answers the
+backlog doc's "what threshold, over what window" question directly: use a
+rolling window, not a single-week trigger, to avoid crying wolf on normal
+variance. Alert via the existing `send_alert_email()` path.
+
+### Feature computation versioning (resolves `feature-computation-versioning`)
+
+The backlog doc's open questions, answered:
+
+- **Granularity:** single repo-wide version, not per-feature-family — this
+  project's scale doesn't justify the bookkeeping overhead the backlog doc
+  itself flagged as a tradeoff.
+- **Git commit SHA, not a maintained semantic version.** The backlog doc's
+  own evidence is that manual version-bumping already failed twice (the
+  2026-08-15 preseason-profile fixes, the injury-grading change) — a SHA
+  needs no human to remember anything, which is the exact failure mode
+  this spec exists to prevent. Today added a third: the snap-share fix
+  itself, deployed 2026-09-18 with no way to mark which predictions were
+  computed before vs. after it, other than session memory.
+- **Storage:** alongside `ensemble_version` in `prediction_features` docs
+  (`services/cache_service.py::write_prediction_features()`), stamped from
+  whatever commit SHA is checked out at write time.
+- **Retroactive backfill:** no — forward-only from whenever this lands.
+  Not worth trying to reconstruct which commit produced historical rows.
+
+## Review checklist and anti-patterns (adapted from ECC's `mle-workflow`
+skill, MIT-licensed, evaluated 2026-09-18 — not installed as a dependency,
+just used as reference; see chat history for the full evaluation)
+
+Apply this checklist at every stage below, not just where a bug has
+already been found:
+
+- [ ] Leakage risk checked against prediction-time availability (the
+  snap-share bug's exact shape — check it again at every stage, not just
+  where it was already found)
+- [ ] Training and serving feature-computation code are shared or
+  equivalence-tested, never manually duplicated
+- [ ] Metrics compare against the registry's own `best`/baseline, not just
+  "did this number go up," before anything gets called `latest`
+- [ ] Model version is present on every stored prediction (already true —
+  `ensemble_version`); feature-computation version is not yet (see above)
+- [ ] Rollback is "switch to a known-good artifact," not "retrain and
+  hope" — confirmed true today (v1/v3 already exist and are loadable), but
+  nothing exercises this path yet
+- [ ] Monitoring covers prediction *quality*, not just job/service uptime
+  (uptime already covered; quality is the gap this section resolves)
+
+Anti-patterns worth actively grepping for during Stages 1/3/4, since they
+'re exactly the shape of bug already found once:
+
+- Feature joins that ignore event time / label availability (the snap-share bug)
+- Training-only feature code manually copied into serving code, or vice versa
+- A model promoted to production without being compared against the
+  current production model on the same test set
+- A quality signal that only checks "did the job run," not "were the
+  predictions any good"
 
 ## Process
 
@@ -146,7 +245,9 @@ findings instead:
    metrics looked acceptable enough to ship despite generalizing badly.
    Decide: roll back to `best` now, or retrain properly once Stage 1's
    findings land (if Stage 1 finds real feature bugs, retraining now would
-   just bake in the same bugs again).
+   just bake in the same bugs again). Whichever is chosen, the training-time
+   promotion gate designed in "Folded-in designs" below should exist before
+   any future retrain, so this specific failure can't recur silently.
 2. **Checked clean:** feature-set parity (all three scripts import the
    same `FEATURE_COLUMNS`), scaler/version pairing, walk-forward (not
    random) train/val/test splitting, blend-weight (45/20/35) constant
@@ -199,10 +300,10 @@ Not yet started. Files: `routes/api_routes.py` (`/api/predictions/explain`),
    correspond to the *same* model version as the stored prediction being
    displayed, or could it reflect a different (e.g. since-retrained)
    model's feature audit than the win probability shown alongside it? This
-   is exactly what
-   `docs/superpowers/specs/2026-08-22-feature-computation-versioning-design.md`
-   already flagged as unresolved — decide whether to fix the display gap,
-   the underlying versioning gap, or both.
+   is the exact display-side symptom of the versioning gap now designed
+   in "Feature computation versioning" above — once the version stamp
+   lands, this check becomes "does the modal show it," not "can we even
+   tell."
 3. Confirm SU/ATS grade, edge, and Vegas-line numbers are consistent
    between the per-game table (`admin_accuracy.js`) and both modals for
    the same game — spot-check a handful of real graded games, not just
@@ -217,20 +318,41 @@ Not yet started. Files: `routes/api_routes.py` (`/api/predictions/explain`),
 
 - Retraining the models — a decision to make *after* Stage 1/2 findings
   are in, not a step of the review itself.
-- Building the model-quality-drift-monitoring or feature-computation-
-  versioning systems described in the two backlog specs — this review
-  decides whether/when to pick them up, doesn't implement them.
+- Live weekly drift monitoring's actual implementation (design is folded
+  in above; building it is its own implementation plan, not a step of
+  this review).
 - Any UI/UX changes beyond what's needed to fix a found correctness bug.
+- Installing the ECC plugin, or any other third-party skill/agent bundle,
+  as a dependency — only the `mle-workflow` skill's checklist/pattern
+  content was evaluated and adapted, nothing was installed.
 
 ## Rollout
 
 1. Run Stage 1 fresh (prior sub-agent was killed mid-run).
 2. Run Stages 3 and 4.
-3. Consolidate all four stages' findings into one severity-ordered list.
+3. Consolidate all four stages' findings into one severity-ordered list,
+   scored against the "Review checklist and anti-patterns" section above.
 4. Decide, with the user, which findings become their own implementation
-   plans (via `superpowers:writing-plans`) and in what order — expect this
-   to include at minimum a Stage 2 model rollback-or-retrain decision.
-5. Re-run the same regrade pattern used for the snap-share fix
+   plans (via `superpowers:writing-plans`) and in what order. At minimum,
+   expect:
+   - A Stage 2 model rollback-or-retrain decision.
+   - Implementing the training-time promotion gate (above) — small,
+     self-contained, directly prevents today's XGB v9/LR v7 bug from
+     recurring, reasonable to do early regardless of what else is found.
+   - Implementing the feature-computation-version stamp (above) — small,
+     self-contained, makes every subsequent regrade in this review
+     provable rather than remembered.
+   - Deciding whether live weekly drift monitoring gets built now or
+     stays backlog once the promotion gate exists (it covers a different,
+     rarer failure mode: a model that passed promotion but degraded
+     in-season).
+5. Update the two original backlog docs
+   (`2026-08-22-model-quality-drift-monitoring-design.md`,
+   `2026-08-22-feature-computation-versioning-design.md`) with a
+   "superseded by this spec" pointer, and move them to `completed/` once
+   the promotion-gate and version-stamp pieces actually land (design is
+   done here; implementation is what completes them).
+6. Re-run the same regrade pattern used for the snap-share fix
    (`backfill_schedule_predictions.py --force --features [--firestore]` +
    `weekly_model_eval.py --firestore`) once real fixes land, so Week 1
    2026's stamped accuracy number keeps reflecting the current state of
