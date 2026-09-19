@@ -75,6 +75,8 @@ STEPS = [
      "args": ["--max-season", "{season}"], "required": True},
     {"name": "Season Projection", "script": SCRIPTS_DIR / "predict_season.py",
      "args": ["--season", "{season}"], "required": True},
+    {"name": "Draft Snapshot Sync", "script": SCRIPTS_DIR / "write_draft_snapshot.py",
+     "args": ["--season", "{season}"], "required": True},
     {"name": "Game Prediction Backfill", "script": SCRIPTS_DIR / "backfill_schedule_predictions.py",
      "args": ["--seasons", "{season}", "{season}", "--firestore", "--force"], "required": True},
     {"name": "Analytics Cache Build", "script": SCRIPTS_DIR / "cache_builder.py",

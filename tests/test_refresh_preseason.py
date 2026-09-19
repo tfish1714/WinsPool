@@ -109,3 +109,19 @@ def test_diff_trustworthy_when_mirror_refresh_succeeds_or_did_not_run():
     # Step never ran (e.g. --skip-sync doesn't affect this one, but be permissive
     # about absence in general) -- absence must not be misread as failure.
     assert diff_is_trustworthy({}) is True
+
+
+def test_draft_snapshot_step_runs_right_after_season_projection():
+    names = [s["name"] for s in STEPS]
+    assert "Draft Snapshot Sync" in names
+    proj_idx = names.index("Season Projection")
+    snap_idx = names.index("Draft Snapshot Sync")
+    assert snap_idx == proj_idx + 1
+
+
+def test_draft_snapshot_step_is_required_and_targets_the_season():
+    by_name = {s["name"]: s for s in STEPS}
+    step = by_name["Draft Snapshot Sync"]
+    assert step["required"] is True
+    assert step["args"] == ["--season", "{season}"]
+    assert step["script"].name == "write_draft_snapshot.py"
