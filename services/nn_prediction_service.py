@@ -53,6 +53,7 @@ REGISTRY_PATH = MODEL_DIR / "model_registry.json"
 
 from services.nn_feature_engine import FEATURE_COLUMNS, _normalize_team
 from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, PROB_CLIP_MIN, PROB_CLIP_MAX, SPREAD_TO_PROB_SCALE
+from services.utils import derive_prediction_scalars
 
 LABEL_COLUMN = "home_win"
 
@@ -95,9 +96,6 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
         ht     = _normalize_team(row.home_team)
         at     = _normalize_team(row.away_team)
 
-        winner = ht if hp >= 0.5 else at
-        conf   = round(min(99.0, max(50.0, (hp if hp >= 0.5 else 1.0 - hp) * 100)), 1)
-
         hp_clip = np.clip(hp, PROB_CLIP_MIN, PROB_CLIP_MAX)
         # nflverse convention: positive spread_line = home favored (e.g. DET -7 stored as +7).
         # model_spread matches this: positive = home favored.
@@ -107,18 +105,12 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
         # edge_vs_vegas > 0: model likes home MORE than Vegas → home has edge ATS.
         # edge_vs_vegas < 0: model likes home LESS than Vegas → away has edge ATS.
         sl_raw = getattr(row, "spread_line", None)
-        vegas_spread = None
-        edge_vs_vegas = None
-        ats = winner
-        if sl_raw is not None:
-            try:
-                sv = float(sl_raw)
-                if not np.isnan(sv):
-                    vegas_spread = round(sv, 1)
-                    edge_vs_vegas = round(model_spread - sv, 1)
-                    ats = ht if model_spread > sv else at
-            except (ValueError, TypeError):
-                pass
+        scalars = derive_prediction_scalars(ht, at, hp, model_spread, sl_raw)
+        winner = scalars["pred_winner"]
+        conf = scalars["pred_su_conf"]
+        ats = scalars["pred_ats_pick"]
+        edge_vs_vegas = scalars["edge_vs_vegas"]
+        vegas_spread = scalars["vegas_line"]
 
         def _f(attr, default=0.0):
             v = getattr(row, attr, default)
@@ -639,12 +631,14 @@ class NNPredictionService:
         from services.model_promotion import find_same_schema_best, assert_promotion_ready
         entries = registry.get("models", [])
         best_metrics = find_same_schema_best(entries, FEATURE_COLUMNS)
+        force_promoted = False
         try:
             assert_promotion_ready(self._eval_metrics or {}, best_metrics, "NN")
-        except ValueError:
+        except ValueError as e:
             if not force_promote:
                 raise
-            logger.warning("NN promotion gate failed but --force-promote set; saving anyway.")
+            force_promoted = True
+            logger.warning("NN promotion gate failed but --force-promote set, saving anyway: %s", e)
 
         if version is None:
             existing_nums = [
@@ -674,6 +668,8 @@ class NNPredictionService:
             entry.update(training_params)
         if self._eval_metrics:
             entry["metrics"] = self._eval_metrics
+        if force_promoted:
+            entry["force_promoted"] = True
 
         models = [m for m in registry.get("models", []) if m["version"] != version]
         models.append(entry)

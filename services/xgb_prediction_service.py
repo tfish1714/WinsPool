@@ -247,12 +247,14 @@ class XGBPredictionService:
         from services.model_promotion import find_same_schema_best, assert_promotion_ready
         entries = [v for v in registry.values() if isinstance(v, dict) and "feature_columns" in v]
         best_metrics = find_same_schema_best(entries, FEATURE_COLUMNS)
+        force_promoted = False
         try:
             assert_promotion_ready(self._eval_metrics or {}, best_metrics, "XGB")
-        except ValueError:
+        except ValueError as e:
             if not force_promote:
                 raise
-            logger.warning("XGB promotion gate failed but --force-promote set; saving anyway.")
+            force_promoted = True
+            logger.warning("XGB promotion gate failed but --force-promote set, saving anyway: %s", e)
 
         if version is None:
             existing = [k for k in registry if k.startswith("v") and k[1:].isdigit()]
@@ -275,6 +277,8 @@ class XGBPredictionService:
             "training_params":  training_params or {},
             "trained_at":       datetime.now(timezone.utc).isoformat(),
         }
+        if force_promoted:
+            entry["force_promoted"] = True
         registry[version] = entry
 
         # Track best by test_accuracy and season_r2

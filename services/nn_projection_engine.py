@@ -31,6 +31,7 @@ from services.nn_prediction_service import (
 )
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
+from services.utils import derive_prediction_scalars
 
 logger = logging.getLogger(__name__)
 
@@ -1006,40 +1007,6 @@ class NNProjectionEngine:
             "simulations": n_sims,
             "season_complete": False,
         }
-
-def derive_prediction_scalars(home_team: str, away_team: str, mean_prob: float,
-                              model_spread: float, spread_line=None) -> dict:
-    """Winner / SU confidence / ATS pick / edge-vs-vegas from one
-    simulate_season() game_probs entry.
-
-    Shared by every MC-simulation consumer (scripts/cache_builder.py's
-    fallback + --resimulate paths and scripts/backfill_schedule_predictions.py)
-    so the four fields can't drift apart between them.
-
-    `vegas_line` is returned alongside them as the parsed float (or None) so
-    callers don't have to re-parse spread_line themselves.
-    """
-    winner = home_team if mean_prob >= 0.5 else away_team
-    conf = round(max(mean_prob, 1.0 - mean_prob) * 100, 1)
-    ats = winner
-    edge = None
-    vegas_line = None
-    if spread_line is not None and pd.notna(spread_line):
-        try:
-            vegas_line = float(spread_line)
-            ats = home_team if model_spread > vegas_line else away_team
-            edge = round(model_spread - vegas_line, 1)
-        except (ValueError, TypeError):
-            vegas_line = None
-    return {
-        "pred_winner":   winner,
-        "pred_su_conf":  conf,
-        "pred_ats_pick": ats,
-        "model_spread":  model_spread,
-        "edge_vs_vegas": edge,
-        "vegas_line":    vegas_line,
-    }
-
 
 def _explain_float(d: dict, col: str, default: float = 0.0) -> float:
     v = d.get(col, default)

@@ -5,14 +5,16 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Baked in at build time from the real checkout that ran `gcloud builds
-# submit` (see deploy/deploy.ps1) -- .dockerignore excludes .git/, so
-# `git rev-parse` cannot run inside this container at runtime.
-ARG GIT_SHA=unknown
-ENV GIT_SHA=$GIT_SHA
-
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Baked in at build time from the real checkout that ran `gcloud builds
+# submit` (see deploy/deploy.ps1) -- .dockerignore excludes .git/, so
+# `git rev-parse` cannot run inside this container at runtime. Kept below
+# the pip install layer so a changed commit SHA doesn't invalidate the
+# dependency cache on every build.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
 
 COPY . .
 

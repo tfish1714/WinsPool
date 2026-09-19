@@ -55,6 +55,36 @@ class TestNNPromotionGate:
             version = svc.save_versioned(version="v14", force_promote=True)
         assert version == "v14"
 
+        saved_registry = json.loads(registry_path.read_text())
+        entry = next(m for m in saved_registry["models"] if m["version"] == "v14")
+        assert entry["force_promoted"] is True
+
+    def test_force_promoted_not_stamped_when_gate_actually_passes(self, tmp_path, monkeypatch):
+        """force_promote=True with a passing gate must not leave a false
+        audit trail -- the flag means the override actually fired."""
+        from services.nn_feature_engine import FEATURE_COLUMNS
+        registry = {
+            "models": [{
+                "version": "v13",
+                "feature_columns": FEATURE_COLUMNS,
+                "metrics": {"test_accuracy": 0.60},
+            }],
+            "latest": "v13",
+            "best_by": {},
+        }
+        registry_path = tmp_path / "model_registry.json"
+        registry_path.write_text(json.dumps(registry))
+        monkeypatch.setattr("services.nn_prediction_service.REGISTRY_PATH", registry_path)
+        monkeypatch.setattr("services.nn_prediction_service.MODEL_DIR", tmp_path)
+
+        svc = _make_service_with_metrics({"test_accuracy": 0.70})
+        with patch("joblib.dump"):
+            svc.save_versioned(version="v14", force_promote=True)
+
+        saved_registry = json.loads(registry_path.read_text())
+        entry = next(m for m in saved_registry["models"] if m["version"] == "v14")
+        assert "force_promoted" not in entry
+
     def test_new_entry_stores_feature_columns(self, tmp_path, monkeypatch):
         """Regression guard for the gap this task fixes: every NN registry
         entry must carry feature_columns so future gate checks can use it."""
