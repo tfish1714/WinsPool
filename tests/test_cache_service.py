@@ -112,6 +112,29 @@ class TestPredictionFeaturesCache:
         from services.cache_service import get_prediction_features
         assert get_prediction_features(2099, "nn_v1+xgb_v1+lr_v1") is None
 
+    def test_write_stamps_feature_version_by_default(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+        monkeypatch.setattr("services.cache_service._GAME_PRED_DIR", tmp_path)
+        from unittest.mock import patch
+        from services.cache_service import write_prediction_features, get_prediction_features
+
+        with patch("services.model_version.get_feature_version", return_value="abc1234"):
+            write_prediction_features(2025, "nn_v10+xgb_v4+lr_v2", {"W01_KC_SF": {}})
+
+        doc = get_prediction_features(2025, "nn_v10+xgb_v4+lr_v2")
+        assert doc["feature_version"] == "abc1234"
+
+    def test_write_accepts_explicit_feature_version(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+        monkeypatch.setattr("services.cache_service._GAME_PRED_DIR", tmp_path)
+        from services.cache_service import write_prediction_features, get_prediction_features
+
+        write_prediction_features(2025, "nn_v10+xgb_v4+lr_v2", {"W01_KC_SF": {}},
+                                   feature_version="deadbeef")
+
+        doc = get_prediction_features(2025, "nn_v10+xgb_v4+lr_v2")
+        assert doc["feature_version"] == "deadbeef"
+
 
 class TestEloHistoryCache:
     """Tests for get_elo_history_season / get_all_elo_history / write_elo_history_season."""

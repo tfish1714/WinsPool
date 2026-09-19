@@ -284,6 +284,7 @@ def write_prediction_features(
     games: dict,
     *,
     use_local: bool | None = None,
+    feature_version: str | None = None,
 ) -> None:
     """Persist the prediction features doc (local JSON or Firestore).
 
@@ -293,9 +294,16 @@ def write_prediction_features(
         games: {game_key: per-game audit dict} from compute_feature_audit().
         use_local: Override the _USE_LOCAL env setting.  Pass True to force
                    local JSON, False to force Firestore.  None = auto.
+        feature_version: git commit SHA identifying the feature-engine code
+                   that produced `games`. Computed automatically (see
+                   services.model_version.get_feature_version) if omitted.
     """
     if "/" in ensemble_version or "\\" in ensemble_version or ".." in ensemble_version:
         raise ValueError(f"Invalid ensemble_version: {ensemble_version!r}")
+
+    if feature_version is None:
+        from services.model_version import get_feature_version
+        feature_version = get_feature_version()
 
     _local = _USE_LOCAL if use_local is None else use_local
 
@@ -303,6 +311,7 @@ def write_prediction_features(
     payload = {
         "season":           season,
         "ensemble_version": ensemble_version,
+        "feature_version":  feature_version,
         "created_at":       datetime.now(timezone.utc).isoformat(),
         "games":            games,
     }
