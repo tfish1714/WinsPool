@@ -2,8 +2,14 @@
 
 **Date:** 2026-09-18
 **Status:** Not designed — backlog stub, split out while fixing the betting-edge
-alert email's unhighlighted-pick bug so the quick fix could ship first. Needs
-a full look across every betting surface before implementation.
+alert email's unhighlighted-pick bug so the quick fix could ship first.
+**Scope narrowed 2026-09-18** by Stage 4 of
+`docs/superpowers/specs/2026-09-18-model-prediction-e2e-review-design.md`
+(finding 3c): both explanation modals (`schedule_explain.js`'s "Why TEAM?"
+and `admin_accuracy.js`'s Feature Debug modal) were checked and are already
+unambiguous — see "Resolved by the E2E review" below. Remaining scope is
+just the two surfaces already identified here: the betting-edge alert email
+and the admin betting screener.
 
 ## Origin
 
@@ -43,6 +49,29 @@ one a "pick" means, is a real usability problem, not just a cosmetic one.
   as the reference pattern for the other three surfaces instead of inventing
   a new convention.
 
+## Resolved by the E2E review (2026-09-18) — don't re-audit these
+
+Stage 4 of the model-prediction E2E review checked both explanation modals
+against this exact clarity question and found them already correct:
+
+- **`schedule_explain.js`'s "Why TEAM?" modal** renders an explicitly
+  labeled "ATS Pick" card, gold-highlighted specifically when it differs
+  from the straight-up pick — unambiguous by construction (finding 3c).
+- **`admin_accuracy.js`'s Feature Debug modal** already shows
+  separately-labeled SU and ATS grade lines (verified in-browser during
+  the review) — same conclusion (finding 3c).
+
+This confirms the "Admin ML Accuracy per-game table" bullet's reference
+pattern above extends correctly to that same file's Feature Debug modal
+too, not just the table. **Remaining scope for this spec is exactly the
+first two bullets in "Where this shows up"** — the betting-edge alert
+email and the admin betting screener — nothing else needs auditing.
+
+(Separately, Stage 4 also found the "Why TEAM?" modal never shows a
+SU/ATS *grade* at all — finding 3b, a gap distinct from this spec's
+pick-*type*-labeling question. That's tracked under the model-prediction
+E2E review's own rollout, not here, to avoid duplicating tracking.)
+
 ## What "designed" would need to answer
 
 1. **Consistent, explicit labeling** — every surface that shows a pick should
@@ -59,12 +88,12 @@ one a "pick" means, is a real usability problem, not just a cosmetic one.
    likely a one-line addition once the wording convention from #1 is picked.
 4. **Should the admin betting screener add an explicit "ATS" label somewhere
    in its header/columns**, given the whole tool is implicitly ATS-only?
-5. **Audit for any other betting-adjacent surface** not listed above (this
-   list came from a quick grep, not a full sweep) — the schedule page's
-   "Why TEAM?" explain modal shows an "ATS Pick" field already (per Stage 4
-   of `docs/superpowers/specs/2026-09-18-model-prediction-e2e-review-design.md`)
-   and should be checked for the same clarity question while that stage runs,
-   rather than duplicating the audit here.
+5. ~~Audit for any other betting-adjacent surface~~ — **done.** Stage 4 of
+   the model-prediction E2E review swept both explanation modals and found
+   them already unambiguous (see "Resolved by the E2E review" above). No
+   further surfaces are known to need this check; the only two remaining
+   are the email and admin screener already scoped in "Where this shows
+   up."
 
 ## Non-goals
 
