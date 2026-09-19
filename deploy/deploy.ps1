@@ -5,7 +5,7 @@ $IMAGE_TAG = "gcr.io/$PROJECT_ID/winspool"
 # the /deploy Claude command, which no longer runs its own pytest step for
 # this reason). Fails fast before touching gcloud auth or Cloud Build.
 Write-Host "[TEST] Running unit test suite..." -ForegroundColor Cyan
-pytest tests/ -q
+pytest tests/ -n auto -q
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] Unit tests failed. Deploy aborted." -ForegroundColor Red
     exit 1
