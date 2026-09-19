@@ -210,7 +210,8 @@ class LRPredictionService:
     # ------------------------------------------------------------------ #
 
     def save_versioned(self, version: Optional[str] = None,
-                       training_params: Optional[dict] = None) -> str:
+                       training_params: Optional[dict] = None,
+                       force_promote: bool = False) -> str:
         if not self._is_trained:
             raise RuntimeError("Model not trained.")
 
@@ -218,6 +219,16 @@ class LRPredictionService:
         if REGISTRY_PATH.exists():
             with open(REGISTRY_PATH) as f:
                 registry = json.load(f)
+
+        from services.model_promotion import find_same_schema_best, assert_promotion_ready
+        entries = [v for v in registry.values() if isinstance(v, dict) and "feature_columns" in v]
+        best_metrics = find_same_schema_best(entries, FEATURE_COLUMNS)
+        try:
+            assert_promotion_ready(self._eval_metrics or {}, best_metrics, "LR")
+        except ValueError:
+            if not force_promote:
+                raise
+            logger.warning("LR promotion gate failed but --force-promote set; saving anyway.")
 
         if version is None:
             existing = [k for k in registry if k.startswith("v") and k[1:].isdigit()]

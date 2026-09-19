@@ -32,6 +32,9 @@ def main():
     parser.add_argument("--max-season", type=int, default=2025)
     parser.add_argument("--version", type=str, default=None,
                         help="Version string (e.g. 'v2'). Auto-increments if omitted.")
+    parser.add_argument("--force-promote", action="store_true",
+                        help="Save even if this run regresses vs. the same-schema "
+                             "best on held-out test metrics (promotion gate override).")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -95,6 +98,7 @@ def main():
         version=args.version,
         training_params={"min_season": args.min_season, "max_season": args.max_season,
                          "train_samples": int((feature_table["season"] < feature_table["season"].max()).sum())},
+        force_promote=args.force_promote,
     )
     print(f"  Saved as {version} -> models/lr_{version}.pkl")
     print(f"{'='*60}")
