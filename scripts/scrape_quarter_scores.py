@@ -32,11 +32,14 @@ import csv
 import logging
 import os
 import pathlib
+import sys
 import time
 from typing import Optional
 
 import pandas as pd
 import requests
+
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -391,15 +394,21 @@ def main():
     print(f"  CSV: {OUTPUT_CSV}")
     print(f"{'='*65}")
 
-    if args.firestore and seasons_touched:
-        # Re-read each touched season's FULL accumulated rows back out of the
-        # CSV (not just the rows this run added) -- the Firestore doc is
+    # Push every requested season that has ANY accumulated data (this run's
+    # new rows plus whatever was already cached in the CSV) -- not just
+    # seasons_touched (rows scraped THIS run). A week can be fully cached
+    # from an earlier run with no new rows to scrape here, and --firestore
+    # must still push it rather than silently no-op.
+    seasons_with_data = {s for (s, _week) in existing.keys() if s in seasons}
+    if args.firestore and seasons_with_data:
+        # Re-read each season's FULL accumulated rows back out of the CSV
+        # (not just the rows this run added) -- the Firestore doc is
         # one-per-season, so a partial write would regress it.
         from services.cache_service import write_quarter_scores_season
 
         print("\n  Pushing touched seasons to Firestore quarter_scores collection...")
         all_rows = pd.read_csv(OUTPUT_CSV, low_memory=False) if OUTPUT_CSV.exists() else pd.DataFrame()
-        for season in sorted(seasons_touched):
+        for season in sorted(seasons_with_data):
             season_rows = all_rows[all_rows["season"] == season].to_dict(orient="records")
             write_quarter_scores_season(int(season), season_rows, use_local=False)
             print(f"  Pushed season {season} ({len(season_rows)} games)")
