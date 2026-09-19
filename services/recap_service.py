@@ -164,26 +164,32 @@ def extract_weekly_data(year, week):
             # nobody drafted is embarrassing on its own, independent of score.
             if a_drafted and not h_drafted:
                 player_stats[a_pid]['bad_beats'].append(f"Lost outright to a team nobody even drafted ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
-            # Bad Beats for Away
-            if margin <= 3:
-                if a_drafted:
+            # Bad Beats for Away (loser side; kept fully independent of the
+            # winner's notable-win note below so the two sides' categorizations
+            # never interact)
+            if a_drafted:
+                if margin <= 3:
                     player_stats[a_pid]['bad_beats'].append(f"Lost a nail-biter by {margin} ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
-                if h_drafted:
-                    player_stats[h_pid]['notable_wins'].append(f"Survived a close one by {margin} ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
-            elif away_score >= 30:
-                if a_drafted:
+                elif away_score >= 30:
                     player_stats[a_pid]['bad_beats'].append(f"Scored {away_score} and still lost ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
 
-            # Notable Wins for Home
-            if h_drafted and margin >= 17:
-                player_stats[h_pid]['notable_wins'].append(f"Absolute blowout! Won by {margin} ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
-            elif h_drafted and home_score < 14 and row['result'] > 0:
-                player_stats[h_pid]['notable_wins'].append(f"Ugly win but counts! Scored only {home_score} and escaped ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
-
-            if h_drafted and qrow is not None:
-                comeback = _detect_comeback_win(qrow, winner_is_home=True)
+            # Notable Win for Home -- a single if/elif chain so each game
+            # produces exactly one narrative label instead of several
+            # overlapping ones (e.g. a low-scoring close win previously hit
+            # both the close-margin AND low-score checks). Comeback is the
+            # most interesting story so it takes priority when present, and
+            # always carries the team/score context like every other label.
+            if h_drafted:
+                game_suffix = f"({row['home_team']} {home_score}-{away_score} {row['away_team']})"
+                comeback = _detect_comeback_win(qrow, winner_is_home=True) if qrow is not None else None
                 if comeback:
-                    player_stats[h_pid]['notable_wins'].append(comeback)
+                    player_stats[h_pid]['notable_wins'].append(f"{comeback} {game_suffix}")
+                elif margin <= 3:
+                    player_stats[h_pid]['notable_wins'].append(f"Survived a close one by {margin} {game_suffix}")
+                elif margin >= 17:
+                    player_stats[h_pid]['notable_wins'].append(f"Absolute blowout! Won by {margin} {game_suffix}")
+                elif home_score < 14:
+                    player_stats[h_pid]['notable_wins'].append(f"Ugly win but counts! Scored only {home_score} and escaped {game_suffix}")
 
         else: # Away Win
             if a_drafted:
@@ -194,26 +200,25 @@ def extract_weekly_data(year, week):
             # nobody drafted is embarrassing on its own, independent of score.
             if h_drafted and not a_drafted:
                 player_stats[h_pid]['bad_beats'].append(f"Lost outright to a team nobody even drafted ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
-            # Bad Beats for Home
-            if margin <= 3:
-                if h_drafted:
+            # Bad Beats for Home (loser side)
+            if h_drafted:
+                if margin <= 3:
                     player_stats[h_pid]['bad_beats'].append(f"Heartbreaker! Lost by {margin} ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
-                if a_drafted:
-                    player_stats[a_pid]['notable_wins'].append(f"Stole a win by {margin} ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
-            elif home_score >= 30:
-                if h_drafted:
+                elif home_score >= 30:
                     player_stats[h_pid]['bad_beats'].append(f"Scored {home_score} and still lost ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
 
-            # Notable Wins for Away
-            if a_drafted and margin >= 17:
-                player_stats[a_pid]['notable_wins'].append(f"Dominant performance! Won by {margin} ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
-            elif a_drafted and away_score < 14 and row['result'] < 0:
-                player_stats[a_pid]['notable_wins'].append(f"Scrappy win! Scored only {away_score} and still won ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
-
-            if a_drafted and qrow is not None:
-                comeback = _detect_comeback_win(qrow, winner_is_home=False)
+            # Notable Win for Away -- see comment above; same single-label rule.
+            if a_drafted:
+                game_suffix = f"({row['away_team']} {away_score}-{home_score} {row['home_team']})"
+                comeback = _detect_comeback_win(qrow, winner_is_home=False) if qrow is not None else None
                 if comeback:
-                    player_stats[a_pid]['notable_wins'].append(comeback)
+                    player_stats[a_pid]['notable_wins'].append(f"{comeback} {game_suffix}")
+                elif margin <= 3:
+                    player_stats[a_pid]['notable_wins'].append(f"Stole a win by {margin} {game_suffix}")
+                elif margin >= 17:
+                    player_stats[a_pid]['notable_wins'].append(f"Dominant performance! Won by {margin} {game_suffix}")
+                elif away_score < 14:
+                    player_stats[a_pid]['notable_wins'].append(f"Scrappy win! Scored only {away_score} and still won {game_suffix}")
 
     # 3. Build text for Gemini
     included_pids = [pid for pid in pid_to_name if pid in player_stats or pid in overall_wins]
