@@ -2,9 +2,12 @@
 # winspool-predict-daily (cache_builder.py's prediction regen). See
 # cloudbuild-sync.yaml for why this needs an explicit build step rather
 # than `gcloud builds submit --tag`.
+substitutions:
+  _GIT_SHA: 'unknown'
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-f', 'Dockerfile.predict', '-t', 'us-east1-docker.pkg.dev/$PROJECT_ID/winspool/winspool-predict:latest', '.']
+    args: ['build', '-f', 'Dockerfile.predict', '--build-arg', 'GIT_SHA=$_GIT_SHA',
+           '-t', 'us-east1-docker.pkg.dev/$PROJECT_ID/winspool/winspool-predict:latest', '.']
     timeout: 1200s
 images:
   - 'us-east1-docker.pkg.dev/$PROJECT_ID/winspool/winspool-predict:latest'

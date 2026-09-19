@@ -112,15 +112,24 @@ else {
 $SYNC_IMAGE = "us-east1-docker.pkg.dev/$PROJECT_ID/winspool/winspool-sync:latest"
 $PREDICT_IMAGE = "us-east1-docker.pkg.dev/$PROJECT_ID/winspool/winspool-predict:latest"
 
+# Stamped into both job images as GIT_SHA (see services/model_version.py) --
+# .dockerignore excludes .git/, so this must be captured here, from the real
+# checkout, and passed in as a build substitution rather than read inside the
+# container at runtime. Full SHA (not the short $gitSha above, which feeds
+# the web service's human-facing APP_VERSION) to match get_feature_version()'s
+# `git rev-parse HEAD` fallback format.
+$gitShaFull = (git rev-parse HEAD).Trim()
+Write-Host "[BUILD] Stamping job images with GIT_SHA=$gitShaFull" -ForegroundColor Cyan
+
 Write-Host "[BUILD] Building winspool-sync image..." -ForegroundColor Cyan
-gcloud builds submit --config=cloudbuild-sync.yaml --project=$PROJECT_ID .
+gcloud builds submit --config=cloudbuild-sync.yaml --substitutions=_GIT_SHA=$gitShaFull --project=$PROJECT_ID .
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] winspool-sync image build failed. Scheduled jobs NOT updated." -ForegroundColor Red
     exit 1
 }
 
 Write-Host "[BUILD] Building winspool-predict image (this installs TensorFlow -- can take several minutes)..." -ForegroundColor Cyan
-gcloud builds submit --config=cloudbuild-predict.yaml --project=$PROJECT_ID .
+gcloud builds submit --config=cloudbuild-predict.yaml --substitutions=_GIT_SHA=$gitShaFull --project=$PROJECT_ID .
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] winspool-predict image build failed. Scheduled jobs NOT updated." -ForegroundColor Red
     exit 1

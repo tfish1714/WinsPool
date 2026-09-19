@@ -6,8 +6,11 @@
 # file literally named `Dockerfile` -- this repo has three (Dockerfile,
 # Dockerfile.sync, Dockerfile.predict), so building from a specific one
 # needs an explicit build step instead.
+substitutions:
+  _GIT_SHA: 'unknown'
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-f', 'Dockerfile.sync', '-t', 'us-east1-docker.pkg.dev/$PROJECT_ID/winspool/winspool-sync:latest', '.']
+    args: ['build', '-f', 'Dockerfile.sync', '--build-arg', 'GIT_SHA=$_GIT_SHA',
+           '-t', 'us-east1-docker.pkg.dev/$PROJECT_ID/winspool/winspool-sync:latest', '.']
 images:
   - 'us-east1-docker.pkg.dev/$PROJECT_ID/winspool/winspool-sync:latest'
