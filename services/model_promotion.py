@@ -20,17 +20,26 @@ PROMOTION_GATES: dict[str, float] = {
 
 
 def find_same_schema_best(entries: list[dict], new_feature_columns: list[str]) -> Optional[dict]:
-    """Return the metrics dict of the highest-test_auc entry that shares
+    """Return the metrics dict of the best entry that shares
     new_feature_columns exactly, or None if no entry shares this schema
-    (the first model of its generation -- nothing to gate against yet)."""
+    (the first model of its generation -- nothing to gate against yet).
+
+    Ranks by test_auc when every candidate has it (XGB/LR); falls back to
+    test_accuracy otherwise (NN, which never computes test_auc) -- both
+    metrics live on a comparable 0-1 scale, so the fallback doesn't change
+    what "best" means, only what's measurable for that model type.
+    """
     candidates = [
         e for e in entries
         if e.get("feature_columns") == new_feature_columns
-        and e.get("metrics", {}).get("test_auc") is not None
+        and e.get("metrics", {}).get("test_accuracy") is not None
     ]
     if not candidates:
         return None
-    return max(candidates, key=lambda e: e["metrics"]["test_auc"])["metrics"]
+    rank_key = "test_auc" if all(
+        e.get("metrics", {}).get("test_auc") is not None for e in candidates
+    ) else "test_accuracy"
+    return max(candidates, key=lambda e: e["metrics"][rank_key])["metrics"]
 
 
 def assert_promotion_ready(new_metrics: dict, best_metrics: Optional[dict], model_name: str) -> None:

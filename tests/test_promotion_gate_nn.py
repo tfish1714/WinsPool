@@ -19,7 +19,7 @@ class TestNNPromotionGate:
             "models": [{
                 "version": "v13",
                 "feature_columns": FEATURE_COLUMNS,
-                "metrics": {"test_accuracy": 0.60, "test_auc": 0.60},
+                "metrics": {"test_accuracy": 0.60},
             }],
             "latest": "v13",
             "best_by": {},
@@ -40,7 +40,7 @@ class TestNNPromotionGate:
             "models": [{
                 "version": "v13",
                 "feature_columns": FEATURE_COLUMNS,
-                "metrics": {"test_accuracy": 0.60, "test_auc": 0.60},
+                "metrics": {"test_accuracy": 0.60},
             }],
             "latest": "v13",
             "best_by": {},

@@ -17,18 +17,39 @@ class TestFindSameSchemaBest:
         from services.model_promotion import find_same_schema_best
         cols = ["a", "b"]
         entries = [
-            {"feature_columns": cols, "metrics": {"test_auc": 0.55}},
-            {"feature_columns": cols, "metrics": {"test_auc": 0.60}},
-            {"feature_columns": ["a"], "metrics": {"test_auc": 0.99}},  # different schema, ignored
+            {"feature_columns": cols, "metrics": {"test_accuracy": 0.55, "test_auc": 0.55}},
+            {"feature_columns": cols, "metrics": {"test_accuracy": 0.60, "test_auc": 0.60}},
+            {"feature_columns": ["a"], "metrics": {"test_accuracy": 0.99, "test_auc": 0.99}},  # different schema, ignored
         ]
         result = find_same_schema_best(entries, cols)
-        assert result == {"test_auc": 0.60}
+        assert result == {"test_accuracy": 0.60, "test_auc": 0.60}
 
-    def test_ignores_entries_missing_test_auc(self):
+    def test_falls_back_to_test_accuracy_when_test_auc_missing(self):
+        """NN entries never carry test_auc -- they must still be a valid
+        candidate as long as test_accuracy is present."""
         from services.model_promotion import find_same_schema_best
         cols = ["a", "b"]
         entries = [{"feature_columns": cols, "metrics": {"test_accuracy": 0.7}}]
+        assert find_same_schema_best(entries, cols) == {"test_accuracy": 0.7}
+
+    def test_ignores_entries_missing_both_test_auc_and_test_accuracy(self):
+        """The real 'nothing to gate against' case now that the filter's
+        ignore-condition is keyed on test_accuracy instead of test_auc."""
+        from services.model_promotion import find_same_schema_best
+        cols = ["a", "b"]
+        entries = [{"feature_columns": cols, "metrics": {"season_r2": 0.9}}]
         assert find_same_schema_best(entries, cols) is None
+
+    def test_ranks_by_test_accuracy_when_all_candidates_lack_test_auc(self):
+        """NN-shaped entries (no test_auc at all): higher test_accuracy wins."""
+        from services.model_promotion import find_same_schema_best
+        cols = ["a", "b"]
+        entries = [
+            {"feature_columns": cols, "metrics": {"test_accuracy": 0.55}},
+            {"feature_columns": cols, "metrics": {"test_accuracy": 0.65}},
+        ]
+        result = find_same_schema_best(entries, cols)
+        assert result == {"test_accuracy": 0.65}
 
 
 class TestAssertPromotionReady:
