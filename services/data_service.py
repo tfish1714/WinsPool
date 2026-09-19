@@ -402,7 +402,7 @@ def get_preseason_predictions(season: int) -> Dict[str, dict]:
     preds_df = entry["preseason_df"]
     if preds_df.empty:
         return {}
-    
+
     # Return a map of team -> {projected_wins, std_dev, sources}
     res = {}
     for _, row in preds_df.iterrows():
@@ -410,6 +410,32 @@ def get_preseason_predictions(season: int) -> Dict[str, dict]:
         # when the column exists but is NaN for this row (e.g. a season mixed
         # into a DataFrame with other seasons that do populate mean_wins) --
         # so the NaN case must be checked explicitly with pd.notna.
+        mean_wins = row.get("mean_wins")
+        res[row["team"]] = {
+            "projected_wins": float(row.get("projected_wins", 0)),
+            "mean_wins": float(mean_wins) if pd.notna(mean_wins) else float(row.get("projected_wins", 0)),
+            "std_dev": float(row.get("std_dev", 0)),
+            "sources": row.get("sources", {})
+        }
+    return res
+
+def get_draft_snapshot_predictions(season: int) -> Dict[str, dict]:
+    """Frozen, pre-draft snapshot of model win projections for `season`.
+
+    Same shape and caching pattern as get_preseason_predictions(), but reads
+    draft_snapshot_predictions instead -- a number that stops moving once a
+    real draft (or a mock draft bot) has used it. See
+    docs/superpowers/specs/2026-09-15-preseason-draft-snapshot-design.md.
+    """
+    entry = _get_predictions_bucket_entry(season)
+    if "snapshot_df" not in entry:
+        entry["snapshot_df"] = get_collection_df("draft_snapshot_predictions", filters=[("season", "==", season)])
+    preds_df = entry["snapshot_df"]
+    if preds_df.empty:
+        return {}
+
+    res = {}
+    for _, row in preds_df.iterrows():
         mean_wins = row.get("mean_wins")
         res[row["team"]] = {
             "projected_wins": float(row.get("projected_wins", 0)),

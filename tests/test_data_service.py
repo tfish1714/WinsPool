@@ -377,6 +377,74 @@ def test_get_preseason_predictions_historical_season_is_cached_separately(monkey
     cs.clear_data_cache()
 
 
+def test_get_draft_snapshot_predictions_shape_matches_preseason(monkeypatch):
+    import services.cache_service as cs
+    from services import data_service
+    cs.clear_data_cache()
+    data_service.load_data()
+    active_season = cs.get_domain(cs.DOMAIN_ACTIVE)["season"]
+
+    with patch("services.data_service.get_collection_df") as mock_fetch:
+        mock_fetch.return_value = pd.DataFrame([
+            {"season": active_season, "team": "KC", "projected_wins": 11.0,
+             "mean_wins": 10.8, "std_dev": 1.95, "locked": True},
+        ])
+        res = data_service.get_draft_snapshot_predictions(active_season)
+        snapshot_calls = [c for c in mock_fetch.call_args_list if c.args and c.args[0] == "draft_snapshot_predictions"]
+        assert len(snapshot_calls) == 1
+        assert res["KC"]["projected_wins"] == 11.0
+        assert res["KC"]["mean_wins"] == 10.8
+    cs.clear_data_cache()
+
+
+def test_get_draft_snapshot_predictions_empty_when_no_rows(monkeypatch):
+    import services.cache_service as cs
+    from services import data_service
+    cs.clear_data_cache()
+    data_service.load_data()
+    active_season = cs.get_domain(cs.DOMAIN_ACTIVE)["season"]
+
+    with patch("services.data_service.get_collection_df") as mock_fetch:
+        mock_fetch.return_value = pd.DataFrame()
+        assert data_service.get_draft_snapshot_predictions(active_season) == {}
+    cs.clear_data_cache()
+
+
+def test_get_draft_snapshot_predictions_is_cached(monkeypatch):
+    import services.cache_service as cs
+    from services import data_service
+    cs.clear_data_cache()
+    data_service.load_data()
+    active_season = cs.get_domain(cs.DOMAIN_ACTIVE)["season"]
+
+    with patch("services.data_service.get_collection_df") as mock_fetch:
+        mock_fetch.return_value = pd.DataFrame()
+        data_service.get_draft_snapshot_predictions(active_season)
+        data_service.get_draft_snapshot_predictions(active_season)  # second call
+        calls = [c for c in mock_fetch.call_args_list if c.args and c.args[0] == "draft_snapshot_predictions"]
+        assert len(calls) == 1
+    cs.clear_data_cache()
+
+
+def test_get_draft_snapshot_predictions_does_not_share_cache_with_preseason(monkeypatch):
+    """The two collections must fetch independently -- warming one must not
+    mark the other as already fetched."""
+    import services.cache_service as cs
+    from services import data_service
+    cs.clear_data_cache()
+    data_service.load_data()
+    active_season = cs.get_domain(cs.DOMAIN_ACTIVE)["season"]
+
+    with patch("services.data_service.get_collection_df") as mock_fetch:
+        mock_fetch.return_value = pd.DataFrame()
+        data_service.get_preseason_predictions(active_season)
+        data_service.get_draft_snapshot_predictions(active_season)
+        calls = [c for c in mock_fetch.call_args_list
+                 if c.args and c.args[0] in ("preseason_predictions", "draft_snapshot_predictions")]
+        assert len(calls) == 2
+    cs.clear_data_cache()
+
+
 def test_get_consensus_projections_shares_the_same_predictions_bucket(monkeypatch):
     """get_preseason_predictions and get_consensus_projections for the same
     season must share one cached fetch pair, not trigger two independent
