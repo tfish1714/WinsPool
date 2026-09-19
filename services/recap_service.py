@@ -51,6 +51,39 @@ def _detect_comeback_win(qrow: dict, winner_is_home: bool) -> str | None:
             f"and still found a way to win.")
 
 
+def _check_close_margin(margin: int, winner_is_home: bool) -> str | None:
+    if margin > 3:
+        return None
+    return f"Survived a close one by {margin}" if winner_is_home else f"Stole a win by {margin}"
+
+
+def _check_blowout(margin: int, winner_is_home: bool) -> str | None:
+    if margin < 17:
+        return None
+    return f"Absolute blowout! Won by {margin}" if winner_is_home else f"Dominant performance! Won by {margin}"
+
+
+def _check_ugly_win(winner_score: int, winner_is_home: bool) -> str | None:
+    if winner_score >= 14:
+        return None
+    return (f"Ugly win but counts! Scored only {winner_score} and escaped" if winner_is_home
+            else f"Scrappy win! Scored only {winner_score} and still won")
+
+
+def _collect_win_notes(qrow: dict | None, margin: int, winner_score: int, winner_is_home: bool) -> list[str]:
+    """Run every notable-win check independently -- not an if/elif priority
+    chain -- and return every descriptor that matched. The caller merges
+    these into one combined notable-win line per game, keyed by
+    (player, team, week, year), instead of one bullet per check."""
+    checks = [
+        _detect_comeback_win(qrow, winner_is_home=winner_is_home) if qrow is not None else None,
+        _check_close_margin(margin, winner_is_home),
+        _check_blowout(margin, winner_is_home),
+        _check_ugly_win(winner_score, winner_is_home),
+    ]
+    return [note for note in checks if note]
+
+
 def _format_roster_entry(team: str, draft_pick, total_players: int, team_records: dict) -> str:
     """Format one roster line for the weekly recap prompt: team, the draft
     pick it was taken with (so the AI can comment on reaches/steals), and
@@ -129,6 +162,13 @@ def extract_weekly_data(year, week):
         for r in get_quarter_scores_season(year)
     }
 
+    # Notable-win checks run independently per game (see _collect_win_notes)
+    # and get merged into one combined line per game here, keyed by
+    # (player, team, week, year) so a low-scoring close win with a comeback
+    # doesn't produce three separate bullets for the same result.
+    notable_win_notes: dict[tuple, list[str]] = {}
+    notable_win_suffix: dict[tuple, str] = {}
+
     for _, row in weekly_games.iterrows():
         if row['result'] == UNDRAFTED_SENTINEL or row['result'] is None:
             continue
@@ -173,23 +213,14 @@ def extract_weekly_data(year, week):
                 elif away_score >= 30:
                     player_stats[a_pid]['bad_beats'].append(f"Scored {away_score} and still lost ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
 
-            # Notable Win for Home -- a single if/elif chain so each game
-            # produces exactly one narrative label instead of several
-            # overlapping ones (e.g. a low-scoring close win previously hit
-            # both the close-margin AND low-score checks). Comeback is the
-            # most interesting story so it takes priority when present, and
-            # always carries the team/score context like every other label.
+            # Notable Win for Home -- collect every matching check, merged
+            # into one combined line after the loop (see notable_win_notes).
             if h_drafted:
-                game_suffix = f"({row['home_team']} {home_score}-{away_score} {row['away_team']})"
-                comeback = _detect_comeback_win(qrow, winner_is_home=True) if qrow is not None else None
-                if comeback:
-                    player_stats[h_pid]['notable_wins'].append(f"{comeback} {game_suffix}")
-                elif margin <= 3:
-                    player_stats[h_pid]['notable_wins'].append(f"Survived a close one by {margin} {game_suffix}")
-                elif margin >= 17:
-                    player_stats[h_pid]['notable_wins'].append(f"Absolute blowout! Won by {margin} {game_suffix}")
-                elif home_score < 14:
-                    player_stats[h_pid]['notable_wins'].append(f"Ugly win but counts! Scored only {home_score} and escaped {game_suffix}")
+                notes = _collect_win_notes(qrow, margin, home_score, winner_is_home=True)
+                if notes:
+                    key = (h_pid, row['home_team'], week, year)
+                    notable_win_notes.setdefault(key, []).extend(notes)
+                    notable_win_suffix[key] = f"({row['home_team']} {home_score}-{away_score} {row['away_team']})"
 
         else: # Away Win
             if a_drafted:
@@ -207,18 +238,20 @@ def extract_weekly_data(year, week):
                 elif home_score >= 30:
                     player_stats[h_pid]['bad_beats'].append(f"Scored {home_score} and still lost ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
 
-            # Notable Win for Away -- see comment above; same single-label rule.
+            # Notable Win for Away -- see comment above; same merge-at-the-end rule.
             if a_drafted:
-                game_suffix = f"({row['away_team']} {away_score}-{home_score} {row['home_team']})"
-                comeback = _detect_comeback_win(qrow, winner_is_home=False) if qrow is not None else None
-                if comeback:
-                    player_stats[a_pid]['notable_wins'].append(f"{comeback} {game_suffix}")
-                elif margin <= 3:
-                    player_stats[a_pid]['notable_wins'].append(f"Stole a win by {margin} {game_suffix}")
-                elif margin >= 17:
-                    player_stats[a_pid]['notable_wins'].append(f"Dominant performance! Won by {margin} {game_suffix}")
-                elif away_score < 14:
-                    player_stats[a_pid]['notable_wins'].append(f"Scrappy win! Scored only {away_score} and still won {game_suffix}")
+                notes = _collect_win_notes(qrow, margin, away_score, winner_is_home=False)
+                if notes:
+                    key = (a_pid, row['away_team'], week, year)
+                    notable_win_notes.setdefault(key, []).extend(notes)
+                    notable_win_suffix[key] = f"({row['away_team']} {away_score}-{home_score} {row['home_team']})"
+
+    # Merge every check that matched for a given game into ONE combined
+    # notable-win line instead of one bullet per check.
+    for key, notes in notable_win_notes.items():
+        pid = key[0]
+        combined = "; ".join(notes)
+        player_stats[pid]['notable_wins'].append(f"{combined} {notable_win_suffix[key]}")
 
     # 3. Build text for Gemini
     included_pids = [pid for pid in pid_to_name if pid in player_stats or pid in overall_wins]
