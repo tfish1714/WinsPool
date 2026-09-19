@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import os
 import pandas as pd
 
@@ -402,7 +402,7 @@ def get_preseason_predictions(season: int) -> Dict[str, dict]:
     preds_df = entry["preseason_df"]
     if preds_df.empty:
         return {}
-
+    
     # Return a map of team -> {projected_wins, std_dev, sources}
     res = {}
     for _, row in preds_df.iterrows():
