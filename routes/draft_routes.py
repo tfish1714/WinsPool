@@ -417,9 +417,11 @@ async def route_draft_results_by_year(request: Request, year: int):
     # Blends model and consensus, not get_preseason_predictions alone: this
     # page is mostly historical seasons, whose projections live in
     # consensus_projections now, and a recap benefits from both reads where
-    # both exist rather than only ever showing one.
+    # both exist rather than only ever showing one. frozen=True: once a draft
+    # has been recapped, the projection it's compared against must not keep
+    # moving underneath it.
     from services.data_service import get_season_projection_blended
-    preds = get_season_projection_blended(year)
+    preds = get_season_projection_blended(year, frozen=True)
     def calculate_draft_value(row):
         team = row.get("team")
         actual = float(row.get("TotalWinsBySeason", 0))

@@ -128,7 +128,7 @@ def bot_pick(
     if was_wildcard:
         return random.choice(available_teams), True
 
-    projections = get_season_projection_legacy_shape(season)
+    projections = get_season_projection_legacy_shape(season, frozen=True)
     if not projections:
         return random.choice(available_teams), False
 
@@ -155,7 +155,7 @@ def rank_rosters(season: int, rosters: Dict[str, List[str]]) -> List[Dict]:
     them as meaningful; mirrors how bot_pick() falls back to uniform-random
     rather than pretending a projection-informed pick was made.
     """
-    projections = get_season_projection_legacy_shape(season)
+    projections = get_season_projection_legacy_shape(season, frozen=True)
     graded = bool(projections)
 
     def total_wins(teams: List[str]) -> float:

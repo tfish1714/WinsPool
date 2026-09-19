@@ -33,8 +33,11 @@ CONSENSUS = {
 
 @pytest.fixture
 def deleted_preseason_rows(monkeypatch):
-    """preseason_predictions empty for SEASON, consensus present -- prod today."""
+    """preseason_predictions and draft_snapshot_predictions both empty for
+    SEASON, consensus present -- prod today for a pre-migration historical
+    season."""
     monkeypatch.setattr(data_service, "get_preseason_predictions", lambda s: {})
+    monkeypatch.setattr(data_service, "get_draft_snapshot_predictions", lambda s: {})
     monkeypatch.setattr(data_service, "get_consensus_projections",
                         lambda s: CONSENSUS if int(s) == SEASON else {})
 

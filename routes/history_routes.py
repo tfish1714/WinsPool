@@ -201,8 +201,9 @@ def _get_player_analytics_data(player_id: int) -> dict | None:
         if not all_draft_results.empty else []
     )
     # Resolver, not get_preseason_predictions: these are historical seasons, whose
-    # projections live in consensus_projections now.
-    preseason_preds = {int(s): get_season_projection_legacy_shape(int(s)) for s in player_seasons}
+    # projections live in consensus_projections now. frozen=True: a player's
+    # past-season draft value must not keep moving as the model is retrained.
+    preseason_preds = {int(s): get_season_projection_legacy_shape(int(s), frozen=True) for s in player_seasons}
     active_season = get_active_season(all_games, all_draft_results, rules)
     return analysis.get_player_analytics(
         player_id, all_draft_results, standings_master, players, preseason_preds,
