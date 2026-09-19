@@ -58,3 +58,7 @@ graphify-out/
 
 # Stray Obsidian vault (personal notes, not app source)
 WinsPool/
+
+# Local git worktrees used for isolated feature work -- scratch checkouts,
+# not source.
+.worktrees/

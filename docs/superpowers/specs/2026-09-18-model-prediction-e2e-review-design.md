@@ -572,6 +572,16 @@ Stage 2 scoped correctly before trusting any of its conclusions:
    Stage 4's finding that both explanation modals are already unambiguous.
    See `docs/superpowers/specs/2026-09-18-betting-pick-type-clarity-design.md`
    (needs updating to reflect this narrower scope).
+9. **[Backlog, not part of this rollout, low priority]** Stage 1b —
+   opponent-adjusted EPA (DVOA-style) as a new feature. Not a correctness
+   fix like items 1-8; a proposed feature addition that changes
+   `FEATURE_COLUMNS` and therefore requires a full NN/XGB/LR retrain +
+   walk-forward validation before it's trustworthy. Needs its own
+   brainstorming pass to scope the actual methodology (regression-based SOS
+   adjustment vs. a simpler weighted-opponent-average proxy) — see the
+   "Stage 1b" section above for full detail. Confirmed 2026-09-18: user
+   wants this kept as backlog, not folded into the current 4-item rollout
+   (items 1-4 below), so it doesn't get lost.
 
 ### Next steps
 
