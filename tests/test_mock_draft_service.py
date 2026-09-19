@@ -85,8 +85,12 @@ class TestBotPick:
                 assert team in ["KC", "DAL"]
 
     def test_falls_back_to_uniform_random_when_no_projections(self):
+        """was_wildcard is otherwise probabilistic (random.random() < WILDCARD_PROBABILITY)
+        -- pin it above that threshold so this test (which is about the no-projections
+        fallback, not the wildcard roll) is deterministic rather than ~8% flaky."""
         from services.mock_draft_service import bot_pick
-        with patch("services.mock_draft_service.get_season_projection_legacy_shape", return_value={}):
+        with patch("services.mock_draft_service.get_season_projection_legacy_shape", return_value={}), \
+             patch("services.mock_draft_service.random.random", return_value=0.99):
             team, was_wildcard = bot_pick(2026, ["KC", "DAL"], wildcards_so_far=5, bot_picks_remaining=10)
         assert team in ["KC", "DAL"]
         assert was_wildcard is False

@@ -74,6 +74,7 @@ python scripts/walk_forward_calibrate_preseason_weights.py --weights '{...}'   #
 ### Tests
 ```bash
 pytest tests/                              # Unit suite (routes/services). A bare `pytest` also runs exactly this — pytest.ini pins testpaths = tests
+pytest tests/ -n auto                      # Same suite, parallelized across CPU cores (needs requirements-dev.txt: pytest-xdist) -- the serial run takes several minutes, mostly TF/keras/sklearn import overhead per test file
 pytest tests/ --cov=services --cov=routes
 pytest tests_e2e/ -v                       # Playwright browser e2e suite (explicit path required — not collected by a bare `pytest`)
 ```

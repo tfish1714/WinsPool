@@ -4,3 +4,11 @@ playwright>=1.59.0
 # After installing, run this ONCE to fetch the browser binary (pip only installs
 # the Python package, not the browser — tests_e2e/ cannot run without it):
 #   playwright install chromium
+
+pytest-xdist>=3.6.0
+# Parallelizes tests/ across CPU cores (pytest tests/ -n auto). The unit suite
+# is TF/keras/sklearn-import-heavy (several minutes serial); each xdist worker
+# is a separate process, so this is NOT baked into pytest.ini's default
+# invocation -- a bare `pytest` must keep working in a requirements.txt-only
+# environment (the Dockerfile, deploy pre-flight) where this package isn't
+# installed at all.

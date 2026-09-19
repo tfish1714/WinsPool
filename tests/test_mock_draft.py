@@ -44,6 +44,26 @@ def _reset_rate_limit_buckets():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _clear_static_bucket_cache():
+    """services.data_service._get_static_bucket() caches draft_order_rules/
+    draft_order in-process with no TTL (by design -- see data_service.py).
+    Whichever test runs first in a given process "wins" that cache for every
+    later test unless it's cleared here: without this, a test's
+    `patch("services.mock_draft_service.get_collection_df", ...)` can be
+    silently skipped because _get_static_bucket() short-circuits on the
+    already-cached value from an earlier test, never calling the mock at
+    all. Serial runs happened to always mock before anything warmed the
+    cache, so this stayed invisible until pytest-xdist's different
+    per-worker test ordering exposed it (3 tests here started failing with
+    400s that only reproduced under `-n auto`, never serially).
+    """
+    from services.cache_service import clear_data_cache
+    clear_data_cache()
+    yield
+    clear_data_cache()
+
+
 class TestMockDraftSetup:
 
     def test_non_admin_setup_has_no_projections_key(self):
