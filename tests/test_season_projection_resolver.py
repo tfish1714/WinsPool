@@ -154,3 +154,84 @@ def test_blended_empty_when_no_data(monkeypatch):
     monkeypatch.setattr(data_service, "get_preseason_predictions", lambda s: {})
     monkeypatch.setattr(data_service, "get_consensus_projections", lambda s: {})
     assert data_service.get_season_projection_blended(1999) == {}
+
+
+# --- frozen=True reads draft_snapshot_predictions instead of the live model -
+
+def test_frozen_reads_snapshot_not_live_model(monkeypatch):
+    monkeypatch.setattr(data_service, "get_preseason_predictions",
+                        lambda s: {"LA": {"projected_wins": 99.0, "mean_wins": 99.0}})
+    monkeypatch.setattr(data_service, "get_draft_snapshot_predictions",
+                        lambda s: {"LA": {"projected_wins": 12.0, "mean_wins": 11.6}})
+    monkeypatch.setattr(data_service, "get_consensus_projections", lambda s: {})
+
+    res = data_service.get_season_projection(2026, frozen=True)
+    assert res["LA"]["wins"] == 11.6
+
+    live = data_service.get_season_projection(2026, frozen=False)
+    assert live["LA"]["wins"] == 99.0
+
+
+def test_frozen_default_is_false(monkeypatch):
+    """Every existing caller that never passes frozen must keep reading the
+    live model -- this is the backward-compatibility guarantee the whole
+    reader swap depends on."""
+    calls = []
+    monkeypatch.setattr(data_service, "get_preseason_predictions",
+                        lambda s: calls.append("live") or {})
+    monkeypatch.setattr(data_service, "get_draft_snapshot_predictions",
+                        lambda s: calls.append("frozen") or {})
+    monkeypatch.setattr(data_service, "get_consensus_projections", lambda s: {})
+
+    data_service.get_season_projection(2026)
+    assert calls == ["live"]
+
+
+def test_legacy_shape_frozen_reads_snapshot(monkeypatch):
+    monkeypatch.setattr(data_service, "get_preseason_predictions", lambda s: {})
+    monkeypatch.setattr(data_service, "get_draft_snapshot_predictions",
+                        lambda s: {"LA": {"projected_wins": 12.0, "mean_wins": 11.6,
+                                          "std_dev": 2.1, "sources": {}}})
+    monkeypatch.setattr(data_service, "get_consensus_projections", lambda s: {})
+
+    res = data_service.get_season_projection_legacy_shape(2026, frozen=True)
+    assert res["LA"]["projected_wins"] == 12.0
+
+
+def test_dual_frozen_reads_snapshot(monkeypatch):
+    monkeypatch.setattr(data_service, "get_preseason_predictions", lambda s: {})
+    monkeypatch.setattr(data_service, "get_draft_snapshot_predictions",
+                        lambda s: {"LA": {"projected_wins": 12.0, "mean_wins": 11.6,
+                                          "std_dev": 2.1, "sources": {}}})
+    monkeypatch.setattr(data_service, "get_consensus_projections", lambda s: {})
+
+    res = data_service.get_season_projection_dual(2026, frozen=True)
+    assert res["LA"]["model"]["projected_wins"] == 12.0
+
+
+def test_blended_frozen_uses_snapshot_for_the_model_side(monkeypatch):
+    monkeypatch.setattr(data_service, "get_preseason_predictions", lambda s: {})
+    monkeypatch.setattr(data_service, "get_draft_snapshot_predictions",
+                        lambda s: {"LA": {"mean_wins": 12.0, "std_dev": 1.0,
+                                          "projected_wins": 12.0, "sources": {}}})
+    monkeypatch.setattr(data_service, "get_consensus_projections",
+                        lambda s: {"LA": {"consensus_mean": 8.0, "consensus_median": 8.0,
+                                          "consensus_std": 2.0, "sources": {"br": 8}}})
+
+    res = data_service.get_season_projection_blended(2026, frozen=True)
+    straight_average = (12.0 + 8.0) / 2
+    assert straight_average < res["LA"]["projected_wins"] < 12.0
+
+
+def test_blended_frozen_falls_back_to_consensus_when_no_snapshot_exists(monkeypatch):
+    """A historical, consensus-only season (2017-2023) has no
+    draft_snapshot_predictions row at all -- frozen=True must still surface
+    the consensus figure, not silently zero it."""
+    monkeypatch.setattr(data_service, "get_preseason_predictions", lambda s: {})
+    monkeypatch.setattr(data_service, "get_draft_snapshot_predictions", lambda s: {})
+    monkeypatch.setattr(data_service, "get_consensus_projections",
+                        lambda s: {"ARI": {"consensus_mean": 8.25, "consensus_median": 7.5,
+                                           "consensus_std": 1.75, "sources": {"br": 10}}})
+
+    res = data_service.get_season_projection_blended(2017, frozen=True)
+    assert res["ARI"]["projected_wins"] == 7.5
