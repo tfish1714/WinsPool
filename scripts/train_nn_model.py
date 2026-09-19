@@ -46,6 +46,11 @@ def main():
         "--version", type=str, default=None,
         help="Version string to save as (e.g. 'v2'). Auto-increments if omitted."
     )
+    parser.add_argument(
+        "--force-promote", action="store_true",
+        help="Save even if this run regresses vs. the same-schema best on "
+             "held-out test metrics (promotion gate override)."
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -122,6 +127,7 @@ def main():
                 "max_season": args.max_season,
                 "train_samples": len(feature_table[feature_table["season"] < 2025]),
             },
+            force_promote=args.force_promote,
         )
         print(f"  Registry entry: {saved_version}")
     print("\nDone.")

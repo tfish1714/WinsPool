@@ -615,6 +615,7 @@ class NNPredictionService:
         self,
         version: Optional[str] = None,
         training_params: Optional[dict] = None,
+        force_promote: bool = False,
     ) -> str:
         """Save a versioned model and update the model registry.
 
@@ -624,6 +625,8 @@ class NNPredictionService:
         Args:
             version: Version string (e.g. "v2"). Auto-increments from registry if None.
             training_params: Extra metadata to store (min_season, max_season, etc.).
+            force_promote: If True, save even if the promotion gate detects a
+                regression vs. the same-schema best model.
 
         Returns:
             The version string used.
@@ -632,6 +635,16 @@ class NNPredictionService:
             raise RuntimeError("No model to save.")
 
         registry = self._load_registry()
+
+        from services.model_promotion import find_same_schema_best, assert_promotion_ready
+        entries = registry.get("models", [])
+        best_metrics = find_same_schema_best(entries, FEATURE_COLUMNS)
+        try:
+            assert_promotion_ready(self._eval_metrics or {}, best_metrics, "NN")
+        except ValueError:
+            if not force_promote:
+                raise
+            logger.warning("NN promotion gate failed but --force-promote set; saving anyway.")
 
         if version is None:
             existing_nums = [
@@ -654,6 +667,7 @@ class NNPredictionService:
             "version": version,
             "path": f"models/nn_{version}.keras",
             "scaler_path": f"models/nn_{version}_scaler.pkl",
+            "feature_columns": FEATURE_COLUMNS,
             "trained_at": datetime.now(timezone.utc).isoformat(),
         }
         if training_params:
