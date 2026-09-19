@@ -1,6 +1,16 @@
 $PROJECT_ID = "fishbone-wins-pool"
 $IMAGE_TAG = "gcr.io/$PROJECT_ID/winspool"
 
+# Test gate -- runs even when this script is invoked directly (not through
+# the /deploy Claude command, which no longer runs its own pytest step for
+# this reason). Fails fast before touching gcloud auth or Cloud Build.
+Write-Host "[TEST] Running unit test suite..." -ForegroundColor Cyan
+pytest tests/ -q
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Unit tests failed. Deploy aborted." -ForegroundColor Red
+    exit 1
+}
+
 # Check if user is already authenticated
 $activeAccount = gcloud auth list --filter=status:ACTIVE --format="value(account)"
 if (-not $activeAccount) {
