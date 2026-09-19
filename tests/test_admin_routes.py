@@ -755,3 +755,90 @@ class TestGetSeasonMembers:
         assert m2["must_change_password"] is False
         assert m2["last_login"] is None
 
+
+# ── /api/admin/draft_snapshot ─────────────────────────────────────────────────
+
+class TestDraftSnapshotSync:
+    def test_happy_path_calls_sync_and_returns_result(self, admin_token):
+        with patch("routes.admin_routes.sync_draft_snapshot_for_season") as mock_sync:
+            mock_sync.return_value = {"season": 2026, "written": 32, "locked": False}
+            resp = client.post(
+                "/api/admin/draft_snapshot/sync",
+                json={"season": 2026},
+                headers={"Authorization": admin_token},
+            )
+        assert resp.status_code == 200
+        assert resp.json() == {"season": 2026, "written": 32, "locked": False}
+        mock_sync.assert_called_once_with(2026)
+
+    def test_requires_token(self):
+        resp = client.post("/api/admin/draft_snapshot/sync", json={"season": 2026})
+        assert resp.status_code in (401, 403)
+
+    def test_requires_admin_role(self, auth_token):
+        resp = client.post(
+            "/api/admin/draft_snapshot/sync",
+            json={"season": 2026},
+            headers={"Authorization": auth_token},
+        )
+        assert resp.status_code in (401, 403)
+
+    def test_unhandled_exception_returns_server_error(self, admin_token):
+        with patch("routes.admin_routes.sync_draft_snapshot_for_season", side_effect=RuntimeError("boom")):
+            resp = client.post(
+                "/api/admin/draft_snapshot/sync",
+                json={"season": 2026},
+                headers={"Authorization": admin_token},
+            )
+        assert resp.status_code == 500
+
+
+class TestDraftSnapshotStatus:
+    def test_happy_path_reports_locked_when_every_team_locked(self, admin_token):
+        import pandas as pd
+        df = pd.DataFrame([
+            {"season": 2026, "team": "KC", "locked": True, "generated_at": 200.0},
+            {"season": 2026, "team": "SF", "locked": True, "generated_at": 210.0},
+        ])
+        with patch("routes.admin_routes.get_collection_df", return_value=df):
+            resp = client.get(
+                "/api/admin/draft_snapshot/2026",
+                headers={"Authorization": admin_token},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["season"] == 2026
+        assert body["team_count"] == 2
+        assert body["locked"] is True
+        assert body["generated_at"] == 210.0
+
+    def test_reports_unlocked_when_any_team_unlocked(self, admin_token):
+        import pandas as pd
+        df = pd.DataFrame([
+            {"season": 2026, "team": "KC", "locked": True, "generated_at": 200.0},
+            {"season": 2026, "team": "SF", "locked": False, "generated_at": 210.0},
+        ])
+        with patch("routes.admin_routes.get_collection_df", return_value=df):
+            resp = client.get(
+                "/api/admin/draft_snapshot/2026",
+                headers={"Authorization": admin_token},
+            )
+        assert resp.json()["locked"] is False
+
+    def test_no_snapshot_yet_reports_zero_teams(self, admin_token):
+        import pandas as pd
+        with patch("routes.admin_routes.get_collection_df", return_value=pd.DataFrame()):
+            resp = client.get(
+                "/api/admin/draft_snapshot/2026",
+                headers={"Authorization": admin_token},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["team_count"] == 0
+        assert body["locked"] is False
+        assert body["generated_at"] is None
+
+    def test_requires_token(self):
+        resp = client.get("/api/admin/draft_snapshot/2026")
+        assert resp.status_code in (401, 403)
+
