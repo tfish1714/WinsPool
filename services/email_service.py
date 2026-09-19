@@ -98,9 +98,20 @@ def send_betting_edge_email(to_email: str, week_summary: dict) -> bool:
     # Both sections bold+color the actual pick so it's unambiguous at a
     # glance which side to bet, not just which game is flagged.
     pick_style = "font-weight:700; color:#059669;"  # green, matches the app's accent-green
+    # Badge style pill, placed right next to the pick itself, so ATS vs.
+    # Moneyline/SU is never left to be inferred from a verb choice or a
+    # parenthetical elsewhere in the sentence (see
+    # docs/superpowers/specs/2026-09-18-betting-pick-type-clarity-design.md).
+    badge_style = ("display:inline-block; font-weight:700; font-size:0.75em; "
+                   "color:#3730a3; background:#e0e7ff; padding:1px 6px; "
+                   "border-radius:3px; margin-right:4px;")
 
     def _pick_html(team: str) -> str:
         return f"<strong style=\"{pick_style}\">{html.escape(str(team))}</strong>"
+
+    def _badge_html(metric: str) -> str:
+        label = "ATS" if metric == "ats" else "SU"
+        return f"<span style=\"{badge_style}\">{label}</span>"
 
     angle_matches = week_summary.get("validated_angle_matches") or []
     if angle_matches:
@@ -110,10 +121,11 @@ def send_betting_edge_email(to_email: str, week_summary: dict) -> bool:
                 f"{c['label']} {'>=' if 'min' in c else '<='} {c.get('min', c.get('max'))}"
                 for c in m["conditions"]
             )
+            badge = _badge_html(m["metric"])
             verb = "Bet" if m["metric"] == "ats" else "Pick"
             games_html = "; ".join(
                 f"{html.escape(str(g['away_team']))} @ {html.escape(str(g['home_team']))} "
-                f"&mdash; {verb} "
+                f"&mdash; {badge}{verb} "
                 + "/".join(
                     _pick_html(g["home_team"] if side == "home" else g["away_team"])
                     for side in g["matched_sides"]
@@ -132,10 +144,11 @@ def send_betting_edge_email(to_email: str, week_summary: dict) -> bool:
 
     outliers = week_summary.get("raw_edge_outliers") or []
     if outliers:
+        ats_badge = _badge_html("ats")
         rows = "".join(
-            f"<li>{html.escape(str(o['away_team']))} @ {html.escape(str(o['home_team']))}: "
-            f"model favors {_pick_html(o['ats_pick'])} by {o['edge_vs_vegas']:+.1f} vs Vegas "
-            f"(model {o['model_spread']}, Vegas {o['vegas_line']})</li>"
+            f"<li>{ats_badge}{html.escape(str(o['away_team']))} @ {html.escape(str(o['home_team']))}: "
+            f"ATS Pick {_pick_html(o['ats_pick'])} (model favors it by {o['edge_vs_vegas']:+.1f} vs Vegas, "
+            f"model {o['model_spread']}, Vegas {o['vegas_line']})</li>"
             for o in outliers
         )
         sections.append(

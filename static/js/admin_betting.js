@@ -42,7 +42,7 @@ const PREBUILT_ANGLES = {
 const CORE_COLUMNS = [
     { key: 'matchup', label: 'Matchup', sortable: false,
       render: c => `${c.away_team} @ ${c.home_team}` },
-    { key: 'favorite', label: 'Favorite', sortable: false,
+    { key: 'favorite', label: 'Favorite (ATS)', sortable: false,
       render: c => {
           if (c.spread_line == null) return '—';
           const favTeam = c.spread_line > 0 ? c.home_team : c.away_team;
@@ -61,7 +61,7 @@ const CORE_COLUMNS = [
           if (c.away_qb_out) flags.push(`${c.away_team} OUT`);
           return flags.length ? flags.join(', ') : '—';
       } },
-    { key: 'match', label: 'Match', sortable: false,
+    { key: 'match', label: 'ATS Match', sortable: false,
       render: c => {
           if (c.matched_sides.length === 2) return 'Both';
           const s = c.matched_sides[0];
