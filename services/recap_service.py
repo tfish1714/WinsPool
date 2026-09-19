@@ -1,9 +1,68 @@
+import math
 import pandas as pd
 from services.constants import UNDRAFTED_SENTINEL
 from services.data_service import load_data, get_season_projection_blended
-from services.analysis_service import get_enriched_schedule
+from services.analysis_service import get_enriched_schedule, compute_team_records, format_team_record
 from services.ai_service import generate_weekly_summary, get_recap_prompt
 from services.db_service import save_weekly_recap
+from services.cache_service import get_quarter_scores_season
+
+# Checkpoint labels for the comeback-win narrative line, keyed by which
+# cumulative quarter checkpoint produced the winner's largest deficit.
+_COMEBACK_CHECKPOINT_LABELS = {
+    1: "after the 1st quarter",
+    2: "at halftime",
+    3: "entering the 4th quarter",
+}
+
+
+def _detect_comeback_win(qrow: dict, winner_is_home: bool) -> str | None:
+    """Return a comeback-win narrative line if the winner overcame a real
+    deficit, else None.
+
+    A win counts as a comeback if the winner trailed entering the 4th quarter
+    (cumulative Q1+Q2+Q3), OR trailed by 14+ points at any single checkpoint
+    (after Q1, Q2, or Q3) -- computed from `qrow`'s cumulative home/away
+    quarter scores. See docs/superpowers/specs/
+    2026-09-15-comeback-win-recap-design.md, Design §5.
+    """
+    w_prefix, l_prefix = ("home", "away") if winner_is_home else ("away", "home")
+
+    w_cum = 0
+    l_cum = 0
+    deficits: dict[int, int] = {}
+    for checkpoint, q_key in ((1, "q1"), (2, "q2"), (3, "q3")):
+        w_cum += qrow.get(f"{w_prefix}_{q_key}") or 0
+        l_cum += qrow.get(f"{l_prefix}_{q_key}") or 0
+        if l_cum > w_cum:
+            deficits[checkpoint] = l_cum - w_cum
+
+    if not deficits:
+        return None
+
+    trailing_entering_q4 = 3 in deficits
+    worst_checkpoint = max(deficits, key=deficits.get)
+    worst_deficit = deficits[worst_checkpoint]
+
+    if not (trailing_entering_q4 or worst_deficit >= 14):
+        return None
+
+    return (f"Down {worst_deficit} {_COMEBACK_CHECKPOINT_LABELS[worst_checkpoint]} "
+            f"and still found a way to win.")
+
+
+def _format_roster_entry(team: str, draft_pick, total_players: int, team_records: dict) -> str:
+    """Format one roster line for the weekly recap prompt: team, the draft
+    pick it was taken with (so the AI can comment on reaches/steals), and
+    the team's real overall record (so it can note a team carrying a
+    roster). `draft_pick` is None/NaN when draft_results has no matching row."""
+    record = format_team_record(team, team_records)
+    if draft_pick is None or pd.isna(draft_pick) or not total_players:
+        return f"{team} ({record})"
+    draft_pick = int(draft_pick)
+    draft_round = math.ceil(draft_pick / total_players)
+    return f"{team} (Pick #{draft_pick}, Rd {draft_round}, {record})"
+
 
 def extract_weekly_data(year, week):
     """
@@ -37,7 +96,39 @@ def extract_weekly_data(year, week):
 
     player_stats = {}
     pid_to_name = dict(zip(players['playerId'], players['fullName']))
-    
+
+    # Each player's drafted teams, the draft pick each was taken with, and
+    # those teams' real overall W-L records (not the fantasy-pool win count
+    # above) -- gives the AI roster context to comment on beyond just this
+    # week's result: reaching for a team, a great late-round pick, or an NFL
+    # team quietly carrying a player's whole roster.
+    team_records = compute_team_records(games, year)
+    player_rosters: dict = {}
+    # Pool size must come from the draft itself (3 teams per player), not
+    # len(players) -- that's every registered account, which can outnumber
+    # this season's actual drafters (e.g. seeded e2e test accounts) and
+    # silently shift every pick into the wrong round. Same fix already
+    # applied in static/js/main.js and ui_renderer.js's round labels.
+    total_players = 10
+    if not draft_results.empty and 'season' in draft_results.columns:
+        season_draft_results = draft_results[draft_results['season'] == year]
+        if 'draftPick' in season_draft_results.columns:
+            season_draft_results = season_draft_results.sort_values('draftPick')
+        if len(season_draft_results):
+            total_players = len(season_draft_results) / 3
+        for _, row in season_draft_results.iterrows():
+            pick = row.get('draftPick')
+            player_rosters.setdefault(row['playerId'], []).append((row['team'], pick))
+
+    # Quarter-by-quarter scores for comeback-win detection, indexed for O(1)
+    # per-game lookup. Silent no-op when the scrape hasn't run yet for this
+    # week (or predates the pipeline) -- comeback callouts are flavor, not
+    # core recap content.
+    quarter_scores_by_game = {
+        (r["week"], r["home_team"], r["away_team"]): r
+        for r in get_quarter_scores_season(year)
+    }
+
     for _, row in weekly_games.iterrows():
         if row['result'] == UNDRAFTED_SENTINEL or row['result'] is None:
             continue
@@ -62,6 +153,7 @@ def extract_weekly_data(year, week):
         home_score = row['home_score']
         away_score = row['away_score']
         margin = abs(home_score - away_score)
+        qrow = quarter_scores_by_game.get((row['week'], row['home_team'], row['away_team']))
 
         if row['result'] > 0: # Home Win
             if h_drafted:
@@ -88,6 +180,11 @@ def extract_weekly_data(year, week):
             elif h_drafted and home_score < 14 and row['result'] > 0:
                 player_stats[h_pid]['notable_wins'].append(f"Ugly win but counts! Scored only {home_score} and escaped ({row['home_team']} {home_score}-{away_score} {row['away_team']})")
 
+            if h_drafted and qrow is not None:
+                comeback = _detect_comeback_win(qrow, winner_is_home=True)
+                if comeback:
+                    player_stats[h_pid]['notable_wins'].append(comeback)
+
         else: # Away Win
             if a_drafted:
                 player_stats[a_pid]['wins'] += 1
@@ -113,21 +210,47 @@ def extract_weekly_data(year, week):
             elif a_drafted and away_score < 14 and row['result'] < 0:
                 player_stats[a_pid]['notable_wins'].append(f"Scrappy win! Scored only {away_score} and still won ({row['away_team']} {away_score}-{home_score} {row['home_team']})")
 
+            if a_drafted and qrow is not None:
+                comeback = _detect_comeback_win(qrow, winner_is_home=False)
+                if comeback:
+                    player_stats[a_pid]['notable_wins'].append(comeback)
+
     # 3. Build text for Gemini
+    included_pids = [pid for pid in pid_to_name if pid in player_stats or pid in overall_wins]
+
     data_summary = f"NFL WEEK {week} RESULTS ({year})\n"
     data_summary += "---------------------------------\n\n"
-    
-    for pid, name in pid_to_name.items():
-        if pid not in player_stats and pid not in overall_wins:
-            continue
-            
+
+    # Ranked standings up front -- the system prompt already asks Gemini to
+    # always note overall standings, but this recap is sent standalone (no
+    # separate standings page in context), so making the ranking explicit
+    # here removes any need for it to infer rank order from the per-player
+    # CUMULATIVE SEASON WINS lines below.
+    if included_pids:
+        standings_entries = sorted(
+            ((pid_to_name[pid], overall_wins.get(pid, 0)) for pid in included_pids),
+            key=lambda entry: (-entry[1], entry[0]),
+        )
+        data_summary += f"SEASON STANDINGS (THROUGH WEEK {week}):\n"
+        for rank, (name, wins) in enumerate(standings_entries, start=1):
+            data_summary += f" {rank}. {name} - {wins} wins\n"
+        data_summary += "\n"
+
+    for pid in included_pids:
+        name = pid_to_name[pid]
         stats = player_stats.get(pid, {'wins': 0, 'losses': 0, 'bad_beats': [], 'notable_wins': []})
         total_wins = overall_wins.get(pid, 0)
-        
+
         data_summary += f"PLAYER: {name}\n"
+        roster = player_rosters.get(pid)
+        if roster:
+            formatted_roster = ", ".join(
+                _format_roster_entry(t, pick, total_players, team_records) for t, pick in roster
+            )
+            data_summary += f"TEAMS: {formatted_roster}\n"
         data_summary += f"WEEKLY RESULT: {stats['wins']}-{stats['losses']}\n"
         data_summary += f"CUMULATIVE SEASON WINS (UP TO WEEK {week}): {total_wins}\n"
-        
+
         if stats['notable_wins']:
             data_summary += "NOTABLE WINS THIS WEEK (GOOD BEATS):\n"
             for win in stats['notable_wins']:

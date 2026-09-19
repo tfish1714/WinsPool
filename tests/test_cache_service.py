@@ -217,6 +217,58 @@ class TestEloHistoryCache:
         cs.clear_data_cache()
 
 
+class TestQuarterScoresCache:
+    """Tests for get_quarter_scores_season / write_quarter_scores_season."""
+
+    def test_write_then_read_local_season(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+        monkeypatch.setattr("services.cache_service._GAME_PRED_DIR", tmp_path)
+
+        from services.cache_service import write_quarter_scores_season, get_quarter_scores_season
+
+        rows = [{"season": 2025, "week": 1, "home_team": "KC", "away_team": "SF",
+                  "home_q1": 7, "home_q2": 3, "home_q3": 0, "home_q4": 10,
+                  "away_q1": 0, "away_q2": 7, "away_q3": 14, "away_q4": 0}]
+        write_quarter_scores_season(2025, rows, use_local=True)
+
+        result = get_quarter_scores_season(2025)
+        assert result == rows
+
+    def test_get_nonexistent_season_returns_empty_list(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+        monkeypatch.setattr("services.cache_service._GAME_PRED_DIR", tmp_path)
+
+        from services.cache_service import get_quarter_scores_season
+        assert get_quarter_scores_season(2099) == []
+
+    def test_write_firestore_writes_document(self, mock_firestore, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", True)
+
+        from services.cache_service import write_quarter_scores_season
+
+        rows = [{"season": 2025, "week": 1, "home_team": "KC"}]
+        write_quarter_scores_season(2025, rows, use_local=False)
+
+        mock_firestore.collection.assert_called_with("quarter_scores")
+        mock_firestore.collection.return_value.document.assert_called_with("2025")
+        mock_firestore.collection.return_value.document.return_value.set.assert_called_with({
+            "season": 2025, "rows": rows,
+        })
+
+    def test_get_firestore_returns_rows(self, mock_firestore, monkeypatch):
+        monkeypatch.setattr("services.cache_service._USE_LOCAL", False)
+
+        from services.cache_service import get_quarter_scores_season
+
+        doc = MagicMock()
+        doc.exists = True
+        doc.to_dict.return_value = {"season": 2025, "rows": [{"season": 2025, "week": 1}]}
+        mock_firestore.collection.return_value.document.return_value.get.return_value = doc
+
+        result = get_quarter_scores_season(2025)
+        assert result == [{"season": 2025, "week": 1}]
+
+
 class TestNnWeeklyAccuracyCache:
     """Tests for get_nn_weekly_accuracy_season / get_all_nn_weekly_accuracy /
     write_nn_weekly_accuracy_rows."""

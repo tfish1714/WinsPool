@@ -224,6 +224,34 @@ def dump_nn_weekly_accuracy():
         log.error(f"    ✗ Failed 'nn_weekly_accuracy': {e}")
 
 
+def dump_quarter_scores():
+    """Pull all quarter_scores docs from Firestore → .local_db/quarter_scores_{season}.json."""
+    log.info("  Fetching 'quarter_scores' from Firestore...")
+    try:
+        db = get_db()
+        docs = list(db.collection("quarter_scores").stream())
+        if not docs:
+            log.warning("    'quarter_scores' returned no documents — skipping")
+            return
+
+        written = 0
+        for doc in docs:
+            d = doc.to_dict()
+            season = d.get("season")
+            rows = d.get("rows")
+            if season is None or not rows:
+                continue
+            out_path = LOCAL_DB / f"quarter_scores_{int(season)}.json"
+            with open(out_path, "w") as f:
+                json.dump(d, f, default=str)
+            written += 1
+            log.info(f"    ✓ {len(rows)} rows → quarter_scores_{int(season)}.json")
+
+        log.info(f"    ✓ {written} seasons written")
+    except Exception as e:
+        log.error(f"    ✗ Failed 'quarter_scores': {e}")
+
+
 def dump_config_settings():
     """Pull config/settings doc → .local_db/config_settings.json."""
     log.info("  Fetching 'config/settings' from Firestore...")
@@ -264,6 +292,9 @@ def main():
 
     log.info("\n-- NN weekly accuracy history --")
     dump_nn_weekly_accuracy()
+
+    log.info("\n-- Quarter-by-quarter scores (comeback-win detection) --")
+    dump_quarter_scores()
 
     log.info("\n-- App config --")
     dump_config_settings()

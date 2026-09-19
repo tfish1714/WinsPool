@@ -374,7 +374,7 @@ Also required (not from nflverse, computed locally):
 | Script | Output | Notes |
 |---|---|---|
 | `scripts/compute_elo.py` | `rawdata/elo_computed.csv` | Run after each rawdata sync; requires `rawdata/schedules/games.csv` |
-| `scripts/scrape_quarter_scores.py` | `rawdata/quarter_scores.csv` | Optional; enables quarter-by-quarter Elo updates |
+| `scripts/scrape_quarter_scores.py` | `rawdata/quarter_scores.csv` | Fetches from ESPN's scoreboard API (switched from jt-sw.com 2026-09-19 -- that site's week index occasionally omits a game entirely). Feeds the weekly recap's comeback-win detection (`--week`/`--firestore`, wired into `winspool-schedule-kickoffs`) and optionally enables quarter-by-quarter Elo updates. **Does not reliably support historical seasons** -- ESPN's endpoint silently returns the current season if an older `year` isn't honored; this script detects and refuses that mismatch (see its module docstring), but don't assume `--seasons 2006 2025` backfills correctly without checking. |
 
 Not synced (redundant or unmaintained): `FiveThirtyEight.csv` (FTE, stops 2022), `Metadata-*.csv`, `Scoring-*.csv`, `ExpectedPoints-*.csv`, `Stats-*.csv` (box stats computed from nflverse weekly stats instead), `SeasonRoster-*.csv` (nflscraPy, superseded by snap_counts + rosters).
 

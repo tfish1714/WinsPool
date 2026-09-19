@@ -276,18 +276,101 @@ class TestRunBettingAlert:
         monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
         monkeypatch.setattr(sk, "compute_kickoff_clusters_with_games", lambda games, s, w: [])
         monkeypatch.setattr(
+            sk, "_run_quarter_scores_scrape",
+            lambda season, week: order.append("quarter_scores"),
+        )
+        monkeypatch.setattr(
             sk, "_run_betting_alert",
             lambda: order.append("betting_alert"),
         )
         with patch("google.cloud.tasks_v2.CloudTasksClient"):
             sk.main()
-        assert order == ["betting_alert"]
+        assert order == ["quarter_scores", "betting_alert"]
 
     def test_betting_alert_failure_does_not_trigger_kickoff_failure_alert(self, monkeypatch):
         """Even if _run_betting_alert() somehow raised, main()'s except
         block would misreport it as 'Dynamic kickoff scheduling failed' --
         assert the real _run_betting_alert() (not a mock) can't do that,
         since it must swallow everything internally."""
+        from unittest.mock import patch
+        import scripts.schedule_kickoffs as sk
+        monkeypatch.setattr(sk, "_sync_schedule_data", lambda: None)
+        monkeypatch.setattr(sk, "load_games", lambda: pd.DataFrame())
+        monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
+        monkeypatch.setattr(sk, "compute_kickoff_clusters_with_games", lambda games, s, w: [])
+        with patch.object(sk.subprocess, "run", side_effect=OSError("no interpreter")), \
+             patch("google.cloud.tasks_v2.CloudTasksClient"), \
+             patch.object(sk, "send_alert_email") as mock_alert:
+            sk.main()
+        mock_alert.assert_not_called()
+
+
+class TestRunQuarterScoresScrape:
+    """_run_quarter_scores_scrape() scrapes the just-finished week's quarter
+    scores for the weekly recap's comeback-win detection -- see
+    docs/superpowers/specs/2026-09-15-comeback-win-recap-design.md, Design §4.
+    Must never be able to fail this job's actual purpose (enqueuing the
+    week's kickoff Cloud Tasks)."""
+
+    def test_skips_when_no_prior_week(self):
+        from unittest.mock import patch
+        import scripts.schedule_kickoffs as sk
+        with patch.object(sk.subprocess, "run") as mock_run:
+            sk._run_quarter_scores_scrape(2026, 1)  # week 1 -> prior_week 0
+        mock_run.assert_not_called()
+
+    def test_invokes_scraper_for_prior_week(self):
+        from unittest.mock import MagicMock, patch
+        import scripts.schedule_kickoffs as sk
+        with patch.object(sk.subprocess, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            sk._run_quarter_scores_scrape(2026, 3)
+        mock_run.assert_called_once()
+        called_args = mock_run.call_args[0][0]
+        assert "scrape_quarter_scores.py" in called_args[1]
+        assert "--season" in called_args and "2026" in called_args
+        assert "--week" in called_args and "2" in called_args
+        assert "--firestore" in called_args
+
+    def test_timeout_is_non_fatal(self):
+        from unittest.mock import patch
+        import subprocess as sp
+        import scripts.schedule_kickoffs as sk
+        with patch.object(sk.subprocess, "run",
+                          side_effect=sp.TimeoutExpired(cmd="scrape_quarter_scores", timeout=120)):
+            sk._run_quarter_scores_scrape(2026, 3)  # must not raise
+
+    def test_unexpected_subprocess_error_is_non_fatal(self):
+        from unittest.mock import patch
+        import scripts.schedule_kickoffs as sk
+        with patch.object(sk.subprocess, "run", side_effect=OSError("no interpreter")):
+            sk._run_quarter_scores_scrape(2026, 3)  # must not raise
+
+    def test_nonzero_returncode_is_non_fatal(self):
+        from unittest.mock import MagicMock, patch
+        import scripts.schedule_kickoffs as sk
+        with patch.object(sk.subprocess, "run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="blocked by site")
+            sk._run_quarter_scores_scrape(2026, 3)  # must not raise
+
+    def test_main_runs_quarter_scores_scrape_after_successful_enqueue(self, monkeypatch):
+        from unittest.mock import patch
+        import scripts.schedule_kickoffs as sk
+        order = []
+        monkeypatch.setattr(sk, "_sync_schedule_data", lambda: None)
+        monkeypatch.setattr(sk, "load_games", lambda: pd.DataFrame())
+        monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
+        monkeypatch.setattr(sk, "compute_kickoff_clusters_with_games", lambda games, s, w: [])
+        monkeypatch.setattr(
+            sk, "_run_quarter_scores_scrape",
+            lambda season, week: order.append(("quarter_scores", season, week)),
+        )
+        monkeypatch.setattr(sk, "_run_betting_alert", lambda: order.append("betting_alert"))
+        with patch("google.cloud.tasks_v2.CloudTasksClient"):
+            sk.main()
+        assert order == [("quarter_scores", 2026, 3), "betting_alert"]
+
+    def test_quarter_scores_failure_does_not_trigger_kickoff_failure_alert(self, monkeypatch):
         from unittest.mock import patch
         import scripts.schedule_kickoffs as sk
         monkeypatch.setattr(sk, "_sync_schedule_data", lambda: None)

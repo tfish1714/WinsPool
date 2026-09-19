@@ -452,6 +452,73 @@ def write_elo_history_season(season: int, rows: list[dict], *, use_local: bool |
 
 
 # ---------------------------------------------------------------------------
+# Quarter-by-quarter scores (comeback-win detection in the weekly recap)
+# ---------------------------------------------------------------------------
+# One document per season, mirroring elo_history above. Written by
+# scripts/scrape_quarter_scores.py --firestore. Read by
+# services/recap_service.py::extract_weekly_data() only -- a manual,
+# low-frequency action -- so this deliberately has no in-memory cache domain,
+# matching prediction_features/weekly_recaps' treatment in the
+# cache-mutability redesign (not worth a metadata/cache_control signal field
+# for one low-frequency reader). See
+# docs/superpowers/specs/2026-09-15-comeback-win-recap-design.md.
+
+
+def get_quarter_scores_season(season: int) -> list[dict]:
+    """Return the list of per-game quarter-score rows for one season, or [] if absent."""
+    if _USE_LOCAL:
+        p = _GAME_PRED_DIR / f"quarter_scores_{season}.json"
+        if p.exists():
+            try:
+                with open(p) as f:
+                    return json.load(f).get("rows", [])
+            except Exception:
+                return []
+        return []
+    else:
+        try:
+            from services.db_service import get_db
+            db = get_db()
+            doc = db.collection("quarter_scores").document(str(season)).get()
+            if doc.exists:
+                return doc.to_dict().get("rows", [])
+        except Exception:
+            pass
+        return []
+
+
+def write_quarter_scores_season(season: int, rows: list[dict], *, use_local: bool | None = None) -> None:
+    """Persist one season's scraped quarter-score rows (local JSON or Firestore).
+
+    Called exclusively by scripts/scrape_quarter_scores.py --firestore.
+
+    Args:
+        use_local: Override the _USE_LOCAL env setting. Pass True to force
+                   local JSON, False to force Firestore. None = auto.
+    """
+    _local = _USE_LOCAL if use_local is None else use_local
+
+    if _local:
+        _GAME_PRED_DIR.mkdir(parents=True, exist_ok=True)
+        p = _GAME_PRED_DIR / f"quarter_scores_{season}.json"
+        with open(p, "w") as f:
+            json.dump({"season": season, "rows": rows}, f, default=str)
+    else:
+        from services.db_service import get_db
+        db = get_db()
+        if db is None:
+            raise RuntimeError(
+                f"Cannot write quarter_scores/{season} to Firestore: get_db() returned "
+                "None (USE_LOCAL_DATA is set). Set USE_LOCAL_DATA=False before calling "
+                "write_quarter_scores_season(use_local=False)."
+            )
+        db.collection("quarter_scores").document(str(season)).set({
+            "season": season,
+            "rows": rows,
+        })
+
+
+# ---------------------------------------------------------------------------
 # NN weekly accuracy tracking (Model Accuracy Explorer)
 # ---------------------------------------------------------------------------
 # One document per season, mirroring elo_history above. Written by

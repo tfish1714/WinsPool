@@ -283,6 +283,49 @@ def _run_betting_alert() -> None:
               f"already self-alerted): {(result.stderr or '').strip()[:500]}")
 
 
+def _run_quarter_scores_scrape(season: int, week: int) -> None:
+    """Scrape the just-finished week's quarter-by-quarter scores for the
+    weekly recap's comeback-win detection, as an independent step.
+
+    `week` here is this job's own *upcoming* week (from
+    _current_season_week()); quarter scores only exist for games that have
+    already been played, i.e. week - 1. Skipped entirely when that's < 1
+    (nothing has completed yet this season).
+
+    Wholly non-fatal, mirroring _run_betting_alert(): this scrapes a single
+    third-party site (jt-sw.com) with no fallback, so a flaky/blocked scrape
+    is expected occasionally. It only affects recap flavor text (not core
+    standings/predictions) and must never cause this job to report failure
+    for -- or skip -- the kickoff-task enqueuing that's its actual purpose.
+    See docs/superpowers/specs/2026-09-15-comeback-win-recap-design.md, Design §4.
+    """
+    prior_week = week - 1
+    if prior_week < 1:
+        print(f"[schedule_kickoffs] Season {season} week {week}: no prior week yet, "
+              f"skipping quarter-score scrape.")
+        return
+
+    print(f"[schedule_kickoffs] Scraping quarter scores for {season} week {prior_week}...")
+    cmd = [
+        sys.executable, str(SCRIPTS_DIR / "scrape_quarter_scores.py"),
+        "--season", str(season), "--week", str(prior_week), "--firestore",
+    ]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=120,
+            cwd=str(SCRIPTS_DIR.parent),
+        )
+    except subprocess.TimeoutExpired:
+        print("[warn] scrape_quarter_scores.py timed out after 120s (non-fatal)")
+        return
+    except Exception as e:
+        print(f"[warn] scrape_quarter_scores.py could not be run (non-fatal): {e}")
+        return
+    if result.returncode != 0:
+        print(f"[warn] scrape_quarter_scores.py exited non-zero (non-fatal): "
+              f"{(result.stderr or '').strip()[:500]}")
+
+
 def main():
     try:
         from google.cloud import tasks_v2
@@ -303,6 +346,7 @@ def main():
 
         print(f"Enqueued {len(clusters_with_games)} kickoff cluster(s) x 3 tasks for {season} week {week}.")
 
+        _run_quarter_scores_scrape(season, week)
         _run_betting_alert()
     except (Exception, SystemExit):
         # `except Exception` alone would let `load_games()`'s `sys.exit(1)`
