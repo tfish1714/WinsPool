@@ -57,6 +57,19 @@ class TestAssertPromotionReady:
         from services.model_promotion import assert_promotion_ready
         assert_promotion_ready({"test_auc": 0.1}, None, "XGB")  # must not raise
 
+    def test_logs_when_no_same_schema_baseline(self, caplog):
+        """Finding 1 (final review): the no-op path must be observable --
+        otherwise a first-of-generation model (or every NN entry, which
+        currently all lack feature_columns) silently never gets gated, with
+        no way to tell "gate skipped" from "gate ran and passed"."""
+        from services.model_promotion import assert_promotion_ready
+        with caplog.at_level("INFO"):
+            assert_promotion_ready({"test_auc": 0.1}, None, "XGB")
+        assert any(
+            "XGB" in record.getMessage() and "promotion gate skipped" in record.getMessage()
+            for record in caplog.records
+        )
+
     def test_raises_on_regression_beyond_tolerance(self):
         from services.model_promotion import assert_promotion_ready
         new_metrics = {"test_accuracy": 0.50, "test_auc": 0.50}

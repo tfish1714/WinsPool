@@ -1,40 +1,53 @@
-"""Only exercises the pure per-entry dict construction, not the full
-build_year() pipeline (which needs live Firestore/model data) -- this
-isolates the stamping logic itself."""
+"""tests/test_cache_builder_version_stamp.py"""
 from unittest.mock import MagicMock, patch
+
+import pandas as pd
 
 
 class TestBuildYearPmapStamping:
     def test_pmap_entry_carries_ensemble_and_feature_version(self):
-        """Reproduces the exact dict-construction shape at
-        scripts/cache_builder.py's pmap-building loop (~line 355-374) to
-        verify the two new keys land on a freshly-built entry."""
-        model_version = "nn_v14+xgb_v9+lr_v7"
-        feature_version = "abc1234"
+        """Exercises the REAL cb.build_year() pmap-building branch (final
+        review finding 3) -- not a hand-copied guard that can't fail if
+        build_year() changes. Mocking pattern mirrors
+        tests/test_cache_builder.py::TestBuildYearWritesExplanation, which
+        already proves build_year() is directly callable with fully mocked
+        collaborators."""
+        import scripts.cache_builder as cb
 
-        entry = {
-            'pred_prob':     0.62,
-            'pred_winner':   'KC',
-            'pred_su_conf':  62.0,
-            'pred_ats_pick': 'KC',
-        }
-        if model_version:
-            entry['ensemble_version'] = model_version
-        entry['feature_version'] = feature_version
+        schedule_df = pd.DataFrame([
+            {"week": 3, "home_team": "WAS", "away_team": "KC",
+             "pred_winner": "WAS", "pred_su_conf": 70.0, "pred_ats_pick": "WAS",
+             "pred_prob": 0.7, "model_spread": 4.5, "edge_vs_vegas": 1.0,
+             "explanation": {"elo_diff": 12.3}},
+        ])
 
-        assert entry['ensemble_version'] == "nn_v14+xgb_v9+lr_v7"
-        assert entry['feature_version'] == "abc1234"
+        # get_team_win_projections() -> {} (falsy) so the separate
+        # preseason_predictions branch (also gated on model_version) is a
+        # no-op and never calls the real set_preseason_predictions/Firestore
+        # write -- this test is only about the game_predictions pmap.
+        mock_engine_instance = MagicMock()
+        mock_engine_instance.get_team_win_projections.return_value = {}
+        mock_engine_cls = MagicMock(return_value=mock_engine_instance)
 
-    def test_pmap_entry_omits_ensemble_version_when_model_load_failed(self):
-        model_version = None
-        feature_version = "abc1234"
+        captured = {}
+        with patch.object(cb, "get_game_predictions", return_value={}), \
+             patch.object(cb, "merge_thin_game_predictions",
+                          side_effect=lambda existing, fresh: fresh), \
+             patch.object(cb, "write_game_predictions",
+                          side_effect=lambda year, merged: captured.update(merged)), \
+             patch.object(cb.analysis, "get_enriched_schedule", return_value=schedule_df), \
+             patch.object(cb, "_apply_predictions", return_value=schedule_df), \
+             patch.object(cb, "NNProjectionEngine", mock_engine_cls), \
+             patch.object(cb, "live_scores"):
+            cb.build_year(
+                pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+                pd.DataFrame(), pd.DataFrame(), year=2026, current_year=2026,
+                force=True,
+                model_version="nn_v15+xgb_v9+lr_v7", feature_version="abc1234",
+            )
 
-        entry = {'pred_prob': 0.5, 'pred_winner': 'KC'}
-        if model_version:
-            entry['ensemble_version'] = model_version
-        entry['feature_version'] = feature_version
-
-        assert "ensemble_version" not in entry
+        entry = captured["W03_WAS_KC"]
+        assert entry["ensemble_version"] == "nn_v15+xgb_v9+lr_v7"
         assert entry["feature_version"] == "abc1234"
 
 

@@ -9,12 +9,26 @@ docs/superpowers/specs/2026-09-18-model-prediction-e2e-review-design.md
 "Folded-in designs" > "Model quality gating" for the incident (an invalid
 XGB v9-vs-v3 comparison) this exists to prevent.
 """
+import logging
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 PROMOTION_GATES: dict[str, float] = {
     # metric_name: max allowed regression vs. same-schema best
     # (negative tolerance -- new must not be more than this much worse)
-    "test_accuracy": -0.02,
+    #
+    # test_accuracy gets a wider tolerance than test_auc: it's quantized to
+    # whole games on a held-out test split (~1/48-1/64 per game depending on
+    # the model), so a tight tolerance triggers on ordinary single-game
+    # sampling noise, not just real regressions. This matters most for NN,
+    # which never computes test_auc (only test_r2/test_mae/test_accuracy),
+    # so it has no continuous metric to stabilize the gate the way XGB/LR's
+    # test_auc does. test_auc's tolerance stays tight -- it's a continuous
+    # probability-based metric with no per-game quantization, and -0.02 was
+    # independently confirmed against real historical registry data to
+    # correctly catch a real regression (XGB v9).
+    "test_accuracy": -0.05,
     "test_auc": -0.02,
 }
 
@@ -51,6 +65,10 @@ def assert_promotion_ready(new_metrics: dict, best_metrics: Optional[dict], mode
     never computes test_auc, so only test_accuracy gates it.
     """
     if best_metrics is None:
+        logger.info(
+            "%s: no same-schema baseline in registry; promotion gate skipped",
+            model_name,
+        )
         return
     failures = {}
     for metric, tolerance in PROMOTION_GATES.items():
