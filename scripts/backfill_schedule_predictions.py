@@ -52,6 +52,7 @@ from services.nn_projection_engine import NNProjectionEngine, build_mc_predictio
 from services.cache_service import get_game_predictions, write_game_predictions, write_prediction_features
 from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 from services.feature_audit_service import compute_feature_audit
+from services.model_version import get_feature_version, build_ensemble_version_string
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +62,9 @@ from services.feature_audit_service import compute_feature_audit
 def _build_predictions_map(year: int, ft_lookup: dict,
                             schedule_df: pd.DataFrame,
                             games_df: pd.DataFrame,
-                            force: bool) -> dict:
+                            force: bool,
+                            ensemble_version: str = None,
+                            feature_version: str = None) -> dict:
     """Assemble the final predictions map for one season.
 
     1. Feature-table predictions for completed games → locked=True.
@@ -70,6 +73,10 @@ def _build_predictions_map(year: int, ft_lookup: dict,
        (protects accuracy tracking if a game just became "completed" but the
        feature table hasn't caught up yet — or if a prior run locked predictions
        we want to keep).
+
+    ensemble_version/feature_version stamp only the entries freshly computed by
+    this call (steps 1-2) -- never entries preserved unchanged from a prior
+    locked run (step 3), since those weren't produced by this run.
     """
     # Feature-table hits for this year
     played_keys = {}
@@ -152,6 +159,14 @@ def _build_predictions_map(year: int, ft_lookup: dict,
             if entry.get("explanation") is None:
                 entry.pop("explanation", None)
             result[key] = entry
+
+    if feature_version is None:
+        feature_version = get_feature_version()
+
+    for entry in result.values():
+        if ensemble_version:
+            entry["ensemble_version"] = ensemble_version
+        entry["feature_version"] = feature_version
 
     if not force:
         existing = get_game_predictions(year)
@@ -298,9 +313,8 @@ def main():
             all_games = pd.DataFrame()
             has_schedule = False
 
-    ensemble_version = (
-        f"nn_{nn_svc.loaded_version}+xgb_{xgb_svc.loaded_version}+lr_{lr_svc.loaded_version}"
-    )
+    ensemble_version = build_ensemble_version_string(nn_svc, xgb_svc, lr_svc)
+    feature_version = get_feature_version()
     if write_features:
         print(f"\n  Ensemble version for audit: {ensemble_version}")
 
@@ -315,7 +329,10 @@ def main():
         else:
             yr_schedule = pd.DataFrame()
 
-        predictions_map = _build_predictions_map(year, ft_lookup, yr_schedule, all_games, args.force)
+        predictions_map = _build_predictions_map(
+            year, ft_lookup, yr_schedule, all_games, args.force,
+            ensemble_version=ensemble_version, feature_version=feature_version,
+        )
 
         if not predictions_map:
             print(f"  {year}  no predictions available — skipped")
