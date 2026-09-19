@@ -58,6 +58,7 @@ from services.nn_feature_engine import (
 from services.constants import UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 import services.live_score_service as live_scores
 from services.email_service import send_alert_email
+from services.model_version import get_feature_version, build_ensemble_version_string
 
 def _build_pred_lookup(ft: pd.DataFrame, nn_svc, xgb_svc, lr_svc) -> dict:
     """Thin wrapper around the shared build_ensemble_lookup."""
@@ -125,7 +126,8 @@ def _build_mc_entry(engine, gp: dict, year: int, spread_line, profile_dict: dict
 
 
 def _publish_game_probs(game_ids: list, games: pd.DataFrame, year: int, game_probs: dict,
-                        engine=None) -> int:
+                        engine=None, ensemble_version: str = None,
+                        feature_version: str = None) -> int:
     """Publish only game_ids' entries from a simulate_season() game_probs_out
     dict into game_predictions, via the same merge-preserving path
     build_year() already uses -- every other stored game (including richer
@@ -157,6 +159,10 @@ def _publish_game_probs(game_ids: list, games: pd.DataFrame, year: int, game_pro
             continue
         entry = _build_mc_entry(engine, gp, year, row.get('spread_line'),
                                 source="mc_simulation (resimulate)")
+        if ensemble_version:
+            entry['ensemble_version'] = ensemble_version
+        if feature_version:
+            entry['feature_version'] = feature_version
         pmap[key] = entry
 
     if not pmap:
@@ -280,7 +286,7 @@ def week_is_complete(games, year: int, week: int) -> bool:
 def build_year(standings, games, players, draft_order, draft_results,
                draft_order_rules, year: int, current_year: int,
                all_games=None, force: bool = False, pred_lookup: dict = None,
-               model_version: str = None):
+               model_version: str = None, feature_version: str = None):
     print(f"\n[cache_builder] Building year {year}...")
 
     # Use full multi-season games for Elo history (falls back to year-filtered)
@@ -372,6 +378,10 @@ def build_year(standings, games, players, draft_order, draft_results,
                         exp = r.get('explanation')
                         if isinstance(exp, dict):
                             entry['explanation'] = exp
+                        if model_version:
+                            entry['ensemble_version'] = model_version
+                        if feature_version:
+                            entry['feature_version'] = feature_version
                         pmap[f"W{int(wk):02d}_{ht}_{at}"] = entry
                 if pmap:
                     existing = get_game_predictions(year)
@@ -588,9 +598,13 @@ def main():
         completed_results = _build_completed_results(yr_games, year)
         sim = engine.simulate_season(yr_games, n_sims=RESIMULATE_N_SIMS, completed_results=completed_results)
 
+        resim_ensemble_version = build_ensemble_version_string(engine.svc, engine.xgb_svc, engine.lr_svc)
+        resim_feature_version = get_feature_version()
         n = _publish_game_probs(game_ids, games, year, sim.get("game_probs", {}),
-                                engine=engine)
-        print(f"[cache_builder] --resimulate: published {n} prediction(s).")
+                                engine=engine, ensemble_version=resim_ensemble_version,
+                                feature_version=resim_feature_version)
+        print(f"[cache_builder] --resimulate: published {n} prediction(s) "
+              f"[{resim_ensemble_version}, feature={resim_feature_version}].")
 
         try:
             from services.cache_service import DOMAIN_PREDICTIONS_ACTIVE
@@ -613,7 +627,7 @@ def main():
         xgb_svc = XGBPredictionService(); xgb_svc.load_model()
         lr_svc  = LRPredictionService();  lr_svc.load_model()
 
-        model_version = f"nn_{nn_svc.loaded_version}+xgb_{xgb_svc.loaded_version}+lr_{lr_svc.loaded_version}"
+        model_version = build_ensemble_version_string(nn_svc, xgb_svc, lr_svc)
 
         min_ft = min(years_to_build)
         max_ft = max(years_to_build)
@@ -626,6 +640,8 @@ def main():
         pred_lookup = {}
         model_version = None
 
+    feature_version = get_feature_version()
+
     for year in years_to_build:
         # Filter data to just this year to avoid large cross-season merges
         yr_standings = standings[standings['season'] == year].copy() if not standings.empty else standings
@@ -633,7 +649,7 @@ def main():
         build_year(yr_standings, yr_games, players, draft_order, draft_results,
                    draft_order_rules, year, current_year, all_games=games,
                    force=args.force, pred_lookup=pred_lookup,
-                   model_version=model_version)
+                   model_version=model_version, feature_version=feature_version)
 
     # Signal the predictions_active domain (games/standings, players, etc.
     # are untouched by this script -- see docs/superpowers/specs/
