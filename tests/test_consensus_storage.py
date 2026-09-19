@@ -118,6 +118,11 @@ def test_refresh_local_pkls_registers_consensus_collection():
     assert ("consensus_projections", "season") in COLLECTIONS
 
 
+def test_refresh_local_pkls_registers_draft_snapshot_collection():
+    from scripts.refresh_local_pkls import COLLECTIONS
+    assert ("draft_snapshot_predictions", "season") in COLLECTIONS
+
+
 def test_get_preseason_predictions_mean_wins_nan_falls_back_to_projected_wins(monkeypatch):
     """mean_wins can be a present-but-NaN column, not merely an absent key.
 
