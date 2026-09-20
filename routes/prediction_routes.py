@@ -7,7 +7,6 @@ from fastapi.responses import JSONResponse
 
 from services.betting_screener_service import load_predictions_by_season
 from services.data_service import load_data
-from services.draft_service import sanitize_state
 from services.response_helpers import server_error
 from services.session_service import require_admin
 
