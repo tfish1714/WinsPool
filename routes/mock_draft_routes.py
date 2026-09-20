@@ -108,8 +108,8 @@ async def mock_draft_setup(request: Request, is_admin: bool = Depends(get_is_adm
         "teamSchedules": get_team_schedules(season),
     }
     if is_admin:
-        content["projections"] = get_season_projection_legacy_shape(season)
-        content["projectionsDetail"] = get_season_projection_dual(season)
+        content["projections"] = get_season_projection_legacy_shape(season, frozen=True)
+        content["projectionsDetail"] = get_season_projection_dual(season, frozen=True)
     return content
 
 

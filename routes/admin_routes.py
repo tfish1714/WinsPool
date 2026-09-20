@@ -28,7 +28,7 @@ from services.response_helpers import server_error
 from services.db_service import (
     add_draft_order, add_draft_rule, add_player, delete_draft_results_for_season,
     delete_season_data, get_collection_df, get_metadata, get_password_hash, save_weekly_recap,
-    set_member_paid, update_player_credentials, update_player_profile,
+    set_member_paid, sync_draft_snapshot_for_season, update_player_credentials, update_player_profile,
 )
 from services.constants import PASSWORD_COMPLEXITY_RE, UNDRAFTED_SENTINEL
 from services.draft_service import sanitize_state, wipe_draft_cache
@@ -321,6 +321,46 @@ async def reset_draft(body: SeasonRequest, _: dict = Depends(require_admin)):
         wipe_draft_cache()
         return JSONResponse(content={"message": f"Draft Results for {body.season} securely wiped! Mock draft reset successful."})
     except Exception as e:
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
+
+
+@router.post("/admin/draft_snapshot/sync")
+async def sync_draft_snapshot(body: SeasonRequest, _: dict = Depends(require_admin)):
+    """Admin: manually copy this season's preseason_predictions into
+    draft_snapshot_predictions right now, instead of waiting for the next
+    scripts/refresh_preseason.py run. Locks automatically if draft_results
+    already has rows for this season -- identical rule to the scheduled path,
+    since both call services.db_service.sync_draft_snapshot_for_season()."""
+    try:
+        result = sync_draft_snapshot_for_season(body.season)
+        return JSONResponse(content=result)
+    except Exception:
+        logger.exception("Unhandled error in admin endpoint")
+        return server_error()
+
+
+@router.get("/admin/draft_snapshot/{season}")
+async def get_draft_snapshot_status(
+    season: Annotated[int, FPath(ge=2000, le=2030)],
+    _: dict = Depends(require_admin),
+):
+    """Admin: current draft_snapshot_predictions status for a season --
+    team count, whether every team is locked, and the most recent
+    generated_at, so an admin can tell whether a sync is needed before
+    triggering POST .../sync."""
+    try:
+        df = get_collection_df("draft_snapshot_predictions", filters=[("season", "==", season)])
+        if df.empty:
+            return JSONResponse(content={"season": season, "team_count": 0,
+                                          "locked": False, "generated_at": None})
+        return JSONResponse(content={
+            "season": season,
+            "team_count": int(len(df)),
+            "locked": bool(df["locked"].all()) if "locked" in df.columns else False,
+            "generated_at": float(df["generated_at"].max()) if "generated_at" in df.columns else None,
+        })
+    except Exception:
         logger.exception("Unhandled error in admin endpoint")
         return server_error()
 

@@ -151,13 +151,13 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
     # which this dict must keep: it is sent verbatim to the frontend
     # (static/js/main.js, ui_renderer.js) and Jinja templates, which read
     # `.projected_wins` / `.std_dev` directly.
-    preseason_predictions = get_season_projection_blended(int(season))
+    preseason_predictions = get_season_projection_blended(int(season), frozen=True)
     # Admin-only, separate from preseason_predictions above: exposes model and
     # consensus numbers individually (instead of collapsed to one) for the
     # available-teams grid's per-team display and sort. preseason_predictions
     # keeps its merged shape for the draft board's "Base" tag and portfolio
     # totals, which don't need this distinction.
-    projection_detail = get_season_projection_dual(int(season))
+    projection_detail = get_season_projection_dual(int(season), frozen=True)
     team_schedules = {t: get_team_schedule(t, games_season, int(season)) for t in all_nfl_teams}
     
     # 6. Player Info Metadata

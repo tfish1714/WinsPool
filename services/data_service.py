@@ -419,6 +419,32 @@ def get_preseason_predictions(season: int) -> Dict[str, dict]:
         }
     return res
 
+def get_draft_snapshot_predictions(season: int) -> Dict[str, dict]:
+    """Frozen, pre-draft snapshot of model win projections for `season`.
+
+    Same shape and caching pattern as get_preseason_predictions(), but reads
+    draft_snapshot_predictions instead -- a number that stops moving once a
+    real draft (or a mock draft bot) has used it. See
+    docs/superpowers/specs/2026-09-15-preseason-draft-snapshot-design.md.
+    """
+    entry = _get_predictions_bucket_entry(season)
+    if "snapshot_df" not in entry:
+        entry["snapshot_df"] = get_collection_df("draft_snapshot_predictions", filters=[("season", "==", season)])
+    preds_df = entry["snapshot_df"]
+    if preds_df.empty:
+        return {}
+
+    res = {}
+    for _, row in preds_df.iterrows():
+        mean_wins = row.get("mean_wins")
+        res[row["team"]] = {
+            "projected_wins": float(row.get("projected_wins", 0)),
+            "mean_wins": float(mean_wins) if pd.notna(mean_wins) else float(row.get("projected_wins", 0)),
+            "std_dev": float(row.get("std_dev", 0)),
+            "sources": row.get("sources", {})
+        }
+    return res
+
 def get_consensus_projections(season: int) -> Dict[str, dict]:
     """Retrieve analyst consensus projections for a season, keyed by team."""
     entry = _get_predictions_bucket_entry(season)
@@ -441,16 +467,22 @@ def get_consensus_projections(season: int) -> Dict[str, dict]:
         }
     return res
 
-def get_season_projection(season: int) -> Dict[str, dict]:
+def get_season_projection(season: int, frozen: bool = False) -> Dict[str, dict]:
     """Resolve the best available win projection for a season, per team.
 
     Model output wins when it exists; analyst consensus is the fallback. This
     lets preseason_predictions mean "model output" and consensus_projections
     mean "analyst consensus" without historical views losing their numbers.
 
+    frozen=True reads the model side from draft_snapshot_predictions instead
+    of preseason_predictions -- see get_draft_snapshot_predictions() and
+    docs/superpowers/specs/2026-09-15-preseason-draft-snapshot-design.md.
+    Consensus is never frozen; only readers that must show a stable, pre-draft
+    number pass frozen=True.
+
     Returns {team: {"wins": float, "source_type": "model"|"consensus", "detail": dict}}
     """
-    model = get_preseason_predictions(season)
+    model = get_draft_snapshot_predictions(season) if frozen else get_preseason_predictions(season)
     consensus = get_consensus_projections(season)
 
     out = {}
@@ -474,7 +506,7 @@ def get_season_projection(season: int) -> Dict[str, dict]:
             }
     return out
 
-def get_season_projection_legacy_shape(season: int) -> Dict[str, dict]:
+def get_season_projection_legacy_shape(season: int, frozen: bool = False) -> Dict[str, dict]:
     """get_season_projection() flattened to the shape the UI has always read.
 
     Callers that render projections -- the draft room payload (consumed verbatim
@@ -491,7 +523,7 @@ def get_season_projection_legacy_shape(season: int) -> Dict[str, dict]:
     vice versa, which is what lets one lookup chain serve both.
     """
     out = {}
-    for team, proj in get_season_projection(int(season)).items():
+    for team, proj in get_season_projection(int(season), frozen=frozen).items():
         detail = proj.get("detail") or {}
         wins = proj.get("wins")
         raw_std = detail.get("std_dev", detail.get("consensus_std", 0))
@@ -503,7 +535,7 @@ def get_season_projection_legacy_shape(season: int) -> Dict[str, dict]:
         }
     return out
 
-def get_season_projection_dual(season: int) -> Dict[str, dict]:
+def get_season_projection_dual(season: int, frozen: bool = False) -> Dict[str, dict]:
     """Per-team model AND consensus projections, both exposed separately --
     unlike get_season_projection_legacy_shape(), which collapses to whichever
     one source_type wins and discards the other. Admin-only data: callers
@@ -512,7 +544,7 @@ def get_season_projection_dual(season: int) -> Dict[str, dict]:
     Returns {team: {"model": {"projected_wins", "std_dev"} | None,
                      "consensus": {"consensus_mean", "consensus_median", "consensus_std"} | None}}
     """
-    model = get_preseason_predictions(season)
+    model = get_draft_snapshot_predictions(season) if frozen else get_preseason_predictions(season)
     consensus = get_consensus_projections(season)
 
     out = {}
@@ -529,7 +561,7 @@ def get_season_projection_dual(season: int) -> Dict[str, dict]:
         }
     return out
 
-def get_season_projection_blended(season: int) -> Dict[str, dict]:
+def get_season_projection_blended(season: int, frozen: bool = False) -> Dict[str, dict]:
     """Per-team inverse-variance blend of model and analyst-consensus wins.
 
     Unlike get_season_projection_legacy_shape() (model wins outright when it
@@ -548,7 +580,7 @@ def get_season_projection_blended(season: int) -> Dict[str, dict]:
     model-only team keeps its own rounded projected_wins, not mean_wins) --
     only a team with both sources gets an actual blended figure.
     """
-    model = get_preseason_predictions(season)
+    model = get_draft_snapshot_predictions(season) if frozen else get_preseason_predictions(season)
     consensus = get_consensus_projections(season)
 
     out = {}

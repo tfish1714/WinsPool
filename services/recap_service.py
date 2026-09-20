@@ -312,8 +312,10 @@ def extract_draft_data(year):
     standings, teams, games, players, draft_order, draft_results, draft_order_rules = load_data(year=year)
     # Same resolver the live draft room's running portfolio uses
     # (services.draft_service.load_draft_state), so the recap's projections
-    # match what players actually saw on the draft page.
-    preds = get_season_projection_blended(year)
+    # match what players actually saw on the draft page. frozen=True: the
+    # draft room itself reads the frozen pre-draft snapshot, not the live
+    # model, so this must too or the two would silently diverge.
+    preds = get_season_projection_blended(year, frozen=True)
     
     if draft_results.empty:
         return None, []

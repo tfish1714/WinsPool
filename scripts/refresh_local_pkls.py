@@ -43,6 +43,7 @@ COLLECTIONS = [
     ("weekly_recaps",         "year"),
     ("preseason_predictions", "season"),
     ("consensus_projections", "season"),
+    ("draft_snapshot_predictions", "season"),
 ]
 
 

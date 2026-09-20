@@ -135,9 +135,9 @@ class TestSeasonResolutionUsesStaticBucket:
 class TestPreseasonPredictionsShape:
 
     @patch("services.data_service.get_consensus_projections")
-    @patch("services.data_service.get_preseason_predictions")
+    @patch("services.data_service.get_draft_snapshot_predictions")
     def test_preseason_predictions_preserves_true_projected_wins(
-        self, mock_get_preseason_predictions, mock_get_consensus_projections
+        self, mock_get_draft_snapshot_predictions, mock_get_consensus_projections
     ):
         """ui_renderer.js:195 renders `${pred.projected_wins}W` straight from this
         payload. A team with only a model projection (no consensus row) must
@@ -145,12 +145,12 @@ class TestPreseasonPredictionsShape:
         unrounded mean_wins (e.g. 6.7) -- substituting mean_wins here would
         silently change what the live 2026 draft room displays.
 
-        Patched at the resolver rather than at draft_service's import so this
-        still exercises the shared adapter (get_season_projection_blended)
-        that the draft room, player profile and draft recap all now go
-        through.
+        Patched at get_draft_snapshot_predictions, not get_preseason_predictions:
+        the draft room reads the frozen snapshot (frozen=True), not the live
+        model, via the shared adapter (get_season_projection_blended) that the
+        draft room, player profile and draft recap all now go through.
         """
-        mock_get_preseason_predictions.return_value = {
+        mock_get_draft_snapshot_predictions.return_value = {
             "ARI": {
                 "projected_wins": 7.0,
                 "mean_wins": 6.7,
@@ -165,9 +165,9 @@ class TestPreseasonPredictionsShape:
         assert state["preseason_predictions"]["ARI"]["projected_wins"] == 7.0
 
     @patch("services.data_service.get_consensus_projections")
-    @patch("services.data_service.get_preseason_predictions")
+    @patch("services.data_service.get_draft_snapshot_predictions")
     def test_preseason_predictions_rounds_consensus_std_dev(
-        self, mock_get_preseason_predictions, mock_get_consensus_projections
+        self, mock_get_draft_snapshot_predictions, mock_get_consensus_projections
     ):
         """Consensus-sourced std_dev (consensus_std) is `float(np.std(vals))` from
         consensus_service.compute_derived -- unrounded, e.g. 1.1367210272875008.
@@ -176,7 +176,7 @@ class TestPreseasonPredictionsShape:
         it rounded to 2 decimals, or historical (2017-2025) draft rooms show long
         float tails like "8.5W ±1.1367210272875008" for undrafted teams.
         """
-        mock_get_preseason_predictions.return_value = {}
+        mock_get_draft_snapshot_predictions.return_value = {}
         mock_get_consensus_projections.return_value = {
             "BUF": {
                 "consensus_mean": 10.4,

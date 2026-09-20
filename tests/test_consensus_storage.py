@@ -118,6 +118,11 @@ def test_refresh_local_pkls_registers_consensus_collection():
     assert ("consensus_projections", "season") in COLLECTIONS
 
 
+def test_refresh_local_pkls_registers_draft_snapshot_collection():
+    from scripts.refresh_local_pkls import COLLECTIONS
+    assert ("draft_snapshot_predictions", "season") in COLLECTIONS
+
+
 def test_get_preseason_predictions_mean_wins_nan_falls_back_to_projected_wins(monkeypatch):
     """mean_wins can be a present-but-NaN column, not merely an absent key.
 
@@ -359,3 +364,274 @@ def test_set_preseason_predictions_no_db_returns_zero(monkeypatch):
     )
 
     assert count == 0
+
+
+def test_set_draft_snapshot_predictions_writes_full_stats(monkeypatch):
+    written = {}
+
+    class FakeDoc:
+        def __init__(self, doc_id):
+            self.doc_id = doc_id
+
+    class FakeBatch:
+        def set(self, ref, payload):
+            written[ref.doc_id] = payload
+
+        def commit(self):
+            pass
+
+    class FakeCollection:
+        def __init__(self):
+            self._docs = []
+
+        def document(self, doc_id):
+            return FakeDoc(doc_id)
+
+        def where(self, *a, **k):
+            return self
+
+        def stream(self):
+            return iter(self._docs)
+
+    class FakeDB:
+        def __init__(self):
+            self.collections = {}
+
+        def collection(self, name):
+            return self.collections.setdefault(name, FakeCollection())
+
+        def batch(self):
+            return FakeBatch()
+
+    import services.db_service as db_service
+    fake_db = FakeDB()
+    monkeypatch.setattr(db_service, "get_db", lambda: fake_db)
+    signaled = []
+    monkeypatch.setattr(db_service, "signal_data_update", lambda domain: signaled.append(domain))
+
+    count = db_service.set_draft_snapshot_predictions(
+        2026,
+        {"KC": {"projected_wins": 11.0, "mean_wins": 10.8, "std_dev": 1.95,
+                "floor": 7.0, "p25": 9.0, "p75": 12.0, "ceiling": 14.0}},
+        model_version="nn_v15+xgb_v9+lr_v7", locked=False,
+    )
+
+    assert count == 1
+    payload = written["2026_KC"]
+    assert payload["season"] == 2026
+    assert payload["team"] == "KC"
+    assert payload["projected_wins"] == 11.0
+    assert payload["model_version"] == "nn_v15+xgb_v9+lr_v7"
+    assert payload["locked"] is False
+    assert "generated_at" in payload
+    from services.cache_service import DOMAIN_PREDICTIONS_ACTIVE, DOMAIN_PREDICTIONS_HISTORICAL
+    assert len(signaled) == 1
+    assert signaled[0] in (DOMAIN_PREDICTIONS_ACTIVE, DOMAIN_PREDICTIONS_HISTORICAL)
+
+
+def test_set_draft_snapshot_predictions_skips_locked_team_without_force(monkeypatch):
+    written = {}
+
+    class FakeDoc:
+        def __init__(self, doc_id):
+            self.doc_id = doc_id
+
+    class FakeBatch:
+        def set(self, ref, payload):
+            written[ref.doc_id] = payload
+
+        def commit(self):
+            pass
+
+    class FakeExistingDoc:
+        def __init__(self, data):
+            self._data = data
+
+        def to_dict(self):
+            return self._data
+
+    class FakeCollection:
+        def __init__(self, existing_docs):
+            self._existing = existing_docs
+
+        def document(self, doc_id):
+            return FakeDoc(doc_id)
+
+        def where(self, *a, **k):
+            return self
+
+        def stream(self):
+            return iter(self._existing)
+
+    class FakeDB:
+        def __init__(self, existing_docs):
+            self._existing = existing_docs
+
+        def collection(self, name):
+            return FakeCollection(self._existing)
+
+        def batch(self):
+            return FakeBatch()
+
+    import services.db_service as db_service
+    existing = [FakeExistingDoc({"season": 2026, "team": "KC", "locked": True})]
+    monkeypatch.setattr(db_service, "get_db", lambda: FakeDB(existing))
+    monkeypatch.setattr(db_service, "signal_data_update", lambda domain: None)
+
+    count = db_service.set_draft_snapshot_predictions(
+        2026,
+        {
+            "KC":  {"projected_wins": 11.0, "mean_wins": 10.8, "std_dev": 1.95,
+                    "floor": 7.0, "p25": 9.0, "p75": 12.0, "ceiling": 14.0},
+            "TEN": {"projected_wins": 5.0, "mean_wins": 5.3, "std_dev": 2.1,
+                    "floor": 2.0, "p25": 4.0, "p75": 7.0, "ceiling": 9.0},
+        },
+        model_version="nn_v15+xgb_v9+lr_v7", locked=True,
+    )
+
+    # KC is already locked (draft has started for this season) -- skipped.
+    # TEN has no existing doc -- written, and locked=True is stamped on it too
+    # (the whole season locks together once the draft starts).
+    assert count == 1
+    assert "2026_KC" not in written
+    assert written["2026_TEN"]["locked"] is True
+
+
+def test_set_draft_snapshot_predictions_already_fully_locked_writes_nothing(monkeypatch):
+    """A re-run of refresh_preseason.py after the draft has started must be a
+    pure no-op for this collection -- the exact edge case the spec calls out."""
+    written = {}
+
+    class FakeDoc:
+        def __init__(self, doc_id):
+            self.doc_id = doc_id
+
+    class FakeBatch:
+        def set(self, ref, payload):
+            written[ref.doc_id] = payload
+
+        def commit(self):
+            pass
+
+    class FakeExistingDoc:
+        def __init__(self, data):
+            self._data = data
+
+        def to_dict(self):
+            return self._data
+
+    class FakeCollection:
+        def __init__(self, existing_docs):
+            self._existing = existing_docs
+
+        def document(self, doc_id):
+            return FakeDoc(doc_id)
+
+        def where(self, *a, **k):
+            return self
+
+        def stream(self):
+            return iter(self._existing)
+
+    class FakeDB:
+        def __init__(self, existing_docs):
+            self._existing = existing_docs
+
+        def collection(self, name):
+            return FakeCollection(self._existing)
+
+        def batch(self):
+            return FakeBatch()
+
+    import services.db_service as db_service
+    existing = [FakeExistingDoc({"season": 2026, "team": "KC", "locked": True})]
+    monkeypatch.setattr(db_service, "get_db", lambda: FakeDB(existing))
+    monkeypatch.setattr(db_service, "signal_data_update", lambda domain: None)
+
+    count = db_service.set_draft_snapshot_predictions(
+        2026,
+        {"KC": {"projected_wins": 99.0, "mean_wins": 99.0, "std_dev": 0,
+                "floor": 0, "p25": 0, "p75": 0, "ceiling": 0}},
+        model_version="nn_v16", locked=True,
+    )
+
+    assert count == 0
+    assert written == {}
+
+
+def test_set_draft_snapshot_predictions_no_db_returns_zero(monkeypatch):
+    import services.db_service as db_service
+    monkeypatch.setattr(db_service, "get_db", lambda: None)
+
+    count = db_service.set_draft_snapshot_predictions(
+        2026, {"KC": {"projected_wins": 11.0}},
+        model_version="nn_v15+xgb_v9+lr_v7", locked=False,
+    )
+
+    assert count == 0
+
+
+def test_sync_draft_snapshot_for_season_copies_and_locks_when_draft_started(monkeypatch):
+    import services.db_service as db_service
+
+    def fake_get_collection_df(name, filters=None):
+        if name == "preseason_predictions":
+            return pd.DataFrame([{"season": 2026, "team": "KC", "projected_wins": 11.0,
+                                   "mean_wins": 10.8, "std_dev": 1.95, "floor": 7.0,
+                                   "p25": 9.0, "p75": 12.0, "ceiling": 14.0,
+                                   "model_version": "nn_v15", "locked": False}])
+        if name == "draft_results":
+            return pd.DataFrame([{"season": 2026, "draftPick": 1, "playerId": 1, "team": "KC"}])
+        return pd.DataFrame()
+
+    monkeypatch.setattr(db_service, "get_collection_df", fake_get_collection_df)
+    captured = {}
+
+    def fake_set(season, projections, model_version, locked, force=False):
+        captured["projections"] = projections
+        captured["locked"] = locked
+        return len(projections)
+
+    monkeypatch.setattr(db_service, "set_draft_snapshot_predictions", fake_set)
+
+    result = db_service.sync_draft_snapshot_for_season(2026)
+
+    assert result == {"season": 2026, "written": 1, "locked": True}
+    assert captured["locked"] is True
+    assert captured["projections"]["KC"]["projected_wins"] == 11.0
+    assert "season" not in captured["projections"]["KC"]
+
+
+def test_sync_draft_snapshot_for_season_stays_unlocked_with_no_draft_results(monkeypatch):
+    import services.db_service as db_service
+
+    def fake_get_collection_df(name, filters=None):
+        if name == "preseason_predictions":
+            return pd.DataFrame([{"season": 2026, "team": "KC", "projected_wins": 11.0,
+                                   "mean_wins": 10.8, "std_dev": 1.95, "floor": 7.0,
+                                   "p25": 9.0, "p75": 12.0, "ceiling": 14.0,
+                                   "model_version": "nn_v15", "locked": False}])
+        if name == "draft_results":
+            return pd.DataFrame()
+        return pd.DataFrame()
+
+    monkeypatch.setattr(db_service, "get_collection_df", fake_get_collection_df)
+    monkeypatch.setattr(db_service, "set_draft_snapshot_predictions",
+                        lambda season, projections, model_version, locked, force=False: len(projections))
+
+    result = db_service.sync_draft_snapshot_for_season(2026)
+
+    assert result == {"season": 2026, "written": 1, "locked": False}
+
+
+def test_sync_draft_snapshot_for_season_no_preseason_data_is_a_noop(monkeypatch):
+    import services.db_service as db_service
+    monkeypatch.setattr(db_service, "get_collection_df", lambda name, filters=None: pd.DataFrame())
+    calls = []
+    monkeypatch.setattr(db_service, "set_draft_snapshot_predictions",
+                        lambda *a, **k: calls.append((a, k)) or 0)
+
+    result = db_service.sync_draft_snapshot_for_season(2026)
+
+    assert result == {"season": 2026, "written": 0, "locked": False}
+    assert calls == []

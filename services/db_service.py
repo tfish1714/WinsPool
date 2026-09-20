@@ -718,3 +718,104 @@ def set_preseason_predictions(season: int, projections: dict, model_version: str
         domain = DOMAIN_PREDICTIONS_ACTIVE if season == _get_active_bucket()["season"] else DOMAIN_PREDICTIONS_HISTORICAL
         signal_data_update(domain)
     return written
+
+
+def set_draft_snapshot_predictions(season: int, projections: dict, model_version: str,
+                                    locked: bool, force: bool = False) -> int:
+    """Write draft_snapshot_predictions docs for a season, respecting per-team locks.
+
+    Identical contract to set_preseason_predictions() -- see
+    docs/superpowers/specs/2026-09-15-preseason-draft-snapshot-design.md.
+    A team's existing doc is skipped (not overwritten) when it's already
+    locked=True and force=False, so once a season's draft has started
+    (locked=True was stamped on every team in one call), every later call for
+    that season writes zero docs -- a pure no-op re-run is exactly the
+    behavior the spec requires when refresh_preseason.py runs again after the
+    real draft has begun.
+
+    projections: {team: {projected_wins, mean_wins, std_dev, floor, p25,
+    p75, ceiling}} -- same shape set_preseason_predictions() takes.
+
+    Returns the number of docs actually written (skipped-due-to-lock docs
+    don't count).
+    """
+    db = get_db()
+    if db is None:
+        logger.warning("No database connection; draft snapshot predictions not written.")
+        return 0
+
+    existing_locked = set()
+    if not force:
+        from google.cloud.firestore_v1.base_query import FieldFilter
+        for doc in db.collection("draft_snapshot_predictions").where(filter=FieldFilter("season", "==", season)).stream():
+            data = doc.to_dict()
+            if data.get("locked"):
+                existing_locked.add(data.get("team"))
+
+    batch = db.batch()
+    written = 0
+    for team, stats in projections.items():
+        if team in existing_locked:
+            continue
+        ref = db.collection("draft_snapshot_predictions").document(f"{season}_{team}")
+        batch.set(ref, {
+            "season": int(season),
+            "team": team,
+            **stats,
+            "model_version": model_version,
+            "generated_at": time.time(),
+            "locked": locked,
+        })
+        written += 1
+        if written % 400 == 0:
+            batch.commit()
+            batch = db.batch()
+    if written % 400 != 0:
+        batch.commit()
+
+    if written:
+        from services.cache_service import DOMAIN_PREDICTIONS_ACTIVE, DOMAIN_PREDICTIONS_HISTORICAL
+        from services.data_service import _get_active_bucket
+        domain = DOMAIN_PREDICTIONS_ACTIVE if season == _get_active_bucket()["season"] else DOMAIN_PREDICTIONS_HISTORICAL
+        signal_data_update(domain)
+    return written
+
+
+_DRAFT_SNAPSHOT_FIELDS = ["projected_wins", "mean_wins", "std_dev", "floor", "p25", "p75", "ceiling"]
+
+
+def sync_draft_snapshot_for_season(season: int) -> dict:
+    """Copy season's preseason_predictions into draft_snapshot_predictions,
+    locking it once draft_results shows the season's draft has started.
+
+    The single implementation of the copy-and-lock rule -- both
+    scripts/write_draft_snapshot.py (run as a refresh_preseason.py step) and
+    the admin-triggered POST /api/admin/draft_snapshot/sync endpoint call
+    this directly, so a manual admin re-sync behaves identically to the
+    scheduled one. See
+    docs/superpowers/specs/2026-09-15-preseason-draft-snapshot-design.md.
+
+    draft_results only gains rows once a real pick has been made
+    (add_draft_result() above), so a non-empty result for this season is a
+    persistent, season-scoped fact -- unlike the transient draft_active
+    config flag -- and is what determines `locked`.
+
+    Returns {"season": int, "written": int, "locked": bool}. `written` is 0
+    when there's no preseason_predictions data yet, or when the season is
+    already fully locked (every team's existing snapshot doc has locked=True).
+    """
+    preds_df = get_collection_df("preseason_predictions", filters=[("season", "==", season)])
+    if preds_df.empty:
+        return {"season": season, "written": 0, "locked": False}
+
+    results_df = get_collection_df("draft_results", filters=[("season", "==", season)])
+    draft_started = not results_df.empty
+
+    model_version = preds_df.iloc[0].get("model_version", "unknown")
+    projections = {
+        row["team"]: {field: row.get(field) for field in _DRAFT_SNAPSHOT_FIELDS}
+        for _, row in preds_df.iterrows()
+    }
+
+    written = set_draft_snapshot_predictions(season, projections, model_version=model_version, locked=draft_started)
+    return {"season": season, "written": written, "locked": draft_started}
