@@ -195,3 +195,77 @@ def test_base_html_admin_link_uses_visibility_not_display():
     for line in src.splitlines():
         if 'admin-nav-link-drawer' in line:
             assert 'display: none' not in line, "admin-nav-link-drawer must not use display:none"
+
+
+class TestPredictionExplainGrading:
+    """Finding 3b: the /api/predictions/explain endpoint (feeds the "Why
+    TEAM?" modal) never returned is_correct/is_correct_ats at all, unlike
+    /admin/predictions/games (feeds the admin per-game table). This adds
+    the same grading, reusing betting_screener_service.grade_bet() rather
+    than re-implementing the ATS win/loss/push formula a third time."""
+
+    def _mock_games_df(self, **overrides):
+        import pandas as pd
+        row = {
+            "season": 2024, "week": 1, "home_team": "KC", "away_team": "BUF",
+            "result": 3.0, "home_score": 20.0, "away_score": 17.0, "spread_line": -2.5,
+        }
+        row.update(overrides)
+        return pd.DataFrame([row])
+
+    def test_completed_game_returns_grading_fields(self, monkeypatch, auth_token):
+        from unittest.mock import patch
+        fake_pred = {
+            "pred_winner": "KC", "pred_su_conf": 65, "pred_ats_pick": "KC",
+            "model_spread": -3.0, "explanation": {"vegas_line": -2.5},
+        }
+        with patch("services.cache_service.get_game_predictions", return_value={"W01_KC_BUF": fake_pred}), \
+             patch("routes.api_routes.load_data", return_value=(None, None, self._mock_games_df(), None, None, None, None)):
+            resp = client.get(
+                "/api/predictions/explain?season=2024&week=1&home=KC&away=BUF",
+                headers={"Authorization": auth_token},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["actual_winner"] == "KC"
+        assert body["home_score"] == 20
+        assert body["away_score"] == 17
+        assert body["is_correct"] is True   # pred_winner=KC, actual_winner=KC
+        assert body["is_correct_ats"] is True  # KC picked ATS; home margin 3 > vegas_line -2.5 -> home covers
+
+    def test_future_game_returns_null_grading_fields(self, monkeypatch, auth_token):
+        from unittest.mock import patch
+        fake_pred = {
+            "pred_winner": "KC", "pred_su_conf": 65, "pred_ats_pick": "KC",
+            "model_spread": -3.0, "explanation": {"vegas_line": -2.5},
+        }
+        unplayed = self._mock_games_df(result=None, home_score=None, away_score=None)
+        with patch("services.cache_service.get_game_predictions", return_value={"W01_KC_BUF": fake_pred}), \
+             patch("routes.api_routes.load_data", return_value=(None, None, unplayed, None, None, None, None)):
+            resp = client.get(
+                "/api/predictions/explain?season=2024&week=1&home=KC&away=BUF",
+                headers={"Authorization": auth_token},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["actual_winner"] is None
+        assert body["home_score"] is None
+        assert body["away_score"] is None
+        assert body["is_correct"] is None
+        assert body["is_correct_ats"] is None
+
+    def test_wrong_su_pick_grades_as_incorrect(self, monkeypatch, auth_token):
+        from unittest.mock import patch
+        fake_pred = {
+            "pred_winner": "BUF", "pred_su_conf": 55, "pred_ats_pick": "BUF",
+            "model_spread": 1.0, "explanation": {"vegas_line": -2.5},
+        }
+        with patch("services.cache_service.get_game_predictions", return_value={"W01_KC_BUF": fake_pred}), \
+             patch("routes.api_routes.load_data", return_value=(None, None, self._mock_games_df(), None, None, None, None)):
+            resp = client.get(
+                "/api/predictions/explain?season=2024&week=1&home=KC&away=BUF",
+                headers={"Authorization": auth_token},
+            )
+        body = resp.json()
+        assert body["is_correct"] is False   # pred_winner=BUF, actual_winner=KC
+        assert body["is_correct_ats"] is False  # BUF picked ATS; away margin -3 < vegas_line(-away)=2.5 -> away does not cover

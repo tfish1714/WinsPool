@@ -229,7 +229,9 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
     try:
         from services.cache_service import get_game_predictions
         from services.nn_feature_engine import _normalize_team
+        from services.betting_screener_service import grade_bet
         import math
+        import pandas as pd
         ht = _normalize_team(home)
         at = _normalize_team(away)
         key = f"W{week:02d}_{ht}_{at}"
@@ -238,33 +240,68 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
         if not pred:
             return not_found("No prediction found for this game.")
 
+        ex = dict(pred.get("explanation") or {})
+
+        # One shared game-row lookup feeds both the existing vegas_line
+        # fallback below and the new SU/ATS grading (Finding 3b: this
+        # endpoint never returned is_correct/is_correct_ats at all, unlike
+        # /admin/predictions/games's per-game table). Both grading fields
+        # stay None for a future/unplayed game.
+        actual_winner, home_score, away_score = None, None, None
+        row = None
+        _, _, all_games, _, _, _, _ = load_data()
+        if not all_games.empty:
+            mask = (
+                (all_games["season"] == season) &
+                (all_games["week"] == week) &
+                (all_games["home_team"].apply(_normalize_team) == ht) &
+                (all_games["away_team"].apply(_normalize_team) == at)
+            )
+            matched = all_games[mask]
+            if not matched.empty:
+                row = matched.iloc[0]
+                res = row.get("result")
+                if pd.notna(res):
+                    actual_winner = ht if res > 0 else (at if res < 0 else None)
+                    hs, aws = row.get("home_score"), row.get("away_score")
+                    home_score = int(hs) if pd.notna(hs) else None
+                    away_score = int(aws) if pd.notna(aws) else None
+
         # If the stored explanation has no vegas_line, fall back to nfl_games.spread_line.
         # This is the same fallback used by /admin/predictions/games.
-        ex = dict(pred.get("explanation") or {})
-        if ex.get("vegas_line") is None:
-            _, _, all_games, _, _, _, _ = load_data()
-            if not all_games.empty and "spread_line" in all_games.columns:
-                mask = (
-                    (all_games["season"] == season) &
-                    (all_games["week"] == week) &
-                    (all_games["home_team"].apply(_normalize_team) == ht) &
-                    (all_games["away_team"].apply(_normalize_team) == at)
-                )
-                row = all_games[mask]
-                if not row.empty:
-                    sl = row.iloc[0].get("spread_line")
-                    try:
-                        sv = float(sl)
-                        if not math.isnan(sv):
-                            ex["vegas_line"] = round(sv, 1)
-                            if ex.get("edge_vs_vegas") is None and pred.get("model_spread") is not None:
-                                ex["edge_vs_vegas"] = round(pred["model_spread"] - sv, 1)
-                    except (TypeError, ValueError):
-                        pass
+        if ex.get("vegas_line") is None and row is not None:
+            sl = row.get("spread_line")
+            try:
+                sv = float(sl)
+                if not math.isnan(sv):
+                    ex["vegas_line"] = round(sv, 1)
+                    if ex.get("edge_vs_vegas") is None and pred.get("model_spread") is not None:
+                        ex["edge_vs_vegas"] = round(pred["model_spread"] - sv, 1)
+            except (TypeError, ValueError):
+                pass
             pred = {**pred, "explanation": ex}
             # Also patch top-level edge_vs_vegas if still missing
             if pred.get("edge_vs_vegas") is None and ex.get("edge_vs_vegas") is not None:
                 pred = {**pred, "edge_vs_vegas": ex["edge_vs_vegas"]}
+
+        # SU grading -- only meaningful once the game has an actual winner.
+        is_correct = None
+        pw = pred.get("pred_winner")
+        if actual_winner is not None and pw is not None:
+            is_correct = (_normalize_team(str(pw)) == actual_winner)
+
+        # ATS grading -- reuses grade_bet(), the same helper
+        # services/betting_screener_service.py's backtesting already uses,
+        # rather than a second copy of the win/loss/push formula.
+        is_correct_ats = None
+        pred_ats_pick = pred.get("pred_ats_pick")
+        vegas_line = ex.get("vegas_line")
+        if (pred_ats_pick is not None and vegas_line is not None
+                and home_score is not None and away_score is not None):
+            side = "home" if _normalize_team(str(pred_ats_pick)) == ht else "away"
+            grade = grade_bet(side, home_score, away_score, vegas_line)
+            if grade in ("win", "loss"):
+                is_correct_ats = (grade == "win")
 
         return JSONResponse(content={
             "key": key,
@@ -273,6 +310,11 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
             "season": season,
             "week": week,
             **{k: v for k, v in pred.items() if k != "locked"},
+            "actual_winner": actual_winner,
+            "home_score": home_score,
+            "away_score": away_score,
+            "is_correct": is_correct,
+            "is_correct_ats": is_correct_ats,
         })
     except Exception as e:
         logger.exception("Unhandled error in get_prediction_explain")
