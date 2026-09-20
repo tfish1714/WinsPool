@@ -307,6 +307,23 @@ class TestMainSignaling:
 
         mock_signal.assert_called_once_with(DOMAIN_ACTIVE)
 
+    def test_overlay_runs_before_cache_signal_not_after(self):
+        """Regression guard for the ordering itself, not just that both
+        calls happen -- a swap would still pass test_signals_active_domain_after_overlay
+        above, since that test only checks signal_data_update was called at
+        all, not when."""
+        call_order = []
+        with patch("scripts.sync_live_scores.initialize_firebase", return_value=MagicMock()), \
+             patch("scripts.sync_live_scores.sync_authoritative", return_value=_games_df()), \
+             patch("scripts.sync_live_scores.run_espn_overlay_safely",
+                   side_effect=lambda *a, **k: call_order.append("overlay") or 0), \
+             patch("services.db_service.signal_data_update",
+                   side_effect=lambda *a, **k: call_order.append("signal")):
+            from scripts.sync_live_scores import main
+            main()
+
+        assert call_order == ["overlay", "signal"]
+
 
 class TestAlertingPaths:
     """I5: coverage on the two alerting-path constraints -- the authoritative
