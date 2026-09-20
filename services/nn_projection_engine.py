@@ -21,7 +21,6 @@ from services.nn_feature_engine import (
     RAWDATA_DIR,
     _read_csv_safe,
     _normalize_team,
-    compute_preseason_roster_features,
     compute_preseason_player_profiles,
     compute_qb_availability_flags,
 )
