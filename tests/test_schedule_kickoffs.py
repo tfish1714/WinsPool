@@ -401,3 +401,14 @@ class TestComputeKickoffClustersWithGames:
         late = next(g for dt, g in result if dt.hour == 16)
         assert sorted(early) == ["g1", "g2"]
         assert late == ["g3"]
+
+
+def test_resimulate_lead_minutes_fires_after_routine_predict():
+    """RESIMULATE_LEAD_MINUTES must stay strictly less than PREDICT_LEAD_MINUTES
+    (smaller lead = closer to kickoff = fires later in absolute time), or the
+    resimulate step could run before the routine predict step and get
+    overwritten by it -- see the ordering comment in schedule_kickoffs.py.
+    Also pins the specific value chosen after profiling engine.initialize()."""
+    from scripts.schedule_kickoffs import RESIMULATE_LEAD_MINUTES, PREDICT_LEAD_MINUTES
+    assert RESIMULATE_LEAD_MINUTES == 30
+    assert RESIMULATE_LEAD_MINUTES < PREDICT_LEAD_MINUTES

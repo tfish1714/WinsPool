@@ -45,7 +45,6 @@ from services.cache_service import (
     write_game_predictions, get_game_predictions, merge_thin_game_predictions,
 )
 import services.analysis_service as analysis
-from services.prediction_service import PredictionService
 from services.nn_projection_engine import (
     NNProjectionEngine, build_mc_prediction_entry, derive_prediction_scalars,
 )

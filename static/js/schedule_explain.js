@@ -47,6 +47,13 @@ function _bar(pct, color) {
     </div>`;
 }
 
+function _gradeIcon(isCorrect) {
+    if (isCorrect === null || isCorrect === undefined) return '';
+    return isCorrect
+        ? '<span style="color:var(--accent-green); font-weight:700;">✓</span>'
+        : '<span style="color:var(--accent-red); font-weight:700;">✗</span>';
+}
+
 function _row(label, valueHtml, subHtml = '') {
     return `<div style="display:flex; justify-content:space-between; align-items:flex-start; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
         <span style="color:var(--text-secondary); font-size:0.8rem; flex:1;">${label}</span>
@@ -60,7 +67,7 @@ function _row(label, valueHtml, subHtml = '') {
 function renderExplanation(data) {
     const { home_team, away_team, pred_winner, pred_su_conf, pred_prob,
             pred_ats_pick, model_spread, edge_vs_vegas, explanation: ex,
-            currentWeek = 0 } = data;
+            currentWeek = 0, is_correct = null, is_correct_ats = null } = data;
 
     const isProfileOnly   = ex?.source === 'profile';
     const isMcSimulation  = !isProfileOnly && data.week > currentWeek;
@@ -74,9 +81,10 @@ function renderExplanation(data) {
     // ── Top cards ──────────────────────────────────────────────────────────────
 
     // Card 1: ML Pick
+    const suGrade = _gradeIcon(is_correct);
     const pickCard = `
         <div style="flex:1; min-width:130px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
-            <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">ML Pick</div>
+            <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">ML Pick${suGrade ? ` · SU ${suGrade}` : ''}</div>
             <div style="font-size:1.3rem; font-weight:800; color:${predColor};">${pred_winner}</div>
             <div style="font-size:0.75rem;">${isMcSimulation ? `wins ${pred_su_conf}% of simulations` : `${pred_su_conf}% confidence`}</div>
             ${confBar}
@@ -111,9 +119,10 @@ function renderExplanation(data) {
 
     // Card 3: ATS pick (only if it differs from SU, or always show)
     const atsDiffers = pred_ats_pick && pred_ats_pick !== pred_winner;
+    const atsGrade = _gradeIcon(is_correct_ats);
     const atsCard = pred_ats_pick ? `
         <div style="flex:1; min-width:110px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
-            <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">ATS Pick</div>
+            <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">ATS Pick${atsGrade ? ` · ${atsGrade}` : ''}</div>
             <div style="font-size:1.3rem; font-weight:800; color:${atsDiffers ? 'var(--accent-gold)' : predColor};">${pred_ats_pick}</div>
             <div style="font-size:0.72rem; color:var(--text-secondary);">${atsDiffers ? '⚡ differs from SU' : 'vs spread'}</div>
         </div>` : '';

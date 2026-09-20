@@ -94,11 +94,6 @@ class SaveBroadcastRecapRequest(BaseModel):
 
 # --- Predictions ---
 
-class PredictionConfigRequest(BaseModel):
-    elo_weight: float = 0.7
-    simulations: int = 1000
-
-
 # --- Mock Draft ---
 
 class MockDraftPickRequest(BaseModel):

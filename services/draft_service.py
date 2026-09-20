@@ -84,8 +84,6 @@ def load_draft_state(connected_players: set, year: int = None) -> Dict[str, Any]
             "connected_players": list(connected_players), "all_players": [],
         }
 
-    from services.prediction_service import PredictionService
-    
     # 2. Load Data (GRANULAR: Only fetches current season as we use cached analytics)
     if is_debug: 
         logger.debug("draft_state: fetching granular season data for %s...", season)

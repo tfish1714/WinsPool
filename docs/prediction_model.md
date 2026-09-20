@@ -77,24 +77,22 @@ team_profile[team][feature] = mean of that feature across all 2025 games
 
 ### Step 2: Preseason Trench Override
 
-Because `trench_dominance_metric` is built from snap counts + DL stats that reflect the *old roster*, a 2026 preseason override uses actual 2026 roster files + 2025 individual player performance:
+`trench_dominance_metric` is normally built from snap counts + DL stats that reflect the *prior* season's team-level rosters (`_load_trench_rolling_stats()`). Because that's stale once a roster turns over, the preseason path overrides it with a **player-level** signal from `compute_preseason_player_profiles()` (`nn_feature_engine.py`) — the same function that seeds the Season Win Projection's Elo boost (see "Season Win Projection" near the end of this doc) — rather than a team-level roster-file lookup:
 
 ```python
-preseason_roster = compute_preseason_roster_features(2026, rawdata_dir)
-# → {team: {"ol_av": float, "dl_perf": float}}
+profiles = compute_preseason_player_profiles(2026, rawdata_dir)
+# → {team: {"ol_av": float, "dl_perf": float, ...}}  (also off/def pass+rush EPA, qb_tier)
 
-# Normalize against league-wide distribution for this preseason
-ol_mu, ol_sig = mean/std of ol_av across all 32 teams
-dl_mu, dl_sig = mean/std of dl_perf across all 32 teams
+# Normalize OL/DL scores against the league-wide distribution of preseason profiles
+ol_mu, ol_sig = mean/std of ol_av across all teams with a profile
+dl_mu, dl_sig = mean/std of dl_perf across all teams with a profile
 
 trench[home] = z(home_ol) + z(home_dl)
 trench[away] = z(away_ol) + z(away_dl)
 game_trench  = trench[home] - trench[away]
 ```
 
-OL score = Σ(offense_snaps × age_multiplier) per OL player on 2026 roster matched to 2025 snaps.
-DL score = Σ((sacks×6 + qb_hits×1 + pressures×1.5) × age_multiplier) per DL player.
-Rookies with no prior-season snap data get `position_median × 0.5`.
+`ol_av` = Σ(blended snap volume × age multiplier) per starting OL player, blending up to 3 prior seasons weighted by recency × snap-share reliability — a season below a minimum-snap threshold is dropped from the blend entirely, not just down-weighted. `dl_perf` = Σ(per-snap score from sacks + pressures + QB hits, each weighted, same multi-season blend and age adjustment) per starting DL player, with edge-rushing OLBs promoted into the DL group when their pass-rush production justifies it. A player with no matching prior-season data at all falls back to a league-average rate for the position, discounted for being unproven. If a team has no preseason profile at all, the engine falls back to that team's flat prior-season `trench_score` average (the same rolling snap/DL-stat aggregate Path 1 uses).
 
 ### Step 3: Assemble Game Features
 
@@ -470,7 +468,7 @@ Used by `NNProjectionEngine.simulate_season()`, called by `predict_season.py`, `
 
 ### Step 1: Seed initial team state from preseason player profiles
 
-`initialize()` builds each team's starting Elo/EPA/margin state from **player-level** preseason profiles (`compute_preseason_player_profiles()` in `nn_feature_engine.py`) — a materially more detailed computation than Path 2's team-level `compute_preseason_roster_features()` override above. It blends up to `DL_BLEND_SEASONS` (3) prior seasons per player across **every** position group (QB/WR/TE/RB, OL, DL, LB, CB/S), weighted by recency (`DL_BLEND_RECENCY_WEIGHTS = [0.55, 0.30, 0.15]`, most-recent first) × reliability (that season's snap/attempt/target/carry share of a full role, via the `FULL_SEASON_*` constants). A season below a minimum-sample threshold (e.g. `DL_MIN_SNAPS_TRUSTED`, and equivalent per-position volume gates on the offensive side) is **excluded from the blend entirely**, not merely down-weighted — a genuinely tiny sample (a backup's handful of pass attempts, a few defensive snaps) can otherwise produce a wildly noisy rate that still pollutes the blend once every available season for that player is similarly small. An additional age-scaled "return risk" haircut applies when the *most recent* season specifically was injury-shortened, so a healthy multi-year track record isn't erased by one bad year — while a genuine current-season breakout still dominates, since it's both most recent and normal-volume.
+`initialize()` builds each team's starting Elo/EPA/margin state from **player-level** preseason profiles (`compute_preseason_player_profiles()` in `nn_feature_engine.py`) — the same function Path 2's trench override above draws `ol_av`/`dl_perf` from, here consuming the full profile (all 7 dimensions) rather than just those two. It blends up to `DL_BLEND_SEASONS` (3) prior seasons per player across **every** position group (QB/WR/TE/RB, OL, DL, LB, CB/S), weighted by recency (`DL_BLEND_RECENCY_WEIGHTS = [0.55, 0.30, 0.15]`, most-recent first) × reliability (that season's snap/attempt/target/carry share of a full role, via the `FULL_SEASON_*` constants). A season below a minimum-sample threshold (e.g. `DL_MIN_SNAPS_TRUSTED`, and equivalent per-position volume gates on the offensive side) is **excluded from the blend entirely**, not merely down-weighted — a genuinely tiny sample (a backup's handful of pass attempts, a few defensive snaps) can otherwise produce a wildly noisy rate that still pollutes the blend once every available season for that player is similarly small. An additional age-scaled "return risk" haircut applies when the *most recent* season specifically was injury-shortened, so a healthy multi-year track record isn't erased by one bad year — while a genuine current-season breakout still dominates, since it's both most recent and normal-volume.
 
 ### Step 2: Profile composite → Elo boost
 

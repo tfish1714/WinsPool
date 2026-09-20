@@ -57,58 +57,6 @@ Returns the enriched schedule for a season, including draft owner mappings, odds
 
 ## Prediction Engine Endpoints
 
-### `GET /api/predictions/game`
-
-Returns the blended win probability for a single NFL matchup using the Elo + Pythagorean model.
-
-| Parameter | Location | Type | Description |
-|---|---|---|---|
-| `home_team` | query | `string` | Home team abbreviation (e.g. `"KC"`) |
-| `away_team` | query | `string` | Away team abbreviation (e.g. `"BUF"`) |
-| `season` | query | `int` | Season year for Elo context (default 2025) |
-
-**Response**: `{ home_team, away_team, home_win_prob, away_win_prob, elo_home_prob, pyth_home_prob, home_elo, away_elo, adjustments, travel_miles, elo_weight, predicted_spread }`
-
----
-
-### `GET /api/predictions/portfolio`
-
-Monte Carlo projected cumulative wins for a player's 3-team portfolio.
-
-| Parameter | Location | Type | Description |
-|---|---|---|---|
-| `season` | query | `int` | Season year |
-| `playerId` | query | `int` | Player whose drafted teams to project |
-
-**Response**: `{ mean_wins, std_wins, min_wins, max_wins, actual_wins, projected_additional, simulations, season_complete }`
-
----
-
-### `GET /api/predictions/ratings`
-
-Current Elo power ratings for all NFL teams, sorted by rating descending.
-
-| Parameter | Location | Type | Description |
-|---|---|---|---|
-| `season` | query | `int` | Season year for Elo context (default 2025) |
-
-**Response**: JSON object mapping team abbreviation to Elo rating.
-
----
-
-### `GET /api/admin/predictions/confidence`
-
-Admin-only: Confidence scores ranking all NFL teams for the live draft room. Excludes already-drafted teams.
-
-| Parameter | Location | Type | Description |
-|---|---|---|---|
-| `season` | query | `int` | Season year |
-| `playerId` | query | `string` | Admin player ID (for auth) |
-
-**Response**: Array of `{ team, elo, projected_wins, confidence, rank }` sorted by confidence descending.
-
----
-
 ### `GET /api/predictions/accuracy`
 
 Returns ML ensemble prediction accuracy versus actual game results.
@@ -137,34 +85,7 @@ Returns a per-game prediction explanation with feature breakdown and Vegas line 
 | `home` | query | `string` | Home team abbreviation (e.g. `"KC"`) |
 | `away` | query | `string` | Away team abbreviation |
 
-**Response**: `{ home_team, away_team, pred_home_wp, model_spread, vegas_line, features: { ... } }`
-
----
-
-### `GET /api/admin/predictions/config`
-
-Admin-only: Read the current model blend weights.
-
-| Parameter | Location | Type | Description |
-|---|---|---|---|
-| `playerId` | query | `string` | Admin player ID |
-
-**Response**: `{ elo_weight, simulations }`
-
----
-
-### `POST /api/admin/predictions/config`
-
-Admin-only: Update the Elo/Pythagorean blend weights. Persisted to Firestore `metadata/prediction_config`.
-
-**Request Body**:
-```json
-{ "playerId": "string", "elo_weight": 0.7, "simulations": 1000 }
-```
-
-**Constraints**: `elo_weight` must be in [0.0, 1.0]. `simulations` must be in [100, 10000].
-
-**Response**: `{ message, elo_weight, pythagorean_weight, simulations }`
+**Response**: `{ key, home_team, away_team, season, week, ...stored prediction fields (e.g. pred_winner, pred_su_conf, pred_prob, pred_ats_pick, model_spread, edge_vs_vegas, explanation) except locked, actual_winner, home_score, away_score, is_correct, is_correct_ats }` — the last two grading fields are `bool | None`, `None` for a game that hasn't been played yet.
 
 ---
 

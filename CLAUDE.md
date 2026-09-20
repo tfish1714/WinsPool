@@ -382,7 +382,7 @@ Not synced (redundant or unmaintained): `FiveThirtyEight.csv` (FTE, stops 2022),
 
 ### Roster talent features
 - `roster_talent_delta` — performance-based team grade from `stats_team_week_*.csv` (2020+): cumulative offense + defense composite z-scored within each week.
-- `trench_dominance_metric` — composite of OL snap quality (snap counts × age multiplier, 2012+) and DL performance (sacks×6 + qb_hits×1 + tfl×1 from `stats_team_week_*.csv`, 2020+), z-scored per season so both components contribute equally. In the **preseason path**, this is overridden using the actual target-season roster file (`roster_{year}.csv`) joined to the prior season's individual player advstats (`advstats_week_def_*.csv`).
+- `trench_dominance_metric` — composite of OL snap quality (snap counts × age multiplier, 2012+) and DL performance (sacks×6 + qb_hits×1 + tfl×1 from `stats_team_week_*.csv`, 2020+), z-scored per season so both components contribute equally. In the **preseason path**, this is overridden using `services/nn_feature_engine.py::compute_preseason_player_profiles()` — a player-level blend of up to 3 prior seasons' individual player snap-counts/advstats per position, weighted by recency × role reliability with age-scaled injury discounting — not a team-level roster-file lookup.
 
 ### Files safe to delete
 - `rawdata/dont use/` — deprecated old PBP format (~157 MB)
