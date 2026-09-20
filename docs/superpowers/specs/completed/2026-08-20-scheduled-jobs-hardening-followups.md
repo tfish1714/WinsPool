@@ -1,7 +1,7 @@
 # Scheduled Jobs: Hardening Follow-Ups (Live-Score Bug + Test Coverage)
 
 **Date:** 2026-08-20
-**Status:** Not designed — backlog, split out of the scheduled-jobs implementation (`2026-08-19-scheduled-jobs.md`) so these don't get lost. Needs its own pass when picked up, not decided here.
+**Status:** Done — implemented by `docs/superpowers/plans/completed/2026-09-19-scheduled-jobs-hardening-followups.md`. Section 1's bug is fixed; Section 2's four test-coverage gaps are all closed. Two items surfaced by that work's final review remain open and are carried forward in `docs/superpowers/specs/2026-09-19-live-score-service-followups.md` (whether `sync_live_scores_to_df()` is still needed at all, and a missing "hasn't kicked off yet" guard on its score/`result` overwrite).
 
 ## Origin
 
