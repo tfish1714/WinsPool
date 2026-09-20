@@ -25,13 +25,17 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 # "any script that writes to Firestore must force USE_LOCAL_DATA=False" gotcha.
 os.environ["USE_LOCAL_DATA"] = "False"
 
-from services.db_service import sync_draft_snapshot_for_season
+from services.db_service import get_db, sync_draft_snapshot_for_season
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--season", type=int, required=True)
     args = ap.parse_args()
+
+    if get_db() is None:
+        print(f"  [error] no Firestore connection -- draft_snapshot_predictions NOT synced for season={args.season}")
+        sys.exit(1)
 
     result = sync_draft_snapshot_for_season(args.season)
     if result["written"] > 0:

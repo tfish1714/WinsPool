@@ -11,7 +11,8 @@ from scripts.write_draft_snapshot import main
 def test_main_parses_season_and_calls_sync(monkeypatch):
     import sys
     monkeypatch.setattr(sys, "argv", ["write_draft_snapshot.py", "--season", "2026"])
-    with patch("scripts.write_draft_snapshot.sync_draft_snapshot_for_season") as mock_sync:
+    with patch("scripts.write_draft_snapshot.get_db", return_value=object()), \
+         patch("scripts.write_draft_snapshot.sync_draft_snapshot_for_season") as mock_sync:
         mock_sync.return_value = {"season": 2026, "written": 32, "locked": False}
         main()
     mock_sync.assert_called_once_with(2026)
@@ -20,7 +21,8 @@ def test_main_parses_season_and_calls_sync(monkeypatch):
 def test_main_prints_locked_state(monkeypatch, capsys):
     import sys
     monkeypatch.setattr(sys, "argv", ["write_draft_snapshot.py", "--season", "2026"])
-    with patch("scripts.write_draft_snapshot.sync_draft_snapshot_for_season") as mock_sync:
+    with patch("scripts.write_draft_snapshot.get_db", return_value=object()), \
+         patch("scripts.write_draft_snapshot.sync_draft_snapshot_for_season") as mock_sync:
         mock_sync.return_value = {"season": 2026, "written": 32, "locked": True}
         main()
     out = capsys.readouterr().out
@@ -31,8 +33,23 @@ def test_main_prints_locked_state(monkeypatch, capsys):
 def test_main_prints_skip_when_nothing_written(monkeypatch, capsys):
     import sys
     monkeypatch.setattr(sys, "argv", ["write_draft_snapshot.py", "--season", "2026"])
-    with patch("scripts.write_draft_snapshot.sync_draft_snapshot_for_season") as mock_sync:
+    with patch("scripts.write_draft_snapshot.get_db", return_value=object()), \
+         patch("scripts.write_draft_snapshot.sync_draft_snapshot_for_season") as mock_sync:
         mock_sync.return_value = {"season": 2026, "written": 0, "locked": False}
         main()
     out = capsys.readouterr().out
     assert "skip" in out.lower()
+
+
+def test_main_exits_nonzero_when_no_db_connection(monkeypatch, capsys):
+    import sys
+    monkeypatch.setattr(sys, "argv", ["write_draft_snapshot.py", "--season", "2026"])
+    with patch("scripts.write_draft_snapshot.get_db", return_value=None), \
+         patch("scripts.write_draft_snapshot.sync_draft_snapshot_for_season") as mock_sync:
+        import pytest
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code != 0
+    out = capsys.readouterr().out
+    assert "no firestore connection" in out.lower()
+    mock_sync.assert_not_called()
