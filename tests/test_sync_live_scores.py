@@ -217,6 +217,78 @@ class TestSyncAuthoritativeScoping:
 
         assert list(result["game_id"]) == ["pre1"]
 
+    def test_game_exactly_seven_days_old_is_included(self, monkeypatch):
+        """The filter is >= today - 7 days, so a game exactly 7 days old is
+        the oldest game still included, not the newest game excluded."""
+        from scripts import sync_live_scores
+        exactly_seven_days_ago = (pd.Timestamp.now().normalize() - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
+        fake_games = pd.DataFrame([
+            {"season": 2026, "game_type": "REG", "home_team": "KC", "away_team": "SF",
+             "result": 3, "home_score": 20, "away_score": 17, "game_id": "boundary",
+             "gameday": exactly_seven_days_ago},
+        ])
+        monkeypatch.setattr(sync_live_scores, "load_games", lambda: fake_games)
+        captured = {}
+
+        def fake_batch_upload(db, name, df, id_col=None, diff_before_write=False):
+            captured[name] = df
+            return 0
+        monkeypatch.setattr(sync_live_scores, "batch_upload", fake_batch_upload)
+
+        with self._patch_subprocess_ok():
+            sync_authoritative(MagicMock())
+
+        assert list(captured["nfl_games"]["game_id"]) == ["boundary"]
+
+    def test_game_eight_days_old_is_excluded(self, monkeypatch):
+        """One day past the boundary must be excluded -- confirms the window
+        actually has an edge, not just an off-by-a-lot margin."""
+        from scripts import sync_live_scores
+        eight_days_ago = (pd.Timestamp.now().normalize() - pd.Timedelta(days=8)).strftime("%Y-%m-%d")
+        fake_games = pd.DataFrame([
+            {"season": 2026, "game_type": "REG", "home_team": "KC", "away_team": "SF",
+             "result": 3, "home_score": 20, "away_score": 17, "game_id": "too_old",
+             "gameday": eight_days_ago},
+        ])
+        monkeypatch.setattr(sync_live_scores, "load_games", lambda: fake_games)
+        captured = {}
+
+        def fake_batch_upload(db, name, df, id_col=None, diff_before_write=False):
+            captured[name] = df
+            return 0
+        monkeypatch.setattr(sync_live_scores, "batch_upload", fake_batch_upload)
+
+        with self._patch_subprocess_ok():
+            sync_authoritative(MagicMock())
+
+        assert list(captured["nfl_games"]["game_id"]) == []
+
+    def test_malformed_gameday_is_excluded_not_crashed_on(self, monkeypatch):
+        """A game with an unparseable/missing gameday must be silently
+        excluded from the trailing-week push, never raise or crash the sync."""
+        from scripts import sync_live_scores
+        fake_games = pd.DataFrame([
+            {"season": 2026, "game_type": "REG", "home_team": "KC", "away_team": "SF",
+             "result": 3, "home_score": 20, "away_score": 17, "game_id": "malformed",
+             "gameday": "not-a-real-date"},
+            {"season": 2026, "game_type": "REG", "home_team": "KC", "away_team": "BUF",
+             "result": None, "home_score": None, "away_score": None, "game_id": "good",
+             "gameday": pd.Timestamp.now().strftime("%Y-%m-%d")},
+        ])
+        monkeypatch.setattr(sync_live_scores, "load_games", lambda: fake_games)
+        captured = {}
+
+        def fake_batch_upload(db, name, df, id_col=None, diff_before_write=False):
+            captured[name] = df
+            return 0
+        monkeypatch.setattr(sync_live_scores, "batch_upload", fake_batch_upload)
+
+        with self._patch_subprocess_ok():
+            result = sync_authoritative(MagicMock())  # must not raise
+
+        assert list(captured["nfl_games"]["game_id"]) == ["good"]
+        assert list(result["game_id"]) == ["good"]
+
 
 class TestMainSignaling:
     """Task 9: main() signals DOMAIN_ACTIVE unconditionally (the ESPN
