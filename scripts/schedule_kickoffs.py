@@ -78,11 +78,17 @@ PREDICT_LEAD_MINUTES = 60
 #      simulate_season() being scoped to one season does NOT make
 #      initialize() itself cheap; it runs before simulate_season() either way.
 #   4. The Monte Carlo simulate_season() call itself (RESIMULATE_N_SIMS).
-# NOT yet validated against a measured runtime of --resimulate (Task 6) in
-# production: before relying on this in-season, time a real invocation (see
-# Step 9 below) and adjust this constant if it runs longer than the margin
-# allows. 20 is an unvalidated placeholder, not a measured value.
-RESIMULATE_LEAD_MINUTES = 20
+# Measured (docs/superpowers/specs/2026-09-18-model-prediction-e2e-review-design.md,
+# Stage 3 finding 2, and independently reconfirmed during planning): a real
+# invocation of engine.initialize() takes roughly 440-640s depending on
+# environment, and build_master_feature_table() alone is ~96% of that --
+# compute_qb_availability_flags()/compute_roster_value() are single-digit
+# seconds each. That's up to ~53% of the original 20-minute budget BEFORE any
+# Cloud Run cold-start penalty (commonly 30-90s+ for a TensorFlow-loading
+# image). 30 keeps real margin against that measured range while staying
+# comfortably less than PREDICT_LEAD_MINUTES (60), so this step still fires
+# after the routine predict run, not before it.
+RESIMULATE_LEAD_MINUTES = 30
 
 # NFL gametime is published in US/Eastern per nflverse convention. Use a
 # proper DST-aware zone -- clocks fall back to EST (UTC-5) the first Sunday
