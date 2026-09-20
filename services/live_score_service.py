@@ -81,30 +81,37 @@ def get_live_updates():
 def sync_live_scores_to_df(games_df: pd.DataFrame) -> pd.DataFrame:
     """
     Overlays live ESPN data onto the provided games DataFrame.
-    Only updates games that are NOT yet final in the source DF, 
+    Only updates games that are NOT yet final in the source DF,
     or games that ESPN says are currently active.
     """
     if games_df.empty:
         return games_df
-        
+
     live_data = get_live_updates()
     if not live_data:
         return games_df
-        
+
+    # ESPN returns raw abbreviations (LAR/WSH/JAC) that differ from
+    # nflverse's (LA/WAS/JAX) -- normalize the ESPN side before matching
+    # against nflverse-normalized home_team/away_team keys, or Rams/
+    # Commanders/Jaguars games silently never match (see
+    # services/utils.py::normalize_team_abbr and the same pattern in
+    # scripts/sync_live_scores.py::run_espn_overlay_safely()). The repo
+    # side (row['home_team']/row['away_team']) is already canonical and
+    # needs no normalization.
+    normalized_live_data = {
+        (normalize_team_abbr(h), normalize_team_abbr(a)): v
+        for (h, a), v in live_data.items()
+    }
+
     df = games_df.copy()
     cache_needs_rebuild = False
-    
+
     for idx, row in df.iterrows():
-        # Only check games for the current/active week (or all for simplicity in V1)
-        # Try to find match
-        
-        # Normalize repo teams to check against ESPN (usually they match, but be safe)
-        home_norm = normalize_team_abbr(row['home_team'])
-        away_norm = normalize_team_abbr(row['away_team'])
-        match_key = (home_norm, away_norm)
-            
-        if match_key in live_data:
-            update = live_data[match_key]
+        match_key = (row['home_team'], row['away_team'])
+
+        if match_key in normalized_live_data:
+            update = normalized_live_data[match_key]
             
             # If the game is currently live or just finished on ESPN
             # we prefer ESPN's score over the static CSV
