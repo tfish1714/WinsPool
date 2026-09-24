@@ -346,23 +346,34 @@ def clean_season_3000(live_server, browser, test_player_credentials):
     original_draft_active = {"value": None}
 
     def _admin_page():
+        """Return (context, page) with the context created first. The caller
+        must close the context; login is done by _login_admin so a failing
+        login still leaves the caller a context to close."""
         context = browser.new_context()
         page = context.new_page()
         _record_dialogs(page)
-        _login(page, live_server, test_player_credentials[0])
         return context, page
 
+    def _login_admin(page):
+        _login(page, live_server, test_player_credentials[0])
+
     context, page = _admin_page()
-    _delete_season_via_admin_ui(page, live_server)
-    context.close()
+    try:
+        _login_admin(page)
+        _delete_season_via_admin_ui(page, live_server)
+    finally:
+        context.close()
 
     yield original_draft_active
 
     context, page = _admin_page()
     try:
-        if original_draft_active["value"] is not None:
-            _set_draft_active(page, live_server, original_draft_active["value"])
-        _delete_season_via_admin_ui(page, live_server)
+        _login_admin(page)
+        try:
+            _delete_season_via_admin_ui(page, live_server)
+        finally:
+            if original_draft_active["value"] is not None:
+                _set_draft_active(page, live_server, original_draft_active["value"])
     finally:
         context.close()
 
@@ -378,23 +389,25 @@ def test_full_ten_player_live_draft(
     admin_creds = test_player_credentials[0]
 
     # ── Setup, entirely through the real Admin Portal ────────────────────────
-    setup_context = browser.new_context()
-    setup_page = setup_context.new_page()
-    setup_dialogs = _record_dialogs(setup_page)
-    _login(setup_page, live_server, admin_creds)
-    _create_season_via_admin_ui(setup_page, live_server, test_player_credentials)
-    clean_season_3000["value"] = _set_draft_active(setup_page, live_server, True)
-    assert not any(
-        "failed" in msg.lower() for _, msg in setup_dialogs
-    ), f"admin setup reported a failure: {setup_dialogs}"
-    print(f"[setup] season {SEASON} created, draft opened; dialogs={setup_dialogs}")
-
-    # ── 10 real browser contexts, each a signed-in player in the draft room ──
+    setup_context = None
     contexts, pages, dialog_logs = [], [], []
     wp_context = None
     try:
+        setup_context = browser.new_context()
+        setup_page = setup_context.new_page()
+        setup_dialogs = _record_dialogs(setup_page)
+        _login(setup_page, live_server, admin_creds)
+        _create_season_via_admin_ui(setup_page, live_server, test_player_credentials)
+        clean_season_3000["value"] = _set_draft_active(setup_page, live_server, True)
+        assert not any(
+            "failed" in msg.lower() for _, msg in setup_dialogs
+        ), f"admin setup reported a failure: {setup_dialogs}"
+        print(f"[setup] season {SEASON} created, draft opened; dialogs={setup_dialogs}")
+
+        # ── 10 real browser contexts, each a signed-in player in the draft room ──
         for creds in test_player_credentials:
             ctx = browser.new_context()
+            contexts.append(ctx)
             pg = ctx.new_page()
             dialog_logs.append(_record_dialogs(pg))
             # A desktop-tall viewport. At Playwright's 1280x720 default,
@@ -412,7 +425,6 @@ def test_full_ten_player_live_draft(
             pg.wait_for_selector("#teams-grid .team-btn", timeout=30000)
             pg.click("#chat-collapse-btn")
             pg.wait_for_selector("#chat-body", state="hidden", timeout=5000)
-            contexts.append(ctx)
             pages.append(pg)
         _ensure_live_clock(pages)
         print(f"[setup] all {len(pages)} players connected to /draft")
@@ -560,4 +572,5 @@ def test_full_ten_player_live_draft(
             wp_context.close()
         for ctx in contexts:
             ctx.close()
-        setup_context.close()
+        if setup_context is not None:
+            setup_context.close()
