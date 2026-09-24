@@ -5,6 +5,7 @@ Also the shared-helpers module for the other lifecycle test files
 """
 import pytest
 
+from tests_e2e.helpers import _open_admin_tab
 from tests_e2e.test_standings import _login
 
 
@@ -64,9 +65,9 @@ def _admin_reset_password(page, live_server, target_player_id):
     # setupTabHandlers() hides every .tab-content and shows only the clicked
     # one, so the toggle isn't clickable until that tab is selected, and we
     # have to switch back to "Players" afterward to see the re-rendered card.
-    page.click(".admin-tabs .tab-btn[data-tab='draft-section']")
+    _open_admin_tab(page, "draft-section")
     page.check("#show-test-accounts-toggle")
-    page.click(".admin-tabs .tab-btn[data-tab='player-section']")
+    _open_admin_tab(page, "player-section")
     page.wait_for_selector(f".player-mgmt-card[data-player-id='{target_player_id}']", timeout=10000)
     card = page.locator(f".player-mgmt-card[data-player-id='{target_player_id}']")
 

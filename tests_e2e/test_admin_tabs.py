@@ -6,6 +6,7 @@ tab loads, its content becomes visible, no server-error text appears.
 Deep interaction with these tools' filters/charts is out of scope.
 """
 import pytest
+from tests_e2e.helpers import _open_admin_tab
 from tests_e2e.test_standings import _login
 
 TABS = [
@@ -25,10 +26,8 @@ def test_admin_tab_loads(live_server, page, test_player_credentials, tab_id):
     _login(page, live_server, admin_creds)
 
     page.goto(f"{live_server}/admin")
-    page.wait_for_selector(f'.admin-tabs .tab-btn[data-tab="{tab_id}"]', timeout=10000)
-    page.click(f'.admin-tabs .tab-btn[data-tab="{tab_id}"]')
+    _open_admin_tab(page, tab_id)
 
-    page.wait_for_selector(f"#{tab_id}:not(.hidden)", timeout=10000)
     assert "Internal Server Error" not in page.content()
 
 

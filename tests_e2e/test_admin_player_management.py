@@ -37,6 +37,7 @@ the original plan, which was checked against source but not run live):
 """
 import pytest
 
+from tests_e2e.helpers import _open_admin_tab
 from tests_e2e.test_standings import _login
 
 NEW_PLAYER_EMAIL = "e2e-created-player@winspool.internal"
@@ -117,16 +118,14 @@ def _refetch_players(page):
     guaranteed to fire `change` and trigger a fresh fetch every time,
     rather than silently no-op on the second-and-later call.
     """
-    page.click('[data-tab="draft-section"]')
-    page.wait_for_selector("#draft-section:not(.hidden)", timeout=5000)
+    _open_admin_tab(page, "draft-section")
 
     checkbox = page.locator("#show-test-accounts-toggle")
     if checkbox.is_checked():
         checkbox.click()
     checkbox.click()
 
-    page.click('[data-tab="player-section"]')
-    page.wait_for_selector("#player-section:not(.hidden)", timeout=5000)
+    _open_admin_tab(page, "player-section")
     page.wait_for_timeout(500)
 
 

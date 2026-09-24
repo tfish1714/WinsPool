@@ -42,6 +42,7 @@ import time
 
 import pytest
 
+from tests_e2e.helpers import _open_admin_tab
 from tests_e2e.test_standings import _login
 
 SEASON = 3000
@@ -99,8 +100,7 @@ def _open_admin_draft_tab(page, live_server):
     (`#draft-section`), which is `.hidden` behind the default Players tab."""
     page.goto(f"{live_server}/admin")
     page.wait_for_selector("#signin-screen", state="hidden", timeout=15000)
-    page.click(".admin-tab-btn[data-tab='draft-section']")
-    page.wait_for_selector("#draft-section:not(.hidden)", timeout=5000)
+    _open_admin_tab(page, "draft-section")
 
 
 def _delete_season_via_admin_ui(page, live_server):
