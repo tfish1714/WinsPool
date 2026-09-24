@@ -129,3 +129,50 @@ def test_route_returns_500_on_failure():
         res = client.get("/api/live-standings?year=2026")
 
     assert res.status_code == 500
+
+
+def _render_standings_page():
+    empty = pd.DataFrame({"season": [2026]})
+    two_players = pd.concat(
+        [_sorted_df(), _sorted_df().assign(Rank=2, playerId=9, fullName="Bo Kim")],
+        ignore_index=True,
+    )
+    two_players["refreshTime"] = "2026-09-20 12:00:00"
+    patches = [
+        patch("routes.standings_routes.load_data",
+              return_value=(empty, empty, empty, empty, empty, empty, empty)),
+        patch("routes.standings_routes.get_active_season", return_value=2026),
+        patch("routes.standings_routes.get_available_years", return_value=[2026]),
+        patch("routes.standings_routes.get_latest_week_for_year", return_value=3),
+        patch("routes.standings_routes.analysis.get_draft_progress", return_value=(10, 10)),
+        patch("routes.standings_routes.analysis.calculate_wins_pool_standings",
+              return_value=two_players),
+        patch("routes.standings_routes.analysis.get_enriched_schedule",
+              return_value=pd.DataFrame()),
+        patch("routes.standings_routes.analysis.player_winlossmatrix",
+              return_value=pd.DataFrame()),
+        patch("routes.standings_routes.db.get_weekly_recap", return_value=None),
+    ]
+    for p in patches:
+        p.start()
+    try:
+        return client.get("/wins-pool/2026")
+    finally:
+        for p in patches:
+            p.stop()
+
+
+def test_standings_page_exposes_refresh_hooks():
+    """standings_refresh.js finds everything by these data-* hooks; a template
+    edit that drops one would break live refresh silently."""
+    res = _render_standings_page()
+    html = res.text
+
+    assert res.status_code == 200
+    assert "/static/js/standings_refresh.js" in html
+    # leader: hero card + mobile card; #2: desktop row + mobile card
+    assert html.count('data-player-id="4"') == 2
+    assert html.count('data-player-id="9"') == 2
+    assert 'data-team="KC"' in html
+    for role in ("total", "rank", "team-wins", "team-pd", "live", "tb1", "tb4", "tb6"):
+        assert f'data-role="{role}"' in html

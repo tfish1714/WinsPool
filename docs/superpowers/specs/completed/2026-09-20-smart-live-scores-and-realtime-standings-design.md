@@ -1,7 +1,7 @@
 # Smart Live Scores and Real-Time Standings Design
 
 **Date:** 2026-09-20  
-**Status:** Draft  
+**Status:** Implemented on `worktree-smart-live-scores` (2026-09-24), except Part 2's Cloud Scheduler `*/2` cadence change, which is a manual `gcloud scheduler jobs update` and has not been applied. Deviation: the container has no `rawdata/`, so the window check does one small nflverse schedule GET instead of reading a local file (fails open on error).  
 **Target Areas:** `scripts/sync_live_scores.py`, `services/live_score_service.py`, `routes/api_routes.py`, `templates/wins_pool.html`, `static/js/standings.js`
 
 ---
