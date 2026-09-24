@@ -4,6 +4,7 @@ import pytest
 from tests_e2e.helpers import (
     _assert_no_failure_dialogs,
     _click_and_wait_for_dialogs,
+    _logout,
     _open_admin_tab,
     _record_dialogs,
 )
@@ -83,3 +84,17 @@ def test_assert_no_failure_dialogs():
         _assert_no_failure_dialogs([("alert", "Reset failed: boom")])
     with pytest.raises(AssertionError):
         _assert_no_failure_dialogs([("alert", "Server ERROR")])
+
+
+def test_logout_clears_the_session_cookie_and_shows_signin(live_server, page, test_player_credentials):
+    _login(page, live_server, test_player_credentials[0])
+    page.goto(f"{live_server}/admin")
+    page.wait_for_selector("#signin-screen", state="hidden", timeout=15000)
+
+    _logout(page)
+
+    assert page.locator("#signin-screen").is_visible()
+    assert not [c for c in page.context.cookies() if c["name"] == "session_token" and c["value"]]
+    # The server agrees: a protected call without credentials is rejected.
+    status = page.evaluate("() => fetch('/api/admin/players').then(r => r.status)")
+    assert status in (401, 403)

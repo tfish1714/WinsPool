@@ -40,6 +40,7 @@ import pytest
 from tests_e2e.helpers import (
     _assert_no_failure_dialogs,
     _click_and_wait_for_dialogs,
+    _logout,
     _open_admin_tab,
     _record_dialogs,
 )
@@ -88,13 +89,11 @@ def _reclaim_player_password(page, live_server, target):
     fresh = _click_and_wait_for_dialogs(page, dialogs, card.locator(".btn-reset-pw"), count=2)
     assert [kind for kind, _ in fresh] == ["confirm", "alert"]
 
-    # The admin's own session is still live in this page's localStorage,
-    # which would otherwise keep the signin overlay hidden (initGlobalUI()
-    # in main.js only shows it when no credentials are stored) -- clear it
-    # first to force a logged-out load.
-    page.evaluate("() => localStorage.clear()")
-    page.goto(live_server)
-    page.wait_for_selector("#signin-screen", state="visible")
+    # The admin's own session is still live (localStorage credentials plus the
+    # httpOnly session cookie), which would keep the signin overlay hidden --
+    # sign out through the real avatar-popover Logout control. It reloads onto
+    # the signin overlay and waits for it to be visible.
+    _logout(page)
     page.fill("#auth-email", target["email"])
     page.locator("#auth-email").blur()
     page.wait_for_selector("#auth-submit-btn:has-text('Setup Account')", timeout=5000)

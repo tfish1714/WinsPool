@@ -68,3 +68,15 @@ def _assert_no_failure_dialogs(dialogs):
     Playwright would otherwise auto-dismiss without a trace."""
     bad = [(kind, msg) for kind, msg in dialogs if "fail" in msg.lower() or "error" in msg.lower()]
     assert not bad, f"unexpected failure dialog(s): {bad}"
+
+
+def _logout(page):
+    """Sign out through the real UI (desktop layout): open the avatar popover,
+    click Logout, and wait for the signin overlay. The handler POSTs
+    /api/logout (clearing the httpOnly session_token cookie), clears
+    localStorage credentials, and reloads -- unlike wiping localStorage
+    from the test, which leaves the cookie claiming the old session.
+    """
+    page.click("#nav-avatar-btn")
+    page.click("#nav-ap-logout-btn")
+    page.wait_for_selector("#signin-screen", state="visible", timeout=10000)
