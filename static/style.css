@@ -3026,6 +3026,22 @@ table.wp-data-table tbody td:last-child {
     animation: pulse 1s infinite;
 }
 
+/* Pulsing dot beside a team currently in a live game (standings page). */
+.live-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-left: 5px;
+    vertical-align: middle;
+    background: var(--accent-red);
+    border-radius: 50%;
+    animation: pulse 1s infinite;
+}
+
+.live-dot[hidden] {
+    display: none;
+}
+
 .winner-highlight .team-name-text {
     color: var(--accent-green);
     font-weight: 800;

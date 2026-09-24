@@ -1,7 +1,7 @@
 # `live_score_service.py` Follow-Ups (Post Abbreviation-Bug Fix)
 
 **Date:** 2026-09-19
-**Status:** Not designed — backlog, split out of `docs/superpowers/specs/completed/2026-08-20-scheduled-jobs-hardening-followups.md` when that spec's work was completed and archived, so these two remaining open questions don't get lost. Needs its own pass when picked up, not decided here.
+**Status:** Resolved 2026-09-24 by the smart-live-scores work (see `2026-09-20-smart-live-scores-and-realtime-standings-design.md`): item 2 fixed with a status guard in `sync_live_scores_to_df()`; item 1 (whether the function can be deleted outright) was deliberately not pursued -- the guard makes it safe, and removal is left as an optional cleanup. Original status: Not designed — backlog, split out of `docs/superpowers/specs/completed/2026-08-20-scheduled-jobs-hardening-followups.md` when that spec's work was completed and archived, so these two remaining open questions don't get lost. Needs its own pass when picked up, not decided here.
 
 ## Origin
 

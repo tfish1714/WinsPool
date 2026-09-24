@@ -94,3 +94,46 @@ def test_no_live_data_returns_games_df_unchanged(monkeypatch):
     games = _repo_game("LA", "SF")
     result = lss.sync_live_scores_to_df(games)
     pd.testing.assert_frame_equal(result, games)
+
+
+def _status_update(status, home=0, away=0, clock="0:00", period=0):
+    return {("KC", "BUF"): {"home_score": home, "away_score": away, "status": status,
+                            "clock": clock, "period": period}}
+
+
+def test_scheduled_game_does_not_get_result_zero(monkeypatch):
+    """ESPN reports unplayed games as 0-0 STATUS_SCHEDULED. Writing that would
+    set result=0, which compute_team_records reads as a played tie."""
+    monkeypatch.setattr(lss, "get_live_updates", lambda: _status_update("STATUS_SCHEDULED"))
+
+    result = lss.sync_live_scores_to_df(_repo_game("KC", "BUF"))
+
+    assert pd.isna(result.at[0, "result"])
+
+
+def test_postponed_game_is_not_written(monkeypatch):
+    monkeypatch.setattr(lss, "get_live_updates", lambda: _status_update("STATUS_POSTPONED"))
+
+    result = lss.sync_live_scores_to_df(_repo_game("KC", "BUF"))
+
+    assert pd.isna(result.at[0, "result"])
+
+
+def test_in_progress_game_still_updates(monkeypatch):
+    monkeypatch.setattr(lss, "get_live_updates",
+                        lambda: _status_update("STATUS_IN_PROGRESS", 10, 3, "8:00", 2))
+
+    result = lss.sync_live_scores_to_df(_repo_game("KC", "BUF"))
+
+    assert result.at[0, "result"] == 7
+    assert result.at[0, "is_live"] == True
+
+
+def test_halftime_game_still_updates(monkeypatch):
+    monkeypatch.setattr(lss, "get_live_updates",
+                        lambda: _status_update("STATUS_HALFTIME", 10, 3, "0:00", 2))
+
+    result = lss.sync_live_scores_to_df(_repo_game("KC", "BUF"))
+
+    assert result.at[0, "clock"] == "Halftime"
+    assert result.at[0, "result"] == 7

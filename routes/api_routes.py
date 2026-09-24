@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse
 from services.data_service import load_data, get_latest_season_and_week
 from services.response_helpers import error_response, server_error, not_found, unauthorized
 from services.draft_service import sanitize_state
+from services.live_standings_service import build_live_standings_payload
+from services.utils import filter_season
 from services.session_service import require_auth, require_admin
 import services.analysis_service as analysis
 from services.analysis_service import get_season_progress
@@ -368,6 +370,35 @@ def get_live_scores(year: int):
         return JSONResponse(content=out)
     except Exception:
         logger.exception("Unhandled error in /api/live-scores")
+        return server_error()
+
+
+@router.get("/live-standings")
+def get_live_standings(year: int):
+    """Lightweight leaderboard snapshot (ranks, wins, point diffs, tiebreakers,
+    live-game flags) for the wins pool page's client-side poll. Public — same
+    visibility as /wins-pool/{year} itself. Reuses the page's own standings
+    calculation so a poll can never disagree with a fresh page load.
+    """
+    try:
+        all_st, _, all_games, players, _, all_draft, rules = load_data()
+        standings = filter_season(all_st, year)
+        games = filter_season(all_games, year)
+        draft_results = filter_season(all_draft, year)
+        picks_made, picks_expected = analysis.get_draft_progress(
+            draft_results, filter_season(rules, year)
+        )
+        if picks_expected > 0 and picks_made < picks_expected:
+            sorted_df = None
+        else:
+            sorted_df = analysis.calculate_wins_pool_standings(
+                standings, draft_results, players, year, games
+            )
+        return JSONResponse(
+            content=sanitize_state(build_live_standings_payload(sorted_df, games, year))
+        )
+    except Exception:
+        logger.exception("Unhandled error in /api/live-standings")
         return server_error()
 
 
