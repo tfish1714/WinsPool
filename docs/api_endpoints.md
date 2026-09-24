@@ -85,7 +85,7 @@ Returns a per-game prediction explanation with feature breakdown and Vegas line 
 | `home` | query | `string` | Home team abbreviation (e.g. `"KC"`) |
 | `away` | query | `string` | Away team abbreviation |
 
-**Response**: `{ key, home_team, away_team, season, week, ...stored prediction fields (e.g. pred_winner, pred_su_conf, pred_prob, pred_ats_pick, model_spread, edge_vs_vegas, explanation) except locked, actual_winner, home_score, away_score, is_correct, is_correct_ats }` — the last two grading fields are `bool | None`, `None` for a game that hasn't been played yet.
+**Response**: `{ key, home_team, away_team, season, week, ...stored prediction fields (e.g. pred_winner, pred_su_conf, pred_prob, pred_ats_pick, model_spread, edge_vs_vegas, explanation) except locked, actual_winner, home_score, away_score, is_correct, is_correct_ats }` — `is_correct` is `bool | None` (`None` for a game not yet played or a tie); `is_correct_ats` is `true | false | "push" | null` -- `"push"` when the game landed exactly on the Vegas line, `null` when the game is unplayed or the pick cannot be graded (no line, or the stored pick matches neither team). `/api/admin/predictions/games` keeps `bool | None` for its `is_correct_ats` (a push stays `null` there so its accuracy counters only see graded picks).
 
 ---
 

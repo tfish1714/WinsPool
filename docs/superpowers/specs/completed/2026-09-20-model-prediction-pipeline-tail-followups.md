@@ -1,7 +1,7 @@
 # Model Prediction Pipeline Tail — Follow-Up Cleanup
 
 **Date:** 2026-09-20
-**Status:** Backlog — parked findings from implementing
+**Status:** Resolved 2026-09-24 on `worktree-prediction-pipeline-consolidation` (push handling, pick-mismatch grading, docstring, explain performance, spread-sign test coverage). The two "process notes" and "local dev environment hygiene" sections are informational and were not acted on. Original status: Backlog — parked findings from implementing
 `docs/superpowers/plans/2026-09-19-model-prediction-pipeline-tail.md`
 (merged to `main` at `6b83887`). None of these block that branch; all were
 explicitly ruled non-blocking during implementation (task reviews or the
