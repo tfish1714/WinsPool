@@ -1,11 +1,21 @@
 # Model Prediction Pipeline — End-to-End Review
 
 **Date:** 2026-09-18
-**Status:** Audit complete (all 4 stages) — ready to consolidate findings and
-write implementation plans per fix (see "Rollout"). Rollout item 4 (ATS/edge
-consolidation) done 2026-09-24 on `worktree-prediction-pipeline-consolidation`
-(see `docs/superpowers/plans/completed/2026-09-24-prediction-pipeline-consolidation.md`);
-the other rollout items are tracked separately and remain open here.
+**Status (updated 2026-09-24):** Audit complete and rollout essentially
+done. Rollout items 1-4 and 6-8 are implemented and merged to `main`; only
+item 5 (`RESIMULATE_LEAD_MINUTES` timing) and item 9 (DVOA-style feature,
+deliberately kept as backlog) remain open. The "Rollout" section below is
+the original 2026-09-18 audit snapshot and still reads "not yet implemented"
+for items that have since landed:
+- Items 2-3 (version stamp, promotion gate): shipped; see the archived
+  `feature-version-stamp-promotion-gate` plan and its follow-up specs.
+- Item 4 (ATS/edge consolidation): `derive_prediction_scalars` in
+  `services/utils.py` (`de9ed2f`), finished 2026-09-24 by
+  `docs/superpowers/plans/completed/2026-09-24-prediction-pipeline-consolidation.md`
+  (shared `edge_vs_vegas` / `pick_ats_team` / `grade_ats_pick`, PUSH handling).
+- Items 6-7 (dead code, SU/ATS grade in the "Why TEAM?" modal): shipped by
+  the model-prediction-pipeline-tail branch.
+- Item 8 (betting pick-type clarity): spec archived as completed.
 
 ## Origin
 
