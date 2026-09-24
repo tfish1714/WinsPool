@@ -465,6 +465,35 @@ def update_player_profile(player_id: str, updates: dict):
     clear_data_cache(DOMAIN_STATIC)
     signal_data_update(DOMAIN_STATIC)
 
+def record_player_activity(player_id: int, ts: float) -> None:
+    """Persist a player's `last_active` timestamp.
+
+    Deliberately lean, unlike update_player_profile(): writes only that one
+    field and never clears or signals the static cache. This runs at most
+    once per player per activity-throttle window (see
+    session_service.record_user_activity), and a full static invalidation
+    each time would make every instance refetch the players/draft bundle for
+    what is only a coarse "last seen" indicator. Instead the already-cached
+    players frame is patched in place, so this instance's admin view is
+    current without any refetch; other warm instances catch up on their next
+    static refresh. In local mode (no Firestore) only the in-memory patch
+    happens -- the local pickles are a read-only mirror of Firestore.
+    """
+    db = get_db()
+    if db:
+        db.collection("players").document(str(player_id)).update({"last_active": ts})
+
+    from services.cache_service import get_domain
+    bucket = get_domain(DOMAIN_STATIC)
+    players_df = bucket.get("players") if bucket else None
+    if players_df is not None and not players_df.empty:
+        mask = players_df["playerId"].astype(str) == str(player_id)
+        if mask.any():
+            if "last_active" not in players_df.columns:
+                players_df["last_active"] = float("nan")
+            players_df.loc[mask, "last_active"] = ts
+
+
 def save_weekly_recap(year: int, week: int, summary: str):
     """Saves an AI-generated weekly summary to Firestore and/or local cache."""
     data = {
