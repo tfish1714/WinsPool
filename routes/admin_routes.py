@@ -115,6 +115,8 @@ async def fetch_admin_players(include_test_accounts: bool = False, _: dict = Dep
             must_change = bool(r.get("must_change_password", False)) if pd.notna(r.get("must_change_password")) else False
             last_login_val = r.get("last_login")
             last_login = float(last_login_val) if pd.notna(last_login_val) and last_login_val is not None else None
+            last_active_val = r.get("last_active")
+            last_active = float(last_active_val) if last_active_val is not None and pd.notna(last_active_val) else None
 
             rec = {
                 "playerId": int(r["playerId"]),
@@ -126,6 +128,7 @@ async def fetch_admin_players(include_test_accounts: bool = False, _: dict = Dep
                 "has_password": has_pw,
                 "must_change_password": must_change,
                 "last_login": last_login,
+                "last_active": last_active,
                 "is_test_account": is_test,
             }
             if "failed_setup_attempts" in r and pd.notna(r.get("failed_setup_attempts")):
@@ -158,6 +161,8 @@ async def get_season_members(season: int, _: dict = Depends(require_admin)):
             must_change = bool(p.get("must_change_password", False)) if pd.notna(p.get("must_change_password")) else False
             last_login_val = p.get("last_login")
             last_login = float(last_login_val) if pd.notna(last_login_val) and last_login_val is not None else None
+            last_active_val = p.get("last_active")
+            last_active = float(last_active_val) if last_active_val is not None and pd.notna(last_active_val) else None
 
             members.append({
                 "playerId": pid,
@@ -169,6 +174,7 @@ async def get_season_members(season: int, _: dict = Depends(require_admin)):
                 "has_password": has_pw,
                 "must_change_password": must_change,
                 "last_login": last_login,
+                "last_active": last_active,
             })
         members.sort(key=lambda x: x["draftOrder"])
         return JSONResponse(content={"members": members})

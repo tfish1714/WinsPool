@@ -694,6 +694,42 @@ class TestFetchAdminPlayers:
             e2e = next(p for p in data2 if p["playerId"] == 2)
             assert e2e["is_test_account"] is True
 
+    def test_exposes_last_active_alongside_last_login(self, admin_token):
+        """last_active is a float when present and null when absent or NaN;
+        last_login is unaffected."""
+        fake_players = pd.DataFrame([
+            {"playerId": 1, "fullName": "Active Ann", "nickName": "AA", "email": "a@test.com",
+             "cell": "", "role": "user", "password_hash": "$2b$12$h", "must_change_password": False,
+             "last_login": 1700000000.0, "last_active": 1727130000.5},
+            {"playerId": 2, "fullName": "Idle Ian", "nickName": "II", "email": "i@test.com",
+             "cell": "", "role": "user", "password_hash": "$2b$12$h", "must_change_password": False,
+             "last_login": 1700000000.0, "last_active": float("nan")},
+        ])
+
+        with patch("routes.admin_routes.load_data", return_value=(None, None, None, fake_players, None, None, None)):
+            resp = client.get("/api/admin/players", headers={"Authorization": admin_token})
+
+        assert resp.status_code == 200
+        data = {p["playerId"]: p for p in resp.json()}
+        assert data[1]["last_active"] == 1727130000.5
+        assert data[1]["last_login"] == 1700000000.0
+        assert data[2]["last_active"] is None
+
+    def test_last_active_is_null_when_column_missing(self, admin_token):
+        """Players loaded before any activity was ever recorded have no
+        last_active column at all."""
+        fake_players = pd.DataFrame([
+            {"playerId": 1, "fullName": "Old Olive", "nickName": "OO", "email": "o@test.com",
+             "cell": "", "role": "user", "password_hash": None, "must_change_password": False,
+             "last_login": None},
+        ])
+
+        with patch("routes.admin_routes.load_data", return_value=(None, None, None, fake_players, None, None, None)):
+            resp = client.get("/api/admin/players", headers={"Authorization": admin_token})
+
+        assert resp.status_code == 200
+        assert resp.json()[0]["last_active"] is None
+
 
 class TestGetSeasonMembers:
 
@@ -754,6 +790,44 @@ class TestGetSeasonMembers:
         assert m2["has_password"] is False
         assert m2["must_change_password"] is False
         assert m2["last_login"] is None
+
+    def test_exposes_last_active_per_member(self, admin_token):
+        fake_players = pd.DataFrame([
+            {"playerId": 1, "fullName": "Active Ann", "email": "a@test.com", "role": "user",
+             "password_hash": "$2b$12$h", "must_change_password": False,
+             "last_login": 1700000000.0, "last_active": 1727130000.5},
+            {"playerId": 2, "fullName": "Idle Ian", "email": "i@test.com", "role": "user",
+             "password_hash": None, "must_change_password": False,
+             "last_login": None, "last_active": None},
+        ])
+        fake_order = pd.DataFrame([
+            {"season": 2026, "playerId": 1, "draftOrder": 1, "paid": True},
+            {"season": 2026, "playerId": 2, "draftOrder": 2, "paid": False},
+        ])
+
+        with patch("routes.admin_routes.load_data", return_value=(None, None, None, fake_players, None, None, None)), \
+             patch("routes.admin_routes.get_collection_df", return_value=fake_order):
+            resp = client.get("/api/admin/members/2026", headers={"Authorization": admin_token})
+
+        assert resp.status_code == 200
+        members = resp.json()["members"]
+        assert members[0]["last_active"] == 1727130000.5
+        assert members[0]["last_login"] == 1700000000.0
+        assert members[1]["last_active"] is None
+
+    def test_last_active_is_null_when_column_missing(self, admin_token):
+        fake_players = pd.DataFrame([
+            {"playerId": 1, "fullName": "Old Olive", "email": "o@test.com", "role": "user",
+             "password_hash": None, "must_change_password": False, "last_login": None},
+        ])
+        fake_order = pd.DataFrame([{"season": 2026, "playerId": 1, "draftOrder": 1, "paid": True}])
+
+        with patch("routes.admin_routes.load_data", return_value=(None, None, None, fake_players, None, None, None)), \
+             patch("routes.admin_routes.get_collection_df", return_value=fake_order):
+            resp = client.get("/api/admin/members/2026", headers={"Authorization": admin_token})
+
+        assert resp.status_code == 200
+        assert resp.json()["members"][0]["last_active"] is None
 
 
 # ── /api/admin/draft_snapshot ─────────────────────────────────────────────────
