@@ -178,3 +178,164 @@ def test_get_is_admin_true_for_non_bearer_header_falls_through_to_cookie(monkeyp
     admin_token = session_service.create_token(player_id=1, role="admin")
     # Authorization header is 'Basic xyz' (not Bearer), so it's ignored; cookie has admin token.
     assert session_service.get_is_admin(authorization="Basic xyz", session_token=admin_token) is True
+
+
+# ── last_active recording (throttled, non-blocking, never raises) ──────────
+
+@pytest.fixture
+def activity(monkeypatch):
+    """Fresh throttle cache, synchronous 'background' runner, and a recorder
+    standing in for db_service.record_player_activity."""
+    from services import session_service
+    import services.db_service as dbs
+    monkeypatch.setenv("JWT_SECRET", "test-secret-activity")
+    monkeypatch.setattr(session_service, "_LAST_ACTIVE_CACHE", {})
+    monkeypatch.setattr(session_service, "_run_in_background", lambda fn, *a: fn(*a))
+    calls = []
+    monkeypatch.setattr(dbs, "record_player_activity", lambda pid, ts: calls.append((pid, ts)))
+    return session_service, calls
+
+
+def test_first_activity_is_recorded(activity, monkeypatch):
+    svc, calls = activity
+    monkeypatch.setattr(svc.time, "time", lambda: 1000.0)
+
+    svc.record_user_activity(5)
+
+    assert calls == [(5, 1000.0)]
+    assert svc._LAST_ACTIVE_CACHE[5] == 1000.0
+
+
+def test_activity_within_throttle_window_is_skipped(activity, monkeypatch):
+    svc, calls = activity
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(svc.time, "time", lambda: clock["t"])
+
+    svc.record_user_activity(5)
+    clock["t"] = 1000.0 + 14 * 60
+    svc.record_user_activity(5)
+
+    assert len(calls) == 1
+
+
+def test_activity_after_throttle_window_is_recorded_again(activity, monkeypatch):
+    svc, calls = activity
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(svc.time, "time", lambda: clock["t"])
+
+    svc.record_user_activity(5)
+    clock["t"] = 1000.0 + 15 * 60
+    svc.record_user_activity(5)
+
+    assert [c[1] for c in calls] == [1000.0, 1900.0]
+    assert svc._LAST_ACTIVE_CACHE[5] == 1900.0
+
+
+def test_throttle_is_per_player(activity, monkeypatch):
+    svc, calls = activity
+    monkeypatch.setattr(svc.time, "time", lambda: 1000.0)
+
+    svc.record_user_activity(5)
+    svc.record_user_activity(6)
+
+    assert sorted(c[0] for c in calls) == [5, 6]
+
+
+def test_db_failure_never_raises(activity, monkeypatch):
+    svc, _ = activity
+    import services.db_service as dbs
+
+    def boom(pid, ts):
+        raise RuntimeError("firestore down")
+
+    monkeypatch.setattr(dbs, "record_player_activity", boom)
+
+    svc.record_user_activity(5)  # must not raise
+
+
+def test_default_runner_does_not_block_the_caller(monkeypatch):
+    """The real runner hands the write to a background thread."""
+    import threading
+    from services import session_service
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow():
+        started.set()
+        release.wait(5)
+
+    session_service._run_in_background(slow)
+
+    assert started.wait(2)  # ran, but the call above already returned
+    release.set()
+
+
+def test_require_auth_records_activity_for_valid_token(activity):
+    svc, calls = activity
+    token = svc.create_token(player_id=42, role="user")
+
+    payload = svc.require_auth(authorization=f"Bearer {token}", session_token=None)
+
+    assert payload["sub"] == "42"
+    assert [c[0] for c in calls] == [42]
+
+
+def test_require_auth_via_cookie_records_activity(activity):
+    svc, calls = activity
+    token = svc.create_token(player_id=43, role="user")
+
+    svc.require_auth(authorization=None, session_token=token)
+
+    assert [c[0] for c in calls] == [43]
+
+
+def test_require_auth_invalid_token_does_not_record(activity):
+    svc, calls = activity
+
+    with pytest.raises(HTTPException):
+        svc.require_auth(authorization="Bearer not-a-jwt", session_token=None)
+
+    assert calls == []
+
+
+def test_require_auth_missing_token_does_not_record(activity):
+    svc, calls = activity
+
+    with pytest.raises(HTTPException):
+        svc.require_auth(authorization=None, session_token=None)
+
+    assert calls == []
+
+
+def test_require_admin_records_activity_for_admin(activity):
+    svc, calls = activity
+    token = svc.create_token(player_id=1, role="admin")
+
+    svc.require_admin(authorization=f"Bearer {token}", session_token=None)
+
+    assert [c[0] for c in calls] == [1]
+
+
+def test_require_admin_does_not_record_for_non_admin(activity):
+    svc, calls = activity
+    token = svc.create_token(player_id=2, role="user")
+
+    with pytest.raises(HTTPException) as exc:
+        svc.require_admin(authorization=f"Bearer {token}", session_token=None)
+
+    assert exc.value.status_code == 403
+    assert calls == []
+
+
+def test_non_numeric_subject_is_ignored_without_error(activity):
+    svc, calls = activity
+    import jwt as pyjwt
+    token = pyjwt.encode(
+        {"sub": "not-a-number", "role": "user", "exp": int(time.time()) + 60},
+        svc._get_secret(), algorithm=svc.JWT_ALGORITHM,
+    )
+
+    payload = svc.require_auth(authorization=f"Bearer {token}", session_token=None)
+
+    assert payload["role"] == "user"
+    assert calls == []

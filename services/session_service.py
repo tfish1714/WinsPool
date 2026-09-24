@@ -1,6 +1,7 @@
 """services/session_service.py — JWT session tokens and FastAPI auth dependencies."""
 import logging
 import os
+import threading
 import time
 
 import jwt
@@ -70,6 +71,48 @@ def _resolve_token(authorization: str | None, session_token: str | None) -> str:
     raise HTTPException(status_code=401, detail="Missing or invalid Authorization header.")
 
 
+_ACTIVITY_THROTTLE_SECONDS = 900  # persist last_active at most once per player per 15 minutes
+_LAST_ACTIVE_CACHE: dict[int, float] = {}  # player_id -> when it was last persisted (this process only)
+
+
+def _run_in_background(fn, *args) -> None:
+    """Run `fn(*args)` on a daemon thread so a Firestore round trip never
+    sits in the request path. Tests replace this with a synchronous call."""
+    threading.Thread(target=fn, args=args, daemon=True).start()
+
+
+def _persist_activity(player_id: int, ts: float) -> None:
+    try:
+        from services.db_service import record_player_activity
+        record_player_activity(player_id, ts)
+    except Exception:
+        logger.warning("Failed to record activity for player %s", player_id, exc_info=True)
+
+
+def record_user_activity(player_id: int) -> None:
+    """Stamp `last_active` for a player, at most once per throttle window.
+
+    The throttle cache is stamped before the write is handed off, so a burst
+    of concurrent requests from one player produces a single write. A failed
+    write is logged and not retried until the next window -- this is a coarse
+    "last seen" indicator, not a record that must never be missed.
+    """
+    now = time.time()
+    if now - _LAST_ACTIVE_CACHE.get(player_id, 0.0) < _ACTIVITY_THROTTLE_SECONDS:
+        return
+    _LAST_ACTIVE_CACHE[player_id] = now
+    _run_in_background(_persist_activity, player_id, now)
+
+
+def _track_activity(payload: dict) -> None:
+    """Record activity for a successfully authenticated payload. Never raises:
+    tracking must not be able to fail the request it is observing."""
+    try:
+        record_user_activity(int(payload["sub"]))
+    except Exception:
+        logger.debug("Skipping activity tracking for payload without a numeric sub", exc_info=True)
+
+
 def require_auth(
     authorization: str = Header(default=None),
     session_token: str = Cookie(default=None),
@@ -78,7 +121,8 @@ def require_auth(
 
     Checks the Authorization: Bearer header first; falls back to the
     session_token httpOnly cookie set by the login endpoint.  Returns the
-    decoded payload dict on success.
+    decoded payload dict on success, and records the player's last_active
+    (throttled -- see record_user_activity).
     Raises HTTP 401 for missing, malformed, or expired tokens.
     """
     token = _resolve_token(authorization, session_token)
@@ -88,6 +132,7 @@ def require_auth(
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid session token.")
+    _track_activity(payload)
     return payload
 
 
@@ -105,6 +150,7 @@ def require_admin(
         raise HTTPException(status_code=401, detail="Invalid session token.")
     if payload.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin role required.")
+    _track_activity(payload)
     return payload
 
 
