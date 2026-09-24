@@ -269,3 +269,88 @@ class TestPredictionExplainGrading:
         body = resp.json()
         assert body["is_correct"] is False   # pred_winner=BUF, actual_winner=KC
         assert body["is_correct_ats"] is False  # BUF picked ATS; away margin -3 < vegas_line(-away)=2.5 -> away does not cover
+
+    def _explain(self, auth_token, pred, games_df):
+        from unittest.mock import patch
+        with patch("services.cache_service.get_game_predictions", return_value={"W01_KC_BUF": pred}), \
+             patch("routes.api_routes.load_data", return_value=(None, None, games_df, None, None, None, None)):
+            resp = client.get(
+                "/api/predictions/explain?season=2024&week=1&home=KC&away=BUF",
+                headers={"Authorization": auth_token},
+            )
+        assert resp.status_code == 200
+        return resp.json()
+
+    def test_pushed_ats_bet_reports_push_not_null(self, auth_token):
+        """A push must be distinguishable from "not gradable / not played yet"."""
+        games = self._mock_games_df(result=3.0, home_score=23.0, away_score=20.0, spread_line=3.0)
+        pred = {"pred_winner": "KC", "pred_su_conf": 60, "pred_ats_pick": "KC",
+                "model_spread": 5.0, "explanation": {"vegas_line": 3.0}}
+
+        body = self._explain(auth_token, pred, games)
+
+        assert body["is_correct_ats"] == "push"
+        assert body["is_correct"] is True  # SU grading is unaffected by the push
+
+    def test_su_right_but_ats_wrong_with_correct_sign_convention(self, auth_token):
+        """The exact case the two-badge modal exists for: home favored by 3
+        (positive line), wins by 1, pick home -> SU correct, ATS wrong. The
+        older fixture's negative line depicted the opposite favorite and
+        could not pin the sign."""
+        games = self._mock_games_df(result=1.0, home_score=21.0, away_score=20.0, spread_line=3.0)
+        pred = {"pred_winner": "KC", "pred_su_conf": 60, "pred_ats_pick": "KC",
+                "model_spread": 5.0, "explanation": {"vegas_line": 3.0}}
+
+        body = self._explain(auth_token, pred, games)
+
+        assert body["is_correct"] is True
+        assert body["is_correct_ats"] is False
+
+    def test_ats_pick_matching_neither_team_is_ungradable(self, auth_token):
+        games = self._mock_games_df(result=7.0, home_score=27.0, away_score=20.0, spread_line=3.0)
+        pred = {"pred_winner": "KC", "pred_su_conf": 60, "pred_ats_pick": "DAL",
+                "model_spread": 5.0, "explanation": {"vegas_line": 3.0}}
+
+        assert self._explain(auth_token, pred, games)["is_correct_ats"] is None
+
+    def test_missing_vegas_line_falls_back_to_the_game_row_and_derives_edge(self, auth_token):
+        games = self._mock_games_df(result=7.0, home_score=27.0, away_score=20.0, spread_line=3.0)
+        pred = {"pred_winner": "KC", "pred_su_conf": 60, "pred_ats_pick": "KC",
+                "model_spread": 5.5, "explanation": {}}
+
+        body = self._explain(auth_token, pred, games)
+
+        assert body["explanation"]["vegas_line"] == 3.0
+        assert body["explanation"]["edge_vs_vegas"] == 2.5
+        assert body["edge_vs_vegas"] == 2.5
+        assert body["is_correct_ats"] is True
+
+    def test_team_normalization_only_runs_on_the_requested_week(self, auth_token):
+        """The game lookup must narrow to the requested season/week before
+        normalizing team names, not normalize every row of every season."""
+        import pandas as pd
+        from unittest.mock import patch
+        import services.nn_feature_engine as nfe
+
+        target = self._mock_games_df().iloc[0].to_dict()
+        others = [
+            {**target, "season": 2023, "week": 1, "home_team": "OLD1", "away_team": "OLD2"},
+            {**target, "season": 2024, "week": 2, "home_team": "WK2A", "away_team": "WK2B"},
+            {**target, "season": 2025, "week": 1, "home_team": "NEW1", "away_team": "NEW2"},
+        ]
+        games = pd.DataFrame([target, *others])
+        seen = []
+        real = nfe._normalize_team
+
+        def spy(team):
+            seen.append(team)
+            return real(team)
+
+        pred = {"pred_winner": "KC", "pred_su_conf": 60, "pred_ats_pick": "KC",
+                "model_spread": 5.0, "explanation": {"vegas_line": -2.5}}
+        with patch.object(nfe, "_normalize_team", spy):
+            body = self._explain(auth_token, pred, games)
+
+        assert body["actual_winner"] == "KC"
+        irrelevant = {"OLD1", "OLD2", "WK2A", "WK2B", "NEW1", "NEW2"}
+        assert not irrelevant & set(seen), f"normalized rows outside season/week: {irrelevant & set(seen)}"

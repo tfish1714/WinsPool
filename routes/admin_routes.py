@@ -482,6 +482,8 @@ async def get_predictions_games(season: int, week: int, _: dict = Depends(requir
     """
     try:
         from services.nn_feature_engine import _normalize_team
+        from services.betting_screener_service import grade_ats_pick
+        from services.utils import edge_vs_vegas as _edge_vs_vegas
 
         preds = get_game_predictions(season)
 
@@ -536,28 +538,20 @@ async def get_predictions_games(season: int, week: int, _: dict = Depends(requir
                 vegas_line = result_entry.get("spread_line")
             model_spread = pred.get("model_spread")
             edge_vs_vegas = pred.get("edge_vs_vegas")
-            if edge_vs_vegas is None and model_spread is not None and vegas_line is not None:
-                edge_vs_vegas = round(model_spread - vegas_line, 1)
+            if edge_vs_vegas is None:
+                edge_vs_vegas = _edge_vs_vegas(model_spread, vegas_line)
 
             # ATS grading: did pred_ats_pick's team actually cover the Vegas line?
-            # vegas_line convention matches model_spread: positive = home favored,
-            # so home covers when actual home margin exceeds vegas_line; a margin
-            # exactly equal to the line is a push (graded as None, not counted).
+            # grade_ats_pick() is the shared grader (vegas_line convention matches
+            # model_spread: positive = home favored). A push, or a pick that
+            # matches neither team, stays None here so this table's accuracy
+            # counters only ever see graded picks; the per-game explain modal
+            # (/api/predictions/explain) is where a push is surfaced.
             pred_ats_pick = pred.get("pred_ats_pick")
-            is_correct_ats = None
             home_score = result_entry.get("home_score") if isinstance(result_entry, dict) else None
             away_score = result_entry.get("away_score") if isinstance(result_entry, dict) else None
-            if (pred_ats_pick is not None and vegas_line is not None
-                    and home_score is not None and away_score is not None):
-                home_margin = home_score - away_score
-                if home_margin > vegas_line:
-                    covered = ht
-                elif home_margin < vegas_line:
-                    covered = at
-                else:
-                    covered = None  # push
-                if covered is not None:
-                    is_correct_ats = (_normalize_team(str(pred_ats_pick)) == covered)
+            ats_grade = grade_ats_pick(pred_ats_pick, ht, at, home_score, away_score, vegas_line)
+            is_correct_ats = (ats_grade == "win") if ats_grade in ("win", "loss") else None
 
             games.append({
                 "key":            key,
