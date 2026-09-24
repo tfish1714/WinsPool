@@ -6,6 +6,7 @@
  */
 
 import { AuthService } from './auth_service.js';
+import { gradeBadge } from './grade_badge.js';
 
 const modal   = document.getElementById('pred-explain-modal');
 const content = document.getElementById('pred-explain-content');
@@ -119,7 +120,7 @@ function renderExplanation(data) {
 
     // Card 3: ATS pick (only if it differs from SU, or always show)
     const atsDiffers = pred_ats_pick && pred_ats_pick !== pred_winner;
-    const atsGrade = _gradeIcon(is_correct_ats);
+    const atsGrade = gradeBadge(is_correct_ats);  // true | false | "push" | null
     const atsCard = pred_ats_pick ? `
         <div style="flex:1; min-width:110px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
             <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">ATS Pick${atsGrade ? ` · ${atsGrade}` : ''}</div>
