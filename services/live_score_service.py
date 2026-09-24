@@ -116,7 +116,13 @@ def sync_live_scores_to_df(games_df: pd.DataFrame) -> pd.DataFrame:
             # If the game is currently live or just finished on ESPN
             # we prefer ESPN's score over the static CSV
             espn_status = update['status']
-            
+
+            # Not-yet-started (STATUS_SCHEDULED, 0-0) and other non-playing
+            # statuses must not be written: result=0 would be read downstream
+            # by compute_team_records() as a completed tie.
+            if not is_live_status(espn_status) and espn_status != 'STATUS_FINAL':
+                continue
+
             # Update scores
             df.at[idx, 'home_score'] = update['home_score']
             df.at[idx, 'away_score'] = update['away_score']
