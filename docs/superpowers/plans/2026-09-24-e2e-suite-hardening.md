@@ -164,7 +164,7 @@ git commit -m "test(e2e): canonical _open_admin_tab helper, migrate all admin ta
 **Interfaces:**
 - Consumes: Task 1's `tests_e2e/helpers.py`.
 - Produces in `tests_e2e/helpers.py`:
-  - `_record_dialogs(page) -> list[tuple[str, str]]`: moved verbatim from `test_live_draft.py`; accepts every dialog and records `(dialog.type, dialog.message)`.
+  - `_record_dialogs(page) -> list[tuple[str, str]]`: moved from `test_live_draft.py`; accepts every dialog and records `(dialog.type, dialog.message)`. **Idempotent per page**: a second call for the same page returns the first call's list instead of attaching another handler (two handlers would both call `dialog.accept()` and Playwright raises "Cannot accept dialog which is already handled"). This matters because `restore_player_9`'s teardown reuses the test's own `page`.
   - `_click_and_wait_for_dialogs(page, dialogs, locator, count, timeout_ms=8000) -> list[tuple[str, str]]`: clicks `locator`, polls until `count` new dialogs were recorded in `dialogs` (or the timeout), asserts exactly `count` arrived, returns just those new entries.
   - `_assert_no_failure_dialogs(dialogs) -> None`: fails if any recorded message contains `fail` or `error` (case-insensitive).
 - `test_live_draft.py` keeps `_record_dialogs` importable: `from tests_e2e.helpers import _record_dialogs  # re-exported: other modules import it from here`.
@@ -186,6 +186,17 @@ def test_record_dialogs_records_type_and_message(live_server, page):
     page.evaluate("() => { alert('hello'); }")
 
     assert seen == [("alert", "hello")]
+
+
+def test_record_dialogs_is_idempotent_per_page(live_server, page):
+    first = _record_dialogs(page)
+    second = _record_dialogs(page)
+    page.goto("about:blank")
+
+    page.evaluate("() => { alert('once'); }")  # a double handler would raise here
+
+    assert first is second
+    assert first == [("alert", "once")]
 
 
 def test_click_and_wait_for_dialogs_returns_only_the_new_dialogs(live_server, page):
@@ -236,6 +247,9 @@ def _record_dialogs(page):
     or a failed admin action, so every page gets a recorder and the test
     asserts on its contents.
     """
+    existing = getattr(page, "_e2e_dialog_log", None)
+    if existing is not None:
+        return existing  # one handler per page: a second would double-accept
     seen = []
 
     def _handle(dialog):
@@ -243,6 +257,7 @@ def _record_dialogs(page):
         dialog.accept()
 
     page.on("dialog", _handle)
+    page._e2e_dialog_log = seen
     return seen
 
 
@@ -275,7 +290,7 @@ def _assert_no_failure_dialogs(dialogs):
 In `test_live_draft.py`, delete the local `_record_dialogs` definition and add `from tests_e2e.helpers import _record_dialogs  # re-exported: other modules import it from here` (keep a `# noqa: F401` only if the file no longer uses it; it does use it).
 
 - [ ] **Step 4: Migrate `test_admin_player_management.py`.**
-  - Each test that pops dialogs registers `dialogs = _record_dialogs(page)` right after `_login(...)`. For `_reclaim_player_password(page, live_server, target)` (called from the fixture teardown with the fixture's `page`) create the recorder inside the function.
+  - Each test that pops dialogs registers `dialogs = _record_dialogs(page)` right after `_login(...)`. For `_reclaim_player_password(page, live_server, target)` (called from the fixture teardown with the test's own `page`) call `dialogs = _record_dialogs(page)` inside the function too; the helper is idempotent, so it returns the test's existing list.
   - Replace `_click_through_two_dialogs(page, card.locator(".btn-reset-pw"))` with:
 
     ```python
