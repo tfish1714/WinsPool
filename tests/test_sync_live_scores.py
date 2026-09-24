@@ -303,7 +303,7 @@ class TestMainSignaling:
              patch("scripts.sync_live_scores.run_espn_overlay_safely", return_value=0), \
              patch("services.db_service.signal_data_update") as mock_signal:
             from scripts.sync_live_scores import main
-            main()
+            main(["--force"])
 
         mock_signal.assert_called_once_with(DOMAIN_ACTIVE)
 
@@ -320,7 +320,7 @@ class TestMainSignaling:
              patch("services.db_service.signal_data_update",
                    side_effect=lambda *a, **k: call_order.append("signal")):
             from scripts.sync_live_scores import main
-            main()
+            main(["--force"])
 
         assert call_order == ["overlay", "signal"]
 
@@ -338,7 +338,7 @@ class TestAlertingPaths:
              patch("scripts.sync_live_scores.send_alert_email") as mock_alert:
             from scripts.sync_live_scores import main
             with pytest.raises(SystemExit) as exc_info:
-                main()
+                main(["--force"])
 
         assert exc_info.value.code == 1
         mock_alert.assert_called_once()
@@ -362,7 +362,7 @@ class TestAlertingPaths:
              patch("scripts.sync_live_scores.send_alert_email") as mock_alert:
             from scripts.sync_live_scores import main
             with pytest.raises(SystemExit) as exc_info:
-                main()
+                main(["--force"])
 
         assert exc_info.value.code == 1
         mock_alert.assert_called_once()
