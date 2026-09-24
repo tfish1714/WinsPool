@@ -13,6 +13,7 @@ from services.betting_screener_service import (
     _flip_row,
     matches_filters,
     side_matches,
+    grade_ats_pick,
     grade_bet,
     find_next_upcoming_week,
     load_predictions_by_season,
@@ -148,6 +149,46 @@ class TestGradeBet:
 
     def test_none_on_nan_score(self):
         assert grade_bet("home", home_score=float("nan"), away_score=14, spread_line=3.0) is None
+
+
+class TestGradeAtsPick:
+    """grade_ats_pick() turns a stored pred_ats_pick team into a grade using
+    grade_bet(), so no caller keeps its own copy of the cover/push formula."""
+
+    def test_su_right_but_ats_wrong_divergence(self):
+        # Home favored by 3 (positive = home favored), wins by only 1: the
+        # straight-up winner is home, but home does NOT cover.
+        assert grade_ats_pick("KC", "KC", "BUF", 21, 20, 3.0) == "loss"
+        assert grade_ats_pick("BUF", "KC", "BUF", 21, 20, 3.0) == "win"
+
+    def test_home_pick_covers(self):
+        assert grade_ats_pick("KC", "KC", "BUF", 27, 20, 3.0) == "win"
+
+    def test_push_is_reported_for_both_sides(self):
+        assert grade_ats_pick("KC", "KC", "BUF", 23, 20, 3.0) == "push"
+        assert grade_ats_pick("BUF", "KC", "BUF", 23, 20, 3.0) == "push"
+
+    def test_away_favorite_negative_line(self):
+        # Away favored by 6 (line -6): away wins by 10 -> away covers.
+        assert grade_ats_pick("BUF", "KC", "BUF", 10, 20, -6.0) == "win"
+        assert grade_ats_pick("KC", "KC", "BUF", 10, 20, -6.0) == "loss"
+
+    def test_team_codes_are_normalized_before_comparing(self):
+        # pick from a source that says LAR; the matchup uses the canonical LA.
+        assert grade_ats_pick("LAR", "LA", "SF", 30, 20, 3.0) == "win"
+        assert grade_ats_pick("la", "LA", "SF", 30, 20, 3.0) == "win"
+
+    def test_pick_matching_neither_team_is_ungradable_not_silently_away(self):
+        assert grade_ats_pick("DAL", "KC", "BUF", 10, 20, -6.0) is None
+
+    @pytest.mark.parametrize("pick", [None, ""])
+    def test_missing_pick_is_none(self, pick):
+        assert grade_ats_pick(pick, "KC", "BUF", 27, 20, 3.0) is None
+
+    def test_unplayed_or_no_line_is_none(self):
+        assert grade_ats_pick("KC", "KC", "BUF", None, None, 3.0) is None
+        assert grade_ats_pick("KC", "KC", "BUF", 27, 20, None) is None
+        assert grade_ats_pick("KC", "KC", "BUF", float("nan"), 20, 3.0) is None
 
 
 class TestPrebuiltAngles:

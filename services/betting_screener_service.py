@@ -145,6 +145,28 @@ def grade_bet(side: str, home_score, away_score, spread_line) -> Optional[str]:
     return "push"
 
 
+def grade_ats_pick(pick, home_team: str, away_team: str,
+                   home_score, away_score, vegas_line) -> Optional[str]:
+    """Grade a stored ATS pick (a team code) against the final score: 'win' |
+    'loss' | 'push', or None when it can't be graded.
+
+    Delegates the cover/push arithmetic to grade_bet(). Team codes are
+    normalized (LAR/WSH/JAC vs the canonical LA/WAS/JAX) before comparing. A
+    pick that matches neither team is ungradable (None) rather than being
+    quietly treated as the away side, so a corrupted or stale prediction
+    record can never produce a confident-looking grade."""
+    if not pick:
+        return None
+    normalized = _normalize_team(str(pick))
+    if normalized == _normalize_team(str(home_team)):
+        side = "home"
+    elif normalized == _normalize_team(str(away_team)):
+        side = "away"
+    else:
+        return None
+    return grade_bet(side, home_score, away_score, vegas_line)
+
+
 def find_next_upcoming_week(games_df, season: int) -> Optional[int]:
     """Earliest week in `season` with at least one unplayed game (null result),
     or None if the season is missing or fully complete."""
