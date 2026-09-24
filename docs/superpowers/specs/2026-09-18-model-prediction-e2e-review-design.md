@@ -2,7 +2,10 @@
 
 **Date:** 2026-09-18
 **Status:** Audit complete (all 4 stages) — ready to consolidate findings and
-write implementation plans per fix (see "Rollout")
+write implementation plans per fix (see "Rollout"). Rollout item 4 (ATS/edge
+consolidation) done 2026-09-24 on `worktree-prediction-pipeline-consolidation`
+(see `docs/superpowers/plans/completed/2026-09-24-prediction-pipeline-consolidation.md`);
+the other rollout items are tracked separately and remain open here.
 
 ## Origin
 

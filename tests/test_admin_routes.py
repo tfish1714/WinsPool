@@ -545,6 +545,63 @@ class TestPredictionsGames:
         assert games[0]["actual_winner"] is None
         assert games[0]["is_correct"] is None
 
+    def _get_game(self, admin_token, pred, game_row):
+        """One-game round trip; returns that game's row from the endpoint."""
+        from unittest.mock import patch
+        import pandas as pd
+        mock_games = pd.DataFrame([{"season": 2024, "week": 1, "home_team": "KC",
+                                    "away_team": "BUF", **game_row}])
+        with patch("routes.admin_routes.get_game_predictions", return_value={"W01_KC_BUF": pred}), \
+             patch("routes.admin_routes.load_data", return_value=(
+                 None, None, mock_games, None, None, None, None
+             )):
+            resp = client.get(
+                "/api/admin/predictions/games?season=2024&week=1",
+                headers={"Authorization": admin_token},
+            )
+        assert resp.status_code == 200
+        return resp.json()["games"][0]
+
+    def test_ats_win_and_loss_grade_against_vegas_line(self, admin_token):
+        # Home favored by 3 (line +3), home wins by 7 -> home covers.
+        played = {"result": 7.0, "home_score": 27, "away_score": 20, "spread_line": 3.0}
+        home_pick = {"pred_winner": "KC", "pred_ats_pick": "KC", "model_spread": 5.0,
+                     "explanation": {"vegas_line": 3.0}}
+        away_pick = {**home_pick, "pred_ats_pick": "BUF"}
+
+        assert self._get_game(admin_token, home_pick, played)["is_correct_ats"] is True
+        assert self._get_game(admin_token, away_pick, played)["is_correct_ats"] is False
+
+    def test_ats_push_stays_null_for_the_accuracy_counters(self, admin_token):
+        """The per-game table's counters treat any non-null grade as a graded
+        pick, so a push must stay null here (only the explain modal shows it)."""
+        pushed = {"result": 3.0, "home_score": 23, "away_score": 20, "spread_line": 3.0}
+        pred = {"pred_winner": "KC", "pred_ats_pick": "KC", "model_spread": 5.0,
+                "explanation": {"vegas_line": 3.0}}
+
+        assert self._get_game(admin_token, pred, pushed)["is_correct_ats"] is None
+
+    def test_ats_pick_matching_neither_team_is_ungradable(self, admin_token):
+        played = {"result": 7.0, "home_score": 27, "away_score": 20, "spread_line": 3.0}
+        pred = {"pred_winner": "KC", "pred_ats_pick": "DAL", "model_spread": 5.0,
+                "explanation": {"vegas_line": 3.0}}
+
+        assert self._get_game(admin_token, pred, played)["is_correct_ats"] is None
+
+    def test_missing_edge_is_derived_from_spreads(self, admin_token):
+        played = {"result": 7.0, "home_score": 27, "away_score": 20, "spread_line": 3.0}
+        pred = {"pred_winner": "KC", "pred_ats_pick": "KC", "model_spread": 5.5,
+                "explanation": {"vegas_line": 3.0}}  # no stored edge_vs_vegas
+
+        assert self._get_game(admin_token, pred, played)["edge_vs_vegas"] == 2.5
+
+    def test_stored_edge_is_not_overwritten(self, admin_token):
+        played = {"result": 7.0, "home_score": 27, "away_score": 20, "spread_line": 3.0}
+        pred = {"pred_winner": "KC", "pred_ats_pick": "KC", "model_spread": 5.5,
+                "edge_vs_vegas": 9.9, "explanation": {"vegas_line": 3.0}}
+
+        assert self._get_game(admin_token, pred, played)["edge_vs_vegas"] == 9.9
+
 
 def test_scrape_predictions_endpoint_removed(admin_token):
     """The ESPN FPI endpoint it called returns 404; the button reported false success."""

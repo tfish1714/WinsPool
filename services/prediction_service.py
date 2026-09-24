@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
 from services.constants import UNDRAFTED_SENTINEL, ELO_TO_SPREAD
+from services.utils import derive_prediction_scalars, prob_to_model_spread
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -909,7 +910,8 @@ def enrich_schedule_with_predictions(
     Elo + Pythagorean win probability and populates:
         - pred_winner: Predicted winning team abbreviation
         - pred_su_conf: Straight-up confidence percentage (50-99)
-        - pred_ats_pick: Against-the-spread pick (underdog if spread <= 3)
+        - pred_ats_pick: Against-the-spread pick (the model's spread vs the Vegas
+          line, via services/utils.py::derive_prediction_scalars)
 
     Completed games receive None for all prediction columns.
 
@@ -947,34 +949,17 @@ def enrich_schedule_with_predictions(
         prediction = svc.game_win_probability(home, away)
         home_prob = prediction["home_win_prob"]
 
-        if home_prob >= 0.5:
-            winner = home
-            confidence = home_prob
-        else:
-            winner = away
-            confidence = 1.0 - home_prob
+        # Winner, clamped confidence and ATS pick all come from the one shared
+        # rule (services/utils.py) rather than a private copy. This replaces
+        # an "underdog if |spread| <= 3, else favorite" heuristic that also had
+        # the sign convention backwards (positive spread_line = home favored).
+        scalars = derive_prediction_scalars(
+            home, away, home_prob, prob_to_model_spread(home_prob), row.get("spread_line")
+        )
 
-        # Clamp confidence to 50-99% range for display
-        conf_pct = round(min(99.0, max(50.0, confidence * 100)), 1)
-
-        # ATS pick: take the underdog if spread is small (<=3), else favorite
-        spread = row.get("spread_line")
-        if pd.notna(spread):
-            try:
-                spread_val = float(spread)
-                if abs(spread_val) <= 3:
-                    # Pick underdog ATS
-                    ats = away if spread_val < 0 else home
-                else:
-                    ats = winner
-            except (ValueError, TypeError):
-                ats = winner
-        else:
-            ats = winner
-
-        pred_winners.append(winner)
-        pred_confs.append(conf_pct)
-        pred_ats.append(ats)
+        pred_winners.append(scalars["pred_winner"])
+        pred_confs.append(scalars["pred_su_conf"])
+        pred_ats.append(scalars["pred_ats_pick"])
 
     schedule_df = schedule_df.copy()
     schedule_df["pred_winner"] = pred_winners

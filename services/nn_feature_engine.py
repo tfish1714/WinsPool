@@ -1253,7 +1253,7 @@ def compute_preseason_player_profiles(target_season: int, rawdata_dir, week: int
                                       shared_inputs: dict = None) -> dict:
     """Build per-team EPA quality estimates from projected roster + prior-season player stats.
 
-    Replaces compute_preseason_roster_features() for all position groups.
+    Player-level replacement for the removed team-level roster lookup; covers all position groups.
     Returns {team: {off_pass_epa, off_rush_epa, def_pass_epa, def_rush_epa,
                     ol_av, dl_perf, qb_tier}}.
     Returns {} if required files (roster or depth_charts) are missing.

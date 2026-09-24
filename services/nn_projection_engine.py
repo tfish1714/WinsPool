@@ -30,7 +30,7 @@ from services.nn_prediction_service import (
 )
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
-from services.utils import derive_prediction_scalars
+from services.utils import derive_prediction_scalars, prob_to_model_spread
 
 logger = logging.getLogger(__name__)
 
@@ -1144,31 +1144,17 @@ def enrich_schedule_with_nn_predictions(
         prediction = engine.game_win_probability(home, away)
         home_prob = prediction["home_win_prob"]
 
-        if home_prob >= 0.5:
-            winner = home
-            confidence = home_prob
-        else:
-            winner = away
-            confidence = 1.0 - home_prob
+        # Winner, clamped confidence and ATS pick come from the one shared
+        # rule (positive model spread = home favored, matching nflverse), so
+        # this path cannot drift from the ensemble/MC paths -- including the
+        # one-decimal rounding of the model spread before it is compared.
+        scalars = derive_prediction_scalars(
+            home, away, home_prob, prob_to_model_spread(home_prob), row.get("spread_line")
+        )
 
-        # Clamp confidence to 50-99%
-        conf_pct = round(min(99.0, max(50.0, confidence * 100)), 1)
-
-        # ATS pick: positive model spread = home favored (matches nflverse convention).
-        spread = row.get("spread_line")
-        ats = winner
-        if pd.notna(spread):
-            try:
-                sv = float(spread)
-                hp_clip = min(PROB_CLIP_MAX, max(PROB_CLIP_MIN, home_prob))
-                implied = SPREAD_TO_PROB_SCALE * np.log(hp_clip / (1.0 - hp_clip))
-                ats = home if implied > sv else away
-            except (ValueError, TypeError):
-                pass
-
-        pred_winners.append(winner)
-        pred_confs.append(conf_pct)
-        pred_ats.append(ats)
+        pred_winners.append(scalars["pred_winner"])
+        pred_confs.append(scalars["pred_su_conf"])
+        pred_ats.append(scalars["pred_ats_pick"])
 
     schedule_df = schedule_df.copy()
     schedule_df["pred_winner"] = pred_winners

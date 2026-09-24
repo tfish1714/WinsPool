@@ -231,7 +231,8 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
     try:
         from services.cache_service import get_game_predictions
         from services.nn_feature_engine import _normalize_team
-        from services.betting_screener_service import grade_bet
+        from services.betting_screener_service import grade_ats_pick
+        from services.utils import edge_vs_vegas
         import math
         import pandas as pd
         ht = _normalize_team(home)
@@ -253,13 +254,15 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
         row = None
         _, _, all_games, _, _, _, _ = load_data()
         if not all_games.empty:
+            # Narrow to the requested season/week BEFORE normalizing team
+            # names: load_data() returns every season, and normalizing both
+            # team columns across all of them on each modal open is wasted work.
+            season_week = all_games[(all_games["season"] == season) & (all_games["week"] == week)]
             mask = (
-                (all_games["season"] == season) &
-                (all_games["week"] == week) &
-                (all_games["home_team"].apply(_normalize_team) == ht) &
-                (all_games["away_team"].apply(_normalize_team) == at)
+                (season_week["home_team"].apply(_normalize_team) == ht) &
+                (season_week["away_team"].apply(_normalize_team) == at)
             )
-            matched = all_games[mask]
+            matched = season_week[mask]
             if not matched.empty:
                 row = matched.iloc[0]
                 res = row.get("result")
@@ -277,8 +280,10 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
                 sv = float(sl)
                 if not math.isnan(sv):
                     ex["vegas_line"] = round(sv, 1)
-                    if ex.get("edge_vs_vegas") is None and pred.get("model_spread") is not None:
-                        ex["edge_vs_vegas"] = round(pred["model_spread"] - sv, 1)
+                    if ex.get("edge_vs_vegas") is None:
+                        edge = edge_vs_vegas(pred.get("model_spread"), sv)
+                        if edge is not None:
+                            ex["edge_vs_vegas"] = edge
             except (TypeError, ValueError):
                 pass
             pred = {**pred, "explanation": ex}
@@ -292,18 +297,16 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
         if actual_winner is not None and pw is not None:
             is_correct = (_normalize_team(str(pw)) == actual_winner)
 
-        # ATS grading -- reuses grade_bet(), the same helper
-        # services/betting_screener_service.py's backtesting already uses,
-        # rather than a second copy of the win/loss/push formula.
-        is_correct_ats = None
-        pred_ats_pick = pred.get("pred_ats_pick")
-        vegas_line = ex.get("vegas_line")
-        if (pred_ats_pick is not None and vegas_line is not None
-                and home_score is not None and away_score is not None):
-            side = "home" if _normalize_team(str(pred_ats_pick)) == ht else "away"
-            grade = grade_bet(side, home_score, away_score, vegas_line)
-            if grade in ("win", "loss"):
-                is_correct_ats = (grade == "win")
+        # ATS grading -- grade_ats_pick() wraps grade_bet(), the helper the
+        # betting backtester already uses, so there is one copy of the
+        # win/loss/push formula. Tri-state plus push: True (covered), False
+        # (did not), "push" (landed on the line -- distinct from None, which
+        # means unplayed or not gradable, so the modal can show a neutral
+        # PUSH badge instead of nothing), and None.
+        grade = grade_ats_pick(
+            pred.get("pred_ats_pick"), ht, at, home_score, away_score, ex.get("vegas_line")
+        )
+        is_correct_ats = {"win": True, "loss": False, "push": "push"}.get(grade)
 
         return JSONResponse(content={
             "key": key,
