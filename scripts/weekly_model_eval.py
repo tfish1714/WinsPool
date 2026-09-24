@@ -152,6 +152,7 @@ def _evaluate_weeks(
         ll = float(sklearn_log_loss(
             non_tie["home_win"].values,
             non_tie["pred_home_wp"].values,
+            labels=[0.0, 1.0],
         )) if len(non_tie) > 0 else None
 
         # Season-level YTD: sum probabilities to get projected wins vs actual for all weeks <= this one
