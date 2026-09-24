@@ -31,6 +31,7 @@ Stores all pool participants.
 | `lockout_until` | `float` | Unix timestamp of lockout expiry (optional) |
 | `must_change_password` | `bool` | Flag set when a temporary password is assigned by admin, requiring change on next login |
 | `last_login` | `float` | Unix epoch timestamp (seconds) of player's most recent login |
+| `last_active` | `float` | Unix epoch timestamp (seconds) of the most recent authenticated request, persisted at most once per player per 15 minutes; absent until first recorded (no backfill) |
 
 **Document ID**: `{playerId}`
 

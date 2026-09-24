@@ -164,6 +164,17 @@
 .members-row-email { font-family: 'JetBrains Mono', monospace; color: var(--ink-2); font-size: 12px; word-break: break-all; }
 .members-row-order { font-family: 'JetBrains Mono', monospace; color: var(--ink-3); font-size: 13px; }
 .members-row-login { font-family: 'JetBrains Mono', monospace; color: var(--ink-2); font-size: 12px; }
+.members-row-login-sub { color: var(--ink-3); font-size: 11px; margin-top: 2px; }
+/* Green dot: player was active within the last 15 minutes (admin panel). */
+.activity-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 6px;
+    vertical-align: middle;
+    background: var(--pos);
+    border-radius: 50%;
+}
 .members-row-pw { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
 
 .paid-toggle {

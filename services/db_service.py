@@ -475,8 +475,8 @@ def record_player_activity(player_id: int, ts: float) -> None:
     each time would make every instance refetch the players/draft bundle for
     what is only a coarse "last seen" indicator. Instead the already-cached
     players frame is patched in place, so this instance's admin view is
-    current without any refetch; other warm instances catch up on their next
-    static refresh. In local mode (no Firestore) only the in-memory patch
+    current without any refetch (the frame is replaced by a patched copy, not
+    mutated); other warm instances catch up on their next static refresh. In local mode (no Firestore) only the in-memory patch
     happens -- the local pickles are a read-only mirror of Firestore.
     """
     db = get_db()
@@ -489,9 +489,16 @@ def record_player_activity(player_id: int, ts: float) -> None:
     if players_df is not None and not players_df.empty:
         mask = players_df["playerId"].astype(str) == str(player_id)
         if mask.any():
-            if "last_active" not in players_df.columns:
-                players_df["last_active"] = float("nan")
-            players_df.loc[mask, "last_active"] = ts
+            # Swap in a patched copy rather than mutating the shared frame:
+            # this runs on a background thread while request threads may be
+            # reading (merging, iterating) the same cached frame, and pandas
+            # is not safe for concurrent mutation and reads. Readers holding
+            # the old frame are unaffected; the dict assignment is atomic.
+            patched = players_df.copy()
+            if "last_active" not in patched.columns:
+                patched["last_active"] = float("nan")
+            patched.loc[mask, "last_active"] = ts
+            bucket["players"] = patched
 
 
 def save_weekly_recap(year: int, week: int, summary: str):

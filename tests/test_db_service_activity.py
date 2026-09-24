@@ -53,6 +53,18 @@ def test_patches_cached_players_frame_in_place():
     assert pd.isna(df.loc[df["playerId"] == 8, "last_active"].iloc[0])
 
 
+def test_shared_frame_is_replaced_not_mutated():
+    """Readers on other threads may hold the old frame; it must not change
+    underneath them (pandas is not safe for concurrent mutation and reads)."""
+    bucket = _install_players([{"playerId": 7, "fullName": "A"}])
+    old = bucket["players"]
+    with patch.object(dbs, "get_db", return_value=MagicMock()):
+        dbs.record_player_activity(7, 99.0)
+
+    assert bucket["players"] is not old
+    assert "last_active" not in old.columns
+
+
 def test_unknown_player_is_a_noop_for_the_cache():
     bucket = _install_players([{"playerId": 7, "fullName": "A"}])
     with patch.object(dbs, "get_db", return_value=MagicMock()):

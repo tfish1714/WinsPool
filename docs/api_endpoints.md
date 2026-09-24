@@ -204,6 +204,7 @@ Lists all players in the pool, including credentials setup status and last login
 - `has_password`: `bool`
 - `must_change_password`: `bool`
 - `last_login`: `float | null` (Unix timestamp)
+- `last_active`: `float | null` (Unix timestamp of most recent authenticated request, throttled to one write per 15 min)
 
 ---
 
@@ -216,7 +217,7 @@ Lists all players enrolled in a specific season with draft order position, fee p
 | `season` | path | `int` | Season year (e.g. 2026) |
 | `playerId` | query | `string` | Admin player ID (for auth check) |
 
-**Response**: `{ "members": [{ "playerId": int, "fullName": string, "email": string, "role": string, "draftOrder": int, "paid": bool, "has_password": bool, "must_change_password": bool, "last_login": float | null }] }`
+**Response**: `{ "members": [{ "playerId": int, "fullName": string, "email": string, "role": string, "draftOrder": int, "paid": bool, "has_password": bool, "must_change_password": bool, "last_login": float | null, "last_active": float | null }] }`
 
 ---
 

@@ -1,7 +1,7 @@
 # User Last Activity Tracking in Admin Panel Design
 
 **Date:** 2026-09-23  
-**Status:** Draft  
+**Status:** Implemented on `worktree-user-last-activity` (2026-09-24); deviations are listed in the completed plan.  
 **Target Areas:** `services/session_service.py`, `routes/admin_routes.py`, `static/js/admin_main.js`, `templates/admin_main.html`, `tests/test_admin_routes.py`, `tests/test_session_service.py`
 
 ---

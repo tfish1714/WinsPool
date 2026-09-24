@@ -1,6 +1,7 @@
 import { ApiService } from './api.js';
 import { UiRenderer } from './ui_renderer.js';
 import { AuthService } from './auth_service.js';
+import { formatRelativeTime, isFresh } from './relative_time.js';
 
 /**
  * WinsPool Admin Application Module (Refactored)
@@ -130,7 +131,7 @@ class AdminApp {
                 memberPwPill = `<span class="mono-pill" style="border-color:var(--ink-3); color:var(--ink-3); font-size:10px; padding:2px 6px;">None</span>`;
             }
 
-            const memberLastLogin = m.last_login ? this._formatDate(m.last_login) : 'Never';
+            const activity = this._activitySummary(m.last_active, m.last_login);
             const paidState = m.paid ? 'paid' : 'unpaid';
 
             row.innerHTML = `
@@ -139,7 +140,11 @@ class AdminApp {
                 <div>${rolePill}</div>
                 <div class="members-row-order">#${m.draftOrder ?? '—'}</div>
                 <div class="members-row-pw">${memberPwPill}</div>
-                <div class="members-row-login">${this._esc(memberLastLogin)}</div>
+                <div class="members-row-login" title="${this._esc(activity.title)}">${activity.hasActivity
+                    ? `<div>${activity.fresh ? '<span class="activity-dot" aria-hidden="true"></span>' : ''}${this._esc(activity.activeText)}</div>
+                    <div class="members-row-login-sub">Login: ${this._esc(activity.loginText)}</div>`
+                    : `<div>Login: ${this._esc(activity.loginText)}</div>`}
+                </div>
                 <div>
                     <button class="paid-toggle" data-paid="${m.paid ? '1' : '0'}" aria-label="Toggle paid">
                         <span class="paid-toggle__track" style="background:${m.paid ? 'var(--pos)' : 'var(--line-strong)'};">
@@ -267,7 +272,7 @@ class AdminApp {
                 pwBadge = `<span class="mono-pill" style="border-color:var(--ink-3); color:var(--ink-3); font-size:10px; padding:2px 7px;">No Password</span>`;
             }
 
-            const lastLoginText = p.last_login ? this._formatDate(p.last_login) : 'Never';
+            const activity = this._activitySummary(p.last_active, p.last_login);
 
             // Display mode
             const displayHtml = `
@@ -280,7 +285,9 @@ class AdminApp {
                         </div>
                         <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; display: flex; gap: 12px; flex-wrap: wrap;">
                             <span>${this._esc(p.email || '')}${p.cell ? ' | ' + this._esc(p.cell) : ''}</span>
-                            <span style="font-family:'JetBrains Mono',monospace; color:var(--ink-2);">Last login: ${this._esc(lastLoginText)}</span>
+                            <span style="font-family:'JetBrains Mono',monospace; color:var(--ink-2);" title="${this._esc(activity.title)}">${activity.hasActivity
+                                ? `${activity.fresh ? '<span class="activity-dot" aria-hidden="true"></span>' : ''}Active: ${this._esc(activity.activeText)} · Login: ${this._esc(activity.loginText)}`
+                                : `Last login: ${this._esc(activity.loginText)}`}</span>
                         </div>
                     </div>
                     <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
@@ -354,6 +361,23 @@ class AdminApp {
 
             confirmTempBtn.addEventListener('click', () => this.setTempPassword(p.playerId, card));
         });
+    }
+
+    /**
+     * Activity vs. login presentation shared by the Season Members table and
+     * the Player Management cards. `hasActivity` is false for players with no
+     * recorded last_active yet (nothing is backfilled); callers then show the
+     * last login alone rather than repeating it as "activity".
+     */
+    _activitySummary(lastActive, lastLogin) {
+        const activeText = formatRelativeTime(lastActive);
+        return {
+            hasActivity: activeText !== null,
+            activeText,
+            loginText: formatRelativeTime(lastLogin) || 'Never',
+            fresh: isFresh(lastActive),
+            title: `Last active: ${lastActive ? this._formatDate(lastActive) : 'Unknown'} | Last login: ${lastLogin ? this._formatDate(lastLogin) : 'Never'}`,
+        };
     }
 
     _formatDate(ts) {
