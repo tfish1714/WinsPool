@@ -6,7 +6,7 @@ tab loads, its content becomes visible, no server-error text appears.
 Deep interaction with these tools' filters/charts is out of scope.
 """
 import pytest
-from tests_e2e.helpers import _open_admin_tab
+from tests_e2e.helpers import _open_admin_tab, _record_dialogs
 from tests_e2e.test_standings import _login
 
 TABS = [
@@ -24,11 +24,13 @@ TABS = [
 def test_admin_tab_loads(live_server, page, test_player_credentials, tab_id):
     admin_creds = test_player_credentials[0]
     _login(page, live_server, admin_creds)
+    dialogs = _record_dialogs(page)
 
     page.goto(f"{live_server}/admin")
     _open_admin_tab(page, tab_id)
 
     assert "Internal Server Error" not in page.content()
+    assert dialogs == [], f"unexpected dialog(s) while loading the tab: {dialogs}"
 
 
 def test_admin_player_management_tab_is_default_visible(live_server, page, test_player_credentials):
@@ -36,10 +38,12 @@ def test_admin_player_management_tab_is_default_visible(live_server, page, test_
     the tab shown on first load, with no click required."""
     admin_creds = test_player_credentials[0]
     _login(page, live_server, admin_creds)
+    dialogs = _record_dialogs(page)
 
     page.goto(f"{live_server}/admin")
     page.wait_for_selector("#player-section:not(.hidden)", timeout=10000)
     assert "Internal Server Error" not in page.content()
+    assert dialogs == [], f"unexpected dialog(s) while loading the tab: {dialogs}"
 
 
 def test_admin_predictions_debug_page_loads(live_server, page, test_player_credentials):
@@ -47,7 +51,9 @@ def test_admin_predictions_debug_page_loads(live_server, page, test_player_crede
     templates/admin_predictions.html) -- not one of the 8 dashboard tabs."""
     admin_creds = test_player_credentials[0]
     _login(page, live_server, admin_creds)
+    dialogs = _record_dialogs(page)
 
     page.goto(f"{live_server}/admin/predictions")
     page.wait_for_selector("#signin-screen", state="hidden", timeout=10000)
     assert "Internal Server Error" not in page.content()
+    assert dialogs == [], f"unexpected dialog(s) while loading the tab: {dialogs}"

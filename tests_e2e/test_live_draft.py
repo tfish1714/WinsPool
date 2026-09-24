@@ -43,6 +43,7 @@ import time
 import pytest
 
 from tests_e2e.helpers import _open_admin_tab
+from tests_e2e.helpers import _record_dialogs  # re-exported: other modules import it from here
 from tests_e2e.test_standings import _login
 
 SEASON = 3000
@@ -52,25 +53,6 @@ TOTAL_PICKS = POOL_SIZE * TEAMS_PER_PLAYER
 
 
 # ── Admin Portal helpers ─────────────────────────────────────────────────────
-
-def _record_dialogs(page):
-    """Accept every native dialog while keeping a record of what it said.
-
-    Both the Admin Portal (confirm() before generate/wipe, alert() with the
-    result) and the draft room (alert() on a WebSocket `error` message, e.g.
-    "It is not your turn to pick!") use native dialogs. Playwright
-    auto-dismisses unhandled ones, which would silently hide a rejected pick,
-    so every page gets a recorder and the test asserts on its contents.
-    """
-    seen = []
-
-    def _handle(dialog):
-        seen.append((dialog.type, dialog.message))
-        dialog.accept()
-
-    page.on("dialog", _handle)
-    return seen
-
 
 def _poll(fn, timeout_s=15, interval_s=0.25, what="condition"):
     """Poll a zero-arg callable until it returns truthy. Used instead of

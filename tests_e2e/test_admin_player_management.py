@@ -24,9 +24,9 @@ the original plan, which was checked against source but not run live):
    #player-section, so a real click() on it fails Playwright's visibility
    check whenever #player-section is the active tab. `_refetch_players()`
    below switches to the Draft tab (a real click on its
-   `[data-tab="draft-section"]` button) to unhide the checkbox's container,
-   clicks the checkbox for real, then switches back to the Players tab
-   (`[data-tab="player-section"]`) -- tab switching only toggles a `hidden`
+   `_open_admin_tab(page, "draft-section")`) to unhide the checkbox's
+   container, clicks the checkbox for real, then switches back to the Players
+   tab (`_open_admin_tab(page, "player-section")`) -- tab switching only toggles a `hidden`
    class (admin_main.js's setupTabHandlers()), so the Players-tab DOM/state
    persists underneath the whole time.
 2. resetPlayerPassword() and setTempPassword() (admin_main.js) never call
@@ -37,7 +37,12 @@ the original plan, which was checked against source but not run live):
 """
 import pytest
 
-from tests_e2e.helpers import _open_admin_tab
+from tests_e2e.helpers import (
+    _assert_no_failure_dialogs,
+    _click_and_wait_for_dialogs,
+    _open_admin_tab,
+    _record_dialogs,
+)
 from tests_e2e.test_standings import _login
 
 NEW_PLAYER_EMAIL = "e2e-created-player@winspool.internal"
@@ -73,13 +78,15 @@ def _reclaim_player_password(page, live_server, target):
     """Admin-reset target's password (idempotent regardless of its current
     state) then reclaim it through the real signin overlay's Setup Account
     flow, restoring target["password"] as its working password."""
+    dialogs = _record_dialogs(page)  # idempotent: returns the test's own list
     page.goto(f"{live_server}/admin")
     page.wait_for_selector("#player-section:not(.hidden)", timeout=10000)
     _refetch_players(page)
 
     card = page.locator(f'.player-mgmt-card[data-player-id="{target["id"]}"]')
     card.wait_for(state="visible", timeout=10000)
-    _click_through_two_dialogs(page, card.locator(".btn-reset-pw"))
+    fresh = _click_and_wait_for_dialogs(page, dialogs, card.locator(".btn-reset-pw"), count=2)
+    assert [kind for kind, _ in fresh] == ["confirm", "alert"]
 
     # The admin's own session is still live in this page's localStorage,
     # which would otherwise keep the signin overlay hidden (initGlobalUI()
@@ -129,46 +136,10 @@ def _refetch_players(page):
     page.wait_for_timeout(500)
 
 
-def _click_through_two_dialogs(page, locator, timeout_ms=8000):
-    """Click `locator` and accept the two sequential dialogs it pops (a
-    confirm(), then an alert() once the awaited API call resolves) --
-    resetPlayerPassword() and the temp-password-panel's reset-back-to-normal
-    step both follow this confirm-then-alert shape.
-
-    Registering two page.once("dialog", ...) handlers up front doesn't work
-    here: both listeners fire on the FIRST dialog (whichever fires next),
-    and the second handler then errors with "Cannot accept dialog which is
-    already handled", leaving the real second dialog with no handler at all.
-    A single persistent page.on("dialog", ...) handler fixes that, but a
-    fixed wait_for_timeout() before removing it is a race against the
-    awaited backend call inside the click handler -- under load (e.g. this
-    test running after others in the same session) the alert can still be
-    pending when the timeout elapses, and everything after this in admin_main.js
-    (including this file's own post-action refetch) needs that call to have
-    actually finished. So poll until both dialogs have actually fired
-    (bounded by timeout_ms) rather than sleep a fixed amount.
-    """
-    seen = []
-
-    def _accept(dialog):
-        seen.append(dialog.message)
-        dialog.accept()
-
-    page.on("dialog", _accept)
-    try:
-        locator.click()
-        deadline_ms = timeout_ms
-        while len(seen) < 2 and deadline_ms > 0:
-            page.wait_for_timeout(100)
-            deadline_ms -= 100
-    finally:
-        page.remove_listener("dialog", _accept)
-    assert len(seen) == 2, f"expected 2 dialogs (confirm + alert), saw {len(seen)}: {seen}"
-
-
 def test_create_player(live_server, page, test_player_credentials):
     admin_creds = test_player_credentials[0]
     _login(page, live_server, admin_creds)
+    dialogs = _record_dialogs(page)
 
     page.goto(f"{live_server}/admin")
     page.wait_for_selector("#player-section:not(.hidden)", timeout=10000)
@@ -188,17 +159,18 @@ def test_create_player(live_server, page, test_player_credentials):
     page.fill("#new-player-email", NEW_PLAYER_EMAIL)
     page.fill("#new-player-phone", "555-0100")
 
-    page.once("dialog", lambda d: d.accept())  # alert('Player created!')
-    page.click("#create-player-btn")
-    page.wait_for_timeout(1000)
+    fresh = _click_and_wait_for_dialogs(page, dialogs, page.locator("#create-player-btn"), count=1)
+    assert fresh == [("alert", "Player created!")]
 
     page.wait_for_selector(f'.player-mgmt-card:has-text("{NEW_PLAYER_EMAIL}")', timeout=10000)
+    _assert_no_failure_dialogs(dialogs)
 
 
 def test_edit_player_profile(live_server, page, test_player_credentials):
     admin_creds = test_player_credentials[0]
     target = test_player_credentials[9]
     _login(page, live_server, admin_creds)
+    dialogs = _record_dialogs(page)
 
     page.goto(f"{live_server}/admin")
     page.wait_for_selector("#player-section:not(.hidden)", timeout=10000)
@@ -215,9 +187,8 @@ def test_edit_player_profile(live_server, page, test_player_credentials):
     phone_input = edit_panel.locator(".edit-phone")
     phone_input.fill("555-0199")
 
-    page.once("dialog", lambda d: d.accept())  # alert('Player updated successfully.')
-    edit_panel.locator(".btn-save-edit").click()
-    page.wait_for_timeout(1000)
+    fresh = _click_and_wait_for_dialogs(page, dialogs, edit_panel.locator(".btn-save-edit"), count=1)
+    assert fresh == [("alert", "Player updated successfully.")]
 
     # savePlayerEdit() calls fetchInitialData() itself (unlike the reset/temp
     # password actions -- see module docstring gap 2), but that refetch uses
@@ -225,12 +196,14 @@ def test_edit_player_profile(live_server, page, test_player_credentials):
     # true from _refetch_players() above -- re-locate the card rather than
     # reusing the (now-detached) old handle.
     page.wait_for_selector(f'.player-mgmt-card[data-player-id="{target["id"]}"]:has-text("555-0199")', timeout=10000)
+    _assert_no_failure_dialogs(dialogs)
 
 
 def test_reset_password_and_reclaim(live_server, page, test_player_credentials, restore_player_9):
     admin_creds = test_player_credentials[0]
     target = restore_player_9
     _login(page, live_server, admin_creds)
+    dialogs = _record_dialogs(page)
 
     page.goto(f"{live_server}/admin")
     page.wait_for_selector("#player-section:not(.hidden)", timeout=10000)
@@ -240,10 +213,13 @@ def test_reset_password_and_reclaim(live_server, page, test_player_credentials, 
     card = page.locator(f'.player-mgmt-card[data-player-id="{target["id"]}"]')
     card.wait_for(state="visible", timeout=10000)
 
-    _click_through_two_dialogs(page, card.locator(".btn-reset-pw"))
+    fresh = _click_and_wait_for_dialogs(page, dialogs, card.locator(".btn-reset-pw"), count=2)
+    assert [kind for kind, _ in fresh] == ["confirm", "alert"]
+    assert fresh[0][1].startswith("Reset password for"), fresh
 
     _refetch_players(page)  # resetPlayerPassword() doesn't self-refresh -- see gap 2
     page.wait_for_selector(f'.player-mgmt-card[data-player-id="{target["id"]}"]:has-text("No Password")', timeout=10000)
+    _assert_no_failure_dialogs(dialogs)
 
     # Reclaiming target's credentials (so they still work for any later test
     # in this session) now happens unconditionally in the restore_player_9
@@ -255,6 +231,7 @@ def test_set_temp_password(live_server, page, test_player_credentials, restore_p
     admin_creds = test_player_credentials[0]
     target = restore_player_9
     _login(page, live_server, admin_creds)
+    dialogs = _record_dialogs(page)
 
     page.goto(f"{live_server}/admin")
     page.wait_for_selector("#player-section:not(.hidden)", timeout=10000)
@@ -269,12 +246,12 @@ def test_set_temp_password(live_server, page, test_player_credentials, restore_p
     temppw_panel.wait_for(state="visible", timeout=5000)
     temppw_panel.locator(".temp-pw-input").fill("TempPass123!")
 
-    page.once("dialog", lambda d: d.accept())  # alert(data.message)
-    temppw_panel.locator(".btn-confirm-temppw").click()
-    page.wait_for_timeout(1000)
+    fresh = _click_and_wait_for_dialogs(page, dialogs, temppw_panel.locator(".btn-confirm-temppw"), count=1)
+    assert [kind for kind, _ in fresh] == ["alert"]
 
     _refetch_players(page)  # setTempPassword() doesn't self-refresh -- see gap 2
     page.wait_for_selector(f'.player-mgmt-card[data-player-id="{target["id"]}"]:has-text("Temp Password")', timeout=10000)
+    _assert_no_failure_dialogs(dialogs)
 
     # Restoring target to its normal, non-temp password now happens
     # unconditionally in the restore_player_9 fixture's teardown -- see that

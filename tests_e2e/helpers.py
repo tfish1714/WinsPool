@@ -18,3 +18,53 @@ def _open_admin_tab(page, tab_id):
     page.wait_for_selector(selector, timeout=10000)
     page.click(selector)
     page.wait_for_selector(f"#{tab_id}:not(.hidden)", timeout=10000)
+
+
+def _record_dialogs(page):
+    """Accept every native dialog while keeping a record of what it said.
+
+    Both the Admin Portal (confirm() before generate/wipe, alert() with the
+    result) and the draft room (alert() on a WebSocket `error` message, e.g.
+    "It is not your turn to pick!") use native dialogs. Playwright
+    auto-dismisses unhandled ones, which would silently hide a rejected pick
+    or a failed admin action, so every page gets a recorder and the test
+    asserts on its contents.
+    """
+    existing = getattr(page, "_e2e_dialog_log", None)
+    if existing is not None:
+        return existing  # one handler per page: a second would double-accept
+    seen = []
+
+    def _handle(dialog):
+        seen.append((dialog.type, dialog.message))
+        dialog.accept()
+
+    page.on("dialog", _handle)
+    page._e2e_dialog_log = seen
+    return seen
+
+
+def _click_and_wait_for_dialogs(page, dialogs, locator, count, timeout_ms=8000):
+    """Click `locator` and wait until `count` NEW dialogs have been recorded in
+    `dialogs` (a list returned by _record_dialogs). Polls rather than sleeping
+    a fixed time: the alert() in these handlers only fires after an awaited
+    backend call, so a fixed wait races it under load. Returns only the dialogs
+    recorded by this click, and asserts there were exactly `count` of them.
+    """
+    start = len(dialogs)
+    locator.click()
+    waited = 0
+    while len(dialogs) - start < count and waited < timeout_ms:
+        page.wait_for_timeout(100)
+        waited += 100
+    fresh = dialogs[start:]
+    assert len(fresh) == count, f"expected {count} dialog(s), saw {len(fresh)}: {fresh}"
+    return fresh
+
+
+def _assert_no_failure_dialogs(dialogs):
+    """Fail if any recorded dialog message reads like a failure. The admin UI
+    reports failures as alert('... failed: ...') / alert('Failed: ...'), which
+    Playwright would otherwise auto-dismiss without a trace."""
+    bad = [(kind, msg) for kind, msg in dialogs if "fail" in msg.lower() or "error" in msg.lower()]
+    assert not bad, f"unexpected failure dialog(s): {bad}"
