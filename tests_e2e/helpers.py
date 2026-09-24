@@ -2,6 +2,28 @@
 
 Rule: this module never imports from a test_*.py file (import cycles).
 """
+import time
+
+
+def _wait_for_config(page, key, want, timeout_s=15):
+    """Poll GET /api/config/settings until `config[key] is want`. Verifying
+    through a fresh GET proves the server PERSISTED the change, which a toggle's
+    optimistic aria-pressed flip or a POST-response listener does not (and the
+    listener form needed a retry loop because it can miss the response event).
+    """
+    deadline = time.time() + timeout_s
+    last = None
+    while time.time() < deadline:
+        try:
+            last = page.evaluate(
+                "() => fetch('/api/config/settings').then(r => r.json())"
+            ).get(key)
+            if last is want:
+                return
+        except Exception:
+            pass
+        time.sleep(0.4)
+    raise AssertionError(f"config {key!r} never became {want!r} (last seen: {last!r})")
 
 
 def _open_admin_tab(page, tab_id):

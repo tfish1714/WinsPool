@@ -43,6 +43,7 @@ import time
 import pytest
 
 from tests_e2e.helpers import _open_admin_tab
+from tests_e2e.helpers import _wait_for_config
 from tests_e2e.helpers import _record_dialogs  # re-exported: other modules import it from here
 from tests_e2e.test_standings import _login
 
@@ -173,15 +174,7 @@ def _set_draft_active(page, live_server, want):
     # The click handler's POST is fire-and-forget; the optimistic aria-pressed
     # flip above does not prove the server accepted it, and a non-admin pick is
     # refused server-side unless config/settings.draft_active is True.
-    _poll(
-        lambda: page.evaluate(
-            "fetch('/api/config/settings').then(r => r.json()).then(c => c.draft_active)"
-        )
-        is want,
-        15,
-        interval_s=0.5,
-        what=f"server config draft_active={want}",
-    )
+    _wait_for_config(page, "draft_active", want)
     return current
 
 

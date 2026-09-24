@@ -22,10 +22,11 @@ unauthenticated session throughout, preserving the "login-free" intent of
 this smoke test.
 """
 import pytest
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import expect
 
-ADMIN_DRAFT_TAB_SELECTOR = '.admin-tab-btn[data-tab="draft-section"]'
+from tests_e2e.helpers import _open_admin_tab, _wait_for_config
+from tests_e2e.test_standings import _login
+
 MOCK_TOGGLE_SELECTOR = "#mock-draft-active-toggle"
 
 
@@ -39,64 +40,45 @@ def mock_draft_enabled(live_server, browser, test_player_credentials):
     context = browser.new_context()
     admin_page = context.new_page()
 
-    admin_page.goto(f"{live_server}/admin")
-    admin_page.wait_for_selector("#signin-screen", state="visible")
+    try:
+        _login(admin_page, live_server, admin_creds)
 
-    # Read the true pre-test state via the same public GET the page itself
-    # calls -- reading over HTTP isn't a shortcut, only mutating state
-    # outside the real UI would be.
-    original_active = admin_page.evaluate(
-        "() => fetch('/api/config/settings').then(r => r.json())"
-    ).get("mock_draft_active") is True
+        # Read the true pre-test state via the same public GET the page itself
+        # calls -- reading over HTTP isn't a shortcut, only mutating state
+        # outside the real UI would be.
+        original_active = admin_page.evaluate(
+            "() => fetch('/api/config/settings').then(r => r.json())"
+        ).get("mock_draft_active") is True
 
-    admin_page.fill("#auth-email", admin_creds["email"])
-    admin_page.fill("#auth-password", admin_creds["password"])
-    admin_page.click("#auth-submit-btn")
-    admin_page.wait_for_selector("#signin-screen", state="hidden", timeout=10000)
+        admin_page.goto(f"{live_server}/admin")
+        admin_page.wait_for_selector("#signin-screen", state="hidden", timeout=15000)
+        _open_admin_tab(admin_page, "draft-section")
+        toggle = admin_page.locator(MOCK_TOGGLE_SELECTOR)
+        toggle.wait_for(state="visible", timeout=10000)
+        # initMockDraftActiveToggle() syncs the toggle's aria-pressed from the
+        # same GET above, asynchronously, right after page load -- wait for it
+        # to settle to the value we already know is true, so the click below
+        # (whose handler reads aria-pressed itself to decide what to send)
+        # isn't racing the toggle's own initial-state fetch.
+        expect(toggle).to_have_attribute(
+            "aria-pressed", "true" if original_active else "false", timeout=5000
+        )
 
-    admin_page.click(ADMIN_DRAFT_TAB_SELECTOR)
-    toggle = admin_page.locator(MOCK_TOGGLE_SELECTOR)
-    toggle.wait_for(state="visible", timeout=10000)
-    # initMockDraftActiveToggle() syncs the toggle's aria-pressed from the
-    # same GET above, asynchronously, right after page load -- wait for it
-    # to actually settle to the value we already know is true, so the
-    # click handler below (which reads aria-pressed itself to decide what
-    # to send) isn't racing against the toggle's own initial-state fetch.
-    expect(toggle).to_have_attribute(
-        "aria-pressed", "true" if original_active else "false", timeout=5000
-    )
-
-    def set_active(desired: bool):
-        # Real clicks occasionally get missed by expect_response's listener
-        # window when run right after another test's browser/page churn
-        # (observed once in the full tests_e2e/ suite, never in isolation) --
-        # retry the same real click rather than falling back to any shortcut.
-        # Each retry re-checks aria-pressed first in case a prior click's
-        # POST actually landed but we just missed the response event.
-        for attempt in range(3):
+        def set_active(desired: bool):
             current = toggle.get_attribute("aria-pressed") == "true"
             if current == desired:
                 return
-            try:
-                with admin_page.expect_response(
-                    lambda r: r.url.endswith("/api/admin/config/settings") and r.request.method == "POST",
-                    timeout=10000,
-                ) as resp_info:
-                    toggle.click()
-                assert resp_info.value.ok, f"POST /api/admin/config/settings failed: {resp_info.value.status}"
-                expect(toggle).to_have_attribute("aria-pressed", "true" if desired else "false", timeout=5000)
-                return
-            except PlaywrightTimeoutError:
-                if attempt == 2:
-                    raise
-        raise AssertionError("unreachable")
+            toggle.click()
+            _wait_for_config(admin_page, "mock_draft_active", desired)
 
-    set_active(True)
+        set_active(True)
 
-    yield
-
-    set_active(original_active)
-    context.close()
+        try:
+            yield
+        finally:
+            set_active(original_active)
+    finally:
+        context.close()
 
 
 @pytest.mark.parametrize("viewport", [

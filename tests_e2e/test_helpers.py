@@ -7,6 +7,7 @@ from tests_e2e.helpers import (
     _logout,
     _open_admin_tab,
     _record_dialogs,
+    _wait_for_config,
 )
 from tests_e2e.test_standings import _login
 
@@ -98,3 +99,20 @@ def test_logout_clears_the_session_cookie_and_shows_signin(live_server, page, te
     # The server agrees: a protected call without credentials is rejected.
     status = page.evaluate("() => fetch('/api/admin/players').then(r => r.status)")
     assert status in (401, 403)
+
+
+def test_wait_for_config_returns_when_the_value_matches(live_server, page):
+    page.goto(live_server)
+    current = page.evaluate("() => fetch('/api/config/settings').then(r => r.json())")
+    key = "draft_active"
+
+    _wait_for_config(page, key, current.get(key) is True, timeout_s=5)
+
+
+def test_wait_for_config_times_out_with_the_last_seen_value(live_server, page):
+    page.goto(live_server)
+    current = page.evaluate("() => fetch('/api/config/settings').then(r => r.json())")
+    opposite = current.get("draft_active") is not True
+
+    with pytest.raises(AssertionError, match="draft_active"):
+        _wait_for_config(page, "draft_active", opposite, timeout_s=1)
