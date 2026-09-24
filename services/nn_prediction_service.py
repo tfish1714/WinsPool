@@ -53,7 +53,7 @@ REGISTRY_PATH = MODEL_DIR / "model_registry.json"
 
 from services.nn_feature_engine import FEATURE_COLUMNS, _normalize_team
 from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, PROB_CLIP_MIN, PROB_CLIP_MAX, SPREAD_TO_PROB_SCALE
-from services.utils import derive_prediction_scalars
+from services.utils import derive_prediction_scalars, prob_to_model_spread
 
 LABEL_COLUMN = "home_win"
 
@@ -96,10 +96,9 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
         ht     = _normalize_team(row.home_team)
         at     = _normalize_team(row.away_team)
 
-        hp_clip = np.clip(hp, PROB_CLIP_MIN, PROB_CLIP_MAX)
         # nflverse convention: positive spread_line = home favored (e.g. DET -7 stored as +7).
         # model_spread matches this: positive = home favored.
-        model_spread = round(SPREAD_TO_PROB_SCALE * float(np.log(hp_clip / (1.0 - hp_clip))), 1)
+        model_spread = prob_to_model_spread(hp)
 
         # Vegas spread used for post-hoc comparison only (not a model feature).
         # edge_vs_vegas > 0: model likes home MORE than Vegas → home has edge ATS.
