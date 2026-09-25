@@ -429,6 +429,42 @@ def build_year(standings, games, players, draft_order, draft_results,
 SCRIPTS_DIR = pathlib.Path(__file__).parent
 
 
+def _run_subprocess_step(cmd: list, label: str, timeout: int, *,
+                         swallow_errors: bool = False,
+                         timeout_note: str = "") -> bool:
+    """Run one child script, always print the tail of its stdout, and warn on
+    a non-zero exit. Returns True iff it completed with returncode 0.
+
+    swallow_errors=False (rawdata sync): TimeoutExpired and any other
+    exception propagate, so a hung sync still fails the job. True (weekly
+    backfill): both are printed as non-fatal warnings and False is returned.
+    """
+    script = pathlib.Path(cmd[1]).name
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout,
+            cwd=str(SCRIPTS_DIR.parent),
+        )
+    except subprocess.TimeoutExpired:
+        if not swallow_errors:
+            raise
+        print(f"[warn] {script} timed out after {timeout}s (non-fatal){timeout_note}")
+        return False
+    except Exception as e:
+        if not swallow_errors:
+            raise
+        print(f"[warn] {script} could not be run (non-fatal): {e}")
+        return False
+    stdout_tail = (result.stdout or "").strip().splitlines()[-20:]
+    print(f"[cache_builder] {label} summary:")
+    for line in stdout_tail:
+        print(f"  {line}")
+    if result.returncode != 0:
+        print(f"[warn] {script} exited non-zero (non-fatal): "
+              f"{(result.stderr or '').strip()[:500]}")
+    return result.returncode == 0
+
+
 def _sync_rawdata() -> None:
     """Re-pull rawdata/ from nflverse before build_master_feature_table() reads
     it. winspool-predict-daily runs in its own, separate Cloud Run Job
@@ -444,11 +480,6 @@ def _sync_rawdata() -> None:
     prior local run isn't available in a fresh container either way, so any
     failure here is worth surfacing (via whatever downstream code hits
     missing files) rather than treated specially."""
-    result = subprocess.run(
-        [sys.executable, str(SCRIPTS_DIR / "sync_nflverse_data.py")],
-        capture_output=True, text=True, timeout=300,
-        cwd=str(SCRIPTS_DIR.parent),
-    )
     # sync_nflverse_data.py prints a per-tag download/skip/fail report and a
     # final summary -- capture_output means none of that reaches this job's
     # own stdout (what Cloud Logging actually captures) unless we print it
@@ -458,13 +489,10 @@ def _sync_rawdata() -> None:
     # alone, whether a given file was fetched, already up to date, or simply
     # never attempted (e.g. dropped by a priority/min_year filter). Always
     # print the summary tail; keep the full stderr only for actual failures.
-    stdout_tail = result.stdout.strip().splitlines()[-20:]
-    print("[cache_builder] nflverse sync summary:")
-    for line in stdout_tail:
-        print(f"  {line}")
-    if result.returncode != 0:
-        print(f"[warn] sync_nflverse_data.py exited non-zero (non-fatal): "
-              f"{result.stderr.strip()[:500]}")
+    _run_subprocess_step(
+        [sys.executable, str(SCRIPTS_DIR / "sync_nflverse_data.py")],
+        "nflverse sync", 300,
+    )
 
 
 def _run_weekly_backfill_if_tuesday(current_year: int = None) -> None:
@@ -495,26 +523,10 @@ def _run_weekly_backfill_if_tuesday(current_year: int = None) -> None:
     cmd = [sys.executable, str(SCRIPTS_DIR / "backfill_schedule_predictions.py"), "--firestore"]
     if current_year:
         cmd += ["--seasons", str(current_year), str(current_year)]
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=600,
-            cwd=str(SCRIPTS_DIR.parent),
-        )
-    except subprocess.TimeoutExpired:
-        print("[warn] backfill_schedule_predictions.py timed out after 600s "
-              "(non-fatal) -- the daily build itself already completed")
-        return
-    except Exception as e:
-        print(f"[warn] backfill_schedule_predictions.py could not be run "
-              f"(non-fatal): {e}")
-        return
-    stdout_tail = (result.stdout or "").strip().splitlines()[-20:]
-    print("[cache_builder] weekly backfill summary:")
-    for line in stdout_tail:
-        print(f"  {line}")
-    if result.returncode != 0:
-        print(f"[warn] backfill_schedule_predictions.py exited non-zero (non-fatal): "
-              f"{(result.stderr or '').strip()[:500]}")
+    _run_subprocess_step(
+        cmd, "weekly backfill", 600, swallow_errors=True,
+        timeout_note=" -- the daily build itself already completed",
+    )
 
 
 def _years_to_build(available_years: list, games: pd.DataFrame) -> list:

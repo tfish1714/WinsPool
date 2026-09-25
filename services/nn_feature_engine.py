@@ -6,6 +6,7 @@ means shifted by 1 to prevent data leakage. Elo is joined per-game when a week
 column is available, falling back to season-level otherwise.
 """
 
+import contextlib
 import glob
 import logging
 import warnings
@@ -172,13 +173,56 @@ def _read_csv_safe(path: str, **kwargs) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+# Run-scoped cache for _load_multi_season. Sibling loaders inside one
+# build_master_feature_table() call read the same injuries/rosters/snap_counts
+# files; while a scope is active each (rawdata_dir, pattern) is parsed once.
+# It is None outside a run, so nothing is retained afterwards. The cached
+# multi-reader patterns are tens to a couple hundred MB; caching single-reader
+# patterns such as weekly_rosters (~1 GB on a full-history run) would only
+# retain memory. Single-threaded by design, like the pipeline.
+_RUN_CACHE: Optional[dict] = None
+
+# Patterns read by more than one loader in one build run. Single-reader
+# patterns (weekly_rosters, pfr_advstats) are deliberately not cached: they
+# would save no reads and only keep a large frame alive until the build ends.
+_MULTI_READER_PATTERNS = frozenset({
+    "injuries/injuries_*.csv",
+    "snap_counts/snap_counts_*.csv",
+    "rosters/roster_*.csv",
+    "stats_team/stats_team_week_*.csv",
+})
+
+
+@contextlib.contextmanager
+def _multi_season_cache_scope():
+    """Enable the per-run file cache for the duration of the block. Re-entrant:
+    a nested scope reuses the outer cache and leaves clearing to the outermost."""
+    global _RUN_CACHE
+    if _RUN_CACHE is not None:
+        yield
+        return
+    _RUN_CACHE = {}
+    try:
+        yield
+    finally:
+        _RUN_CACHE = None
+
+
 def _load_multi_season(pattern: str, rawdata_dir: Path) -> pd.DataFrame:
+    key = (str(rawdata_dir), pattern)
+    use_cache = _RUN_CACHE is not None and pattern in _MULTI_READER_PATTERNS
+    if use_cache and key in _RUN_CACHE:
+        return _RUN_CACHE[key].copy()
     files = sorted(glob.glob(str(rawdata_dir / pattern)))
     if not files:
         return pd.DataFrame()
     frames = [_read_csv_safe(f) for f in files]
     frames = [f for f in frames if not f.empty]
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    result = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    if not use_cache:
+        return result
+    _RUN_CACHE[key] = result
+    return result.copy()
 
 
 # ---------------------------------------------------------------------------
@@ -2180,6 +2224,12 @@ def _load_qb_snap_shares(rd: Path) -> pd.DataFrame:
 
     roster = _load_multi_season("rosters/roster_*.csv", rd)
     if roster.empty or "pfr_id" not in roster.columns or "gsis_id" not in roster.columns:
+        logger.warning(
+            "_load_qb_snap_shares: roster crosswalk unavailable (roster empty=%s, "
+            "has pfr_id=%s, has gsis_id=%s) -- the snap-share leg of the QB "
+            "availability signal is disabled for this run",
+            roster.empty, "pfr_id" in roster.columns, "gsis_id" in roster.columns,
+        )
         return empty
     crosswalk = (
         roster.dropna(subset=["pfr_id", "gsis_id"])
@@ -2202,6 +2252,43 @@ def _load_qb_snap_shares(rd: Path) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def build_master_feature_table(
+    rawdata_dir: Optional[str] = None,
+    min_season: int = 2006,
+    max_season: int = 2025,
+) -> pd.DataFrame:
+    """Assemble the full 26-feature ML training dataset from rawdata CSVs.
+
+    Runs the build inside a run-scoped file cache so sibling loaders parse each
+    rawdata CSV once. See _build_master_feature_table_impl for details.
+    """
+    with _multi_season_cache_scope():
+        return _build_master_feature_table_impl(rawdata_dir, min_season, max_season)
+
+
+def _apply_qb_availability(sched: pd.DataFrame, qb_avail: dict) -> pd.DataFrame:
+    """OR the sticky-reference QB availability signal into the two QB injury
+    flags: each flag becomes max(existing flag, availability for that team in
+    that week), 0.0 when the (season, week, team) key is absent.
+
+    One keyed lookup per side instead of a row-wise .apply(axis=1) pass per
+    flag, which was the hot path of this function on a full multi-season build.
+    """
+    if sched.empty:
+        return sched
+    seasons = sched["season"].astype(int).to_numpy()
+    weeks = sched["week"].astype(int).to_numpy()
+    for side in ("home", "away"):
+        avail = np.fromiter(
+            (qb_avail.get((s, w, t), 0.0)
+             for s, w, t in zip(seasons, weeks, sched[f"{side}_team"].to_numpy())),
+            dtype=float, count=len(sched),
+        )
+        flag = f"{side}_qb_injury_flag"
+        sched[flag] = np.maximum(sched[flag].to_numpy(dtype=float), avail)
+    return sched
+
+
+def _build_master_feature_table_impl(
     rawdata_dir: Optional[str] = None,
     min_season: int = 2006,
     max_season: int = 2025,
@@ -2404,20 +2491,7 @@ def build_master_feature_table(
     qb_avail = compute_qb_availability_flags(
         sorted(sched["season"].dropna().unique().astype(int).tolist()), rd
     )
-    sched["home_qb_injury_flag"] = sched.apply(
-        lambda r: max(
-            r["home_qb_injury_flag"],
-            qb_avail.get((int(r["season"]), int(r["week"]), r["home_team"]), 0.0),
-        ),
-        axis=1,
-    )
-    sched["away_qb_injury_flag"] = sched.apply(
-        lambda r: max(
-            r["away_qb_injury_flag"],
-            qb_avail.get((int(r["season"]), int(r["week"]), r["away_team"]), 0.0),
-        ),
-        axis=1,
-    )
+    sched = _apply_qb_availability(sched, qb_avail)
 
     # Legacy aux cols for any downstream that still reads them
     sched["home_qb_out"] = sched["home_qb_injury_flag"]

@@ -852,6 +852,34 @@ class TestWeekAwareRosterSnapshot:
         result = compute_preseason_player_profiles(2026, tmp_path, week=1)
         assert result == {}
 
+    def test_weekly_rosters_with_no_rows_for_the_requested_week_returns_empty(self, tmp_path):
+        """The file exists and parses, but holds only OTHER weeks: distinct from
+        the file being missing entirely (covered above)."""
+        from services.nn_feature_engine import compute_preseason_player_profiles
+        self._write_common_files(tmp_path)
+        other_week = pd.concat([_fake_roster(), _fake_def_roster()], ignore_index=True)
+        other_week["week"] = 2
+        (tmp_path / "weekly_rosters").mkdir(exist_ok=True)
+        other_week.to_csv(tmp_path / "weekly_rosters" / f"roster_weekly_{2026}.csv", index=False)
+
+        assert compute_preseason_player_profiles(2026, tmp_path, week=1) == {}
+        assert "AAA" in compute_preseason_player_profiles(2026, tmp_path, week=2)  # the file itself is fine
+
+    def test_z_table_skips_a_week_whose_weekly_roster_slice_is_empty(self, tmp_path):
+        """_build_profile_z_table must skip (not raise on, not fabricate) a
+        (season, week) pair whose roster slice is empty."""
+        from services.nn_feature_engine import _build_profile_z_table
+        self._write_common_files(tmp_path)
+        other_week = pd.concat([_fake_roster(), _fake_def_roster()], ignore_index=True)
+        other_week["week"] = 2
+        (tmp_path / "weekly_rosters").mkdir(exist_ok=True)
+        other_week.to_csv(tmp_path / "weekly_rosters" / f"roster_weekly_{2026}.csv", index=False)
+
+        table = _build_profile_z_table([(2026, 1), (2026, 2)], tmp_path)
+
+        assert not [k for k in table if k[:2] == (2026, 1)]
+        assert [k for k in table if k[:2] == (2026, 2)]
+
 
 class TestNNProjectionEngineInitialize:
     def test_preseason_profiles_set_when_snap_empty(self, tmp_path, monkeypatch):

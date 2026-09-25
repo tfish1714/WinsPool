@@ -1057,3 +1057,274 @@ class TestComputeQbAvailabilityFlags:
             "TEAM_B's own week-3 declared starter should have been picked up "
             "as the reference, not left None because TEAM_A has a week-1 row"
         )
+
+
+class TestMultiSeasonRunCache:
+    """_load_multi_season is read by sibling loaders that each parse the same
+    injuries/rosters/snap_counts files; inside one build_master_feature_table()
+    run those files must be parsed once, and outside a run nothing is retained."""
+
+    def _write_injuries(self, tmp_path):
+        d = tmp_path / "injuries"
+        d.mkdir()
+        pd.DataFrame({"season": [2024], "week": [1], "team": ["KC"], "gsis_id": ["g1"],
+                      "position": ["QB"], "report_status": ["Out"]}).to_csv(
+            d / "injuries_2024.csv", index=False)
+        pd.DataFrame({"season": [2025], "week": [1], "team": ["BUF"], "gsis_id": ["g2"],
+                      "position": ["QB"], "report_status": ["Doubtful"]}).to_csv(
+            d / "injuries_2025.csv", index=False)
+
+    def test_scope_parses_each_file_once(self, tmp_path, monkeypatch):
+        import services.nn_feature_engine as nfe
+        self._write_injuries(tmp_path)
+        calls = []
+        real = nfe._read_csv_safe
+        monkeypatch.setattr(nfe, "_read_csv_safe", lambda p, *a, **k: (calls.append(p), real(p, *a, **k))[1])
+
+        with nfe._multi_season_cache_scope():
+            a = nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+            b = nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+
+        assert len(calls) == 2  # two files, each parsed exactly once
+        pd.testing.assert_frame_equal(a, b)
+
+    def test_single_reader_patterns_are_not_cached_inside_a_scope(self, tmp_path, monkeypatch):
+        import services.nn_feature_engine as nfe
+        d = tmp_path / "weekly_rosters"
+        d.mkdir()
+        pd.DataFrame({"season": [2024], "week": [1], "team": ["KC"]}).to_csv(
+            d / "roster_weekly_2024.csv", index=False)
+        calls = []
+        real = nfe._read_csv_safe
+        monkeypatch.setattr(nfe, "_read_csv_safe", lambda p, *a, **k: (calls.append(p), real(p, *a, **k))[1])
+
+        pattern = "weekly_rosters/roster_weekly_*.csv"
+        with nfe._multi_season_cache_scope():
+            nfe._load_multi_season(pattern, tmp_path)
+            nfe._load_multi_season(pattern, tmp_path)
+            assert not any(k[1] == pattern for k in nfe._RUN_CACHE)
+
+        assert len(calls) == 2
+
+    def test_multi_reader_patterns_are_still_cached(self):
+        import services.nn_feature_engine as nfe
+        assert "injuries/injuries_*.csv" in nfe._MULTI_READER_PATTERNS
+
+    def test_multi_reader_patterns_are_plain_csv_globs(self):
+        import services.nn_feature_engine as nfe
+        assert nfe._MULTI_READER_PATTERNS
+        for p in nfe._MULTI_READER_PATTERNS:
+            assert isinstance(p, str) and p.endswith(".csv")
+
+    def test_without_a_scope_nothing_is_cached(self, tmp_path, monkeypatch):
+        import services.nn_feature_engine as nfe
+        self._write_injuries(tmp_path)
+        calls = []
+        real = nfe._read_csv_safe
+        monkeypatch.setattr(nfe, "_read_csv_safe", lambda p, *a, **k: (calls.append(p), real(p, *a, **k))[1])
+
+        nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+        nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+
+        assert len(calls) == 4
+
+    def test_returned_frames_are_independent_copies(self, tmp_path):
+        import services.nn_feature_engine as nfe
+        self._write_injuries(tmp_path)
+        with nfe._multi_season_cache_scope():
+            first = nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+            first["team"] = "MUTATED"
+            first["extra"] = 1
+            second = nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+
+        assert "extra" not in second.columns
+        assert set(second["team"]) == {"KC", "BUF"}
+
+    def test_cache_is_cleared_when_the_scope_exits(self, tmp_path):
+        import services.nn_feature_engine as nfe
+        self._write_injuries(tmp_path)
+        with nfe._multi_season_cache_scope():
+            nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+            assert nfe._RUN_CACHE
+        assert nfe._RUN_CACHE is None
+
+    def test_cache_is_cleared_when_the_scope_body_raises(self, tmp_path):
+        import services.nn_feature_engine as nfe
+        with pytest.raises(RuntimeError):
+            with nfe._multi_season_cache_scope():
+                raise RuntimeError("boom")
+        assert nfe._RUN_CACHE is None
+
+    def test_nested_scope_reuses_the_outer_cache_and_does_not_clear_it(self, tmp_path):
+        import services.nn_feature_engine as nfe
+        self._write_injuries(tmp_path)
+        with nfe._multi_season_cache_scope():
+            nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+            with nfe._multi_season_cache_scope():
+                pass
+            assert nfe._RUN_CACHE  # inner exit must not wipe the outer run's cache
+
+    def test_different_directories_do_not_collide(self, tmp_path):
+        import services.nn_feature_engine as nfe
+        a, b = tmp_path / "a", tmp_path / "b"
+        for root, team in ((a, "KC"), (b, "BUF")):
+            (root / "injuries").mkdir(parents=True)
+            pd.DataFrame({"season": [2024], "week": [1], "team": [team], "gsis_id": ["g"]}).to_csv(
+                root / "injuries" / "injuries_2024.csv", index=False)
+        with nfe._multi_season_cache_scope():
+            ra = nfe._load_multi_season("injuries/injuries_*.csv", a)
+            rb = nfe._load_multi_season("injuries/injuries_*.csv", b)
+        assert list(ra["team"]) == ["KC"] and list(rb["team"]) == ["BUF"]
+
+    def test_no_matching_files_still_returns_an_empty_frame(self, tmp_path):
+        import services.nn_feature_engine as nfe
+        with nfe._multi_season_cache_scope():
+            out = nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+        assert out.empty
+
+    def test_build_master_feature_table_runs_inside_a_scope(self, tmp_path, monkeypatch):
+        """The public entry point wraps the previous body in the scope, so
+        sibling loaders share one read per file for the whole build."""
+        import services.nn_feature_engine as nfe
+        seen = {}
+
+        def fake_impl(*args, **kwargs):
+            seen["active"] = nfe._RUN_CACHE is not None
+            return pd.DataFrame({"ok": [1]})
+
+        monkeypatch.setattr(nfe, "_build_master_feature_table_impl", fake_impl)
+        out = nfe.build_master_feature_table(str(tmp_path), 2020, 2021)
+
+        assert seen["active"] is True
+        assert nfe._RUN_CACHE is None
+        assert list(out["ok"]) == [1]
+
+    def test_sibling_injury_loaders_share_one_read_per_file_in_a_scope(self, tmp_path, monkeypatch):
+        import services.nn_feature_engine as nfe
+        self._write_injuries(tmp_path)
+        calls = []
+        real = nfe._read_csv_safe
+        monkeypatch.setattr(nfe, "_read_csv_safe", lambda p, *a, **k: (calls.append(p), real(p, *a, **k))[1])
+
+        with nfe._multi_season_cache_scope():
+            nfe._load_injury_flags(tmp_path)
+            nfe._load_qb_report_status(tmp_path)
+
+        assert len(calls) == 2  # not 4
+
+
+class TestApplyQbAvailability:
+    def _sched(self):
+        return pd.DataFrame({
+            "season": [2024, 2024, 2025],
+            "week": [1, 2, 1],
+            "home_team": ["KC", "BUF", "KC"],
+            "away_team": ["BUF", "KC", "DEN"],
+            "home_qb_injury_flag": [0.0, 1.0, 0.0],
+            "away_qb_injury_flag": [0.0, 0.0, 1.0],
+        })
+
+    def test_takes_the_max_of_existing_flag_and_availability(self):
+        from services.nn_feature_engine import _apply_qb_availability
+        qb_avail = {(2024, 1, "KC"): 1.0, (2024, 2, "KC"): 1.0, (2025, 1, "DEN"): 0.0}
+
+        out = _apply_qb_availability(self._sched(), qb_avail)
+
+        assert list(out["home_qb_injury_flag"]) == [1.0, 1.0, 0.0]  # KC wk1 raised, BUF wk2 stays 1.0
+        assert list(out["away_qb_injury_flag"]) == [0.0, 1.0, 1.0]  # KC away wk2 raised, DEN keeps 1.0
+
+    def test_missing_keys_default_to_zero_and_never_lower_a_flag(self):
+        from services.nn_feature_engine import _apply_qb_availability
+        out = _apply_qb_availability(self._sched(), {})
+        assert list(out["home_qb_injury_flag"]) == [0.0, 1.0, 0.0]
+        assert list(out["away_qb_injury_flag"]) == [0.0, 0.0, 1.0]
+
+    def test_matches_the_previous_row_wise_formula_on_random_data(self):
+        """Equivalence with the two .apply(axis=1) passes this replaced."""
+        import numpy as np
+        from services.nn_feature_engine import _apply_qb_availability
+        rng = np.random.default_rng(7)
+        teams = ["KC", "BUF", "DEN", "SF", "LA"]
+        n = 300
+        sched = pd.DataFrame({
+            "season": rng.integers(2020, 2024, n),
+            "week": rng.integers(1, 19, n),
+            "home_team": rng.choice(teams, n),
+            "away_team": rng.choice(teams, n),
+            "home_qb_injury_flag": rng.integers(0, 2, n).astype(float),
+            "away_qb_injury_flag": rng.integers(0, 2, n).astype(float),
+        })
+        qb_avail = {(int(s), int(w), t): float(rng.integers(0, 2))
+                    for s in range(2020, 2024) for w in range(1, 19) for t in teams
+                    if rng.random() < 0.3}
+
+        expected = sched.copy()
+        expected["home_qb_injury_flag"] = expected.apply(
+            lambda r: max(r["home_qb_injury_flag"],
+                          qb_avail.get((int(r["season"]), int(r["week"]), r["home_team"]), 0.0)), axis=1)
+        expected["away_qb_injury_flag"] = expected.apply(
+            lambda r: max(r["away_qb_injury_flag"],
+                          qb_avail.get((int(r["season"]), int(r["week"]), r["away_team"]), 0.0)), axis=1)
+
+        out = _apply_qb_availability(sched.copy(), qb_avail)
+
+        pd.testing.assert_series_equal(out["home_qb_injury_flag"], expected["home_qb_injury_flag"])
+        pd.testing.assert_series_equal(out["away_qb_injury_flag"], expected["away_qb_injury_flag"])
+
+    def test_empty_schedule_is_a_noop(self):
+        from services.nn_feature_engine import _apply_qb_availability
+        empty = self._sched().iloc[0:0]
+        out = _apply_qb_availability(empty.copy(), {(2024, 1, "KC"): 1.0})
+        assert out.empty
+
+
+class TestQbSnapSharesCrosswalkWarning:
+    def _write(self, tmp_path, roster_cols):
+        (tmp_path / "snap_counts").mkdir()
+        pd.DataFrame({
+            "season": [2024], "week": [1], "team": ["KC"], "position": ["QB"],
+            "game_type": ["REG"], "offense_snaps": [60], "pfr_player_id": ["P1"],
+        }).to_csv(tmp_path / "snap_counts" / "snap_counts_2024.csv", index=False)
+        (tmp_path / "rosters").mkdir()
+        pd.DataFrame({c: ["x"] for c in roster_cols}).to_csv(
+            tmp_path / "rosters" / "roster_2024.csv", index=False)
+
+    def test_warns_when_the_crosswalk_columns_are_absent(self, tmp_path, caplog):
+        import logging
+        from services.nn_feature_engine import _load_qb_snap_shares
+        self._write(tmp_path, ["full_name"])  # no pfr_id / gsis_id
+
+        with caplog.at_level(logging.WARNING, logger="services.nn_feature_engine"):
+            out = _load_qb_snap_shares(tmp_path)
+
+        assert out.empty
+        assert any("pfr_id" in r.message and "gsis_id" in r.message for r in caplog.records)
+
+    def test_warns_when_the_roster_files_are_missing_entirely(self, tmp_path, caplog):
+        import logging
+        from services.nn_feature_engine import _load_qb_snap_shares
+        self._write(tmp_path, ["pfr_id", "gsis_id"])
+        (tmp_path / "rosters" / "roster_2024.csv").unlink()
+
+        with caplog.at_level(logging.WARNING, logger="services.nn_feature_engine"):
+            out = _load_qb_snap_shares(tmp_path)
+
+        assert out.empty
+        assert any("roster" in r.message.lower() for r in caplog.records)
+
+    def test_no_warning_when_the_crosswalk_is_present(self, tmp_path, caplog):
+        import logging
+        from services.nn_feature_engine import _load_qb_snap_shares
+        (tmp_path / "snap_counts").mkdir()
+        pd.DataFrame({"season": [2024], "week": [1], "team": ["KC"], "position": ["QB"],
+                      "game_type": ["REG"], "offense_snaps": [60], "pfr_player_id": ["P1"]}).to_csv(
+            tmp_path / "snap_counts" / "snap_counts_2024.csv", index=False)
+        (tmp_path / "rosters").mkdir()
+        pd.DataFrame({"pfr_id": ["P1"], "gsis_id": ["G1"]}).to_csv(
+            tmp_path / "rosters" / "roster_2024.csv", index=False)
+
+        with caplog.at_level(logging.WARNING, logger="services.nn_feature_engine"):
+            out = _load_qb_snap_shares(tmp_path)
+
+        assert len(out) == 1
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
