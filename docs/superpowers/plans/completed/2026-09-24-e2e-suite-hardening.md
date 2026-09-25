@@ -58,7 +58,7 @@ E2E_TEMPWORD_TEST_PLAYER_ID=27
 **Interfaces:**
 - Produces: `_open_admin_tab(page, tab_id: str) -> None` in `tests_e2e/helpers.py`. Precondition: `page` is on `/admin` and signed in. Postcondition: the tab's section (`#<tab_id>`) is visible.
 
-- [ ] **Step 1: Write the failing test** (`tests_e2e/test_helpers.py`)
+- [x] **Step 1: Write the failing test** (`tests_e2e/test_helpers.py`)
 
 ```python
 """tests_e2e/test_helpers.py -- the shared e2e helpers, exercised against the real app."""
@@ -93,12 +93,12 @@ def test_open_admin_tab_switches_between_tabs(live_server, page, test_player_cre
     assert not page.locator("#members-section").is_visible()
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `python -m pytest tests_e2e/test_helpers.py -q -p no:cacheprovider`
 Expected: FAIL (`ModuleNotFoundError: tests_e2e.helpers`).
 
-- [ ] **Step 3: Create `tests_e2e/helpers.py`**
+- [x] **Step 3: Create `tests_e2e/helpers.py`**
 
 ```python
 """tests_e2e/helpers.py -- shared Playwright helpers for the e2e suite.
@@ -123,12 +123,12 @@ def _open_admin_tab(page, tab_id):
     page.wait_for_selector(f"#{tab_id}:not(.hidden)", timeout=10000)
 ```
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `python -m pytest tests_e2e/test_helpers.py -q -p no:cacheprovider`
 Expected: 4 passed.
 
-- [ ] **Step 5: Migrate the call sites.** Replace every direct admin-tab click with `_open_admin_tab(page, "<tab-id>")` and delete the now-redundant explicit `wait_for_selector("#<tab>:not(.hidden)")` that immediately followed it (the helper waits for it). Sites:
+- [x] **Step 5: Migrate the call sites.** Replace every direct admin-tab click with `_open_admin_tab(page, "<tab-id>")` and delete the now-redundant explicit `wait_for_selector("#<tab>:not(.hidden)")` that immediately followed it (the helper waits for it). Sites:
   - `test_admin_tabs.py::test_admin_tab_loads`: the `wait_for_selector(...tab-btn...)`, `click`, and section wait become one `_open_admin_tab(page, tab_id)` call.
   - `test_admin_dashboard.py`: `page.click(".admin-tab-btn[data-tab='draft-section']")` plus the following `wait_for_selector("#draft-section:not(.hidden)")`.
   - `test_admin_members_and_recap.py`: both tests (`members-section`, `recap-section`).
@@ -137,17 +137,17 @@ Expected: 4 passed.
   - `test_mock_draft.py`'s `ADMIN_DRAFT_TAB_SELECTOR` click is migrated in Task 5, not here.
   Import with `from tests_e2e.helpers import _open_admin_tab`.
 
-- [ ] **Step 6: Verify nothing else uses the old idioms**
+- [x] **Step 6: Verify nothing else uses the old idioms**
 
 Run: `git grep -n "admin-tab-btn\[data-tab\|\[data-tab=" -- tests_e2e`
 Expected: only `tests_e2e/helpers.py` and (until Task 5) `tests_e2e/test_mock_draft.py`.
 
-- [ ] **Step 7: Run the affected files**
+- [x] **Step 7: Run the affected files**
 
 Run: `python -m pytest tests_e2e/test_helpers.py tests_e2e/test_admin_tabs.py tests_e2e/test_admin_dashboard.py tests_e2e/test_admin_members_and_recap.py tests_e2e/test_admin_player_management.py -q -p no:cacheprovider`
 Expected: all pass. (`test_live_draft.py` is exercised at the end of Task 6.)
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tests_e2e
@@ -169,7 +169,7 @@ git commit -m "test(e2e): canonical _open_admin_tab helper, migrate all admin ta
   - `_assert_no_failure_dialogs(dialogs) -> None`: fails if any recorded message contains `fail` or `error` (case-insensitive).
 - `test_live_draft.py` keeps `_record_dialogs` importable: `from tests_e2e.helpers import _record_dialogs  # re-exported: other modules import it from here`.
 
-- [ ] **Step 1: Write the failing tests** (append to `tests_e2e/test_helpers.py`)
+- [x] **Step 1: Write the failing tests** (append to `tests_e2e/test_helpers.py`)
 
 ```python
 from tests_e2e.helpers import (
@@ -229,12 +229,12 @@ def test_assert_no_failure_dialogs():
         _assert_no_failure_dialogs([("alert", "Server ERROR")])
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `python -m pytest tests_e2e/test_helpers.py -q -p no:cacheprovider`
 Expected: FAIL (ImportError on the new names).
 
-- [ ] **Step 3: Implement.** Append to `tests_e2e/helpers.py` (move the docstring from `test_live_draft._record_dialogs` with it):
+- [x] **Step 3: Implement.** Append to `tests_e2e/helpers.py` (move the docstring from `test_live_draft._record_dialogs` with it):
 
 ```python
 def _record_dialogs(page):
@@ -289,7 +289,7 @@ def _assert_no_failure_dialogs(dialogs):
 
 In `test_live_draft.py`, delete the local `_record_dialogs` definition and add `from tests_e2e.helpers import _record_dialogs  # re-exported: other modules import it from here` (keep a `# noqa: F401` only if the file no longer uses it; it does use it).
 
-- [ ] **Step 4: Migrate `test_admin_player_management.py`.**
+- [x] **Step 4: Migrate `test_admin_player_management.py`.**
   - Each test that pops dialogs registers `dialogs = _record_dialogs(page)` right after `_login(...)`. For `_reclaim_player_password(page, live_server, target)` (called from the fixture teardown with the test's own `page`) call `dialogs = _record_dialogs(page)` inside the function too; the helper is idempotent, so it returns the test's existing list.
   - Replace `_click_through_two_dialogs(page, card.locator(".btn-reset-pw"))` with:
 
@@ -303,19 +303,19 @@ In `test_live_draft.py`, delete the local `_record_dialogs` definition and add `
   - Delete `_click_through_two_dialogs` (retired; no call sites remain).
   - Fixture teardown path: its dialogs must not raise on the happy path; keep it as an assertion on dialog kinds only.
 
-- [ ] **Step 5: Migrate `test_admin_tabs.py`.** In `test_admin_tab_loads`, `test_admin_player_management_tab_is_default_visible` and `test_admin_predictions_debug_page_loads`, add `dialogs = _record_dialogs(page)` immediately after `_login(...)` and `assert dialogs == [], f"unexpected dialog(s) while loading the tab: {dialogs}"` as the last line.
+- [x] **Step 5: Migrate `test_admin_tabs.py`.** In `test_admin_tab_loads`, `test_admin_player_management_tab_is_default_visible` and `test_admin_predictions_debug_page_loads`, add `dialogs = _record_dialogs(page)` immediately after `_login(...)` and `assert dialogs == [], f"unexpected dialog(s) while loading the tab: {dialogs}"` as the last line.
 
-- [ ] **Step 6: Verify no loose handlers remain**
+- [x] **Step 6: Verify no loose handlers remain**
 
 Run: `git grep -n "page.once(\"dialog\"\|_click_through_two_dialogs" -- tests_e2e`
 Expected: only `test_admin_draft_overrides.py` (migrated in Task 4).
 
-- [ ] **Step 7: Run the affected files**
+- [x] **Step 7: Run the affected files**
 
 Run: `python -m pytest tests_e2e/test_helpers.py tests_e2e/test_admin_tabs.py tests_e2e/test_admin_player_management.py tests_e2e/test_admin_members_and_recap.py -q -p no:cacheprovider`
 Expected: all pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tests_e2e
@@ -333,7 +333,7 @@ git commit -m "test(e2e): standardize on _record_dialogs, retire _click_through_
 - Consumes: `_login` from `tests_e2e.test_standings`.
 - Produces: `_logout(page) -> None` in `tests_e2e/helpers.py`: on a signed-in desktop page, click `#nav-avatar-btn`, then `#nav-ap-logout-btn`, then wait for `#signin-screen` to become visible (the handler POSTs `/api/logout`, clears credentials and reloads).
 
-- [ ] **Step 1: Write the failing test** (append to `tests_e2e/test_helpers.py`)
+- [x] **Step 1: Write the failing test** (append to `tests_e2e/test_helpers.py`)
 
 ```python
 from tests_e2e.helpers import _logout
@@ -353,12 +353,12 @@ def test_logout_clears_the_session_cookie_and_shows_signin(live_server, page, te
     assert status in (401, 403)
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `python -m pytest tests_e2e/test_helpers.py::test_logout_clears_the_session_cookie_and_shows_signin -q -p no:cacheprovider`
 Expected: FAIL (ImportError for `_logout`).
 
-- [ ] **Step 3: Implement** (append to `tests_e2e/helpers.py`)
+- [x] **Step 3: Implement** (append to `tests_e2e/helpers.py`)
 
 ```python
 def _logout(page):
@@ -373,14 +373,14 @@ def _logout(page):
     page.wait_for_selector("#signin-screen", state="visible", timeout=10000)
 ```
 
-- [ ] **Step 4: Migrate.** In `test_admin_player_management.py::_reclaim_player_password`, replace the `page.evaluate("() => localStorage.clear()")` line, the following `page.goto(live_server)`, and update the comment above them: call `_logout(page)` while still on `/admin` (after the reset-password step), then continue with the `#signin-screen` visible flow (fill email, blur, wait for the "Setup Account" button, fill both passwords, submit). `_logout` already leaves the page on the reloaded signin screen, so the explicit `page.goto(live_server)` and the visible-wait become redundant only if the reload lands on a page with `#signin-screen`; keep whichever wait is still needed so the flow stays deterministic. `git grep -n "localStorage.clear" -- tests_e2e` must return nothing afterwards.
+- [x] **Step 4: Migrate.** In `test_admin_player_management.py::_reclaim_player_password`, replace the `page.evaluate("() => localStorage.clear()")` line, the following `page.goto(live_server)`, and update the comment above them: call `_logout(page)` while still on `/admin` (after the reset-password step), then continue with the `#signin-screen` visible flow (fill email, blur, wait for the "Setup Account" button, fill both passwords, submit). `_logout` already leaves the page on the reloaded signin screen, so the explicit `page.goto(live_server)` and the visible-wait become redundant only if the reload lands on a page with `#signin-screen`; keep whichever wait is still needed so the flow stays deterministic. `git grep -n "localStorage.clear" -- tests_e2e` must return nothing afterwards.
 
-- [ ] **Step 5: Run**
+- [x] **Step 5: Run**
 
 Run: `python -m pytest tests_e2e/test_helpers.py tests_e2e/test_admin_player_management.py -q -p no:cacheprovider`
 Expected: all pass, including `test_reset_password_and_reclaim` and `test_set_temp_password` (both go through the reclaim path in fixture teardown).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests_e2e
@@ -397,7 +397,7 @@ git commit -m "test(e2e): sign out through the real logout control instead of cl
 **Interfaces:**
 - Consumes: `_record_dialogs`, `_assert_no_failure_dialogs` from `tests_e2e.helpers`.
 
-- [ ] **Step 1: Make the vacuous assertion strict.** Replace
+- [x] **Step 1: Make the vacuous assertion strict.** Replace
 
 ```python
         assert not timer_dialogs[1:], (
@@ -415,16 +415,16 @@ with
 
   Verify it can fail: temporarily change the expected length to `2` and confirm the test fails with that message, then restore (do not commit the temporary change).
 
-- [ ] **Step 2: Undo step on `_record_dialogs`.** Change `_expand_and_click(row, action_btn_selector, dialog_page)` so it no longer registers a one-shot handler; the caller passes the recorder list: `_expand_and_click(row, action_btn_selector, dialogs)`. Create `admin_dialogs = _record_dialogs(admin_draft_page)` right after `admin_draft_page` is opened (before the undo), pass it to the undo click, and assert after the undo settles that `[kind for kind, _ in admin_dialogs] == ["confirm"]` and the message contains `undo`. Move the later `timer_dialogs = _record_dialogs(admin_draft_page)` to reuse `admin_dialogs` (a second recorder on the same page would double-record); the reset-timer assertion then checks the entries added since the undo (`len(admin_dialogs) == 2`, the second being a `confirm`). Add `_assert_no_failure_dialogs(admin_dialogs)` at the end.
+- [x] **Step 2: Undo step on `_record_dialogs`.** Change `_expand_and_click(row, action_btn_selector, dialog_page)` so it no longer registers a one-shot handler; the caller passes the recorder list: `_expand_and_click(row, action_btn_selector, dialogs)`. Create `admin_dialogs = _record_dialogs(admin_draft_page)` right after `admin_draft_page` is opened (before the undo), pass it to the undo click, and assert after the undo settles that `[kind for kind, _ in admin_dialogs] == ["confirm"]` and the message contains `undo`. Move the later `timer_dialogs = _record_dialogs(admin_draft_page)` to reuse `admin_dialogs` (a second recorder on the same page would double-record); the reset-timer assertion then checks the entries added since the undo (`len(admin_dialogs) == 2`, the second being a `confirm`). Add `_assert_no_failure_dialogs(admin_dialogs)` at the end.
 
-- [ ] **Step 3: Context cleanup.** Move `setup_context = browser.new_context()` and the setup calls (`_login`, `_create_season_via_admin_ui`, `_set_draft_active`) inside the existing `try:` so the `finally:` that closes contexts also runs when setup raises. Append each per-player `ctx` to `contexts` immediately after `browser.new_context()` (before `_login`), so a failure mid-loop still closes it. Initialise `contexts, pages = [], []` and `setup_context = None` before the `try:`, and in `finally:` guard with `if setup_context is not None`.
+- [x] **Step 3: Context cleanup.** Move `setup_context = browser.new_context()` and the setup calls (`_login`, `_create_season_via_admin_ui`, `_set_draft_active`) inside the existing `try:` so the `finally:` that closes contexts also runs when setup raises. Append each per-player `ctx` to `contexts` immediately after `browser.new_context()` (before `_login`), so a failure mid-loop still closes it. Initialise `contexts, pages = [], []` and `setup_context = None` before the `try:`, and in `finally:` guard with `if setup_context is not None`.
 
-- [ ] **Step 4: Run**
+- [x] **Step 4: Run**
 
 Run: `python -m pytest tests_e2e/test_admin_draft_overrides.py -q -p no:cacheprovider`
 Expected: 1 passed (about 1-2 minutes; it connects 10 browser contexts).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests_e2e
@@ -441,7 +441,7 @@ git commit -m "test(e2e): strict reset-timer dialog assertion, recorder for undo
 **Interfaces:**
 - Produces: `_wait_for_config(page, key, want, timeout_s=15) -> None` in `tests_e2e/helpers.py`: polls `GET /api/config/settings` (via `page.evaluate(fetch)`, so it uses the page's origin) until `config[key] is want`, raising `AssertionError` on timeout naming the key and the last value seen.
 
-- [ ] **Step 1: Write the failing test** (append to `tests_e2e/test_helpers.py`)
+- [x] **Step 1: Write the failing test** (append to `tests_e2e/test_helpers.py`)
 
 ```python
 from tests_e2e.helpers import _wait_for_config
@@ -464,12 +464,12 @@ def test_wait_for_config_times_out_with_the_last_seen_value(live_server, page):
         _wait_for_config(page, "draft_active", opposite, timeout_s=1)
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `python -m pytest tests_e2e/test_helpers.py -q -p no:cacheprovider -k wait_for_config`
 Expected: FAIL (ImportError).
 
-- [ ] **Step 3: Implement** (append to `tests_e2e/helpers.py`; add `import time` at the top)
+- [x] **Step 3: Implement** (append to `tests_e2e/helpers.py`; add `import time` at the top)
 
 ```python
 def _wait_for_config(page, key, want, timeout_s=15):
@@ -493,19 +493,19 @@ def _wait_for_config(page, key, want, timeout_s=15):
     raise AssertionError(f"config {key!r} never became {want!r} (last seen: {last!r})")
 ```
 
-- [ ] **Step 4: Use it in `test_live_draft.py::_set_draft_active`.** Replace the final `_poll(lambda: page.evaluate("fetch('/api/config/settings')...") is want, ...)` block with `_wait_for_config(page, "draft_active", want)`. Keep the earlier aria-pressed `_poll` steps unchanged.
+- [x] **Step 4: Use it in `test_live_draft.py::_set_draft_active`.** Replace the final `_poll(lambda: page.evaluate("fetch('/api/config/settings')...") is want, ...)` block with `_wait_for_config(page, "draft_active", want)`. Keep the earlier aria-pressed `_poll` steps unchanged.
 
-- [ ] **Step 5: Rewrite the `mock_draft_enabled` fixture in `test_mock_draft.py`.**
+- [x] **Step 5: Rewrite the `mock_draft_enabled` fixture in `test_mock_draft.py`.**
   - Delete the inline login block (`admin_page.fill("#auth-email"...` through the `wait_for_selector("#signin-screen", state="hidden"...)`) and use `_login(admin_page, live_server, admin_creds)` (imported from `tests_e2e.test_standings`). Read `original_active` after `_login` through the same public GET (`page.evaluate(fetch)`), before touching the toggle; `goto(f"{live_server}/admin")` afterwards and open the tab with `_open_admin_tab(admin_page, "draft-section")` (this also retires `ADMIN_DRAFT_TAB_SELECTOR`; keep the constant defined only if something else still imports it, otherwise remove its use).
   - Replace `set_active(desired)` with a single click followed by `_wait_for_config(admin_page, "mock_draft_active", desired)`; no `expect_response`, no retry loop, no `PlaywrightTimeoutError` import. Keep the `expect(toggle).to_have_attribute("aria-pressed", ...)` initial-state wait (it prevents racing the toggle's own initial fetch). If the toggle is already in the desired state, return without clicking.
   - Wrap the `yield` in `try/finally` so `set_active(original_active)` and `context.close()` run even if the test body fails.
 
-- [ ] **Step 6: Run**
+- [x] **Step 6: Run**
 
 Run: `python -m pytest tests_e2e/test_helpers.py tests_e2e/test_mock_draft.py -q -p no:cacheprovider`
 Expected: all pass (`test_mock_draft_loads_and_allows_a_pick` runs at both viewports).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tests_e2e
@@ -522,9 +522,9 @@ git commit -m "test(e2e): mock-draft fixture uses shared _login and GET-reread c
 **Interfaces:**
 - Consumes: `_wait_for_config`, `_open_admin_tab`, `_record_dialogs` from `tests_e2e.helpers`.
 
-- [ ] **Step 1: `clean_season_3000` pre-delete leak.** Wrap the pre-test `context, page = _admin_page()` / `_delete_season_via_admin_ui(...)` / `context.close()` in `try/finally` so the context closes when `_admin_page()`'s login or the delete raises. Because `_admin_page()` creates the context before it can fail, restructure it to return the context first (create the context, then `try: ... finally: context.close()` around the login and delete) so a failure in `_login` also closes it.
+- [x] **Step 1: `clean_season_3000` pre-delete leak.** Wrap the pre-test `context, page = _admin_page()` / `_delete_season_via_admin_ui(...)` / `context.close()` in `try/finally` so the context closes when `_admin_page()`'s login or the delete raises. Because `_admin_page()` creates the context before it can fail, restructure it to return the context first (create the context, then `try: ... finally: context.close()` around the login and delete) so a failure in `_login` also closes it.
 
-- [ ] **Step 2: Teardown order.** In the fixture's post-`yield` block, delete season 3000 first and restore `draft_active` second, with the restore in a `finally:` so it is attempted even when the delete raises:
+- [x] **Step 2: Teardown order.** In the fixture's post-`yield` block, delete season 3000 first and restore `draft_active` second, with the restore in a `finally:` so it is attempted even when the delete raises:
 
 ```python
     context, page = _admin_page()
@@ -540,16 +540,18 @@ git commit -m "test(e2e): mock-draft fixture uses shared _login and GET-reread c
 
   (`_admin_page()` must itself be leak-proof per Step 1, so the `context` here is always closed.)
 
-- [ ] **Step 3: Test-body leaks.** In `test_full_ten_player_live_draft`: create `setup_context = None` and `contexts, pages, dialog_logs = [], [], []` before a single `try:` that starts at `setup_context = browser.new_context()`; move the setup calls (`_login`, `_create_season_via_admin_ui`, `_set_draft_active`, the setup-dialog assertion) inside it; append each player `ctx` to `contexts` immediately after `browser.new_context()` (before `_login`/`goto`); in the existing `finally:` guard `wp_context` and `setup_context` with `is not None`. Do not change any assertion or the draft-driving logic.
+- [x] **Step 3: Test-body leaks.** In `test_full_ten_player_live_draft`: create `setup_context = None` and `contexts, pages, dialog_logs = [], [], []` before a single `try:` that starts at `setup_context = browser.new_context()`; move the setup calls (`_login`, `_create_season_via_admin_ui`, `_set_draft_active`, the setup-dialog assertion) inside it; append each player `ctx` to `contexts` immediately after `browser.new_context()` (before `_login`/`goto`); in the existing `finally:` guard `wp_context` and `setup_context` with `is not None`. Do not change any assertion or the draft-driving logic.
 
-- [ ] **Step 4: Verify the leak fixes actually close contexts.** Add to `tests_e2e/test_helpers.py` nothing new; instead run a manual fault injection once (do not commit): temporarily make `_create_season_via_admin_ui` raise at its start, run `python -m pytest tests_e2e/test_live_draft.py -q -p no:cacheprovider`, confirm the failure is the injected error (not a hang or a teardown error) and that a following run of `tests_e2e/test_admin_tabs.py` still passes and `draft_active` in `GET /api/config/settings` is unchanged. Revert the injection.
+- [x] **Step 4: Verify the leak fixes actually close contexts.** Add to `tests_e2e/test_helpers.py` nothing new; instead run a manual fault injection once (do not commit): temporarily make `_create_season_via_admin_ui` raise at its start, run `python -m pytest tests_e2e/test_live_draft.py -q -p no:cacheprovider`, confirm the failure is the injected error (not a hang or a teardown error) and that a following run of `tests_e2e/test_admin_tabs.py` still passes and `draft_active` in `GET /api/config/settings` is unchanged. Revert the injection.
 
-- [ ] **Step 5: Run the real test**
+- [x] **Step 5: Run the real test**
 
 Run: `python -m pytest tests_e2e/test_live_draft.py -q -p no:cacheprovider`
 Expected: 1 passed (about 2-3 minutes).
 
-- [ ] **Step 6: Commit**
+  **Actual outcome (2026-09-24):** the test FAILS with `/wins-pool/3000 returned HTTP 500 after pick #30`, identically on the untouched pre-branch original, so it is not caused by this plan. Root cause is application code (`services/analysis_service.py::calculate_wins_pool_standings` merging an empty standings frame for a fully drafted season with no games; `GET /` then redirects to that 500). Ruled out of scope here (no application changes; the 200-status assertion is not weakened). The leak fixes were validated by the fault-injection run instead.
+
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests_e2e
@@ -560,7 +562,7 @@ git commit -m "test(e2e): leak-proof live-draft contexts, delete season 3000 bef
 
 ### Task 7: Verify, document, archive
 
-- [ ] `python -m pytest tests/ -n auto -q -p no:cacheprovider` (expected: the same environment-only failures as `main` in a worktree: 2 `test_loaded_version`, 5 Firebase-schema errors; the intermittent `test_player_analytics` flake is known).
-- [ ] `python -m pytest tests_e2e/ -q -p no:cacheprovider` (whole suite, with the e2e env vars set). Expected: all pass. Any failure must be compared against a run of the same test on the untouched base commit before it is called a regression.
-- [ ] Check off this plan's steps; add a status line to both source specs listing what this branch resolved (spec 09-12 items 5 and 6; spec 09-13 items 1 through 6) and what remains open; move this plan to `plans/completed/`. Move a spec to `specs/completed/` only if every item in it is resolved (the 09-13 spec still has items 7 through 11; the 09-12 spec still has items 2, 3, 4, 7, 8), otherwise leave it in place with the updated status.
-- [ ] Use superpowers:verification-before-completion, then superpowers:finishing-a-development-branch (do not merge or push without being asked).
+- [x] `python -m pytest tests/ -n auto -q -p no:cacheprovider` (expected: the same environment-only failures as `main` in a worktree: 2 `test_loaded_version`, 5 Firebase-schema errors; the intermittent `test_player_analytics` flake is known). Result: 1378 passed, only those 2 failures and 5 errors.
+- [x] `python -m pytest tests_e2e/ -q -p no:cacheprovider` (whole suite, with the e2e env vars set). Result after the final fix wave: 65 passed, 1 failed (`test_full_ten_player_live_draft`, the pre-existing `/wins-pool/3000` HTTP 500 application bug, identical on the untouched base). Before the fix wave the same run showed 22 failed and 4 errors because that test's leaked season 3000 broke every later login through the site root; `clean_season_3000` now logs in via `/admin` and cleans up after itself.
+- [x] Check off this plan's steps; add a status line to both source specs listing what this branch resolved (spec 09-12 items 5 and 6; spec 09-13 items 1 through 6) and what remains open; move this plan to `plans/completed/`. Both specs stay in place because items remain open in each.
+- [x] Use superpowers:verification-before-completion, then superpowers:finishing-a-development-branch (do not merge or push without being asked).

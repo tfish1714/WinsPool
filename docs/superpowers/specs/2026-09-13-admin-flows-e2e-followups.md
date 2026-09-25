@@ -1,7 +1,7 @@
 # Admin-Flows E2E Tests: Minor Follow-Ups
 
 **Date:** 2026-09-13
-**Status:** Not designed — backlog, split out of `docs/superpowers/plans/2026-09-09-ui-tests-admin-flows.md`'s implementation so these don't get lost. Needs its own pass when picked up, not decided here.
+**Status (updated 2026-09-24, branch `worktree-e2e-suite-hardening`, plan `plans/completed/2026-09-24-e2e-suite-hardening.md`):** Items 1, 3, 4, 5 and 6 are resolved (canonical `_open_admin_tab`; real logout via `_logout` instead of clearing localStorage; strict reset-timer dialog assertion; undo step on the shared recorder; leak-proof contexts in `test_admin_draft_overrides.py` and `test_live_draft.py`). Item 3 turned out to have one call site, not two. Item 2 is resolved for the admin files (`_record_dialogs` everywhere, `_click_through_two_dialogs` retired, message checks added) except that one-shot `page.once("dialog", ...)` handlers remain in `test_forced_password_change.py` and `test_profile.py`, which were outside the requested scope. Items 7, 8, 9, 10 and 11 are untouched. Original status: Not designed — backlog, split out of `docs/superpowers/plans/2026-09-09-ui-tests-admin-flows.md`'s implementation so these don't get lost. Needs its own pass when picked up, not decided here.
 
 ## Origin
 
