@@ -1183,3 +1183,68 @@ class TestMultiSeasonRunCache:
             nfe._load_qb_report_status(tmp_path)
 
         assert len(calls) == 2  # not 4
+
+
+class TestApplyQbAvailability:
+    def _sched(self):
+        return pd.DataFrame({
+            "season": [2024, 2024, 2025],
+            "week": [1, 2, 1],
+            "home_team": ["KC", "BUF", "KC"],
+            "away_team": ["BUF", "KC", "DEN"],
+            "home_qb_injury_flag": [0.0, 1.0, 0.0],
+            "away_qb_injury_flag": [0.0, 0.0, 1.0],
+        })
+
+    def test_takes_the_max_of_existing_flag_and_availability(self):
+        from services.nn_feature_engine import _apply_qb_availability
+        qb_avail = {(2024, 1, "KC"): 1.0, (2024, 2, "KC"): 1.0, (2025, 1, "DEN"): 0.0}
+
+        out = _apply_qb_availability(self._sched(), qb_avail)
+
+        assert list(out["home_qb_injury_flag"]) == [1.0, 1.0, 0.0]  # KC wk1 raised, BUF wk2 stays 1.0
+        assert list(out["away_qb_injury_flag"]) == [0.0, 1.0, 1.0]  # KC away wk2 raised, DEN keeps 1.0
+
+    def test_missing_keys_default_to_zero_and_never_lower_a_flag(self):
+        from services.nn_feature_engine import _apply_qb_availability
+        out = _apply_qb_availability(self._sched(), {})
+        assert list(out["home_qb_injury_flag"]) == [0.0, 1.0, 0.0]
+        assert list(out["away_qb_injury_flag"]) == [0.0, 0.0, 1.0]
+
+    def test_matches_the_previous_row_wise_formula_on_random_data(self):
+        """Equivalence with the two .apply(axis=1) passes this replaced."""
+        import numpy as np
+        from services.nn_feature_engine import _apply_qb_availability
+        rng = np.random.default_rng(7)
+        teams = ["KC", "BUF", "DEN", "SF", "LA"]
+        n = 300
+        sched = pd.DataFrame({
+            "season": rng.integers(2020, 2024, n),
+            "week": rng.integers(1, 19, n),
+            "home_team": rng.choice(teams, n),
+            "away_team": rng.choice(teams, n),
+            "home_qb_injury_flag": rng.integers(0, 2, n).astype(float),
+            "away_qb_injury_flag": rng.integers(0, 2, n).astype(float),
+        })
+        qb_avail = {(int(s), int(w), t): float(rng.integers(0, 2))
+                    for s in range(2020, 2024) for w in range(1, 19) for t in teams
+                    if rng.random() < 0.3}
+
+        expected = sched.copy()
+        expected["home_qb_injury_flag"] = expected.apply(
+            lambda r: max(r["home_qb_injury_flag"],
+                          qb_avail.get((int(r["season"]), int(r["week"]), r["home_team"]), 0.0)), axis=1)
+        expected["away_qb_injury_flag"] = expected.apply(
+            lambda r: max(r["away_qb_injury_flag"],
+                          qb_avail.get((int(r["season"]), int(r["week"]), r["away_team"]), 0.0)), axis=1)
+
+        out = _apply_qb_availability(sched.copy(), qb_avail)
+
+        pd.testing.assert_series_equal(out["home_qb_injury_flag"], expected["home_qb_injury_flag"])
+        pd.testing.assert_series_equal(out["away_qb_injury_flag"], expected["away_qb_injury_flag"])
+
+    def test_empty_schedule_is_a_noop(self):
+        from services.nn_feature_engine import _apply_qb_availability
+        empty = self._sched().iloc[0:0]
+        out = _apply_qb_availability(empty.copy(), {(2024, 1, "KC"): 1.0})
+        assert out.empty

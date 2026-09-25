@@ -2246,6 +2246,29 @@ def build_master_feature_table(
         return _build_master_feature_table_impl(rawdata_dir, min_season, max_season)
 
 
+def _apply_qb_availability(sched: pd.DataFrame, qb_avail: dict) -> pd.DataFrame:
+    """OR the sticky-reference QB availability signal into the two QB injury
+    flags: each flag becomes max(existing flag, availability for that team in
+    that week), 0.0 when the (season, week, team) key is absent.
+
+    One keyed lookup per side instead of a row-wise .apply(axis=1) pass per
+    flag, which was the hot path of this function on a full multi-season build.
+    """
+    if sched.empty:
+        return sched
+    seasons = sched["season"].astype(int).to_numpy()
+    weeks = sched["week"].astype(int).to_numpy()
+    for side in ("home", "away"):
+        avail = np.fromiter(
+            (qb_avail.get((s, w, t), 0.0)
+             for s, w, t in zip(seasons, weeks, sched[f"{side}_team"].to_numpy())),
+            dtype=float, count=len(sched),
+        )
+        flag = f"{side}_qb_injury_flag"
+        sched[flag] = np.maximum(sched[flag].to_numpy(dtype=float), avail)
+    return sched
+
+
 def _build_master_feature_table_impl(
     rawdata_dir: Optional[str] = None,
     min_season: int = 2006,
@@ -2449,20 +2472,7 @@ def _build_master_feature_table_impl(
     qb_avail = compute_qb_availability_flags(
         sorted(sched["season"].dropna().unique().astype(int).tolist()), rd
     )
-    sched["home_qb_injury_flag"] = sched.apply(
-        lambda r: max(
-            r["home_qb_injury_flag"],
-            qb_avail.get((int(r["season"]), int(r["week"]), r["home_team"]), 0.0),
-        ),
-        axis=1,
-    )
-    sched["away_qb_injury_flag"] = sched.apply(
-        lambda r: max(
-            r["away_qb_injury_flag"],
-            qb_avail.get((int(r["season"]), int(r["week"]), r["away_team"]), 0.0),
-        ),
-        axis=1,
-    )
+    sched = _apply_qb_availability(sched, qb_avail)
 
     # Legacy aux cols for any downstream that still reads them
     sched["home_qb_out"] = sched["home_qb_injury_flag"]
