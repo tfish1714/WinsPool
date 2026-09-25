@@ -647,6 +647,12 @@ class TestPublishGameProbs:
         assert entry["edge_vs_vegas"] == pytest.approx(-2.0)  # -3.0 - (-1.0)
 
 
+def _backfill_calls(mock_run):
+    """subprocess.run calls whose command runs backfill_schedule_predictions.py."""
+    return [c for c in mock_run.call_args_list
+            if any("backfill_schedule_predictions.py" in str(a) for a in c[0][0])]
+
+
 class TestPredictionsActiveSignal:
     """Task 6: main()'s daily full-build run must signal predictions_active_
     updated (merge=True, via signal_data_update()) instead of the old bare,
@@ -683,19 +689,17 @@ class TestPredictionsActiveSignal:
     @patch("scripts.cache_builder.NNPredictionService", side_effect=RuntimeError("no model in test env"))
     @patch("scripts.cache_builder.build_year")
     @patch("services.db_service.signal_data_update")
-    @patch("scripts.cache_builder._run_weekly_backfill_if_tuesday")
-    def test_full_run_never_spawns_backfill_subprocess_on_a_tuesday(
-        self, mock_backfill, mock_signal, mock_build_year, mock_nn_svc,
+    def test_main_runs_the_weekly_backfill_subprocess_on_a_tuesday(
+        self, mock_signal, mock_build_year, mock_nn_svc,
         mock_years_to_build, mock_available_years, mock_load_data, monkeypatch,
     ):
-        """Isolation proof: with the clock pinned to a Tuesday, a real
-        subprocess.run would be reached if the weekly-backfill patch were
-        removed. Deterministic -- never depends on the wall-clock weekday."""
+        """_run_weekly_backfill_if_tuesday is left real; the clock is pinned
+        to a Tuesday so the result never depends on the wall-clock weekday."""
         import sys
         from datetime import datetime, timezone
         import scripts.cache_builder as cb
 
-        tuesday = datetime(2026, 9, 22, 9, 15, tzinfo=timezone.utc)  # a real Tuesday
+        tuesday = datetime(2026, 9, 22, 9, 15, tzinfo=timezone.utc)
         monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--skip-sync"])
         mock_load_data.return_value = (
             pd.DataFrame(), pd.DataFrame(), pd.DataFrame([{"season": 2026}]),
@@ -703,11 +707,46 @@ class TestPredictionsActiveSignal:
         )
         with patch("scripts.cache_builder.datetime") as mock_dt, \
              patch.object(cb.subprocess, "run",
-                          side_effect=AssertionError("real subprocess must not run")):
+                          return_value=MagicMock(returncode=0, stdout="", stderr="")) as mock_run:
             mock_dt.now.return_value = tuesday
-            main()  # must complete without reaching subprocess.run
+            main()
 
-        mock_backfill.assert_called_once()
+        # main() also shells out to `git rev-parse HEAD` for unrelated
+        # bookkeeping; only the backfill script matters here.
+        calls = _backfill_calls(mock_run)
+        assert len(calls) == 1
+        called_args = calls[0][0][0]
+        assert "backfill_schedule_predictions.py" in called_args[1]
+        assert "--firestore" in called_args
+
+    @patch("scripts.cache_builder.load_data")
+    @patch("scripts.cache_builder.get_available_years", return_value=[2026])
+    @patch("scripts.cache_builder._years_to_build", return_value=[2026])
+    @patch("scripts.cache_builder.NNPredictionService", side_effect=RuntimeError("no model in test env"))
+    @patch("scripts.cache_builder.build_year")
+    @patch("services.db_service.signal_data_update")
+    def test_main_does_not_run_the_weekly_backfill_subprocess_on_a_monday(
+        self, mock_signal, mock_build_year, mock_nn_svc,
+        mock_years_to_build, mock_available_years, mock_load_data, monkeypatch,
+    ):
+        import sys
+        from datetime import datetime, timezone
+        import scripts.cache_builder as cb
+
+        monday = datetime(2026, 9, 21, 9, 15, tzinfo=timezone.utc)
+        monkeypatch.setattr(sys, "argv", ["cache_builder.py", "--skip-sync"])
+        mock_load_data.return_value = (
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame([{"season": 2026}]),
+            pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(),
+        )
+        with patch("scripts.cache_builder.datetime") as mock_dt, \
+             patch.object(cb.subprocess, "run") as mock_run:
+            mock_dt.now.return_value = monday
+            main()
+
+        # main() also shells out to `git rev-parse HEAD` for unrelated bookkeeping;
+        # only the backfill script matters here.
+        assert _backfill_calls(mock_run) == []
 
 
 class TestResimulateModeWiring:
