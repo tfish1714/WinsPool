@@ -1,7 +1,7 @@
 # QB Availability Branch — Follow-Up Cleanup
 
 **Date:** 2026-09-17
-**Status:** Backlog — parked findings from implementing
+**Status (updated 2026-09-24, branch `worktree-feature-engine-io-cleanup`, plan `plans/completed/2026-09-24-feature-engine-io-cleanup.md`):** RESOLVED in that branch: the Performance / duplicated I/O section (a run-scoped file cache in `_load_multi_season` so sibling loaders parse each rawdata CSV once per `build_master_feature_table()` run; the two row-wise QB-flag `.apply` passes replaced by one keyed pass, `_apply_qb_availability`; a shared `_run_subprocess_step` for `_sync_rawdata` and `_run_weekly_backfill_if_tuesday`), the three test-coverage items about `tests/test_cache_builder.py` and the empty week-filtered roster slice, and the `_load_qb_snap_shares` warning. Deviations: the cache is scoped to one build run rather than a process-lifetime `lru_cache`, and the plan's proposed "isolation-proof" test was replaced by two real `main()` wiring tests after review found it vacuous. STILL OPEN: the malformed-`weekly_rosters` missing-`week`-column `KeyError` note, the `_load_declared_starters` duplicate-schema ordering note, both Documentation items, and the informational behavior notes. Original status: Backlog — parked findings from implementing
 `docs/superpowers/plans/2026-09-17-qb-availability-and-prediction-freshness.md`.
 None of these block that branch; all were explicitly ruled non-blocking
 during implementation (task reviews, the final whole-branch review, or the

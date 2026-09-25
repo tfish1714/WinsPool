@@ -44,7 +44,7 @@
 - Produces: context manager `_multi_season_cache_scope()`; module state `_RUN_CACHE: dict | None`; `build_master_feature_table(...)` keeps its exact signature and now delegates to `_build_master_feature_table_impl(...)` (the previous body, unchanged) inside the scope.
 - `_load_multi_season` behavior: with no active scope it behaves exactly as today. With an active scope it memoizes the concatenated frame by `(str(rawdata_dir), pattern)` and returns `cached.copy()` on every call (including the first).
 
-- [ ] **Step 1: Write the failing tests** (append to `tests/test_nn_feature_engine.py`; reuse its existing imports, add missing ones)
+- [x] **Step 1: Write the failing tests** (append to `tests/test_nn_feature_engine.py`; reuse its existing imports, add missing ones)
 
 ```python
 class TestMultiSeasonRunCache:
@@ -176,12 +176,12 @@ class TestMultiSeasonRunCache:
         assert len(calls) == 2  # not 4
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `python -m pytest tests/test_nn_feature_engine.py -q -p no:cacheprovider -k MultiSeasonRunCache`
 Expected: FAIL (`_multi_season_cache_scope` / `_RUN_CACHE` do not exist).
 
-- [ ] **Step 3: Implement.** Replace `_load_multi_season` and add the scope (imports: `contextlib` at the top if missing):
+- [x] **Step 3: Implement.** Replace `_load_multi_season` and add the scope (imports: `contextlib` at the top if missing):
 
 ```python
 # Run-scoped cache for _load_multi_season. Sibling loaders inside one
@@ -225,14 +225,14 @@ def _load_multi_season(pattern: str, rawdata_dir: Path) -> pd.DataFrame:
 
   Then rename the existing `def build_master_feature_table(` to `def _build_master_feature_table_impl(` (body unchanged, docstring may stay) and add above it a public wrapper with the identical signature `(rawdata_dir: Optional[str] = None, min_season: int = 2006, max_season: int = 2025) -> pd.DataFrame` and the original docstring's first paragraph, whose body is `with _multi_season_cache_scope(): return _build_master_feature_table_impl(rawdata_dir, min_season, max_season)`. Confirm the signature by reading the current `def` first.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `python -m pytest tests/test_nn_feature_engine.py -q -p no:cacheprovider`
 Expected: all pass, output free of new warnings.
 
-- [ ] **Step 5: Equivalence check on real code paths.** Run every test file that exercises the feature engine: `python -m pytest tests/test_nn_feature_engine.py tests/test_preseason_profiles.py tests/test_qb_availability.py tests/test_feature_audit_service.py -q -p no:cacheprovider` (use whichever of these exist; `git grep -l "build_master_feature_table\|_load_multi_season" -- tests` lists them). Expected: all pass.
+- [x] **Step 5: Equivalence check on real code paths.** Run every test file that exercises the feature engine: `python -m pytest tests/test_nn_feature_engine.py tests/test_preseason_profiles.py tests/test_qb_availability.py tests/test_feature_audit_service.py -q -p no:cacheprovider` (use whichever of these exist; `git grep -l "build_master_feature_table\|_load_multi_season" -- tests` lists them). Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add services/nn_feature_engine.py tests/test_nn_feature_engine.py
@@ -249,7 +249,7 @@ git commit -m "perf: run-scoped file cache so sibling loaders parse each rawdata
 - Consumes: `qb_avail: dict[(int season, int week, str team), float]` from `compute_qb_availability_flags`.
 - Produces: `_apply_qb_availability(sched: pd.DataFrame, qb_avail: dict) -> pd.DataFrame`. It sets `home_qb_injury_flag` and `away_qb_injury_flag` on `sched` to `max(existing_flag, qb_avail.get((season, week, team), 0.0))` and returns `sched`. Requires columns `season`, `week`, `home_team`, `away_team`, `home_qb_injury_flag`, `away_qb_injury_flag`.
 
-- [ ] **Step 1: Write the failing tests** (append to `tests/test_nn_feature_engine.py`)
+- [x] **Step 1: Write the failing tests** (append to `tests/test_nn_feature_engine.py`)
 
 ```python
 class TestApplyQbAvailability:
@@ -317,12 +317,12 @@ class TestApplyQbAvailability:
         assert out.empty
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `python -m pytest tests/test_nn_feature_engine.py -q -p no:cacheprovider -k ApplyQbAvailability`
 Expected: FAIL (ImportError).
 
-- [ ] **Step 3: Implement.** Add above `_build_master_feature_table_impl`:
+- [x] **Step 3: Implement.** Add above `_build_master_feature_table_impl`:
 
 ```python
 def _apply_qb_availability(sched: pd.DataFrame, qb_avail: dict) -> pd.DataFrame:
@@ -350,12 +350,12 @@ def _apply_qb_availability(sched: pd.DataFrame, qb_avail: dict) -> pd.DataFrame:
 
   and replace the two `sched["home_qb_injury_flag"] = sched.apply(...)` / `sched["away_qb_injury_flag"] = sched.apply(...)` statements in the impl (keeping the `qb_avail = compute_qb_availability_flags(...)` line above them) with `sched = _apply_qb_availability(sched, qb_avail)`. Keep the surrounding comment. `np` is already imported in the module.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `python -m pytest tests/test_nn_feature_engine.py tests/test_preseason_profiles.py -q -p no:cacheprovider`
 Expected: all pass (plus any qb-availability test file found by `git grep -l "compute_qb_availability_flags" -- tests`).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add services/nn_feature_engine.py tests/test_nn_feature_engine.py
@@ -376,7 +376,7 @@ git commit -m "perf: vectorize the QB availability flag OR into one keyed pass"
   - After a completed run: prints `[cache_builder] {label} summary:` then the last 20 stdout lines, each indented two spaces; if `returncode != 0` prints `[warn] {script} exited non-zero (non-fatal): {stderr[:500]}` (stderr stripped, `None`-safe). Returns `returncode == 0`.
 - `_sync_rawdata()` becomes `_run_subprocess_step([sys.executable, str(SCRIPTS_DIR / "sync_nflverse_data.py")], "nflverse sync", 300)` (keep its long docstring). `_run_weekly_backfill_if_tuesday()` keeps its weekday gate and command construction and calls `_run_subprocess_step(cmd, "weekly backfill", 600, swallow_errors=True, timeout_note=" -- the daily build itself already completed")`; keep the "[cache_builder] Tuesday -- running weekly backfill lock-in..." print before it.
 
-- [ ] **Step 1: Write the failing tests** (append a new class to `tests/test_cache_builder.py`; it already imports `patch`, `MagicMock`, `pd`)
+- [x] **Step 1: Write the failing tests** (append a new class to `tests/test_cache_builder.py`; it already imports `patch`, `MagicMock`, `pd`)
 
 ```python
 class TestRunSubprocessStep:
@@ -488,19 +488,19 @@ class TestSubprocessCallSitesUseTheSharedStep:
         assert "[cache_builder] weekly backfill summary:" in capsys.readouterr().out
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `python -m pytest tests/test_cache_builder.py -q -p no:cacheprovider -k "RunSubprocessStep or SharedStep"`
 Expected: FAIL (`_run_subprocess_step` missing).
 
-- [ ] **Step 3: Implement** `_run_subprocess_step` per the Interfaces block and rewrite the two call sites. Keep every existing `TestSyncRawdata` and `TestWeeklyBackfillStep` test passing unchanged.
+- [x] **Step 3: Implement** `_run_subprocess_step` per the Interfaces block and rewrite the two call sites. Keep every existing `TestSyncRawdata` and `TestWeeklyBackfillStep` test passing unchanged.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `python -m pytest tests/test_cache_builder.py -q -p no:cacheprovider`
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/cache_builder.py tests/test_cache_builder.py
@@ -513,18 +513,21 @@ git commit -m "refactor: share one subprocess-step helper between rawdata sync a
 
 **Files:** Modify `tests/test_cache_builder.py`
 
-- [ ] **Step 1: Dead variable.** In `TestWeeklyBackfillStep.test_runs_backfill_on_tuesday`, delete the unused local `tuesday = datetime(...)` (and the now-unused `from datetime import datetime, timezone` line if nothing else in that test uses it). Rename the test to `test_main_invokes_weekly_backfill_step` and correct its docstring/comment to say it checks that `main()` calls the (mocked) step, not the Tuesday gate (the gate is covered by `test_subprocess_only_runs_on_tuesday` and `test_subprocess_invoked_with_firestore_flag_on_tuesday`). Do not change what it asserts.
+- [x] **Step 1: Dead variable.** In `TestWeeklyBackfillStep.test_runs_backfill_on_tuesday`, delete the unused local `tuesday = datetime(...)` (and the now-unused `from datetime import datetime, timezone` line if nothing else in that test uses it). Rename the test to `test_main_invokes_weekly_backfill_step` and correct its docstring/comment to say it checks that `main()` calls the (mocked) step, not the Tuesday gate (the gate is covered by `test_subprocess_only_runs_on_tuesday` and `test_subprocess_invoked_with_firestore_flag_on_tuesday`). Do not change what it asserts.
 
-- [ ] **Step 2: Isolate `TestPredictionsActiveSignal`.** Add `@patch("scripts.cache_builder._run_weekly_backfill_if_tuesday")` to `test_full_run_signals_predictions_active` (a new leading mock argument) so a real Tuesday can never spawn the backfill subprocess. Match the pattern in `TestWeeklyBackfillStep.test_runs_after_the_cache_invalidation_signal`. Add an assertion that the mocked step was called once.
+- [x] **Step 2: Isolate `TestPredictionsActiveSignal`.** Add `@patch("scripts.cache_builder._run_weekly_backfill_if_tuesday")` to `test_full_run_signals_predictions_active` (a new leading mock argument) so a real Tuesday can never spawn the backfill subprocess. Match the pattern in `TestWeeklyBackfillStep.test_runs_after_the_cache_invalidation_signal`. Add an assertion that the mocked step was called once.
 
-- [ ] **Step 3: Prove the isolation.** Add a new test in the same class that runs `main()` with `datetime` patched to a Tuesday and `cb.subprocess.run` patched to raise `AssertionError("real subprocess must not run")`, with `_run_weekly_backfill_if_tuesday` left patched as in Step 2's decorator: it must pass (no subprocess). (This documents why the decorator matters.)
+- [x] **Step 3 (SUPERSEDED during execution, see note): Prove the isolation.**
 
-- [ ] **Step 4: Run**
+  **Note (2026-09-24):** review found this step's test vacuous (the real step was mocked, so the pinned Tuesday and the raising `subprocess.run` never came into play, and `swallow_errors=True` would have swallowed the sentinel anyway). It was replaced by two `main()` wiring tests that leave `_run_weekly_backfill_if_tuesday` real: `test_main_runs_the_weekly_backfill_subprocess_on_a_tuesday` and `test_main_does_not_run_the_weekly_backfill_subprocess_on_a_monday`, verified by mutating the weekday gate. Original step text kept below for the record.
+ Add a new test in the same class that runs `main()` with `datetime` patched to a Tuesday and `cb.subprocess.run` patched to raise `AssertionError("real subprocess must not run")`, with `_run_weekly_backfill_if_tuesday` left patched as in Step 2's decorator: it must pass (no subprocess). (This documents why the decorator matters.)
+
+- [x] **Step 4: Run**
 
 Run: `python -m pytest tests/test_cache_builder.py -q -p no:cacheprovider`
 Expected: all pass, one test renamed, none removed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/test_cache_builder.py
@@ -537,7 +540,7 @@ git commit -m "test: tighten weekly-backfill test isolation and drop a dead vari
 
 **Files:** Modify `services/nn_feature_engine.py` (`_load_qb_snap_shares`, `~2181-2183`); Test `tests/test_nn_feature_engine.py`, `tests/test_preseason_profiles.py`
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
 
   In `tests/test_nn_feature_engine.py`:
 
@@ -628,12 +631,12 @@ class TestQbSnapSharesCrosswalkWarning:
 
   If the actual behavior differs from what these tests assume (for example the empty-slice case raises `KeyError` instead of returning `{}`), STOP and report NEEDS_CONTEXT with the observed behavior rather than adjusting the assertion to fit.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `python -m pytest tests/test_nn_feature_engine.py tests/test_preseason_profiles.py -q -p no:cacheprovider -k "CrosswalkWarning or no_rows_for_the_requested_week or empty"`
 Expected: the two warning tests FAIL (no warning logged); the week-filtered tests may already PASS (they close a coverage gap for existing behavior) or reveal a real difference.
 
-- [ ] **Step 3: Implement the warning.** In `_load_qb_snap_shares`, where it currently returns `empty` when the roster is empty or lacks `pfr_id`/`gsis_id`, log first:
+- [x] **Step 3: Implement the warning.** In `_load_qb_snap_shares`, where it currently returns `empty` when the roster is empty or lacks `pfr_id`/`gsis_id`, log first:
 
 ```python
     roster = _load_multi_season("rosters/roster_*.csv", rd)
@@ -649,12 +652,12 @@ Expected: the two warning tests FAIL (no warning logged); the week-filtered test
 
   `logger` already exists in the module (`logging.getLogger(__name__)`); confirm.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `python -m pytest tests/test_nn_feature_engine.py tests/test_preseason_profiles.py -q -p no:cacheprovider`
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add services/nn_feature_engine.py tests/test_nn_feature_engine.py tests/test_preseason_profiles.py
