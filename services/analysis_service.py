@@ -560,11 +560,32 @@ def calculate_wins_pool_standings(standings, draft_results, players, season, gam
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     if draft_results.empty or 'season' not in draft_results.columns:
         return pd.DataFrame()
-    today_standings = standings[standings['season'] == season].copy() if not standings.empty and 'season' in standings.columns else pd.DataFrame()
+    today_standings = (
+        standings[standings['season'] == season].copy()
+        if standings is not None and not standings.empty and 'season' in standings.columns
+        else pd.DataFrame()
+    )
     today_draft_results = draft_results[draft_results['season'] == season].copy()
-    
-    wins_pool_standings = pd.merge(today_standings, today_draft_results, on=['team', 'season'])
-    
+
+    # nfl_standings is built only from COMPLETED games, so a drafted team has no
+    # row until its first game is final: none at all right after a draft (the
+    # merge below used to raise KeyError 'team' and 500 the standings page), and
+    # only some teams mid-Week-1 (an inner join silently dropped the rest from
+    # a player's slots). Keep every drafted team and treat a missing row as
+    # zero games played: 0 wins, 0 point differential.
+    stat_cols = ['wins', 'losses', 'ties', 'scored', 'allowed', 'net', 'pct']
+    if today_standings.empty or 'team' not in today_standings.columns:
+        today_standings = pd.DataFrame({
+            'team': pd.Series(dtype=object),
+            'season': pd.Series(dtype=today_draft_results['season'].dtype),
+            **{c: pd.Series(dtype=float) for c in stat_cols},
+        })
+    wins_pool_standings = pd.merge(
+        today_draft_results, today_standings, on=['team', 'season'], how='left'
+    )
+    fill_cols = [c for c in stat_cols if c in wins_pool_standings.columns]
+    wins_pool_standings[fill_cols] = wins_pool_standings[fill_cols].fillna(0)
+
     if 'scored' in wins_pool_standings.columns and 'allowed' in wins_pool_standings.columns:
         wins_pool_standings['ptDiff'] = wins_pool_standings['scored'] - wins_pool_standings['allowed']
     else:
