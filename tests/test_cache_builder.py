@@ -1019,3 +1019,112 @@ class TestBuildYearWritesExplanation:
         # real merge_thin_game_predictions, not a stub
         assert captured["W03_WAS_KC"]["explanation"] == rich
         assert captured["W03_WAS_KC"]["pred_prob"] == 0.62  # scalars still refreshed
+
+
+class TestRunSubprocessStep:
+    def _cb(self):
+        import scripts.cache_builder as cb
+        return cb
+
+    def test_success_prints_a_labelled_tail_and_returns_true(self, capsys):
+        cb = self._cb()
+        with patch.object(cb.subprocess, "run") as run:
+            run.return_value = MagicMock(returncode=0, stdout="\n".join(f"line{i}" for i in range(30)), stderr="")
+            ok = cb._run_subprocess_step(["py", "/x/sync_nflverse_data.py"], "nflverse sync", 300)
+        out = capsys.readouterr().out
+        assert ok is True
+        assert "[cache_builder] nflverse sync summary:" in out
+        assert "  line29" in out and "line9\n" not in out  # only the last 20 lines
+        assert "[warn]" not in out
+
+    def test_passes_timeout_and_cwd_through(self):
+        cb = self._cb()
+        with patch.object(cb.subprocess, "run") as run:
+            run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            cb._run_subprocess_step(["py", "s.py"], "x", 123)
+        assert run.call_args.kwargs["timeout"] == 123
+        assert run.call_args.kwargs["capture_output"] is True
+        assert run.call_args.kwargs["cwd"] == str(cb.SCRIPTS_DIR.parent)
+
+    def test_nonzero_exit_warns_with_script_name_and_returns_false(self, capsys):
+        cb = self._cb()
+        with patch.object(cb.subprocess, "run") as run:
+            run.return_value = MagicMock(returncode=1, stdout="", stderr="404 not found")
+            ok = cb._run_subprocess_step(["py", "/x/sync_nflverse_data.py"], "nflverse sync", 300)
+        out = capsys.readouterr().out
+        assert ok is False
+        assert "[warn] sync_nflverse_data.py exited non-zero (non-fatal): 404 not found" in out
+
+    def test_none_stdout_and_stderr_are_tolerated(self, capsys):
+        cb = self._cb()
+        with patch.object(cb.subprocess, "run") as run:
+            run.return_value = MagicMock(returncode=1, stdout=None, stderr=None)
+            assert cb._run_subprocess_step(["py", "s.py"], "x", 5) is False
+
+    def test_timeout_propagates_by_default(self):
+        import subprocess as sp
+        cb = self._cb()
+        with patch.object(cb.subprocess, "run", side_effect=sp.TimeoutExpired(cmd="s", timeout=300)):
+            try:
+                cb._run_subprocess_step(["py", "s.py"], "x", 300)
+            except sp.TimeoutExpired:
+                return
+        raise AssertionError("TimeoutExpired must propagate when swallow_errors is False")
+
+    def test_swallowed_timeout_warns_with_the_note_and_returns_false(self, capsys):
+        import subprocess as sp
+        cb = self._cb()
+        with patch.object(cb.subprocess, "run", side_effect=sp.TimeoutExpired(cmd="s", timeout=600)):
+            ok = cb._run_subprocess_step(["py", "/x/backfill_schedule_predictions.py"], "weekly backfill", 600,
+                                         swallow_errors=True, timeout_note=" -- daily build done")
+        assert ok is False
+        assert "[warn] backfill_schedule_predictions.py timed out after 600s (non-fatal) -- daily build done" in capsys.readouterr().out
+
+    def test_swallowed_unexpected_error_warns_and_returns_false(self, capsys):
+        cb = self._cb()
+        with patch.object(cb.subprocess, "run", side_effect=OSError("no interpreter")):
+            ok = cb._run_subprocess_step(["py", "/x/backfill_schedule_predictions.py"], "weekly backfill", 600,
+                                         swallow_errors=True)
+        assert ok is False
+        assert "could not be run (non-fatal): no interpreter" in capsys.readouterr().out
+
+    def test_unexpected_error_propagates_by_default(self):
+        cb = self._cb()
+        with patch.object(cb.subprocess, "run", side_effect=OSError("boom")):
+            try:
+                cb._run_subprocess_step(["py", "s.py"], "x", 5)
+            except OSError:
+                return
+        raise AssertionError("OSError must propagate when swallow_errors is False")
+
+
+class TestSubprocessCallSitesUseTheSharedStep:
+    def test_sync_rawdata_keeps_timeout_propagation(self):
+        """A hung nflverse sync must still fail the job (Cloud Run retries it)."""
+        import subprocess as sp
+        import scripts.cache_builder as cb
+        with patch.object(cb.subprocess, "run", side_effect=sp.TimeoutExpired(cmd="s", timeout=300)):
+            try:
+                cb._sync_rawdata()
+            except sp.TimeoutExpired:
+                return
+        raise AssertionError("_sync_rawdata must let TimeoutExpired propagate")
+
+    def test_sync_rawdata_uses_the_300s_timeout_and_label(self, capsys):
+        import scripts.cache_builder as cb
+        with patch.object(cb.subprocess, "run") as run:
+            run.return_value = MagicMock(returncode=0, stdout="Sync complete", stderr="")
+            cb._sync_rawdata()
+        assert run.call_args.kwargs["timeout"] == 300
+        assert "[cache_builder] nflverse sync summary:" in capsys.readouterr().out
+
+    def test_weekly_backfill_labels_its_summary_and_uses_600s(self, capsys):
+        from datetime import datetime, timezone
+        import scripts.cache_builder as cb
+        tuesday = datetime(2026, 9, 22, 9, 15, tzinfo=timezone.utc)
+        with patch("scripts.cache_builder.datetime") as mock_dt, patch.object(cb.subprocess, "run") as run:
+            mock_dt.now.return_value = tuesday
+            run.return_value = MagicMock(returncode=0, stdout="done", stderr="")
+            cb._run_weekly_backfill_if_tuesday(2026)
+        assert run.call_args.kwargs["timeout"] == 600
+        assert "[cache_builder] weekly backfill summary:" in capsys.readouterr().out
