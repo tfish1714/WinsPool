@@ -1,6 +1,7 @@
 """tests_e2e/test_admin_members_and_recap.py — Member/paid tracking and the
 weekly-recap workflow up to its real-Gemini-API boundary (see this plan's
 Task 4 for why full recap generation is out of scope for automation)."""
+from tests_e2e.helpers import _open_admin_tab
 from tests_e2e.test_live_draft import _record_dialogs
 from tests_e2e.test_standings import _login
 
@@ -21,8 +22,7 @@ def test_toggle_member_paid_status(live_server, page, test_player_credentials):
     dialogs = _record_dialogs(page)
 
     page.goto(f"{live_server}/admin")
-    page.click('.admin-tabs .tab-btn[data-tab="members-section"]')
-    page.wait_for_selector("#members-section:not(.hidden)", timeout=10000)
+    _open_admin_tab(page, "members-section")
 
     page.wait_for_selector(".paid-toggle", timeout=10000)
     season_select = page.locator("#members-season-select")
@@ -73,8 +73,7 @@ def test_recap_prompt_preview_populates(live_server, page, test_player_credentia
     _login(page, live_server, admin_creds)
 
     page.goto(f"{live_server}/admin")
-    page.click('.admin-tabs .tab-btn[data-tab="recap-section"]')
-    page.wait_for_selector("#recap-section:not(.hidden)", timeout=10000)
+    _open_admin_tab(page, "recap-section")
 
     # A real, definitely-complete past week -- avoids the 404 branch for
     # "no game results found yet" that a future/in-progress week would hit.

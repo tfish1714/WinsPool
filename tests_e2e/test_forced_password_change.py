@@ -19,6 +19,7 @@ a full "user completes the forced change" UI flow, since that UI flow
 doesn't exist to test.
 """
 import pytest
+from tests_e2e.helpers import _open_admin_tab
 from tests_e2e.test_account_claim import _login_admin, _restore_account_via_claim
 
 TEMP_PASSWORD = "E2eForcedTemp!7"
@@ -74,9 +75,9 @@ def _check_show_test_accounts(page):
     here because a fresh `page.goto("/admin")` re-initializes admin_main.js
     with the toggle unchecked; it isn't carried over from a prior visit.
     """
-    page.click(".admin-tabs .tab-btn[data-tab='draft-section']")
+    _open_admin_tab(page, "draft-section")
     page.check("#show-test-accounts-toggle")
-    page.click(".admin-tabs .tab-btn[data-tab='player-section']")
+    _open_admin_tab(page, "player-section")
 
 
 def test_admin_set_temp_password_blocks_normal_login(live_server, page, browser, lifecycle_test_accounts, test_player_credentials, restore_tempword_account_after):

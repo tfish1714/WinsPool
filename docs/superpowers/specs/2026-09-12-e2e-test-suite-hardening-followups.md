@@ -1,7 +1,7 @@
 # E2E Test Suite: Hardening Follow-Ups
 
 **Date:** 2026-09-12
-**Status:** Not designed — backlog, split out of the UI-tests implementation (`docs/superpowers/plans/2026-09-09-ui-tests-playwright.md`) so these don't get lost. Needs its own pass when picked up, not decided here.
+**Status (updated 2026-09-24, branch `worktree-e2e-suite-hardening`, plan `plans/completed/2026-09-24-e2e-suite-hardening.md`):** Item 1 was already fixed (see it below). Item 5 is resolved (`test_mock_draft.py` imports the shared `_login` and verifies through `GET /api/config/settings` polling via the new `tests_e2e/helpers.py::_wait_for_config`). Item 6 is PARTLY resolved: the context leaks and the teardown order (delete season 3000, then restore `draft_active`) are fixed; still open are the vacuous win-math assertion, `_poll` swallowing exceptions, the missing explicit "room is on season 3000" assertion, and the pick-queue window-size dependency. Items 2, 3, 4, 7 and 8 are untouched. NEW FINDING from this work: `tests_e2e/test_live_draft.py::test_full_ten_player_live_draft` fails on the untouched base as well, with `/wins-pool/3000 returned HTTP 500 after pick #30` (application bug: `services/analysis_service.py::calculate_wins_pool_standings` merges an empty standings frame for a fully drafted season that has no games, and `GET /` redirects there); the stale-cache behavior the test's comment describes no longer exists. Original status: Not designed — backlog, split out of the UI-tests implementation (`docs/superpowers/plans/2026-09-09-ui-tests-playwright.md`) so these don't get lost. Needs its own pass when picked up, not decided here.
 
 ## Origin
 

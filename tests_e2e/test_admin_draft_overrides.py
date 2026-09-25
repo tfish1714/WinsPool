@@ -37,6 +37,7 @@ only adds `.expanded` when the row itself (not the hidden action buttons) is
 clicked first. So each admin action here is two real clicks: one on the row
 to reveal its buttons, then one on the revealed button.
 """
+from tests_e2e.helpers import _assert_no_failure_dialogs
 from tests_e2e.test_standings import _login
 from tests_e2e.test_live_draft import (
     clean_season_3000,
@@ -50,15 +51,20 @@ from tests_e2e.test_live_draft import (
 )
 
 
-def _expand_and_click(row, action_btn_selector, dialog_page):
+def _expand_and_click(row, action_btn_selector, dialogs):
     """Click an admin `.q-row-admin` row to reveal its `.q-row-actions`
     (display:none until `.expanded` is added by main.js's delegated click
-    handler), then click the now-visible action button, accepting the
-    native confirm() it triggers."""
+    handler), then click the now-visible action button. The native confirm()
+    it triggers is accepted and recorded by the page's `_record_dialogs`
+    recorder, whose list the caller passes as `dialogs`; that it really is the
+    recorder attached to this row's page is asserted so an unrecorded dialog
+    can never slip through."""
+    assert dialogs is getattr(row.page, "_e2e_dialog_log", None), (
+        "attach _record_dialogs(page) before clicking"
+    )
     row.locator(".q-row-main").click()
     btn = row.locator(action_btn_selector)
     btn.wait_for(state="visible", timeout=5000)
-    dialog_page.once("dialog", lambda d: d.accept())
     btn.click()
 
 
@@ -79,24 +85,26 @@ def test_admin_can_undo_last_pick_and_reset_timer(
 
     # ── Setup: season 3000, draft opened -- entirely through the real Admin
     # Portal UI, same as test_live_draft.py's own setup. ────────────────────
-    setup_context = browser.new_context()
-    setup_page = setup_context.new_page()
-    setup_dialogs = _record_dialogs(setup_page)
-    _login(setup_page, live_server, admin_creds)
-    _create_season_via_admin_ui(setup_page, live_server, test_player_credentials)
-    clean_season_3000["value"] = _set_draft_active(setup_page, live_server, True)
-    assert not any("failed" in msg.lower() for _, msg in setup_dialogs), (
-        f"admin setup reported a failure: {setup_dialogs}"
-    )
-    print(f"[setup] season 3000 created, draft opened; dialogs={setup_dialogs}")
-
     contexts, pages = [], []
+    setup_context = None
     try:
+        setup_context = browser.new_context()
+        setup_page = setup_context.new_page()
+        setup_dialogs = _record_dialogs(setup_page)
+        _login(setup_page, live_server, admin_creds)
+        _create_season_via_admin_ui(setup_page, live_server, test_player_credentials)
+        clean_season_3000["value"] = _set_draft_active(setup_page, live_server, True)
+        assert not any("failed" in msg.lower() for _, msg in setup_dialogs), (
+            f"admin setup reported a failure: {setup_dialogs}"
+        )
+        print(f"[setup] season 3000 created, draft opened; dialogs={setup_dialogs}")
+
         # ── Connect all 10 real seeded player contexts. This is needed only
         # so _find_turn_page can discover, from the real board, which one is
         # actually on the clock for pick #1 -- turn order is server-side. ──
         for creds in test_player_credentials:
             ctx = browser.new_context()
+            contexts.append(ctx)
             pg = ctx.new_page()
             _record_dialogs(pg)
             pg.set_viewport_size({"width": 1600, "height": 1200})
@@ -107,7 +115,6 @@ def test_admin_can_undo_last_pick_and_reset_timer(
             pg.wait_for_selector("#teams-grid .team-btn", timeout=30000)
             pg.click("#chat-collapse-btn")
             pg.wait_for_selector("#chat-body", state="hidden", timeout=5000)
-            contexts.append(ctx)
             pages.append(pg)
         _ensure_live_clock(pages)
         print(f"[setup] all {len(pages)} players connected to /draft")
@@ -131,13 +138,23 @@ def test_admin_can_undo_last_pick_and_reset_timer(
         admin_draft_page.wait_for_selector("#signin-screen", state="hidden", timeout=15000)
         admin_draft_page.wait_for_selector("#pick-queue .q-row", timeout=30000)
 
+        # One persistent recorder for this page's whole life (idempotent per
+        # page, so it is the only handler): accepts and records every dialog.
+        admin_dialogs = _record_dialogs(admin_draft_page)
+
         undo_row = admin_draft_page.locator(".q-row-admin:has(.q-undo-btn)")
         undo_row.wait_for(state="visible", timeout=10000)
-        _expand_and_click(undo_row, ".q-undo-btn", admin_draft_page)  # confirm('Permanently undo the last pick?...')
+        _expand_and_click(undo_row, ".q-undo-btn", admin_dialogs)  # confirm('Permanently undo the last pick?...')
 
         # Undo removes pick #1's result -- the board reverts to pick #1 active
         # on every connected player page.
         _wait_for_board_advance(pages, 1)
+        assert [kind for kind, _ in admin_dialogs] == ["confirm"], (
+            f"expected exactly one confirm() from the undo click, saw: {admin_dialogs}"
+        )
+        assert "undo" in admin_dialogs[0][1].lower(), (
+            f"undo confirm() message did not mention undo: {admin_dialogs[0]}"
+        )
         assert "Internal Server Error" not in admin_draft_page.content()
         print("[undo] pick #1 undone; board back to pick #1 active")
 
@@ -152,18 +169,16 @@ def test_admin_can_undo_last_pick_and_reset_timer(
         timer_row = admin_draft_page.locator(".q-row-admin:has(.q-timer-btn)")
         timer_row.wait_for(state="visible", timeout=10000)
 
-        # A persistent dialog recorder (not _expand_and_click's one-shot
-        # `.once` handler) is attached for this portion: if the server instead
-        # rejected the reset (stale pick number, a real regression, etc.) the
-        # client renders that as an `alert()` (main.js's `msg.type === 'error'`
-        # branch, static/js/main.js ~line 459) -- a *second* native dialog on
-        # top of the confirm() this action already triggers. A one-shot
-        # handler registered only for the confirm() would leave that alert
-        # unhandled and Playwright would silently auto-dismiss it, letting a
-        # silent server-side failure pass. This recorder accepts and records
-        # every dialog on this page for the rest of the test, so any such
-        # alert is both handled and assertable below.
-        timer_dialogs = _record_dialogs(admin_draft_page)
+        # The persistent dialog recorder (admin_dialogs, attached before the
+        # undo and used by _expand_and_click) covers this portion too: if the
+        # server instead rejected the reset (stale pick number, a real
+        # regression, etc.) the client renders that as an `alert()`
+        # (main.js's `msg.type === 'error'` branch, static/js/main.js ~line
+        # 459) -- a *second* native dialog on top of the confirm() this action
+        # already triggers. An unrecorded alert would be silently
+        # auto-dismissed by Playwright, letting a silent server-side failure
+        # pass. The recorder accepts and records every dialog on this page for
+        # the whole test, so any such alert is both handled and assertable.
 
         # Sample the on-screen shame-timer's elapsed time and wait a couple of
         # seconds so it is meaningfully non-zero before resetting. This is the
@@ -190,8 +205,9 @@ def test_admin_can_undo_last_pick_and_reset_timer(
         timer_btn.click()  # confirm('Reset the timer...?') -- accepted by the recorder above
 
         admin_draft_page.wait_for_timeout(500)
-        assert not timer_dialogs[1:], (
-            f"unexpected dialog(s) after the reset confirm() -- likely a server-side error alert: {timer_dialogs[1:]}"
+        timer_dialogs = admin_dialogs[1:]  # entries added since the undo
+        assert len(timer_dialogs) == 1 and timer_dialogs[0][0] == "confirm", (
+            f"expected exactly one confirm() from the reset click and nothing else, saw: {timer_dialogs}"
         )
 
         elapsed_after = _parse_mmss(shame_num.inner_text())
@@ -201,9 +217,14 @@ def test_admin_can_undo_last_pick_and_reset_timer(
         assert "Internal Server Error" not in admin_draft_page.content()
         print(
             f"[reset-timer] timer reset on active pick #2: {elapsed_before}s -> {elapsed_after}s; "
-            f"dialogs={timer_dialogs}"
+            f"dialogs={admin_dialogs}"
+        )
+        _assert_no_failure_dialogs(admin_dialogs)
+        assert len(admin_dialogs) == 2, (
+            f"expected exactly 2 dialogs (undo confirm + reset-timer confirm), saw: {admin_dialogs}"
         )
     finally:
         for ctx in contexts:
             ctx.close()
-        setup_context.close()
+        if setup_context is not None:
+            setup_context.close()
