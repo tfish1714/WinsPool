@@ -42,9 +42,12 @@ import time
 
 import pytest
 
-from tests_e2e.helpers import _open_admin_tab
-from tests_e2e.helpers import _wait_for_config
-from tests_e2e.helpers import _record_dialogs  # re-exported: other modules import it from here
+from tests_e2e.helpers import (  # _record_dialogs is re-exported: other modules import it from here
+    _login_via_admin,
+    _open_admin_tab,
+    _record_dialogs,
+    _wait_for_config,
+)
 from tests_e2e.test_standings import _login
 
 SEASON = 3000
@@ -355,7 +358,7 @@ def clean_season_3000(live_server, browser, test_player_credentials):
         return context, page
 
     def _login_admin(page):
-        _login(page, live_server, test_player_credentials[0])
+        _login_via_admin(page, live_server, test_player_credentials[0])
 
     context, page = _admin_page()
     try:

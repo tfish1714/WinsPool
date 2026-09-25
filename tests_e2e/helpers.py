@@ -13,6 +13,7 @@ def _wait_for_config(page, key, want, timeout_s=15):
     """
     deadline = time.time() + timeout_s
     last = None
+    last_error = None
     while time.time() < deadline:
         try:
             last = page.evaluate(
@@ -20,10 +21,29 @@ def _wait_for_config(page, key, want, timeout_s=15):
             ).get(key)
             if last is want:
                 return
-        except Exception:
-            pass
+        except Exception as exc:
+            last_error = exc
         time.sleep(0.4)
-    raise AssertionError(f"config {key!r} never became {want!r} (last seen: {last!r})")
+    raise AssertionError(
+        f"config {key!r} never became {want!r} "
+        f"(last seen: {last!r}, last error: {last_error!r})"
+    )
+
+
+def _login_via_admin(page, live_server, creds):
+    """Sign in through the /admin page's own signin overlay and stay on /admin.
+
+    Unlike test_standings._login (which opens `/`, redirecting to the newest
+    season's standings page), this never touches the site root: once season
+    3000 is fully drafted that page can return HTTP 500 and has no signin
+    overlay, which would make fixture cleanup impossible after a leak.
+    """
+    page.goto(f"{live_server}/admin")
+    page.wait_for_selector("#signin-screen", state="visible", timeout=15000)
+    page.fill("#auth-email", creds["email"])
+    page.fill("#auth-password", creds["password"])
+    page.click("#auth-submit-btn")
+    page.wait_for_selector("#signin-screen", state="hidden", timeout=15000)
 
 
 def _open_admin_tab(page, tab_id):

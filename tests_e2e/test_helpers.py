@@ -4,6 +4,7 @@ import pytest
 from tests_e2e.helpers import (
     _assert_no_failure_dialogs,
     _click_and_wait_for_dialogs,
+    _login_via_admin,
     _logout,
     _open_admin_tab,
     _record_dialogs,
@@ -101,6 +102,15 @@ def test_logout_clears_the_session_cookie_and_shows_signin(live_server, page, te
     assert status in (401, 403)
 
 
+def test_login_via_admin_signs_in_and_stays_on_admin(live_server, page, test_player_credentials):
+    _login_via_admin(page, live_server, test_player_credentials[0])
+
+    assert not page.locator("#signin-screen").is_visible()
+    assert page.evaluate("() => location.pathname").rstrip("/") == "/admin"
+    status = page.evaluate("() => fetch('/api/admin/players').then(r => r.status)")
+    assert status == 200
+
+
 def test_wait_for_config_returns_when_the_value_matches(live_server, page):
     page.goto(live_server)
     current = page.evaluate("() => fetch('/api/config/settings').then(r => r.json())")
@@ -114,5 +124,6 @@ def test_wait_for_config_times_out_with_the_last_seen_value(live_server, page):
     current = page.evaluate("() => fetch('/api/config/settings').then(r => r.json())")
     opposite = current.get("draft_active") is not True
 
-    with pytest.raises(AssertionError, match="draft_active"):
+    with pytest.raises(AssertionError, match="draft_active") as excinfo:
         _wait_for_config(page, "draft_active", opposite, timeout_s=1)
+    assert f"last seen: {current.get('draft_active')!r}" in str(excinfo.value)

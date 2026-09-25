@@ -56,8 +56,12 @@ def _expand_and_click(row, action_btn_selector, dialogs):
     (display:none until `.expanded` is added by main.js's delegated click
     handler), then click the now-visible action button. The native confirm()
     it triggers is accepted and recorded by the page's `_record_dialogs`
-    recorder, whose list the caller passes as `dialogs` (unused here beyond
-    documenting that the recorder must already be attached)."""
+    recorder, whose list the caller passes as `dialogs`; that it really is the
+    recorder attached to this row's page is asserted so an unrecorded dialog
+    can never slip through."""
+    assert dialogs is getattr(row.page, "_e2e_dialog_log", None), (
+        "attach _record_dialogs(page) before clicking"
+    )
     row.locator(".q-row-main").click()
     btn = row.locator(action_btn_selector)
     btn.wait_for(state="visible", timeout=5000)
@@ -165,18 +169,16 @@ def test_admin_can_undo_last_pick_and_reset_timer(
         timer_row = admin_draft_page.locator(".q-row-admin:has(.q-timer-btn)")
         timer_row.wait_for(state="visible", timeout=10000)
 
-        # A persistent dialog recorder (not _expand_and_click's one-shot
-        # `.once` handler) is attached for this portion: if the server instead
-        # rejected the reset (stale pick number, a real regression, etc.) the
-        # client renders that as an `alert()` (main.js's `msg.type === 'error'`
-        # branch, static/js/main.js ~line 459) -- a *second* native dialog on
-        # top of the confirm() this action already triggers. A one-shot
-        # handler registered only for the confirm() would leave that alert
-        # unhandled and Playwright would silently auto-dismiss it, letting a
-        # silent server-side failure pass. This recorder accepts and records
-        # every dialog on this page for the rest of the test, so any such
-        # alert is both handled and assertable below.
-        # (admin_dialogs, attached before the undo, is that recorder.)
+        # The persistent dialog recorder (admin_dialogs, attached before the
+        # undo and used by _expand_and_click) covers this portion too: if the
+        # server instead rejected the reset (stale pick number, a real
+        # regression, etc.) the client renders that as an `alert()`
+        # (main.js's `msg.type === 'error'` branch, static/js/main.js ~line
+        # 459) -- a *second* native dialog on top of the confirm() this action
+        # already triggers. An unrecorded alert would be silently
+        # auto-dismissed by Playwright, letting a silent server-side failure
+        # pass. The recorder accepts and records every dialog on this page for
+        # the whole test, so any such alert is both handled and assertable.
 
         # Sample the on-screen shame-timer's elapsed time and wait a couple of
         # seconds so it is meaningfully non-zero before resetting. This is the
@@ -218,6 +220,9 @@ def test_admin_can_undo_last_pick_and_reset_timer(
             f"dialogs={admin_dialogs}"
         )
         _assert_no_failure_dialogs(admin_dialogs)
+        assert len(admin_dialogs) == 2, (
+            f"expected exactly 2 dialogs (undo confirm + reset-timer confirm), saw: {admin_dialogs}"
+        )
     finally:
         for ctx in contexts:
             ctx.close()

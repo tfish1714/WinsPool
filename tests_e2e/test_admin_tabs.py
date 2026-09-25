@@ -6,6 +6,7 @@ tab loads, its content becomes visible, no server-error text appears.
 Deep interaction with these tools' filters/charts is out of scope.
 """
 import pytest
+
 from tests_e2e.helpers import _open_admin_tab, _record_dialogs
 from tests_e2e.test_standings import _login
 

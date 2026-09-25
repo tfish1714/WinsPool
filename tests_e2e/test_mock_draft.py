@@ -71,9 +71,8 @@ def mock_draft_enabled(live_server, browser, test_player_credentials):
             toggle.click()
             _wait_for_config(admin_page, "mock_draft_active", desired)
 
-        set_active(True)
-
         try:
+            set_active(True)
             yield
         finally:
             set_active(original_active)
