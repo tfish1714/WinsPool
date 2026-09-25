@@ -1057,3 +1057,129 @@ class TestComputeQbAvailabilityFlags:
             "TEAM_B's own week-3 declared starter should have been picked up "
             "as the reference, not left None because TEAM_A has a week-1 row"
         )
+
+
+class TestMultiSeasonRunCache:
+    """_load_multi_season is read by sibling loaders that each parse the same
+    injuries/rosters/snap_counts files; inside one build_master_feature_table()
+    run those files must be parsed once, and outside a run nothing is retained."""
+
+    def _write_injuries(self, tmp_path):
+        d = tmp_path / "injuries"
+        d.mkdir()
+        pd.DataFrame({"season": [2024], "week": [1], "team": ["KC"], "gsis_id": ["g1"],
+                      "position": ["QB"], "report_status": ["Out"]}).to_csv(
+            d / "injuries_2024.csv", index=False)
+        pd.DataFrame({"season": [2025], "week": [1], "team": ["BUF"], "gsis_id": ["g2"],
+                      "position": ["QB"], "report_status": ["Doubtful"]}).to_csv(
+            d / "injuries_2025.csv", index=False)
+
+    def test_scope_parses_each_file_once(self, tmp_path, monkeypatch):
+        import services.nn_feature_engine as nfe
+        self._write_injuries(tmp_path)
+        calls = []
+        real = nfe._read_csv_safe
+        monkeypatch.setattr(nfe, "_read_csv_safe", lambda p, *a, **k: (calls.append(p), real(p, *a, **k))[1])
+
+        with nfe._multi_season_cache_scope():
+            a = nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+            b = nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+
+        assert len(calls) == 2  # two files, each parsed exactly once
+        pd.testing.assert_frame_equal(a, b)
+
+    def test_without_a_scope_nothing_is_cached(self, tmp_path, monkeypatch):
+        import services.nn_feature_engine as nfe
+        self._write_injuries(tmp_path)
+        calls = []
+        real = nfe._read_csv_safe
+        monkeypatch.setattr(nfe, "_read_csv_safe", lambda p, *a, **k: (calls.append(p), real(p, *a, **k))[1])
+
+        nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+        nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+
+        assert len(calls) == 4
+
+    def test_returned_frames_are_independent_copies(self, tmp_path):
+        import services.nn_feature_engine as nfe
+        self._write_injuries(tmp_path)
+        with nfe._multi_season_cache_scope():
+            first = nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+            first["team"] = "MUTATED"
+            first["extra"] = 1
+            second = nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+
+        assert "extra" not in second.columns
+        assert set(second["team"]) == {"KC", "BUF"}
+
+    def test_cache_is_cleared_when_the_scope_exits(self, tmp_path):
+        import services.nn_feature_engine as nfe
+        self._write_injuries(tmp_path)
+        with nfe._multi_season_cache_scope():
+            nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+            assert nfe._RUN_CACHE
+        assert nfe._RUN_CACHE is None
+
+    def test_cache_is_cleared_when_the_scope_body_raises(self, tmp_path):
+        import services.nn_feature_engine as nfe
+        with pytest.raises(RuntimeError):
+            with nfe._multi_season_cache_scope():
+                raise RuntimeError("boom")
+        assert nfe._RUN_CACHE is None
+
+    def test_nested_scope_reuses_the_outer_cache_and_does_not_clear_it(self, tmp_path):
+        import services.nn_feature_engine as nfe
+        self._write_injuries(tmp_path)
+        with nfe._multi_season_cache_scope():
+            nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+            with nfe._multi_season_cache_scope():
+                pass
+            assert nfe._RUN_CACHE  # inner exit must not wipe the outer run's cache
+
+    def test_different_directories_do_not_collide(self, tmp_path):
+        import services.nn_feature_engine as nfe
+        a, b = tmp_path / "a", tmp_path / "b"
+        for root, team in ((a, "KC"), (b, "BUF")):
+            (root / "injuries").mkdir(parents=True)
+            pd.DataFrame({"season": [2024], "week": [1], "team": [team], "gsis_id": ["g"]}).to_csv(
+                root / "injuries" / "injuries_2024.csv", index=False)
+        with nfe._multi_season_cache_scope():
+            ra = nfe._load_multi_season("injuries/injuries_*.csv", a)
+            rb = nfe._load_multi_season("injuries/injuries_*.csv", b)
+        assert list(ra["team"]) == ["KC"] and list(rb["team"]) == ["BUF"]
+
+    def test_no_matching_files_still_returns_an_empty_frame(self, tmp_path):
+        import services.nn_feature_engine as nfe
+        with nfe._multi_season_cache_scope():
+            out = nfe._load_multi_season("injuries/injuries_*.csv", tmp_path)
+        assert out.empty
+
+    def test_build_master_feature_table_runs_inside_a_scope(self, tmp_path, monkeypatch):
+        """The public entry point wraps the previous body in the scope, so
+        sibling loaders share one read per file for the whole build."""
+        import services.nn_feature_engine as nfe
+        seen = {}
+
+        def fake_impl(*args, **kwargs):
+            seen["active"] = nfe._RUN_CACHE is not None
+            return pd.DataFrame({"ok": [1]})
+
+        monkeypatch.setattr(nfe, "_build_master_feature_table_impl", fake_impl)
+        out = nfe.build_master_feature_table(str(tmp_path), 2020, 2021)
+
+        assert seen["active"] is True
+        assert nfe._RUN_CACHE is None
+        assert list(out["ok"]) == [1]
+
+    def test_sibling_injury_loaders_share_one_read_per_file_in_a_scope(self, tmp_path, monkeypatch):
+        import services.nn_feature_engine as nfe
+        self._write_injuries(tmp_path)
+        calls = []
+        real = nfe._read_csv_safe
+        monkeypatch.setattr(nfe, "_read_csv_safe", lambda p, *a, **k: (calls.append(p), real(p, *a, **k))[1])
+
+        with nfe._multi_season_cache_scope():
+            nfe._load_injury_flags(tmp_path)
+            nfe._load_qb_report_status(tmp_path)
+
+        assert len(calls) == 2  # not 4

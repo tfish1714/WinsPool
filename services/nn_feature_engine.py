@@ -6,6 +6,7 @@ means shifted by 1 to prevent data leakage. Elo is joined per-game when a week
 column is available, falling back to season-level otherwise.
 """
 
+import contextlib
 import glob
 import logging
 import warnings
@@ -172,13 +173,43 @@ def _read_csv_safe(path: str, **kwargs) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+# Run-scoped cache for _load_multi_season. Sibling loaders inside one
+# build_master_feature_table() call read the same injuries/rosters/snap_counts
+# files; while a scope is active each (rawdata_dir, pattern) is parsed once.
+# It is None outside a run, so nothing is retained afterwards (snap_counts
+# alone is hundreds of MB). Single-threaded by design, like the pipeline.
+_RUN_CACHE: Optional[dict] = None
+
+
+@contextlib.contextmanager
+def _multi_season_cache_scope():
+    """Enable the per-run file cache for the duration of the block. Re-entrant:
+    a nested scope reuses the outer cache and leaves clearing to the outermost."""
+    global _RUN_CACHE
+    if _RUN_CACHE is not None:
+        yield
+        return
+    _RUN_CACHE = {}
+    try:
+        yield
+    finally:
+        _RUN_CACHE = None
+
+
 def _load_multi_season(pattern: str, rawdata_dir: Path) -> pd.DataFrame:
+    key = (str(rawdata_dir), pattern)
+    if _RUN_CACHE is not None and key in _RUN_CACHE:
+        return _RUN_CACHE[key].copy()
     files = sorted(glob.glob(str(rawdata_dir / pattern)))
     if not files:
         return pd.DataFrame()
     frames = [_read_csv_safe(f) for f in files]
     frames = [f for f in frames if not f.empty]
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    result = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    if _RUN_CACHE is None:
+        return result
+    _RUN_CACHE[key] = result
+    return result.copy()
 
 
 # ---------------------------------------------------------------------------
@@ -2202,6 +2233,20 @@ def _load_qb_snap_shares(rd: Path) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def build_master_feature_table(
+    rawdata_dir: Optional[str] = None,
+    min_season: int = 2006,
+    max_season: int = 2025,
+) -> pd.DataFrame:
+    """Assemble the full 26-feature ML training dataset from rawdata CSVs.
+
+    Runs the build inside a run-scoped file cache so sibling loaders parse each
+    rawdata CSV once. See _build_master_feature_table_impl for details.
+    """
+    with _multi_season_cache_scope():
+        return _build_master_feature_table_impl(rawdata_dir, min_season, max_season)
+
+
+def _build_master_feature_table_impl(
     rawdata_dir: Optional[str] = None,
     min_season: int = 2006,
     max_season: int = 2025,
