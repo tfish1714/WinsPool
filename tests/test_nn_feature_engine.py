@@ -1088,6 +1088,34 @@ class TestMultiSeasonRunCache:
         assert len(calls) == 2  # two files, each parsed exactly once
         pd.testing.assert_frame_equal(a, b)
 
+    def test_single_reader_patterns_are_not_cached_inside_a_scope(self, tmp_path, monkeypatch):
+        import services.nn_feature_engine as nfe
+        d = tmp_path / "weekly_rosters"
+        d.mkdir()
+        pd.DataFrame({"season": [2024], "week": [1], "team": ["KC"]}).to_csv(
+            d / "roster_weekly_2024.csv", index=False)
+        calls = []
+        real = nfe._read_csv_safe
+        monkeypatch.setattr(nfe, "_read_csv_safe", lambda p, *a, **k: (calls.append(p), real(p, *a, **k))[1])
+
+        pattern = "weekly_rosters/roster_weekly_*.csv"
+        with nfe._multi_season_cache_scope():
+            nfe._load_multi_season(pattern, tmp_path)
+            nfe._load_multi_season(pattern, tmp_path)
+            assert not any(k[1] == pattern for k in nfe._RUN_CACHE)
+
+        assert len(calls) == 2
+
+    def test_multi_reader_patterns_are_still_cached(self):
+        import services.nn_feature_engine as nfe
+        assert "injuries/injuries_*.csv" in nfe._MULTI_READER_PATTERNS
+
+    def test_multi_reader_patterns_are_plain_csv_globs(self):
+        import services.nn_feature_engine as nfe
+        assert nfe._MULTI_READER_PATTERNS
+        for p in nfe._MULTI_READER_PATTERNS:
+            assert isinstance(p, str) and p.endswith(".csv")
+
     def test_without_a_scope_nothing_is_cached(self, tmp_path, monkeypatch):
         import services.nn_feature_engine as nfe
         self._write_injuries(tmp_path)

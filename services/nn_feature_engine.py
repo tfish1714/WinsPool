@@ -176,9 +176,21 @@ def _read_csv_safe(path: str, **kwargs) -> pd.DataFrame:
 # Run-scoped cache for _load_multi_season. Sibling loaders inside one
 # build_master_feature_table() call read the same injuries/rosters/snap_counts
 # files; while a scope is active each (rawdata_dir, pattern) is parsed once.
-# It is None outside a run, so nothing is retained afterwards (snap_counts
-# alone is hundreds of MB). Single-threaded by design, like the pipeline.
+# It is None outside a run, so nothing is retained afterwards. The cached
+# multi-reader patterns are tens to a couple hundred MB; caching single-reader
+# patterns such as weekly_rosters (~1 GB on a full-history run) would only
+# retain memory. Single-threaded by design, like the pipeline.
 _RUN_CACHE: Optional[dict] = None
+
+# Patterns read by more than one loader in one build run. Single-reader
+# patterns (weekly_rosters, pfr_advstats) are deliberately not cached: they
+# would save no reads and only keep a large frame alive until the build ends.
+_MULTI_READER_PATTERNS = frozenset({
+    "injuries/injuries_*.csv",
+    "snap_counts/snap_counts_*.csv",
+    "rosters/roster_*.csv",
+    "stats_team/stats_team_week_*.csv",
+})
 
 
 @contextlib.contextmanager
@@ -198,7 +210,8 @@ def _multi_season_cache_scope():
 
 def _load_multi_season(pattern: str, rawdata_dir: Path) -> pd.DataFrame:
     key = (str(rawdata_dir), pattern)
-    if _RUN_CACHE is not None and key in _RUN_CACHE:
+    use_cache = _RUN_CACHE is not None and pattern in _MULTI_READER_PATTERNS
+    if use_cache and key in _RUN_CACHE:
         return _RUN_CACHE[key].copy()
     files = sorted(glob.glob(str(rawdata_dir / pattern)))
     if not files:
@@ -206,7 +219,7 @@ def _load_multi_season(pattern: str, rawdata_dir: Path) -> pd.DataFrame:
     frames = [_read_csv_safe(f) for f in files]
     frames = [f for f in frames if not f.empty]
     result = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-    if _RUN_CACHE is None:
+    if not use_cache:
         return result
     _RUN_CACHE[key] = result
     return result.copy()
