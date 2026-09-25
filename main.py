@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import RedirectResponse, FileResponse
 
 from services.data_service import load_data, get_active_season, get_team_logo
@@ -44,6 +45,11 @@ app.add_middleware(
 )
 
 # ── Middleware ────────────────────────────────────────────────────────────────
+# Cloud Run does not compress responses itself. Passes non-HTTP scopes (the
+# /ws draft WebSocket) through untouched.
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
+
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
     if os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true":
@@ -93,7 +99,29 @@ for t in [standings_templates, history_templates, draft_templates, admin_templat
 STATIC_PATH = os.environ.get("STATIC_PATH", "static")
 if not pathlib.Path(STATIC_PATH).exists():
     pathlib.Path(STATIC_PATH).mkdir(parents=True, exist_ok=True)
-app.mount("/static", StaticFiles(directory=STATIC_PATH), name="static")
+
+
+class CachedStaticFiles(StaticFiles):
+    """StaticFiles + Cache-Control. Templates version the entry points
+    (`style.css?v=27`, `main.js?v=10`), so a `?v=` request is safe to cache
+    forever -- bumping the number is the cache-bust. Everything else (the ES
+    modules main.js imports, which carry no version) must revalidate on each
+    use (cheap 304 via the ETag StaticFiles already sends) or a deploy would
+    leave browsers running stale modules against a fresh main.js."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code in (200, 304):
+            if b"v=" in scope.get("query_string", b""):
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            elif path.lower().endswith((".png", ".jpg", ".jpeg", ".ico")):
+                response.headers["Cache-Control"] = "public, max-age=86400"
+            else:
+                response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/static", CachedStaticFiles(directory=STATIC_PATH), name="static")
 
 
 @app.get("/sw.js", include_in_schema=False)
