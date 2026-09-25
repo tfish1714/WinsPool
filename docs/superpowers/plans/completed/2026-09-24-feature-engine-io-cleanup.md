@@ -668,7 +668,7 @@ git commit -m "feat: warn when the QB snap-share crosswalk is unavailable; test 
 
 ### Task 6: Verify, document, archive
 
-- [ ] `python -m pytest tests/ -n auto -q -p no:cacheprovider`; the only failures may be the environment-only ones listed in the Global Constraints (and the known `test_player_analytics` flake).
-- [ ] Add a status line to `docs/superpowers/specs/2026-09-17-qb-availability-followup-cleanup.md`: resolved by this branch: the three Performance items (duplicated I/O, the two `.apply` passes, the subprocess helper), the three Test-coverage items it names (dead variable, backfill patching, empty week-filtered table), and the `_load_qb_snap_shares` warning. Still open: the malformed `weekly_rosters` missing-`week`-column `KeyError`, the `_load_declared_starters` duplicate-schema ordering note, the two documentation items, and the informational behavior notes.
-- [ ] Move this plan to `docs/superpowers/plans/completed/`; leave the spec in place (items remain open).
-- [ ] Use superpowers:verification-before-completion, then superpowers:finishing-a-development-branch (do not merge or push without being asked).
+- [x] `python -m pytest tests/ -n auto -q -p no:cacheprovider`; the only failures may be the environment-only ones listed in the Global Constraints (and the known `test_player_analytics` flake). Result: see the commit that archives this plan (only the 2 `test_loaded_version` failures and 5 Firebase-schema errors).
+- [x] Add a status line to `docs/superpowers/specs/2026-09-17-qb-availability-followup-cleanup.md`: resolved by this branch: the three Performance items (duplicated I/O, the two `.apply` passes, the subprocess helper), the three Test-coverage items it names (dead variable, backfill patching, empty week-filtered table), and the `_load_qb_snap_shares` warning. Still open: the malformed `weekly_rosters` missing-`week`-column `KeyError`, the `_load_declared_starters` duplicate-schema ordering note, the two documentation items, and the informational behavior notes.
+- [x] Move this plan to `docs/superpowers/plans/completed/`; leave the spec in place (items remain open).
+- [x] Use superpowers:verification-before-completion, then superpowers:finishing-a-development-branch (do not merge or push without being asked).
