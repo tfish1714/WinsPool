@@ -2211,6 +2211,12 @@ def _load_qb_snap_shares(rd: Path) -> pd.DataFrame:
 
     roster = _load_multi_season("rosters/roster_*.csv", rd)
     if roster.empty or "pfr_id" not in roster.columns or "gsis_id" not in roster.columns:
+        logger.warning(
+            "_load_qb_snap_shares: roster crosswalk unavailable (roster empty=%s, "
+            "has pfr_id=%s, has gsis_id=%s) -- the snap-share leg of the QB "
+            "availability signal is disabled for this run",
+            roster.empty, "pfr_id" in roster.columns, "gsis_id" in roster.columns,
+        )
         return empty
     crosswalk = (
         roster.dropna(subset=["pfr_id", "gsis_id"])

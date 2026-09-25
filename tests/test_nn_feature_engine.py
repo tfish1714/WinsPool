@@ -1248,3 +1248,55 @@ class TestApplyQbAvailability:
         empty = self._sched().iloc[0:0]
         out = _apply_qb_availability(empty.copy(), {(2024, 1, "KC"): 1.0})
         assert out.empty
+
+
+class TestQbSnapSharesCrosswalkWarning:
+    def _write(self, tmp_path, roster_cols):
+        (tmp_path / "snap_counts").mkdir()
+        pd.DataFrame({
+            "season": [2024], "week": [1], "team": ["KC"], "position": ["QB"],
+            "game_type": ["REG"], "offense_snaps": [60], "pfr_player_id": ["P1"],
+        }).to_csv(tmp_path / "snap_counts" / "snap_counts_2024.csv", index=False)
+        (tmp_path / "rosters").mkdir()
+        pd.DataFrame({c: ["x"] for c in roster_cols}).to_csv(
+            tmp_path / "rosters" / "roster_2024.csv", index=False)
+
+    def test_warns_when_the_crosswalk_columns_are_absent(self, tmp_path, caplog):
+        import logging
+        from services.nn_feature_engine import _load_qb_snap_shares
+        self._write(tmp_path, ["full_name"])  # no pfr_id / gsis_id
+
+        with caplog.at_level(logging.WARNING, logger="services.nn_feature_engine"):
+            out = _load_qb_snap_shares(tmp_path)
+
+        assert out.empty
+        assert any("pfr_id" in r.message and "gsis_id" in r.message for r in caplog.records)
+
+    def test_warns_when_the_roster_files_are_missing_entirely(self, tmp_path, caplog):
+        import logging
+        from services.nn_feature_engine import _load_qb_snap_shares
+        self._write(tmp_path, ["pfr_id", "gsis_id"])
+        (tmp_path / "rosters" / "roster_2024.csv").unlink()
+
+        with caplog.at_level(logging.WARNING, logger="services.nn_feature_engine"):
+            out = _load_qb_snap_shares(tmp_path)
+
+        assert out.empty
+        assert any("roster" in r.message.lower() for r in caplog.records)
+
+    def test_no_warning_when_the_crosswalk_is_present(self, tmp_path, caplog):
+        import logging
+        from services.nn_feature_engine import _load_qb_snap_shares
+        (tmp_path / "snap_counts").mkdir()
+        pd.DataFrame({"season": [2024], "week": [1], "team": ["KC"], "position": ["QB"],
+                      "game_type": ["REG"], "offense_snaps": [60], "pfr_player_id": ["P1"]}).to_csv(
+            tmp_path / "snap_counts" / "snap_counts_2024.csv", index=False)
+        (tmp_path / "rosters").mkdir()
+        pd.DataFrame({"pfr_id": ["P1"], "gsis_id": ["G1"]}).to_csv(
+            tmp_path / "rosters" / "roster_2024.csv", index=False)
+
+        with caplog.at_level(logging.WARNING, logger="services.nn_feature_engine"):
+            out = _load_qb_snap_shares(tmp_path)
+
+        assert len(out) == 1
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
