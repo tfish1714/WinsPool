@@ -22,6 +22,8 @@ from routes.history_routes import router as history_router, templates as history
 from routes.draft_routes import router as draft_router, templates as draft_templates
 from routes.api_routes import router as api_router
 from routes.auth_routes import router as auth_router
+from services.static_assets import register as register_static_assets
+from routes.mock_draft_routes import templates as mock_draft_templates
 from routes.admin_routes import router as admin_router, _page_router as admin_page_router, _templates as admin_templates
 from routes.prediction_routes import router as prediction_router
 from routes.mock_draft_routes import router as mock_draft_router, page_router as mock_draft_page_router
@@ -90,7 +92,8 @@ def _current_year():
     """
     return date.today().year
 
-for t in [standings_templates, history_templates, draft_templates, admin_templates]:
+for t in [standings_templates, history_templates, draft_templates, admin_templates, mock_draft_templates]:
+    register_static_assets(t.env)
     t.env.globals['get_team_logo'] = get_team_logo
     t.env.globals['current_season_label'] = _current_season_label
     t.env.globals['current_year'] = _current_year()
@@ -102,12 +105,11 @@ if not pathlib.Path(STATIC_PATH).exists():
 
 
 class CachedStaticFiles(StaticFiles):
-    """StaticFiles + Cache-Control. Templates version the entry points
-    (`style.css?v=27`, `main.js?v=10`), so a `?v=` request is safe to cache
-    forever -- bumping the number is the cache-bust. Everything else (the ES
-    modules main.js imports, which carry no version) must revalidate on each
-    use (cheap 304 via the ETag StaticFiles already sends) or a deploy would
-    leave browsers running stale modules against a fresh main.js."""
+    """StaticFiles + Cache-Control. `?v=<content hash>` URLs (see
+    services/static_assets.py) are safe to cache forever. Unversioned requests
+    -- only browsers without import-map support, or direct hits -- must
+    revalidate (cheap 304 via the ETag StaticFiles sends) so a deploy can't
+    leave them running stale modules."""
 
     async def get_response(self, path, scope):
         response = await super().get_response(path, scope)

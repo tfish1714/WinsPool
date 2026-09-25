@@ -8,7 +8,8 @@
     <!-- Use the primary glassmorphism design system -->
     <link rel="icon" href="/static/fishbone.png" type="image/png">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@500;700&family=Newsreader:ital,opsz,wght@1,12,500;0,12,500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=27">
+    {{ js_import_map() }}
+    <link rel="stylesheet" href="{{ static_url('style.css') }}">
     {% block head %}{% endblock %}
     <!-- Early Auth Detection to prevent flicker -->
     <script>
@@ -176,8 +177,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <script type="module" src="/static/js/main.js?v=10"></script>
-    <script src="/static/js/responsive.js"></script>
+    <script type="module" src="{{ static_url('js/main.js') }}"></script>
+    <script src="{{ static_url('js/responsive.js') }}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             if (typeof lucide !== 'undefined') {

@@ -181,7 +181,7 @@
 
 {% block scripts %}
 <script>window.SCHEDULE_CONFIG = { year: {{ year }} };</script>
-<script src="/static/js/standings.js"></script>
-<script src="/static/js/live_refresh.js"></script>
-<script type="module" src="/static/js/schedule_explain.js"></script>
+<script src="{{ static_url('js/standings.js') }}"></script>
+<script src="{{ static_url('js/live_refresh.js') }}"></script>
+<script type="module" src="{{ static_url('js/schedule_explain.js') }}"></script>
 {% endblock %}

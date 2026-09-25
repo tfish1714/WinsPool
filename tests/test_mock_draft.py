@@ -179,18 +179,19 @@ class TestMockDraftActiveGate:
             resp = client.get("/mock-draft")
         assert resp.status_code == 200
         assert "not currently available" in resp.text.lower()
-        assert "mock_draft.js" not in resp.text
+        # the import map names every module, so check for the actual <script> load
+        assert 'src="/static/js/mock_draft.js' not in resp.text
 
     def test_page_shows_draft_ui_when_active(self):
         resp = client.get("/mock-draft")
         assert resp.status_code == 200
-        assert "mock_draft.js" in resp.text
+        assert 'src="/static/js/mock_draft.js' in resp.text
 
     def test_page_bypasses_gate_for_admin(self, admin_token):
         with patch("routes.mock_draft_routes.get_config_settings", return_value={"mock_draft_active": False}):
             resp = client.get("/mock-draft", headers={"Authorization": admin_token})
         assert resp.status_code == 200
-        assert "mock_draft.js" in resp.text
+        assert 'src="/static/js/mock_draft.js' in resp.text
 
     def test_setup_blocked_for_non_admin_when_inactive(self):
         with patch("routes.mock_draft_routes.get_config_settings", return_value={"mock_draft_active": False}):
