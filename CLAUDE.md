@@ -205,6 +205,10 @@ docs/                    # Architecture and model documentation (prediction_mode
 .local_db/               # Local pickle cache (NOT committed)
 ```
 
+### Team page
+
+`GET /team/{abbr}` (`routes/history_routes.py`, case-insensitive, 404 for an unknown team) renders `templates/team.html` via `static/js/team_page.js` from `services/team_page_service.py::build_team_page()`: pool-season history (record, drafter linking to `/player/{id}`, pick, pool winner for completed seasons only) plus this season's schedule with the stored ensemble projection overlaid (`pred_prob` is the HOME win probability; an away team uses `1 - pred_prob`; byes are rows). Projected wins, per-game win probability/projection and projected record are withheld from non-admins while `draft_active` is set; history, results and the dropdown always render. `GET /teams` (the More-menu "Teams" entry, in both `main.js` `moreLinks` and the `base.html` drawer) redirects to the viewer's first drafted team this season (from the `session_token` cookie), else the first team alphabetically.
+
 ### Newer API endpoints
 
 All require auth (`require_auth`) unless noted.

@@ -8,6 +8,10 @@ from fastapi.templating import Jinja2Templates
 from services.data_service import load_data, get_available_years, get_active_season, get_season_projection_legacy_shape
 from services.utils import abbreviate_player_name as _first_name, filter_season
 import services.analysis_service as analysis
+from services.cache_service import get_game_predictions
+from services.db_service import get_config_settings
+from services.session_service import decode_token
+import services.team_page_service as team_page_service
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -218,3 +222,52 @@ async def player_page(request: Request, player_id: int):
         "analytics": analytics,
         "player_id": player_id,
     })
+
+
+def _viewer(request: Request):
+    """(player_id | None, is_admin) from the session cookie / Bearer header; never raises."""
+    token = request.cookies.get("session_token")
+    auth = request.headers.get("authorization") or ""
+    if auth.startswith("Bearer "):
+        token = auth.removeprefix("Bearer ")
+    if not token:
+        return None, False
+    try:
+        payload = decode_token(token)
+        return int(payload.get("sub")), payload.get("role") == "admin"
+    except Exception:
+        return None, False
+
+
+@router.get("/teams")
+async def teams_redirect(request: Request):
+    """Teams nav target: the viewer's first drafted team this season, else the first team alphabetically."""
+    player_id, _ = _viewer(request)
+    target = team_page_service.team_list()[0]["abbr"]
+    if player_id is not None:
+        _, _, games, _, _, draft_results, rules = load_data()
+        season = int(get_active_season(games, draft_results, rules))
+        if draft_results is not None and not draft_results.empty and "season" in draft_results.columns:
+            mine = draft_results[(draft_results["season"] == season)
+                                 & (draft_results["playerId"] == player_id)].sort_values("draftPick")
+            teams = [str(t) for t in mine["team"].dropna().tolist() if str(t) in team_page_service.TEAM_NAMES]
+            if teams:
+                target = teams[0]
+    return RedirectResponse(f"/team/{target}", status_code=302)
+
+
+@router.get("/team/{abbr}")
+async def team_page(request: Request, abbr: str):
+    standings, _, games, players, _, draft_results, rules = load_data()
+    season = int(get_active_season(games, draft_results, rules))
+    _, is_admin = _viewer(request)
+    include_projections = is_admin or not get_config_settings().get("draft_active")
+    data = {
+        "standings": standings, "games": games, "players": players, "draft_results": draft_results,
+        "predictions": get_game_predictions(season) if include_projections else {},
+        "projections": get_season_projection_legacy_shape(season) if include_projections else {},
+    }
+    payload = team_page_service.build_team_page(abbr, season, data, include_projections)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Team not found")
+    return templates.TemplateResponse(request, "team.html", {"payload": payload})

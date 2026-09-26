@@ -4028,3 +4028,33 @@ a.pool-chip-mine:hover { text-decoration: underline; }
 .pool-payout-row .pool-place { flex: 1 1 130px; min-width: 0; }
 .pool-payout-row .pool-amount { flex: 1 1 110px; min-width: 0; }
 .pool-summary { margin-top: 1rem; font-weight: 600; }
+
+/* Team page */
+.team-page__top { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+.team-page__ident { display: flex; align-items: center; gap: 1rem; min-width: 0; }
+.team-page__logo { width: 56px; height: 56px; object-fit: contain; flex: none; }
+.team-page__summary { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.9rem; color: var(--text-secondary); }
+.team-page__picker { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.75rem; color: var(--text-secondary); }
+.team-page__select { min-height: 44px; min-width: 220px; padding: 0 0.75rem; font-size: 1rem; border-radius: 10px; color: var(--text-primary); background: rgba(255,255,255,0.06); border: 1px solid var(--glass-border); }
+.team-page__select option { color: #111; }
+.team-page__section { margin-bottom: 2rem; }
+.team-page__h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary); margin-bottom: 0.75rem; }
+.team-page__hrow, .team-page__grow { display: grid; align-items: center; gap: 0.75rem; min-height: 44px; padding: 0.4rem 0; border-bottom: 1px solid var(--glass-border); }
+.team-page__hrow { grid-template-columns: 4rem 5rem 1fr auto; }
+.team-page__hrow .team-page__note { grid-column: 1 / -1; margin-top: 0; padding-bottom: 0.25rem; }
+.team-page__grow { grid-template-columns: 4rem 1fr auto; }
+.team-page__season, .team-page__week { font-weight: 600; }
+.team-page__link { display: inline-flex; align-items: center; min-height: 44px; color: var(--primary-color); text-decoration: none; }
+.team-page__note { font-size: 0.8rem; color: var(--text-secondary); margin: 0.25rem 0 0.5rem; }
+.team-page__muted { color: var(--text-secondary); }
+.team-page__badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.85rem; border: 1px solid var(--glass-border); }
+.team-page__badge--w { color: var(--pos); border-color: var(--pos); }
+.team-page__badge--l { color: var(--neg); border-color: var(--neg); }
+.team-page__badge--t { color: var(--text-primary); }
+.team-page__badge--proj { color: var(--text-secondary); border-style: dashed; }
+@media (max-width: 480px) {
+  .team-page__hrow { grid-template-columns: 1fr 1fr; }
+  .team-page__hrow .team-page__cell:nth-child(3) { grid-column: 1 / -1; }
+  .team-page__select { min-width: 0; width: 100%; }
+  .team-page__picker { width: 100%; }
+}
