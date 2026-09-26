@@ -28,7 +28,8 @@ try:
 except ImportError:
     XGB_AVAILABLE = False
 
-from services.nn_feature_engine import FEATURE_COLUMNS, _normalize_team
+from services.nn_feature_engine import FEATURE_COLUMNS
+from services.utils import normalize_team_abbr
 from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, PROB_CLIP_MIN, PROB_CLIP_MAX
 
 logger = logging.getLogger(__name__)
@@ -138,8 +139,8 @@ def compute_feature_audit(
     for i, row in enumerate(feature_table.itertuples(index=False)):
         season = int(getattr(row, "season", 0))
         week   = int(getattr(row, "week", 0))
-        ht     = _normalize_team(str(getattr(row, "home_team", "") or ""))
-        at     = _normalize_team(str(getattr(row, "away_team", "") or ""))
+        ht     = normalize_team_abbr(str(getattr(row, "home_team", "") or ""))
+        at     = normalize_team_abbr(str(getattr(row, "away_team", "") or ""))
         game_key = f"W{week:02d}_{ht}_{at}"
 
         raw_features    = {col: round(_safe_float(getattr(row, col, 0.0)), 4)

@@ -983,7 +983,7 @@ def build_result_lookup(all_games: pd.DataFrame, season: Optional[int] = None) -
     scope the lookup: the key has no season component, so an unscoped lookup
     over several seasons can grade one season against another's result.
     """
-    from services.nn_feature_engine import _normalize_team
+    from services.utils import normalize_team_abbr
 
     if all_games is None or all_games.empty:
         return {}
@@ -994,8 +994,8 @@ def build_result_lookup(all_games: pd.DataFrame, season: Optional[int] = None) -
         return {}
 
     week = pd.to_numeric(played['week'], errors='coerce')
-    home = played['home_team'].fillna('').astype(str).map(_normalize_team)
-    away = played['away_team'].fillna('').astype(str).map(_normalize_team)
+    home = played['home_team'].fillna('').astype(str).map(normalize_team_abbr)
+    away = played['away_team'].fillna('').astype(str).map(normalize_team_abbr)
     keep = week.notna() & (week != 0) & (home != '') & (away != '')
     if not keep.any():
         return {}

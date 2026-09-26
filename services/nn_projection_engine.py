@@ -20,10 +20,10 @@ from services.nn_feature_engine import (
     build_master_feature_table,
     RAWDATA_DIR,
     _read_csv_safe,
-    _normalize_team,
     compute_preseason_player_profiles,
     compute_qb_availability_flags,
 )
+from services.utils import normalize_team_abbr
 from services.nn_prediction_service import (
     NNPredictionService,
     FEATURE_COLUMNS as NN_FEATURE_COLUMNS,
@@ -302,7 +302,7 @@ class NNProjectionEngine:
         Returns:
             {game_key: float32 array of shape (n_features,)}
         """
-        from services.nn_feature_engine import _normalize_team, FEATURE_COLUMNS as NN_FC
+        from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
         from services.prediction_service import _get_travel_distance
 
         profile_dict = {row["team"]: row.to_dict() for _, row in self._team_profiles.iterrows()}
@@ -336,8 +336,8 @@ class NNProjectionEngine:
                 }
 
         for _, game in schedule_df.iterrows():
-            ht = _normalize_team(str(game.get("home_team", "") or ""))
-            at = _normalize_team(str(game.get("away_team", "") or ""))
+            ht = normalize_team_abbr(str(game.get("home_team", "") or ""))
+            at = normalize_team_abbr(str(game.get("away_team", "") or ""))
             wk = game.get("week")
             if not ht or not at or wk is None:
                 continue
@@ -755,7 +755,7 @@ class NNProjectionEngine:
                 "game_probs":  {game_key: {mean_prob, model_spread, home_team, away_team, week}},
             }
         """
-        from services.nn_feature_engine import _normalize_team, FEATURE_COLUMNS as NN_FC
+        from services.nn_feature_engine import FEATURE_COLUMNS as NN_FC
 
         if completed_results is None:
             completed_results = {}
@@ -770,8 +770,8 @@ class NNProjectionEngine:
             return {"team_stats": {}, "game_probs": {}}
 
         # Normalize team abbreviations
-        reg["home_team"] = reg["home_team"].apply(lambda x: _normalize_team(str(x)))
-        reg["away_team"] = reg["away_team"].apply(lambda x: _normalize_team(str(x)))
+        reg["home_team"] = reg["home_team"].apply(lambda x: normalize_team_abbr(str(x)))
+        reg["away_team"] = reg["away_team"].apply(lambda x: normalize_team_abbr(str(x)))
 
         # Build initial state and index
         state_template, team_list, team_idx = self._build_initial_state()

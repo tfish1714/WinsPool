@@ -36,9 +36,9 @@ import pandas as pd
 from services.nn_feature_engine import (
     build_master_feature_table,
     _read_csv_safe,
-    _normalize_team,
     RAWDATA_DIR,
 )
+from services.utils import normalize_team_abbr
 from services.nn_prediction_service import (
     NNPredictionService,
     FEATURE_COLUMNS as NN_FEATURE_COLUMNS,
@@ -222,8 +222,8 @@ def main():
         sys.exit(1)
 
     df = _read_csv_safe(str(games_path))
-    df["home_team"] = df["home_team"].apply(_normalize_team)
-    df["away_team"] = df["away_team"].apply(_normalize_team)
+    df["home_team"] = df["home_team"].apply(normalize_team_abbr)
+    df["away_team"] = df["away_team"].apply(normalize_team_abbr)
     df["home_score"] = pd.to_numeric(df["home_score"], errors="coerce")
     df["away_score"] = pd.to_numeric(df["away_score"], errors="coerce")
     df["result"] = pd.to_numeric(df.get("result", pd.Series(dtype=float)), errors="coerce")

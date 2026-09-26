@@ -34,9 +34,9 @@ import pandas as pd
 
 from services.nn_feature_engine import (
     _read_csv_safe,
-    _normalize_team,
     RAWDATA_DIR,
 )
+from services.utils import normalize_team_abbr
 from services.nn_projection_engine import NNProjectionEngine
 
 from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
@@ -70,8 +70,8 @@ def _load_schedule(rawdata_dir: pathlib.Path, season: int, prior_season: int) ->
         return pd.DataFrame()
 
     df = _read_csv_safe(str(path))
-    df["home_team"] = df["home_team"].apply(_normalize_team)
-    df["away_team"] = df["away_team"].apply(_normalize_team)
+    df["home_team"] = df["home_team"].apply(normalize_team_abbr)
+    df["away_team"] = df["away_team"].apply(normalize_team_abbr)
 
     reg = df[(df["season"] == season) & (df["game_type"] == "REG")]
     if not reg.empty:

@@ -51,7 +51,8 @@ MODEL_DIR = Path(__file__).parent.parent / "models"
 DEFAULT_MODEL_PATH = MODEL_DIR / "nn_v1.keras"
 REGISTRY_PATH = MODEL_DIR / "model_registry.json"
 
-from services.nn_feature_engine import FEATURE_COLUMNS, _normalize_team
+from services.nn_feature_engine import FEATURE_COLUMNS
+from services.utils import normalize_team_abbr
 from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, PROB_CLIP_MIN, PROB_CLIP_MAX, SPREAD_TO_PROB_SCALE
 from services.utils import derive_prediction_scalars, prob_to_model_spread
 
@@ -93,8 +94,8 @@ def build_ensemble_lookup(feature_table, nn_svc, xgb_svc, lr_svc) -> dict:
     lookup = {}
     for i, row in enumerate(feature_table.itertuples(index=False)):
         hp     = float(blended[i])
-        ht     = _normalize_team(row.home_team)
-        at     = _normalize_team(row.away_team)
+        ht     = normalize_team_abbr(row.home_team)
+        at     = normalize_team_abbr(row.away_team)
 
         # nflverse convention: positive spread_line = home favored (e.g. DET -7 stored as +7).
         # model_spread matches this: positive = home favored.

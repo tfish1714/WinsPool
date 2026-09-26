@@ -521,7 +521,7 @@ async def get_predictions_games(season: int, week: int, _: dict = Depends(requir
     from nfl_games. actual_winner and is_correct are null for future games.
     """
     try:
-        from services.nn_feature_engine import _normalize_team
+        from services.utils import normalize_team_abbr
         from services.betting_screener_service import grade_ats_pick
         from services.utils import edge_vs_vegas as _edge_vs_vegas
 
@@ -546,7 +546,7 @@ async def get_predictions_games(season: int, week: int, _: dict = Depends(requir
             pw = pred.get("pred_winner")
             is_correct = None
             if actual_winner is not None and pw is not None:
-                is_correct = (_normalize_team(str(pw)) == actual_winner)
+                is_correct = (normalize_team_abbr(str(pw)) == actual_winner)
 
             # Vegas line: prefer stored explanation value, fall back to live schedule data
             vegas_line = ex.get("vegas_line")

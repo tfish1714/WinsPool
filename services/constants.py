@@ -113,3 +113,10 @@ PLAYOFF_RACE_MIN_WEEK = 10
 
 # "Podium" for the playoff-race magic number: finishing in the top N.
 PODIUM_SIZE = 3
+
+# Canonical team abbreviation normalization: source-specific and historical
+# abbreviations -> the identifiers used throughout the repo. Single source of
+# truth; services.utils.normalize_team_abbr is the only function that applies it.
+TEAM_ABBR_MAP = {
+    "LAR": "LA", "WSH": "WAS", "JAC": "JAX", "OAK": "LV", "SD": "LAC", "STL": "LA",
+}

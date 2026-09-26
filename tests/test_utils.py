@@ -135,3 +135,10 @@ class TestProbToModelSpread:
         from services.constants import PROB_CLIP_MAX, PROB_CLIP_MIN
         assert prob_to_model_spread(1.0) == prob_to_model_spread(PROB_CLIP_MAX)
         assert prob_to_model_spread(0.0) == prob_to_model_spread(PROB_CLIP_MIN)
+
+
+def test_normalize_team_abbr_handles_relocated_franchises():
+    assert normalize_team_abbr("OAK") == "LV"
+    assert normalize_team_abbr("SD") == "LAC"
+    assert normalize_team_abbr("STL") == "LA"
+    assert normalize_team_abbr(" wsh ") == "WAS"
