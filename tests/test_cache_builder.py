@@ -924,6 +924,80 @@ class TestWeeklyBackfillStep:
         assert order == ["signal", "backfill"]
 
 
+def _eval_games(with_post=False):
+    rows = []
+    for wk in (1, 2, 3):
+        rows.append({"season": 2026, "week": wk, "result": 3.0, "game_type": "REG"})
+        rows.append({"season": 2026, "week": wk, "result": -7.0, "game_type": "REG"})
+    rows.append({"season": 2026, "week": 4, "result": 3.0, "game_type": "REG"})
+    rows.append({"season": 2026, "week": 4, "result": float("nan"), "game_type": "REG"})
+    if with_post:
+        rows.append({"season": 2026, "week": 19, "result": 3.0, "game_type": "POST"})
+    return pd.DataFrame(rows)
+
+
+class TestWeeklyEvalStep:
+    def test_latest_completed_week_skips_partial_week(self):
+        import scripts.cache_builder as cb
+        assert cb._latest_completed_week(_eval_games(), 2026) == 3
+
+    def test_latest_completed_week_none_when_nothing_complete(self):
+        import scripts.cache_builder as cb
+        games = pd.DataFrame([
+            {"season": 2026, "week": 1, "result": float("nan"), "game_type": "REG"},
+        ])
+        assert cb._latest_completed_week(games, 2026) is None
+        assert cb._latest_completed_week(pd.DataFrame(), 2026) is None
+
+    def test_latest_completed_week_ignores_non_reg_games(self):
+        import scripts.cache_builder as cb
+        assert cb._latest_completed_week(_eval_games(with_post=True), 2026) == 3
+
+    def _run(self, day, games):
+        import scripts.cache_builder as cb
+        from datetime import datetime, timezone
+        now = datetime(2026, 9, day, 9, 15, tzinfo=timezone.utc)
+        with patch("scripts.cache_builder.datetime") as mock_dt, \
+             patch.object(cb, "_run_subprocess_step") as step:
+            mock_dt.now.return_value = now
+            cb._run_weekly_eval_if_tuesday(games, 2026)
+        return step
+
+    def test_tuesday_runs_eval_for_latest_completed_week(self):
+        step = self._run(22, _eval_games())
+        step.assert_called_once()
+        cmd = step.call_args[0][0]
+        assert cmd[-5:] == ["--season", "2026", "--week", "3", "--firestore"]
+        assert cmd[1].endswith("weekly_model_eval.py")
+        assert step.call_args.kwargs["swallow_errors"] is True
+
+    def test_wednesday_does_not_run(self):
+        assert not self._run(23, _eval_games()).called
+
+    def test_tuesday_without_completed_week_does_not_run(self):
+        assert not self._run(22, pd.DataFrame()).called
+
+    def test_main_runs_eval_step_before_build_year(self):
+        import scripts.cache_builder as cb
+        order = []
+        games = _eval_games()
+        empty = pd.DataFrame()
+        with patch.object(cb, "_run_weekly_eval_if_tuesday",
+                          side_effect=lambda *a, **k: order.append("eval")), \
+             patch.object(cb, "_run_weekly_backfill_if_tuesday"), \
+             patch.object(cb, "build_year",
+                          side_effect=lambda *a, **k: order.append("build_year")), \
+             patch("services.db_service.signal_data_update"), \
+             patch.object(cb, "load_data", return_value=(empty, empty, games, empty,
+                                                          empty, empty, empty)), \
+             patch.object(cb, "get_available_years", return_value=[2026]), \
+             patch.object(cb, "_years_to_build", return_value=[2026]), \
+             patch.object(cb, "NNPredictionService", side_effect=Exception("skip ML load")), \
+             patch("sys.argv", ["cache_builder.py", "--skip-sync"]):
+            cb.main()
+        assert order == ["eval", "build_year"]
+
+
 class TestApplyPredictionsCarriesExplanation:
     def test_feature_table_branch_carries_explanation_through(self):
         """pred_lookup entries already include a full explanation dict

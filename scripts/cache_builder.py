@@ -496,6 +496,54 @@ def _sync_rawdata() -> None:
     )
 
 
+def _latest_completed_week(games, year: int):
+    """Highest regular-season week of `year` in which every game is final
+    (per week_is_complete), or None if no week is complete yet. Non-REG rows
+    (playoffs) are ignored when a game_type column exists."""
+    if games is None or games.empty or not {"season", "week", "result"} <= set(games.columns):
+        return None
+    yr = games[games["season"] == year]
+    if "game_type" in yr.columns:
+        yr = yr[yr["game_type"] == "REG"]
+    if yr.empty:
+        return None
+    completed = [int(w) for w in sorted(yr["week"].dropna().unique())
+                 if week_is_complete(yr, year, w)]
+    return max(completed) if completed else None
+
+
+def _run_weekly_eval_if_tuesday(games, current_year: int) -> None:
+    """Record the ensemble's accuracy for the latest completed week to the
+    nn_weekly_accuracy Firestore store (weekly_model_eval.py --firestore).
+
+    Runs on Tuesday only, for the same reason as the weekly backfill: it is
+    the first day every game of the prior week (including Monday Night
+    Football) is final. It is called early in main(), before the forward-
+    looking prediction regeneration, so the snapshot grades the model that
+    made the predictions rather than one refreshed afterward.
+
+    Wholly non-fatal: a failure, timeout or missing week only prints a
+    warning and never fails the daily job.
+    """
+    if datetime.now(timezone.utc).weekday() != 1:  # Monday=0, Tuesday=1
+        return
+    try:
+        week = _latest_completed_week(games, current_year)
+    except Exception as e:
+        print(f"[warn] weekly eval: could not determine latest completed week (non-fatal): {e}")
+        return
+    if week is None:
+        print("[cache_builder] Tuesday -- no completed week yet, skipping weekly eval.")
+        return
+    print(f"[cache_builder] Tuesday -- running weekly model eval for week {week}...")
+    _run_subprocess_step(
+        [sys.executable, str(SCRIPTS_DIR / "weekly_model_eval.py"),
+         "--season", str(current_year), "--week", str(week), "--firestore"],
+        "weekly eval", 900, swallow_errors=True,
+        timeout_note=" -- the daily build continues",
+    )
+
+
 def _run_weekly_backfill_if_tuesday(current_year: int = None) -> None:
     """Grade the prior week's predictions via the feature table once a
     week, on the first day every game in that week (including Monday Night
@@ -631,6 +679,8 @@ def main():
 
     years_to_build = [args.year] if args.year else _years_to_build(available_years, games)
     print(f"[cache_builder] Years to process: {years_to_build}")
+
+    _run_weekly_eval_if_tuesday(games, current_year)
 
     # Build ML ensemble prediction lookup once for all years
     print("[cache_builder] Loading ML models...")
