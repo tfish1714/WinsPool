@@ -514,12 +514,30 @@ def _active_season_latest_week() -> int:
     return int(get_latest_week_for_year(games, season))
 
 
+_LATEST_WEEK_TTL_SECONDS = 30
+# (monotonic timestamp, value) of the last SUCCESSFUL lookup, or None.
+_latest_week_cache = None
+
+
+def _reset_latest_week_cache() -> None:
+    global _latest_week_cache
+    _latest_week_cache = None
+
+
 def _safe_latest_week() -> int:
+    """Cached (30s) latest_week; failures return 0 and are never cached."""
+    global _latest_week_cache
+    now = time.monotonic()
+    cached = _latest_week_cache
+    if cached is not None and now - cached[0] < _LATEST_WEEK_TTL_SECONDS:
+        return cached[1]
     try:
-        return max(0, int(_active_season_latest_week()))
+        value = max(0, int(_active_season_latest_week()))
     except Exception:
         logger.exception("config: could not determine latest_week")
         return 0
+    _latest_week_cache = (now, value)
+    return value
 
 
 @router.get("/config/settings")

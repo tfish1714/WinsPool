@@ -61,17 +61,32 @@ def test_weekly_progress_loads(live_server, page, test_player_credentials, viewp
 # whatever week the local data set is currently on.
 # ---------------------------------------------------------------------------
 def _stub_latest_week(page, week):
+    state = {"closing": False}
+    page.on("close", lambda *_: state.update(closing=True))
+
     def handle(route):
-        # The page can close while a poll is in flight (teardown); a failed
-        # fetch/fulfill then is not a test failure.
         try:
             resp = route.fetch()
             body = resp.json()
             body["latest_week"] = week
             route.fulfill(response=resp, json=body)
         except PlaywrightError:
-            pass
+            # Only a page closing mid-poll (teardown) is benign. Anything else
+            # means the stub did not apply, which would let the negative
+            # assertions pass vacuously, so surface it.
+            if not state["closing"] and not page.is_closed():
+                raise
+
     page.route("**/api/config/settings", handle)
+
+
+def _wait_for_synced_week(page, week):
+    """Wait until the stubbed background sync has landed and the nav settled."""
+    page.wait_for_function(
+        "(w) => localStorage.getItem('nfl_wins_latest_week') === String(w)",
+        arg=week, timeout=10000,
+    )
+    page.wait_for_load_state("networkidle")
 
 
 @pytest.mark.parametrize("viewport", [
@@ -87,9 +102,11 @@ def test_playoff_race_link_hidden_before_week_10(live_server, page, test_player_
         # The desktop nav is rendered client-side by updateNav(); wait for it
         # so a count of 0 means "gated out", not "not rendered yet".
         page.wait_for_selector("#nav-primary-links a", timeout=10000)
+        _wait_for_synced_week(page, 9)
         assert page.locator("#nav-primary-links a[href='/playoff-race']").count() == 0
     else:
         page.wait_for_selector("#btb-more-tab", timeout=10000)
+        _wait_for_synced_week(page, 9)
         assert page.locator("#btb-playoff-tab").is_hidden()
         page.click("#btb-more-tab")
         page.wait_for_selector("#nav-drawer.open", timeout=5000)
@@ -119,6 +136,7 @@ def test_playoff_race_direct_url_reachable_when_link_hidden(live_server, page, t
     _stub_latest_week(page, 9)
     _login(page, live_server, test_player_credentials[1])
     page.wait_for_selector("#nav-primary-links a", timeout=10000)
+    _wait_for_synced_week(page, 9)
     assert page.locator("#nav-primary-links a[href='/playoff-race']").count() == 0
 
     # Gating is nav-only: the route itself must stay reachable. /playoff-race

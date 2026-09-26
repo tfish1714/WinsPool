@@ -28,6 +28,15 @@ def mock_env_vars(monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "test-jwt-secret-for-winspool-tests-only")
 
 
+@pytest.fixture(autouse=True)
+def reset_latest_week_cache():
+    """The /api/config/settings latest_week TTL cache is module-level state."""
+    from routes.api_routes import _reset_latest_week_cache
+    _reset_latest_week_cache()
+    yield
+    _reset_latest_week_cache()
+
+
 @pytest.fixture
 def auth_token(monkeypatch):
     """A valid JWT Bearer token for a regular player (role='user')."""
