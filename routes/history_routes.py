@@ -10,7 +10,7 @@ from services.utils import abbreviate_player_name as _first_name, filter_season,
 import services.analysis_service as analysis
 from services.cache_service import get_game_predictions
 from services.db_service import get_config_settings, is_draft_active_fail_closed
-from services.session_service import decode_token
+from services.session_service import decode_current_token
 import services.team_page_service as team_page_service
 
 router = APIRouter()
@@ -232,8 +232,10 @@ def _viewer(request: Request):
         token = auth.removeprefix("Bearer ")
     if not token:
         return None, False
+    payload = decode_current_token(token)
+    if payload is None:
+        return None, False
     try:
-        payload = decode_token(token)
         return int(payload.get("sub")), payload.get("role") == "admin"
     except Exception:
         return None, False

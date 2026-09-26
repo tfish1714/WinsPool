@@ -329,10 +329,17 @@ class TestMfaVerify:
         resp = client.post("/api/mfa/verify", json={"playerId": "", "code": ""})
         assert resp.status_code == 400
 
-    def test_mfa_verify_unknown_player_returns_404(self):
+    def test_mfa_verify_unknown_player_is_indistinguishable_from_expired_code(self):
+        """Renamed/rewritten from ..._unknown_player_returns_404: the contract changed
+        so player ids cannot be enumerated. An unknown player now gets exactly the
+        status and body a known player with an expired/absent code gets."""
         with patch("services.db_service.get_player_by_id", return_value=None):
-            resp = client.post("/api/mfa/verify", json={"playerId": "999", "code": self._CODE})
-        assert resp.status_code == 404
+            unknown = client.post("/api/mfa/verify", json={"playerId": "999", "code": self._CODE})
+        with patch("services.db_service.get_player_by_id", return_value=self._player(expired=True)):
+            expired = client.post("/api/mfa/verify", json={"playerId": "99", "code": self._CODE})
+        assert unknown.status_code == 401
+        assert unknown.json() == {"error": "MFA code expired or invalid."}
+        assert (unknown.status_code, unknown.content) == (expired.status_code, expired.content)
 
 
 # ── Issue #46: cookie-based auth fallback for require_auth ─────────────────
@@ -835,7 +842,7 @@ class TestMfaAttemptCap:
                                  json={"playerId": "999", "code": "1"}).status_code
                      for _ in range(5)]
             resp = client.post("/api/mfa/verify", json={"playerId": "999", "code": "1"})
-        assert codes == [404] * 5
+        assert codes == [401] * 5
         assert resp.status_code == 429
         assert int(resp.headers["Retry-After"]) >= 1
         with patch("routes.auth_routes.get_player_by_email", return_value=None):

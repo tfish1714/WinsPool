@@ -29,6 +29,21 @@ def mock_env_vars(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _permissive_session_player_lookup(monkeypatch):
+    """Session tokens are now checked against the player's stored token_version
+    (session_service._payload_is_current). Most tests mint tokens for synthetic
+    player ids that have no players row, so by default the lookup returns a
+    matching unbumped player. Revocation tests re-point
+    session_service._lookup_player at the real implementation
+    (session_service._load_player_from_db) or at their own stub."""
+    from services import session_service
+    monkeypatch.setattr(
+        session_service, "_lookup_player",
+        lambda pid: {"playerId": pid, "token_version": 0},
+    )
+
+
+@pytest.fixture(autouse=True)
 def reset_latest_week_cache():
     """The /api/config/settings latest_week TTL cache is module-level state."""
     def _reset():

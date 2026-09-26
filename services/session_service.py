@@ -35,12 +35,18 @@ def _get_secret() -> str:
     return secret
 
 
-def create_token(player_id: int, role: str) -> str:
-    """Create a signed JWT containing player_id, role, issued-at, and expiry (7 days)."""
+def create_token(player_id: int, role: str, token_version: int = 0) -> str:
+    """Create a signed JWT containing player_id, role, issued-at, expiry (7 days)
+    and `tv`, the player's token_version at issue time.
+
+    A password change bumps the stored token_version, which makes every token
+    minted with an older `tv` fail `token_is_current` (session revocation).
+    """
     now = int(time.time())
     payload = {
         "sub": str(player_id),
         "role": role,
+        "tv": int(token_version or 0),
         "iat": now,
         "exp": now + _TOKEN_EXPIRY_SECONDS,
     }
@@ -54,6 +60,62 @@ def decode_token(token: str) -> dict:
     jwt.InvalidTokenError for any other verification failure.
     """
     return jwt.decode(token, _get_secret(), algorithms=[JWT_ALGORITHM])
+
+
+def _as_version(value) -> int:
+    """Coerce a stored/claimed token version to int; missing, None or NaN (an
+    unset Firestore field arriving through pandas) count as 0."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def token_is_current(payload: dict, player: dict | None) -> bool:
+    """True iff the token's `tv` claim matches the player's stored token_version.
+
+    A token without `tv` is treated as 0 and a player without a stored version
+    as 0, so tokens issued before revocation existed keep working until that
+    player's password next changes. A missing player (deleted) is never current.
+    """
+    if player is None:
+        return False
+    return _as_version(payload.get("tv")) == _as_version(player.get("token_version"))
+
+
+def _load_player_from_db(player_id: int):
+    from services.db_service import get_player_by_id
+    return get_player_by_id(player_id)
+
+
+def _lookup_player(player_id: int):
+    """Indirection over the players lookup (tests stub this)."""
+    return _load_player_from_db(player_id)
+
+
+def _payload_is_current(payload: dict) -> bool:
+    """Look up the token's player and apply token_is_current. Fails closed:
+    a non-numeric `sub` or any lookup error means the token is not trusted."""
+    try:
+        player = _lookup_player(int(payload["sub"]))
+    except Exception:
+        logger.warning("Token version check failed; rejecting token", exc_info=True)
+        return False
+    return token_is_current(payload, player)
+
+
+def decode_current_token(token: str) -> dict | None:
+    """Decode a token and confirm it has not been revoked. Never raises;
+    returns None for any invalid, expired or revoked token. For the
+    cookie-only trust sites (page routes) that don't use the dependencies."""
+    try:
+        payload = decode_token(token)
+    except Exception:
+        return None
+    return payload if _payload_is_current(payload) else None
+
+
+_REVOKED_DETAIL = "Session is no longer valid. Please log in again."
 
 
 def _resolve_token(authorization: str | None, session_token: str | None) -> str:
@@ -132,6 +194,8 @@ def require_auth(
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid session token.")
+    if not _payload_is_current(payload):
+        raise HTTPException(status_code=401, detail=_REVOKED_DETAIL)
     _track_activity(payload)
     return payload
 
@@ -148,6 +212,8 @@ def require_admin(
         raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid session token.")
+    if not _payload_is_current(payload):
+        raise HTTPException(status_code=401, detail=_REVOKED_DETAIL)
     if payload.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin role required.")
     _track_activity(payload)
@@ -174,4 +240,4 @@ def get_is_admin(
         payload = decode_token(token)
     except Exception:
         return False
-    return payload.get("role") == "admin"
+    return payload.get("role") == "admin" and _payload_is_current(payload)

@@ -19,7 +19,7 @@ from services.db_service import (
     update_player_credentials, increment_failed_setup_attempts, update_player_profile,
 )
 from services.constants import PASSWORD_COMPLEXITY_RE
-from services.session_service import create_token, _TOKEN_EXPIRY_SECONDS, require_auth
+from services.session_service import create_token, _TOKEN_EXPIRY_SECONDS, require_auth, _as_version
 import services.email_service as email_service
 from services.rate_limit_service import get_limiter, client_ip
 
@@ -103,6 +103,18 @@ def _int_field(player: dict, field: str, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _token_version_after_write(player_id, previous_player: dict) -> int:
+    """Token version to embed in a token minted right after a password write
+    (which bumped the stored version). Re-reads the player so the new token
+    matches what the write actually stored; falls back to previous + 1 if the
+    row cannot be read back."""
+    from services.db_service import get_player_by_id
+    fresh = get_player_by_id(player_id)
+    if fresh:
+        return _as_version(fresh.get("token_version"))
+    return _as_version(previous_player.get("token_version")) + 1
 
 
 def _set_session_cookie(response: JSONResponse, token: str) -> JSONResponse:
@@ -196,7 +208,8 @@ async def set_password(request: Request, body: SetPasswordRequest):
         })
 
         role = _player_role(player)
-        token = create_token(int(player["playerId"]), role)
+        token = create_token(int(player["playerId"]), role,
+                             _token_version_after_write(str(player["playerId"]), player))
         resp = JSONResponse(content={
             "status": "success",
             "message": "Password setup securely! Redirecting...",
@@ -287,7 +300,8 @@ async def login(request: Request, body: LoginRequest):
         update_player_profile(str(player["playerId"]), reset_fields)
 
         role = _player_role(player)
-        token = create_token(int(player["playerId"]), role)
+        token = create_token(int(player["playerId"]), role,
+                             _as_version(player.get("token_version")))
         resp = JSONResponse(content={
             "status": "success",
             "playerId": str(player["playerId"]),
@@ -381,6 +395,7 @@ async def update_profile(body: UpdateProfileRequest, request: Request,
                 return JSONResponse(status_code=400, content={"error": "Email is already in use by another account."})
 
         updates = {}
+        password_changed = False
         if full_name:
             updates["fullName"] = full_name
         if nickname:
@@ -392,6 +407,7 @@ async def update_profile(body: UpdateProfileRequest, request: Request,
                 return JSONResponse(status_code=400, content={"error": "New password too weak."})
             updates["password_hash"] = get_password_hash(new_password)
             updates["must_change_password"] = False
+            password_changed = True
 
         updates["mfa_enabled"] = bool(mfa_enabled)
         # A verified password clears the counters, mirroring login's reset_fields.
@@ -399,7 +415,17 @@ async def update_profile(body: UpdateProfileRequest, request: Request,
         updates["lockout_until"] = None
 
         if updates:
-            update_player_profile(str(pid), updates)
+            # A password change bumps token_version (revoking every older
+            # session, including this request's own token).
+            update_player_profile(str(pid), updates, bump_token_version=password_changed)
+
+        if password_changed:
+            # The caller just proved their current password: keep them signed
+            # in by handing back a token (and cookie) at the new version.
+            token = create_token(int(pid), _player_role(player),
+                                 _token_version_after_write(str(pid), player))
+            resp = JSONResponse(content={"message": "Profile updated successfully!", "token": token})
+            return _set_session_cookie(resp, token)
 
         return JSONResponse(content={"message": "Profile updated successfully!"})
     except Exception as e:
@@ -424,7 +450,9 @@ async def verify_mfa(body: MfaVerifyRequest, request: Request):
         from services.db_service import get_player_by_id
         player = get_player_by_id(pid)
         if not player:
-            return JSONResponse(status_code=404, content={"error": "Player not found."})
+            # Same status and body as a wrong/expired code so player ids
+            # cannot be enumerated through this unauthenticated endpoint.
+            return JSONResponse(status_code=401, content={"error": "MFA code expired or invalid."})
         stored_hash = player.get("mfa_token")
         expiry = player.get("mfa_expiry", 0)
 
@@ -450,7 +478,7 @@ async def verify_mfa(body: MfaVerifyRequest, request: Request):
         update_player_profile(pid, {"mfa_token": None, "mfa_expiry": 0, "mfa_attempts": 0, "last_login": time.time()})
 
         role = _player_role(player)
-        token = create_token(int(pid), role)
+        token = create_token(int(pid), role, _as_version(player.get("token_version")))
         resp = JSONResponse(content={
             "status": "success",
             "playerId": str(pid),

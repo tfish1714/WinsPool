@@ -327,7 +327,7 @@ def test_require_admin_does_not_record_for_non_admin(activity):
     assert calls == []
 
 
-def test_non_numeric_subject_is_ignored_without_error(activity):
+def test_non_numeric_subject_is_rejected_without_error_or_activity(activity):
     svc, calls = activity
     import jwt as pyjwt
     token = pyjwt.encode(
@@ -335,7 +335,12 @@ def test_non_numeric_subject_is_ignored_without_error(activity):
         svc._get_secret(), algorithm=svc.JWT_ALGORITHM,
     )
 
-    payload = svc.require_auth(authorization=f"Bearer {token}", session_token=None)
+    # Contract change (session revocation): a token whose subject is not a
+    # player id cannot be checked against a token_version, so it is no longer
+    # trusted at all. Every legitimately minted token has a numeric sub. It
+    # must still fail cleanly (401), never crash, and never stamp activity.
+    with pytest.raises(HTTPException) as exc_info:
+        svc.require_auth(authorization=f"Bearer {token}", session_token=None)
 
-    assert payload["role"] == "user"
+    assert exc_info.value.status_code == 401
     assert calls == []

@@ -272,7 +272,7 @@ def update_player_credentials(player_id: str, password_hash: str):
         "password_hash": password_hash,
         "failed_setup_attempts": 0,
         "lockout_until": None
-    })
+    }, bump_token_version=True)
 
 def increment_failed_setup_attempts(player_id: str, new_count: int, lockout_until: float = None):
     """Write updated failed_setup_attempts count (and optional lockout_until timestamp) to the player document."""
@@ -486,11 +486,23 @@ def set_member_paid(season: int, player_id: int, paid: bool) -> bool:
     return True
 
 
-def update_player_profile(player_id: str, updates: dict):
-    """Updates non-credential player fields (nickname, email, MFA) with cache invalidation."""
+def update_player_profile(player_id: str, updates: dict, bump_token_version: bool = False):
+    """Updates player fields (nickname, email, MFA, ...) with cache invalidation.
+
+    bump_token_version=True is for every write that changes or clears the
+    password hash: it increments the player's `token_version` in the same
+    document update, which revokes all previously issued session tokens (see
+    session_service.token_is_current). In Firestore this is a server-side
+    Increment (atomic, immune to a stale cached read); locally it is +1 on
+    the frame value.
+    """
     db = get_db()
     if db:
-        db.collection("players").document(str(player_id)).update(updates)
+        payload = dict(updates)
+        if bump_token_version:
+            from google.cloud.firestore_v1 import Increment
+            payload["token_version"] = Increment(1)
+        db.collection("players").document(str(player_id)).update(payload)
     
     # Update local
     players_df = get_collection_df("players")
@@ -500,6 +512,11 @@ def update_player_profile(player_id: str, updates: dict):
         if mask.any():
             for k, v in updates.items():
                 players_df.loc[mask, k] = v
+            if bump_token_version:
+                if "token_version" not in players_df.columns:
+                    players_df["token_version"] = 0
+                cur = pd.to_numeric(players_df.loc[mask, "token_version"], errors="coerce").fillna(0)
+                players_df.loc[mask, "token_version"] = cur.astype(int) + 1
             _save_df_to_local("players", players_df)
 
     clear_data_cache(DOMAIN_STATIC)

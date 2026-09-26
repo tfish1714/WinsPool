@@ -281,7 +281,7 @@ async def admin_reset_password(body: TargetPlayerRequest, _: dict = Depends(requ
             "lockout_until": None,
             "mfa_secret": None,
             "mfa_enabled": False,
-        })
+        }, bump_token_version=True)  # revoke the target's existing sessions
         return JSONResponse(content={"message": "Password reset. Player will be prompted to set a new password on next login."})
     except Exception as e:
         logger.exception("Unhandled error in admin endpoint")

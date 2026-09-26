@@ -385,13 +385,24 @@
         const result = await resp.json();
 
         if (resp.ok) {
+          // A password change revokes older sessions; the server returns a
+          // fresh token (and cookie). The API layer sends this stored token
+          // as a Bearer header, so it must be replaced or every later call 401s.
+          if (result.token) localStorage.setItem('nfl_wins_token', result.token);
           alert("Profile updated successfully!");
           localStorage.setItem('nfl_wins_playerName', fullName);
           localStorage.setItem('nfl_wins_nickName', nickname);
           localStorage.setItem('nfl_wins_user_email', newEmail);
           window.location.reload();
+        } else if (resp.status === 401 && !result.error) {
+          // Session expired or revoked (not a wrong-current-password 401,
+          // which carries result.error): clear the stale token and return to
+          // the sign-in wall.
+          localStorage.removeItem('nfl_wins_token');
+          alert("Your session has expired. Please sign in again.");
+          window.location.href = '/wins-pool';
         } else {
-          alert("Error: " + (result.error || "Update failed"));
+          alert("Error: " + (result.error || result.detail || "Update failed"));
         }
       } catch (err) {
         alert("Network error. Please try again.");
