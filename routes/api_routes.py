@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Request
 from fastapi.responses import JSONResponse
 
-from services.data_service import load_data, get_latest_season_and_week
+from services.data_service import load_data, get_latest_season_and_week, get_season_projection_legacy_shape
 from services.response_helpers import error_response, server_error, not_found, unauthorized
 from services.draft_service import sanitize_state
 from services.live_standings_service import build_live_standings_payload
@@ -539,6 +539,37 @@ async def set_config(request: Request, _auth: dict = Depends(require_admin)):
         logger.exception("set_config error")
         return server_error()
 
+
+
+@router.get("/profile/portfolio")
+def get_profile_portfolio(_auth: dict = Depends(require_auth)):
+    """Caller's season outlook. Projections are withheld from non-admins while the draft is active."""
+    try:
+        from services.data_service import get_active_season
+        _, _, games, _, _, draft_results, rules = load_data()
+        season = int(get_active_season(games, draft_results, rules))
+        base = {"season": season, "available": False, "reason": None}
+        if get_config_settings().get("draft_active") and _auth.get("role") != "admin":
+            return JSONResponse(content={**base, "reason": "draft_in_progress"})
+        try:
+            player_id = int(_auth.get("sub"))
+        except (TypeError, ValueError):
+            return JSONResponse(content={**base, "reason": "no_teams"})
+        teams = []
+        if draft_results is not None and not draft_results.empty and "season" in draft_results.columns:
+            mine = draft_results[(draft_results["season"] == season)
+                                 & (draft_results["playerId"] == player_id)]
+            teams = [str(t) for t in mine["team"].dropna().tolist()]
+        if not teams:
+            return JSONResponse(content={**base, "reason": "no_teams"})
+        projections = get_season_projection_legacy_shape(season)
+        if not projections:
+            return JSONResponse(content={**base, "reason": "no_projections"})
+        result = analysis.compute_portfolio_projection(projections, teams)
+        return JSONResponse(content={**base, "available": True, **result})
+    except Exception:
+        logger.exception("Unhandled error in get_profile_portfolio")
+        return server_error()
 
 
 @router.get("/pool/status")

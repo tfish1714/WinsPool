@@ -944,3 +944,53 @@ def get_season_progress(season: int, week: int) -> Dict[str, Any]:
         "best_by_round": best_by_round_teams,
         "standings": wins_pool_standings.to_dict(orient="records")
     }
+
+
+def _normal_cdf(z: float) -> float:
+    import math
+    return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+
+
+def compute_portfolio_projection(team_projections: dict, player_teams: list,
+                                 playoff_wins_threshold: float = 9.5) -> dict:
+    """Summarise a player's 3-team portfolio from per-team win projections.
+
+    team_projections: {team: {"projected_wins": float, "std_dev": float}}.
+    Per-team playoff_prob = P(wins >= threshold) under Normal(mean, sd), sd floored
+    at 0.5.  Portfolio std_dev assumes team outcomes are independent (a
+    simplification: sqrt of the summed variances).  floor/ceiling are the
+    5th/95th percentiles (expected -/+ 1.645 std), clamped to [0, 17*n].
+    Teams with no projection are skipped.
+    """
+    import math
+    teams = []
+    for team in player_teams:
+        proj = team_projections.get(team)
+        if not proj or proj.get("projected_wins") is None:
+            continue
+        mean = float(proj["projected_wins"])
+        sd = max(float(proj.get("std_dev") or 0), 0.5)
+        prob = 1.0 - _normal_cdf((playoff_wins_threshold - mean) / sd)
+        teams.append({"team": team, "projected_wins": mean, "std_dev": sd,
+                      "playoff_prob": round(prob, 4)})
+    teams.sort(key=lambda t: t["projected_wins"], reverse=True)
+    n = len(teams)
+    if n == 0:
+        return {"teams": [], "expected_wins": 0.0, "std_dev": 0.0, "floor": 0.0,
+                "ceiling": 0.0, "playoff_prob_any": 0.0,
+                "expected_playoff_teams": 0.0, "team_count": 0}
+    expected = sum(t["projected_wins"] for t in teams)
+    std = math.sqrt(sum(t["std_dev"] ** 2 for t in teams))
+    none_prob = 1.0
+    for t in teams:
+        none_prob *= 1.0 - t["playoff_prob"]
+    return {
+        "teams": teams,
+        "expected_wins": round(expected, 2),
+        "std_dev": round(std, 2),
+        "floor": round(max(0.0, expected - 1.645 * std), 2),
+        "ceiling": round(min(17.0 * n, expected + 1.645 * std), 2),
+        "playoff_prob_any": round(1.0 - none_prob, 4),
+        "expected_playoff_teams": round(sum(t["playoff_prob"] for t in teams), 2),
+        "team_count": n,
+    }
