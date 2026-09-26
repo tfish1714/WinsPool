@@ -161,3 +161,23 @@ def test_live_standings_api_serves_a_completed_draft_with_no_games():
     body = res.json()
     assert [row["full_name"] for row in body["standings"]] == ["Ann Lee", "Bo Kim"]
     assert all(row["total_wins"] == 0 for row in body["standings"])
+
+
+@pytest.mark.parametrize("games", [
+    pd.DataFrame(columns=["season", "week", "result", "home_team", "away_team"]),
+    pd.DataFrame([
+        {"season": SEASON, "week": 1, "result": float("nan"), "home_team": "KC", "away_team": "BAL"},
+        {"season": SEASON, "week": 1, "result": float("nan"), "home_team": "DEN", "away_team": "SF"},
+    ]),
+    None,
+], ids=["zero_rows", "only_unplayed", "none"])
+def test_zero_played_games_yields_zero_records_without_error(games):
+    """Live-draft window: drafted season, no standings, no played games."""
+    out = calculate_wins_pool_standings(
+        pd.DataFrame(), _draft(), _players(), SEASON, games=games, team_records=None
+    )
+
+    assert not out.empty
+    assert list(out["TotalWins"]) == [0, 0]
+    for col in ("global_record1", "global_record2", "global_record3"):
+        assert set(out[col]) == {"0-0"}

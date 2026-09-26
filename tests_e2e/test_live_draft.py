@@ -50,6 +50,8 @@ from tests_e2e.helpers import (  # _record_dialogs is re-exported: other modules
 )
 from tests_e2e.test_standings import _login
 
+pytestmark = pytest.mark.slow
+
 SEASON = 3000
 POOL_SIZE = 10
 TEAMS_PER_PLAYER = 3

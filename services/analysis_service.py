@@ -600,6 +600,13 @@ def calculate_wins_pool_standings(standings, draft_results, players, season, gam
     Merges standings with draft_results and players to produce a DataFrame
     with one row per (player, team) pair and columns for wins, point
     differential, and global record.
+
+    Args:
+        team_records: Optional precomputed dict from compute_team_records().
+            An empty dict (a season with no played games) is used as is and
+            yields "0-0" for every team. When None, records are computed from
+            `games` if it is non-empty; with no games (None, zero rows, or only
+            unplayed rows) every team's global record is "0-0".
     """
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     if draft_results.empty or 'season' not in draft_results.columns:
