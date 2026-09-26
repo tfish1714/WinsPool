@@ -48,3 +48,62 @@ def test_magic_column_shown_from_min_week(monkeypatch):
     assert "race-card" in resp.text
     assert "data-magic-number" in resp.text
     assert "data-podium-magic-number" in resp.text
+
+
+def _wins_pool_frame():
+    """Two players tied on wins, every column templates/wins_pool.html reads."""
+    def row(pid, name, rank, tb1):
+        return {
+            "playerId": pid, "fullName": name, "TotalWins": 9, "Rank": rank,
+            "team1": "BAL", "team2": "KC", "team3": "SF",
+            "wins1": 3, "wins2": 3, "wins3": 3,
+            "ptDiff1": 10, "ptDiff2": -4, "ptDiff3": 7,
+            "Tiebreaker1_WorstTeamWins": tb1, "Tiebreaker2_2ndWorstTeamWins": 3,
+            "Tiebreaker3_BestTeamWins": 3, "Tiebreaker4_WorstTeamPtDiff": -4,
+            "Tiebreaker5_2ndWorstTeamPtDiff": 7, "Tiebreaker6_BestTeamPtDiff": 10,
+            "refreshTime": "now",
+        }
+    return pd.DataFrame([row(1, "Ann Lee", 1, 3), row(2, "Bo Kim", 2, 2)])
+
+
+def _render_wins_pool(monkeypatch):
+    import routes.standings_routes as sr
+    empty = pd.DataFrame()
+    games = pd.DataFrame([{"season": YEAR, "week": 5, "result": 1}])
+    monkeypatch.setattr(sr, "load_data", lambda *a, **k: (empty, empty, games, empty, empty, empty, empty))
+    monkeypatch.setattr(sr, "filter_season", lambda df, year: df)
+    monkeypatch.setattr(sr.analysis, "get_draft_progress", lambda *a, **k: (0, 0))
+    monkeypatch.setattr(sr.analysis, "calculate_wins_pool_standings", lambda *a, **k: _wins_pool_frame())
+    monkeypatch.setattr(sr.analysis, "get_enriched_schedule", lambda *a, **k: empty)
+    monkeypatch.setattr(sr.analysis, "player_winlossmatrix", lambda *a, **k: empty)
+    monkeypatch.setattr(sr, "get_latest_week_for_year", lambda games, year: 5)
+    monkeypatch.setattr(sr, "get_available_years", lambda *a, **k: [YEAR])
+    monkeypatch.setattr(sr, "get_active_season", lambda *a, **k: YEAR)
+    monkeypatch.setattr(sr.db, "get_weekly_recap", lambda *a, **k: None)
+    return client.get(f"/wins-pool/{YEAR}")
+
+
+def test_wins_pool_page_loads_tiebreaker_module_and_legend(monkeypatch):
+    resp = _render_wins_pool(monkeypatch)
+    assert resp.status_code == 200
+    assert "tiebreaker_explain.js" in resp.text
+    assert 'id="tb-tooltip"' in resp.text
+    assert "worst team wins" in resp.text.lower()
+    # Existing legend text is kept and the cascade sentence is added.
+    assert "TB1 = worst team wins" in resp.text
+    assert "ties are broken by TB1 through TB6 in order" in resp.text
+
+
+def test_wins_pool_page_keeps_dom_hooks_the_highlighter_reads(monkeypatch):
+    html = _render_wins_pool(monkeypatch).text
+    # Stacked cards are the highlighter's data source: name + tb1..tb6 per player.
+    assert html.count('class="standings-stacked-card"') == 2
+    assert html.count('class="standings-stacked-card__name"') == 2
+    for n in range(1, 7):
+        assert html.count(f'data-role="tb{n}"') >= 2
+
+
+def test_live_refresh_announces_patches_so_highlights_recompute():
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parent.parent / "static" / "js" / "standings_refresh.js").read_text(encoding="utf-8")
+    assert "standings:patched" in src
