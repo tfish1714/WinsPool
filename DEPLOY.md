@@ -82,6 +82,22 @@ docker run -p 8000:8080 -e USE_LOCAL_DATA=True winspool
 
 ---
 
+## Scaling and cost guardrails
+
+`deploy/deploy.ps1` pins `--max-instances=1` and `--concurrency=80` on the `winspool` web service.
+
+Live settings, verified read-only on 2026-09-25: `autoscaling.knative.dev/maxScale: '1'`, `containerConcurrency: 80`, `timeoutSeconds: 3600`, cpu `1000m` (1 vCPU), memory `512Mi`.
+
+**Why max-instances must stay 1.** The live draft room's WebSocket state (`ConnectionManager` / `connected_players`) and the auth rate limiter (`services/rate_limit_service.py`) live in process memory. A second instance would split a draft room in two and double every per-IP limit. It also bounds worst-case spend. Do not raise it until that state is moved out of process.
+
+**Re-verify:**
+
+```
+gcloud run services describe winspool --region us-east1 --project fishbone-wins-pool --format="yaml(spec.template.metadata.annotations,spec.template.spec.containerConcurrency,spec.template.spec.timeoutSeconds)"
+```
+
+The scheduled jobs (`winspool-sync-daily`, `winspool-live-scores`, `winspool-schedule-kickoffs`, `winspool-predict-daily`) are separate Cloud Run Jobs with their own task limits; these service flags do not apply to them.
+
 ## Scheduled Jobs (Cloud Scheduler + Cloud Tasks)
 
 Data sync, live scores, prediction regen, and kickoff-time scheduling run as
