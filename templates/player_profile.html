@@ -138,9 +138,7 @@
 
     {# ── Own page only: hidden until the script confirms this is the signed-in player's page ── #}
     <div id="own-page-only" hidden style="margin-top:2rem;">
-      <div id="pool-status-card" style="margin-bottom:2rem;">
-        {# Pool status is filled in by a later task #}
-      </div>
+      <div id="pool-status-card" class="card-glass" style="margin-bottom:2rem; padding: 1rem; display:none;"></div>
 
       <h2 style="margin-bottom:0.25rem;"><i data-lucide="user"></i> Account and Security</h2>
       <p style="color:var(--text-secondary); margin-bottom: 1.5rem;">Manage your account settings and security.</p>
@@ -294,6 +292,33 @@
     // server returns 403 when editing another player's profile.
     if (!isOwnPage) return;
     document.getElementById('own-page-only').hidden = false;
+
+    // Pool card: own page only. /api/pool/status returns only the caller's own paid flag.
+    (async () => { try {
+      const token = localStorage.getItem('nfl_wins_token');
+      const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+      const res = await fetch('/api/pool/status', { headers, credentials: 'same-origin' });
+      if (!res.ok) return;
+      const d = await res.json();
+      if (!d || !(d.entry_fee > 0)) return;
+      const money = n => '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+      const card = document.getElementById('pool-status-card');
+      const add = (parent, tag, cls, text) => {
+        const n = document.createElement(tag); if (cls) n.className = cls; n.textContent = text; parent.appendChild(n); return n;
+      };
+      card.textContent = '';
+      add(card, 'h2', '', 'Pool');
+      add(card, 'div', 'pool-status-pot', 'Prize pot: ' + money(d.total_pot));
+      add(card, 'div', 'pool-status-sub', 'Paid: ' + d.paid_count + ' of ' + d.total_count + ' (' + money(d.entry_fee) + ' entry)');
+      const list = add(card, 'ul', 'pool-status-split', '');
+      (d.payouts || []).forEach(p => add(list, 'li', '', (p.label || ('Place ' + p.place)) + ': ' + money(p.amount)));
+      if (d.my_paid !== null && d.my_paid !== undefined) {
+        add(card, 'div', 'pool-status-mine' + (d.my_paid ? ' is-paid' : ''), 'Your entry: ' + (d.my_paid ? 'Paid' : 'Not yet paid'));
+      }
+      card.style.display = 'block';
+    } catch (err) {
+      console.error('Failed to load pool status:', err);
+    } })();
 
     document.getElementById('profile-form').addEventListener('submit', async (e) => {
       e.preventDefault();

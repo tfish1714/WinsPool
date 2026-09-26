@@ -63,6 +63,16 @@ class TestPlayerPage:
         assert html.index('id="profile-form"') > idx
         assert html.index('id="pool-status-card"') > idx
 
+    def test_pool_card_container_is_inside_hidden_own_page_block_and_script_uses_pool_status(self):
+        html = _get("/player/2").text
+        own = html.index('id="own-page-only"')
+        card = html.index('id="pool-status-card"')
+        assert card > own
+        assert card < html.index('id="profile-form"')
+        # the card is only populated after the own-page gate un-hides the block
+        gate = html.index("if (!isOwnPage) return;")
+        assert html.index("/api/pool/status") > gate
+
     def test_page_keeps_profile_form_ids(self):
         html = _get("/player/1").text
         for i in ("profile-form", "full-name", "nickname", "email", "mfa-enabled",

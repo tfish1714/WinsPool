@@ -25,10 +25,9 @@
                     <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }} Season</option>
                     {% endfor %}
                 </select>
+                <div id="pool-fee-banner" class="pool-chip" data-year="{{ year }}" hidden></div>
             </div>
         </header>
-
-        <div id="pool-fee-banner" class="pool-fee-card" data-year="{{ year }}" hidden></div>
 
         {% if draft_pending %}
         <div class="card-glass" style="padding: 2.5rem 1.5rem; text-align: center;">

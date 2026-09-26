@@ -151,6 +151,26 @@ def test_standings_page_renders_for_a_completed_draft_with_no_games():
     assert "Ann Lee" in res.text and 'id="winsChart"' in res.text
 
 
+def test_standings_page_has_slim_pool_chip_in_header_and_no_large_banner_card():
+    with patch("routes.standings_routes.load_data",
+               return_value=_load_data_for_completed_draft_without_games()), \
+         patch("routes.standings_routes.get_active_season", return_value=SEASON), \
+         patch("routes.standings_routes.get_available_years", return_value=[SEASON]), \
+         patch("routes.standings_routes.get_latest_week_for_year", return_value=0), \
+         patch("routes.standings_routes.analysis.get_draft_progress", return_value=(6, 6)), \
+         patch("routes.standings_routes.analysis.get_enriched_schedule", return_value=pd.DataFrame()), \
+         patch("routes.standings_routes.analysis.player_winlossmatrix", return_value=pd.DataFrame()), \
+         patch("routes.standings_routes.db.get_weekly_recap", return_value=None):
+        html = client.get(f"/wins-pool/{SEASON}").text
+
+    assert 'class="pool-chip"' in html
+    assert "pool-fee-card" not in html
+    header = html[html.index('<header class="wp-top">'):html.index("</header>")]
+    assert 'id="pool-fee-banner"' in header and 'id="year-pick"' in header
+    start = html.index('id="pool-fee-banner"')
+    assert "hidden" in html[start:html.index(">", start)]  # hidden until a fee is confirmed
+
+
 def test_live_standings_api_serves_a_completed_draft_with_no_games():
     with patch("routes.api_routes.load_data",
                return_value=_load_data_for_completed_draft_without_games()), \

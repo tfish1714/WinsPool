@@ -4005,15 +4005,19 @@ table.wp-data-table tbody td:last-child {
 }
 .tb-tooltip[hidden] { display: none; }
 
-/* Pool fee / prize pot banner (wins pool page) */
-.pool-fee-card { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; padding: 14px 18px; margin-bottom: 24px; border: 1px solid var(--line-strong); border-radius: 12px; background: rgba(255, 255, 255, 0.03); }
-.pool-fee-card[hidden] { display: none; }
-.pool-fee-pot { font-size: 18px; font-weight: 700; }
-.pool-fee-sub { font-size: 13px; opacity: 0.75; }
-.pool-fee-split { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; }
-.pool-fee-mine { font-size: 13px; font-weight: 600; }
-.pool-fee-mine.is-paid { color: var(--pos); }
-@media (max-width: 480px) { .pool-fee-card { flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 14px; } }
+/* Pool chip (wins pool page header) */
+.pool-chip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; max-width: 100%; padding: 4px 12px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: 13px; background: rgba(255, 255, 255, 0.03); }
+.pool-chip[hidden] { display: none; }
+.pool-chip-sep { opacity: 0.4; }
+.pool-chip-mine { font-weight: 600; color: var(--warn); text-decoration: none; }
+.pool-chip-mine.is-paid { color: var(--pos); }
+a.pool-chip-mine:hover { text-decoration: underline; }
+/* Own-page pool card on /player/{id} */
+.pool-status-pot { font-size: 18px; font-weight: 700; }
+.pool-status-sub { font-size: 13px; opacity: 0.75; }
+.pool-status-split { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; }
+.pool-status-mine { font-size: 13px; font-weight: 600; color: var(--warn); }
+.pool-status-mine.is-paid { color: var(--pos); }
 
 /* Admin Pool tab */
 .pool-config-grid { display: flex; gap: 1rem; flex-wrap: wrap; }
