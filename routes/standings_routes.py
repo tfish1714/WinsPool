@@ -14,6 +14,7 @@ from services.constants import PLAYOFF_RACE_MIN_WEEK
 from services.response_helpers import server_error
 from services.utils import abbreviate_player_name as _first_name, filter_season
 import services.db_service as db
+from services.session_service import decode_token
 import services.analysis_service as analysis
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,15 @@ def _fmt_gametime(gt) -> str:
 
 @router.get("/profile")
 async def user_profile(request: Request):
-    return templates.TemplateResponse(request, "profile.html")
+    """Entry point kept for the nav link: land on the signed-in player's own page."""
+    token = request.cookies.get("session_token")
+    if token:
+        try:
+            sub = int(decode_token(token).get("sub"))
+            return RedirectResponse(f"/player/{sub}")
+        except Exception:
+            pass  # invalid/expired cookie: fall through to the client-side redirect
+    return templates.TemplateResponse(request, "profile_redirect.html")
 
 
 @router.get("/wins-pool")

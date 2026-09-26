@@ -586,69 +586,89 @@ def _remaining_games_with_probs(games, season: int):
     return out, n_stored
 
 
+def build_player_outlook(player_id: int, is_admin: bool) -> dict:
+    """Season outlook for one player (shared by the own and any-player endpoints).
+
+    Projections are withheld from non-admins while the draft is active. Never
+    includes pool paid status. An unknown player id yields reason "no_teams".
+    """
+    from services.data_service import get_active_season
+    standings, _, games, _, _, draft_results, rules = load_data()
+    season = int(get_active_season(games, draft_results, rules))
+    base = {"season": season, "available": False, "reason": None,
+            "top2_prob": None, "win_prob": None, "expected_rank": None, "pool_size": 0,
+            "odds_basis": None, "games_remaining": None}
+    if get_config_settings().get("draft_active") and not is_admin:
+        return {**base, "reason": "draft_in_progress"}
+    teams = []
+    if draft_results is not None and not draft_results.empty and "season" in draft_results.columns:
+        mine = draft_results[(draft_results["season"] == season)
+                             & (draft_results["playerId"] == player_id)]
+        teams = [str(t) for t in mine["team"].dropna().tolist()]
+    if not teams:
+        return {**base, "reason": "no_teams"}
+    projections = get_season_projection_legacy_shape(season)
+    if not projections:
+        return {**base, "reason": "no_projections"}
+    result = analysis.compute_portfolio_projection(projections, teams)
+    odds = {}
+    try:
+        season_dr = draft_results[draft_results["season"] == season]
+        pool = {int(pid): [str(t) for t in grp["team"].dropna().tolist()]
+                for pid, grp in season_dr.groupby("playerId")}
+        records = {}
+        if standings is not None and not standings.empty and "season" in standings.columns:
+            # A team with no standings row is treated as 0 games played.
+            for row in standings[standings["season"] == season].to_dict("records"):
+                records[str(row.get("team"))] = {
+                    k: (0 if pd.isna(row.get(k)) else row.get(k))
+                    for k in ("wins", "losses", "ties")}
+        remaining, n_stored = _remaining_games_with_probs(games, season)
+        if n_stored > 0:
+            # Wins only: ties are not counted as wins (pool ranks by wins; ties are tracked separately),
+            # so standings-derived base wins match the pool definition.
+            # games_remaining is the league-wide count of unplayed REG games, not just the pool's teams.
+            base_wins = {t: r.get("wins") for t, r in records.items()}
+            sim = analysis.simulate_pool_finish_odds_from_games(pool, base_wins, remaining)
+            basis, n_remaining = "per_game", len(remaining)
+        else:
+            sim = analysis.simulate_pool_finish_odds(pool, projections, records)
+            basis, n_remaining = "team_projection", None
+        mine = sim.get(player_id)
+        if mine:
+            odds = {"top2_prob": round(mine["top_n_prob"], 4),
+                    "win_prob": round(mine["win_prob"], 4),
+                    "expected_rank": round(mine["expected_rank"], 2),
+                    "pool_size": len(pool),
+                    "odds_basis": basis,
+                    "games_remaining": n_remaining}
+    except Exception:
+        logger.exception("pool finish odds failed; returning portfolio without them")
+    return {**base, "available": True, **result, **odds}
+
+
+
 @router.get("/profile/portfolio")
 def get_profile_portfolio(_auth: dict = Depends(require_auth)):
     """Caller's season outlook. Projections are withheld from non-admins while the draft is active."""
     try:
-        from services.data_service import get_active_season
-        standings, _, games, _, _, draft_results, rules = load_data()
-        season = int(get_active_season(games, draft_results, rules))
-        base = {"season": season, "available": False, "reason": None,
-                "top2_prob": None, "win_prob": None, "expected_rank": None, "pool_size": 0,
-                "odds_basis": None, "games_remaining": None}
-        if get_config_settings().get("draft_active") and _auth.get("role") != "admin":
-            return JSONResponse(content={**base, "reason": "draft_in_progress"})
         try:
             player_id = int(_auth.get("sub"))
         except (TypeError, ValueError):
-            return JSONResponse(content={**base, "reason": "no_teams"})
-        teams = []
-        if draft_results is not None and not draft_results.empty and "season" in draft_results.columns:
-            mine = draft_results[(draft_results["season"] == season)
-                                 & (draft_results["playerId"] == player_id)]
-            teams = [str(t) for t in mine["team"].dropna().tolist()]
-        if not teams:
-            return JSONResponse(content={**base, "reason": "no_teams"})
-        projections = get_season_projection_legacy_shape(season)
-        if not projections:
-            return JSONResponse(content={**base, "reason": "no_projections"})
-        result = analysis.compute_portfolio_projection(projections, teams)
-        odds = {}
-        try:
-            season_dr = draft_results[draft_results["season"] == season]
-            pool = {int(pid): [str(t) for t in grp["team"].dropna().tolist()]
-                    for pid, grp in season_dr.groupby("playerId")}
-            records = {}
-            if standings is not None and not standings.empty and "season" in standings.columns:
-                # A team with no standings row is treated as 0 games played.
-                for row in standings[standings["season"] == season].to_dict("records"):
-                    records[str(row.get("team"))] = {
-                        k: (0 if pd.isna(row.get(k)) else row.get(k))
-                        for k in ("wins", "losses", "ties")}
-            remaining, n_stored = _remaining_games_with_probs(games, season)
-            if n_stored > 0:
-                # Wins only: ties are not counted as wins (pool ranks by wins; ties are tracked separately),
-                # so standings-derived base wins match the pool definition.
-                # games_remaining is the league-wide count of unplayed REG games, not just the pool's teams.
-                base_wins = {t: r.get("wins") for t, r in records.items()}
-                sim = analysis.simulate_pool_finish_odds_from_games(pool, base_wins, remaining)
-                basis, n_remaining = "per_game", len(remaining)
-            else:
-                sim = analysis.simulate_pool_finish_odds(pool, projections, records)
-                basis, n_remaining = "team_projection", None
-            mine = sim.get(player_id)
-            if mine:
-                odds = {"top2_prob": round(mine["top_n_prob"], 4),
-                        "win_prob": round(mine["win_prob"], 4),
-                        "expected_rank": round(mine["expected_rank"], 2),
-                        "pool_size": len(pool),
-                        "odds_basis": basis,
-                        "games_remaining": n_remaining}
-        except Exception:
-            logger.exception("pool finish odds failed; returning portfolio without them")
-        return JSONResponse(content={**base, "available": True, **result, **odds})
+            player_id = -1  # unparseable subject: resolves to reason "no_teams"
+        return JSONResponse(content=build_player_outlook(player_id, _auth.get("role") == "admin"))
     except Exception:
         logger.exception("Unhandled error in get_profile_portfolio")
+        return server_error()
+
+
+@router.get("/players/{player_id}/portfolio")
+def get_player_portfolio(player_id: int, _auth: dict = Depends(require_auth)):
+    """Any player's season outlook, visible to every authenticated player (no paid data)."""
+    try:
+        return JSONResponse(content=build_player_outlook(player_id, _auth.get("role") == "admin"))
+    except Exception:
+        logger.exception("Unhandled error in get_player_portfolio")
         return server_error()
 
 

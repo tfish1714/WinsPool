@@ -191,10 +191,30 @@ async def headtohead_by_year(request: Request, year: int):
 # ─── Player Profile ───────────────────────────────────────────────────────────
 
 @router.get("/history/player/{player_id}")
-async def player_profile(request: Request, player_id: int):
+async def player_profile_legacy(player_id: int):
+    """Old bookmark URL; the canonical page is /player/{player_id}."""
+    return RedirectResponse(f"/player/{player_id}", status_code=301)
+
+
+@router.get("/player/{player_id}")
+async def player_page(request: Request, player_id: int):
     analytics = analysis.get_player_analytics_data(player_id)
     if analytics is None:
-        raise HTTPException(status_code=404, detail="Player not found")
+        # No draft history is not "not found": render a zeroed career for a known player.
+        _, _, _, players, _, _, _ = load_data()
+        row = players[players["playerId"] == player_id] if players is not None and not players.empty else pd.DataFrame()
+        if row.empty:
+            raise HTTPException(status_code=404, detail="Player not found")
+        p = row.iloc[0]
+        analytics = {
+            "player": {"playerId": player_id, "fullName": str(p.get("fullName", "")),
+                       "nickName": str(p.get("nickName", ""))},
+            "career": {"seasons": 0, "totalWins": 0, "avgWins": 0, "championships": 0,
+                       "bestFinish": None, "worstFinish": None},
+            "seasons": [],
+            "slotAverages": {},
+        }
     return templates.TemplateResponse(request, "player_profile.html", {
         "analytics": analytics,
+        "player_id": player_id,
     })

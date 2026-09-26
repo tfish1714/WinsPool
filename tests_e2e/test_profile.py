@@ -1,6 +1,7 @@
 """tests_e2e/test_profile.py — Profile view and edit, including the MFA toggle.
 
-templates/profile.html's #profile-form requires current-password to save any
+templates/player_profile.html's #profile-form (reached via /profile, which
+redirects to /player/{me}) requires current-password to save any
 change (routes/auth_routes.py's update_profile endpoint) and self-service
 toggles mfa_enabled via #mfa-enabled — no admin action needed for MFA.
 """
@@ -77,7 +78,7 @@ def test_profile_wrong_current_password_is_rejected(live_server, page, test_play
 
     # routes/auth_routes.py's update_profile returns 401 with
     # {"error": "Incorrect current password."} for a wrong current password,
-    # and templates/profile.html's failure branch alerts "Error: " + result.error.
+    # and templates/player_profile.html's failure branch alerts "Error: " + result.error.
     assert dialog_messages == ["Error: Incorrect current password."], (
         f"Expected the wrong-password error alert, got: {dialog_messages!r}"
     )

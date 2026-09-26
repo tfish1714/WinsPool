@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Profile - WinsPool</title>
+</head>
+<body>
+<p>Redirecting to your player page...</p>
+<script>
+    (function () {
+        var id = null;
+        try { id = localStorage.getItem('nfl_wins_my_player_id'); } catch (e) { id = null; }
+        if (id && id !== 'null' && /^\d+$/.test(id)) {
+            window.location.replace('/player/' + id);
+        } else {
+            window.location.replace('/wins-pool');
+        }
+    }());
+</script>
+</body>
+</html>
