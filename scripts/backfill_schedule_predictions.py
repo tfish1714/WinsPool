@@ -53,6 +53,7 @@ from services.nn_projection_engine import NNProjectionEngine, build_mc_predictio
 from services.cache_service import get_game_predictions, write_game_predictions, write_prediction_features
 from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 from services.feature_audit_service import compute_feature_audit
+from services.db_service import get_db
 from services.model_version import get_feature_version, build_ensemble_version_string
 
 
@@ -183,30 +184,14 @@ def _build_predictions_map(year: int, ft_lookup: dict,
 # ---------------------------------------------------------------------------
 
 def _init_firestore():
-    import firebase_admin
-    from firebase_admin import credentials
-    if not firebase_admin._apps:
-        creds_b64 = os.environ.get("FIREBASE_CREDENTIALS")
-        if creds_b64:
-            import base64, tempfile
-            decoded = base64.b64decode(creds_b64).decode("utf-8")
-            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-            tmp.write(decoded)
-            tmp.close()
-            cred = credentials.Certificate(tmp.name)
-            os.unlink(tmp.name)
-        else:
-            creds_path = pathlib.Path(__file__).parent.parent / "firebase_credentials.json"
-            if not creds_path.exists():
-                raise FileNotFoundError(
-                    "No Firebase credentials found. Set FIREBASE_CREDENTIALS env var "
-                    "or place firebase_credentials.json in the project root."
-                )
-            cred = credentials.Certificate(str(creds_path))
-        firebase_admin.initialize_app(cred)
-    import firebase_admin.firestore as fs
-    return fs.client()
-
+    os.environ["USE_LOCAL_DATA"] = "False"
+    db = get_db()
+    if db is None:
+        raise FileNotFoundError(
+            "No Firebase credentials found. Set FIREBASE_CREDENTIALS env var "
+            "or place firebase_credentials.json in the project root."
+        )
+    return db
 
 # ---------------------------------------------------------------------------
 # Main

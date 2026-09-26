@@ -37,6 +37,7 @@ from services.nn_feature_engine import (
     RAWDATA_DIR,
 )
 from services.utils import normalize_team_abbr
+from services.db_service import get_db
 from services.nn_projection_engine import NNProjectionEngine
 
 from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
@@ -89,30 +90,15 @@ def _load_schedule(rawdata_dir: pathlib.Path, season: int, prior_season: int) ->
 # ---------------------------------------------------------------------------
 
 def _init_firebase():
-    import firebase_admin
-    from firebase_admin import credentials, firestore
-    if firebase_admin._apps:
-        return firestore.client()
-
-    creds_b64 = os.environ.get("FIREBASE_CREDENTIALS")
-    if creds_b64:
-        import base64, tempfile
-        decoded = base64.b64decode(creds_b64).decode("utf-8")
-        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-        tmp.write(decoded)
-        tmp.close()
-        cred = credentials.Certificate(tmp.name)
-        os.unlink(tmp.name)
-    else:
-        creds_path = pathlib.Path(__file__).parent.parent / "firebase_credentials.json"
-        if not creds_path.exists():
-            print("ERROR: No Firebase credentials found. Use --dry-run to skip upload.")
-            sys.exit(1)
-        cred = credentials.Certificate(str(creds_path))
-
-    firebase_admin.initialize_app(cred)
-    return firestore.client()
-
+    """Return the shared Firestore client from services.db_service.get_db()."""
+    # get_db() returns None whenever USE_LOCAL_DATA is true (repo CLAUDE.md
+    # gotcha), so a Firestore-writing script must force it off first.
+    os.environ["USE_LOCAL_DATA"] = "False"
+    db = get_db()
+    if db is None:
+        print("ERROR: No Firebase credentials found. Use --dry-run to skip upload.")
+        sys.exit(1)
+    return db
 
 def _model_version_string() -> str:
     """Concrete ensemble versions, e.g. 'nn_v14+xgb_v8+lr_v6'.

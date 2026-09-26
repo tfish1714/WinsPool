@@ -242,68 +242,46 @@ def test_sync_nfl_data_explicit_range_spanning_active_signals_both_domains(monke
 
 
 class TestInitializeFirebase:
-    """initialize_firebase() has 4 branches: already-initialized shortcut,
-    FIREBASE_CREDENTIALS env var (how Cloud Run passes credentials), local
-    firebase_credentials.json fallback (dev machines), and sys.exit(1) when
-    neither is available. None of the existing tests exercise this function
-    directly -- every other test in this file monkeypatches it away entirely."""
+    """initialize_firebase() delegates credential handling (already-initialized
+    shortcut, FIREBASE_CREDENTIALS env var, local firebase_credentials.json) to
+    services.db_service.get_db() (#64) and only forces remote mode and exits
+    with status 1 when no client is available."""
 
     def test_already_initialized_returns_client_without_reinitializing(self, monkeypatch):
         import scripts.daily_nfl_sync as daily_nfl_sync
-        monkeypatch.setattr(daily_nfl_sync.firebase_admin, "_apps", {"[DEFAULT]": object()})
         sentinel_client = object()
-        with patch.object(daily_nfl_sync.firestore, "client", return_value=sentinel_client), \
-             patch.object(daily_nfl_sync.firebase_admin, "initialize_app") as mock_init:
-            result = daily_nfl_sync.initialize_firebase()
-
-        assert result is sentinel_client
-        mock_init.assert_not_called()
+        monkeypatch.setattr(daily_nfl_sync, "get_db", lambda: sentinel_client)
+        assert daily_nfl_sync.initialize_firebase() is sentinel_client
 
     def test_uses_env_var_credentials_when_present(self, monkeypatch):
-        import base64
         import scripts.daily_nfl_sync as daily_nfl_sync
-        monkeypatch.setattr(daily_nfl_sync.firebase_admin, "_apps", {})
-        monkeypatch.setenv("FIREBASE_CREDENTIALS", base64.b64encode(b'{"project_id": "test"}').decode())
+        monkeypatch.setenv("USE_LOCAL_DATA", "true")
+        import os
+        seen = {}
         sentinel_client = object()
 
-        with patch.object(daily_nfl_sync.credentials, "Certificate") as mock_cert, \
-             patch.object(daily_nfl_sync.firebase_admin, "initialize_app") as mock_init, \
-             patch.object(daily_nfl_sync.firestore, "client", return_value=sentinel_client):
-            result = daily_nfl_sync.initialize_firebase()
+        def fake_get_db():
+            seen["use_local"] = os.environ["USE_LOCAL_DATA"]
+            return sentinel_client
 
-        assert result is sentinel_client
-        mock_init.assert_called_once()
-        mock_cert.assert_called_once()
-        # The temp file Certificate() was pointed at must actually contain
-        # the decoded credentials JSON.
-        written_path = mock_cert.call_args[0][0]
-        with open(written_path) as f:
-            assert f.read() == '{"project_id": "test"}'
+        monkeypatch.setattr(daily_nfl_sync, "get_db", fake_get_db)
+        assert daily_nfl_sync.initialize_firebase() is sentinel_client
+        # get_db() returns None under USE_LOCAL_DATA=true, so it must be forced off first.
+        assert seen["use_local"].lower() == "false"
 
     def test_falls_back_to_local_file_when_no_env_var(self, monkeypatch):
         import scripts.daily_nfl_sync as daily_nfl_sync
-        monkeypatch.setattr(daily_nfl_sync.firebase_admin, "_apps", {})
         monkeypatch.delenv("FIREBASE_CREDENTIALS", raising=False)
         sentinel_client = object()
-
-        with patch("pathlib.Path.exists", return_value=True), \
-             patch.object(daily_nfl_sync.credentials, "Certificate") as mock_cert, \
-             patch.object(daily_nfl_sync.firebase_admin, "initialize_app") as mock_init, \
-             patch.object(daily_nfl_sync.firestore, "client", return_value=sentinel_client):
-            result = daily_nfl_sync.initialize_firebase()
-
-        assert result is sentinel_client
-        mock_init.assert_called_once()
-        mock_cert.assert_called_once()
-        assert mock_cert.call_args[0][0].endswith("firebase_credentials.json")
+        monkeypatch.setattr(daily_nfl_sync, "get_db", lambda: sentinel_client)
+        assert daily_nfl_sync.initialize_firebase() is sentinel_client
 
     def test_exits_when_no_env_var_and_no_local_file(self, monkeypatch):
         import scripts.daily_nfl_sync as daily_nfl_sync
-        monkeypatch.setattr(daily_nfl_sync.firebase_admin, "_apps", {})
         monkeypatch.delenv("FIREBASE_CREDENTIALS", raising=False)
+        monkeypatch.setattr(daily_nfl_sync, "get_db", lambda: None)
 
-        with patch("pathlib.Path.exists", return_value=False):
-            with pytest.raises(SystemExit) as exc_info:
-                daily_nfl_sync.initialize_firebase()
+        with pytest.raises(SystemExit) as exc_info:
+            daily_nfl_sync.initialize_firebase()
 
         assert exc_info.value.code == 1
