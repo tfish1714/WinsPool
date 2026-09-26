@@ -47,6 +47,19 @@ class TestPlayerPage:
         assert r.status_code == 200
         assert "Bob Jones" in r.text
 
+    def test_seasons_table_has_narrow_card_layout_without_scroll(self):
+        html = _get("/player/1").text
+        assert "@media (max-width: 640px)" in html
+        assert "seasons-table-wrap" in html
+        assert "#player-page .seasons-table-wrap { overflow-x: visible; }" in html
+        assert "overflow-x:auto" not in html and "overflow-x: auto" not in html
+
+    def test_pick_cells_link_to_team_pages(self):
+        import re
+        html = _get("/player/1").text
+        assert 'class="pick-cell"' in html
+        assert re.search(r'<a class="team-link" href="/team/[A-Za-z]+">', html)
+
     def test_unknown_player_404(self):
         assert _get("/player/999").status_code == 404
 

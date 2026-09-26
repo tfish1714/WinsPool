@@ -90,8 +90,8 @@
     </p>
 
     {# ── Year-by-year table ── #}
-    <div class="table-container">
-      <table class="stacked-table">
+    <div class="table-container seasons-table-wrap">
+      <table class="stacked-table seasons-table">
         <thead>
           <tr>
             <th>Year</th>
@@ -109,11 +109,11 @@
         <tbody>
           {% for s in analytics.seasons | sort(attribute='year', reverse=True) %}
           <tr>
-            <td style="font-weight:700;">{{ s.year }}</td>
-            <td>#{{ s.rank }}</td>
-            <td style="color:var(--primary-color); font-weight:700;">{{ s.totalWins }}</td>
+            <td class="season-year" style="font-weight:700;">{{ s.year }}</td>
+            <td class="season-rank">#{{ s.rank }}</td>
+            <td class="season-wins" style="color:var(--primary-color); font-weight:700;">{{ s.totalWins }}</td>
             {% for pick in s.picks %}
-            <td style="font-size:0.82rem; line-height:1.6;">
+            <td class="pick-cell" style="font-size:0.82rem; line-height:1.6;">
               <div class="pick-cell__head"><strong><a class="team-link" href="/team/{{ normalize_team_abbr(pick.team)|urlencode }}">{{ pick.team }}</a></strong><span style="color:var(--text-secondary);">Pick #{{ pick.pickNum }}</span></div>
               {{ pick.actualWins }}W
               {% if pick.vsProjected is not none %}
@@ -200,6 +200,36 @@
 
   </div>
 </main>
+
+<style>
+    /* No horizontal scroll on this page at any width: the seasons table wraps its text
+       instead of scrolling, and below 640px each season becomes a stacked card. */
+    #player-page, #player-page * { min-width: 0; }
+    #player-page { max-width: 100%; overflow-wrap: anywhere; }
+    #player-page .card-glass, #player-page .profile-charts > * { max-width: 100%; }
+    #player-page canvas { max-width: 100%; }
+    #player-page input:not([type=checkbox]), #player-page select, #player-page textarea { max-width: 100%; box-sizing: border-box; }
+    #player-page .seasons-table-wrap { overflow-x: visible; }
+    #player-page .seasons-table-wrap table { white-space: normal; table-layout: auto; }
+    @media (max-width: 640px) {
+      #player-page .seasons-table tbody tr {
+        display: flex; flex-wrap: wrap; align-items: baseline;
+        gap: 0 1rem; padding: 0.75rem 1rem; box-sizing: border-box; max-width: 100%;
+      }
+      #player-page .seasons-table td.season-year,
+      #player-page .seasons-table td.season-rank,
+      #player-page .seasons-table td.season-wins {
+        display: block; padding: 0 0 0.5rem; border-bottom: none; text-align: left; flex: 0 1 auto;
+      }
+      #player-page .seasons-table td.season-wins { margin-left: auto; }
+      #player-page .seasons-table td.pick-cell {
+        display: block; flex: 1 1 100%; min-width: 0; text-align: left;
+        padding: 0.5rem 0; border-top: 1px solid rgba(255,255,255,0.06); border-bottom: none;
+        overflow-wrap: anywhere;
+      }
+      #player-page .pick-cell__head { flex-wrap: wrap; }
+    }
+</style>
 
 <style>
     /* Toggle switch styles for the Account and Security form */
