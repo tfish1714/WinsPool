@@ -211,7 +211,7 @@ docs/                    # Architecture and model documentation (prediction_mode
 
 ### Standings player links
 
-On `/wins-pool/{year}` the player NAME is the only link in each of the three server-rendered variants (leader card, desktop row, stacked mobile card): `<a class="player-link" href="/player/{playerId}">`, with a 44px-min-height tap target (`.player-link` in `style.css`). Team logos/chips stay non-links. `standings_refresh.js` patches text in place and never rebuilds name markup, so the links survive the 30s poll. On the player page, only the team abbreviation text in each pick cell links to `/team/{abbr}` (`.team-link`). Contract tests: `tests/test_standings_player_links.py`.
+On `/wins-pool/{year}` the player NAME is the only link in each of the three server-rendered variants (leader card, desktop row, stacked mobile card): `<a class="player-link" href="/player/{playerId}">`, with a 44px-min-height tap target (`.player-link` in `style.css`). Team logos/chips stay non-links. `standings_refresh.js` patches text in place and never rebuilds name markup, so the links survive the 30s poll. On the player page, only the team abbreviation text in each pick cell links to `/team/{abbr}` (`.team-link`, a single-line 44px flex target that never overlaps the pick/wins lines); the abbreviation is normalized via the `normalize_team_abbr` Jinja global (legacy OAK/SD/STL/LAR/WSH/JAC resolve to a valid team page) and `|urlencode`d. `.player-link` gets a faint dotted underline under `@media (hover: none)` as a touch affordance. Contract tests: `tests/test_standings_player_links.py`.
 
 ### Newer API endpoints
 

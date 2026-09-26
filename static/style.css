@@ -299,7 +299,7 @@
     font-size: 26px;
     font-weight: 700;
     letter-spacing: -0.01em;
-    margin-bottom: 4px;
+    margin-bottom: 0; /* 44px player-link supplies the gap */
 }
 
 .wp-leader-sub {
@@ -436,7 +436,7 @@
 .wp-row-player .wp-row-meta {
     font-size: 12px;
     color: var(--ink-3);
-    margin-top: 3px;
+    margin-top: 0; /* the 44px player-link above already supplies the gap */
     font-family: 'JetBrains Mono', monospace;
 }
 
@@ -4078,10 +4078,26 @@ a.pool-chip-mine:hover { text-decoration: underline; }
     border-bottom-color: currentColor;
 }
 
+/* Single-line, non-overlapping 44px target: the head row is its own flex line,
+   so the link box never extends onto the "{n}W" / slot-avg lines below. */
+.pick-cell__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .team-link {
-    display: inline-block;
-    padding: 12px 6px;
-    margin: -12px -6px;
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding-right: 4px;
     color: inherit;
     text-decoration: underline dotted;
+}
+
+/* Touch devices have no hover, so give the player name a faint persistent cue. */
+@media (hover: none) {
+    .player-link {
+        border-bottom-color: color-mix(in srgb, currentColor 35%, transparent);
+    }
 }

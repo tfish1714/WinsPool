@@ -51,7 +51,8 @@ def test_player_name_links_in_every_variant():
     stacked = m[m.index('class="standings-stacked"'):]
     assert stacked.count('href="/player/1"') == 1
     assert stacked.count('href="/player/2"') == 1
-    # Exactly one link per player per rendering: 2 + 1 + 2 = ... 4 total for 2 players.
+    # Exactly one link per player per rendering: leader card 1, one desktop row 1,
+    # two stacked cards 2 = 4 total for 2 players.
     assert len(re.findall(r'href="/player/\d+"', m)) == 4
 
 
@@ -80,3 +81,39 @@ def test_player_page_pick_cells_link_only_the_team_abbreviation():
     html = _get("/player/1").text
     assert '<a class="team-link" href="/team/KC">KC</a>' in html
     assert not re.search(r'<td[^>]*>\s*<a\b', html)
+
+
+def test_player_page_team_link_normalizes_legacy_abbreviation():
+    import test_player_page as tpp
+    standings, a, games, players, b, draft, c = tpp._load()
+    draft = draft.assign(team="OAK")
+    data = (standings, a, games, players, b, draft, c)
+    with patch("routes.history_routes.load_data", return_value=data),          patch("services.analysis_service.load_data", return_value=data),          patch("services.analysis_service.get_season_projection_legacy_shape",
+               return_value={}):
+        html = client.get("/player/1", follow_redirects=False).text
+    assert 'href="/team/LV"' in html
+    assert 'href="/team/OAK"' not in html
+
+
+def test_legacy_abbreviations_all_resolve_to_valid_team_pages():
+    from services.constants import TEAM_ABBR_MAP
+    from services.team_page_service import TEAM_NAMES
+    from services.utils import normalize_team_abbr
+    for legacy in list(TEAM_ABBR_MAP) + ["OAK", "SD", "STL", "LAR", "WSH", "JAC"]:
+        assert normalize_team_abbr(legacy) in TEAM_NAMES
+
+
+def test_team_link_css_is_single_line_tap_target_without_negative_margin():
+    css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
+    m = re.search(r"\.team-link\s*\{([^}]*)\}", css)
+    assert m, "missing .team-link rule"
+    body = m.group(1)
+    assert "min-height: 44px" in body and "display: inline-flex" in body
+    assert "margin: -" not in body and "margin:-" not in body
+
+
+def test_player_link_has_touch_only_affordance():
+    css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
+    m = re.search(r"@media \(hover: none\)\s*\{[^@]*?\.player-link[^{]*\{([^}]*)\}", css)
+    assert m, "missing (hover: none) .player-link affordance"
+    assert "border-bottom" in m.group(1)

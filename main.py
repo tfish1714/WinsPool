@@ -17,6 +17,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import RedirectResponse, FileResponse
 
 from services.data_service import load_data, get_active_season, get_team_logo
+from services.utils import normalize_team_abbr
 from routes.standings_routes import router as standings_router, templates as standings_templates
 from routes.history_routes import router as history_router, templates as history_templates
 from routes.draft_routes import router as draft_router, templates as draft_templates
@@ -95,6 +96,7 @@ def _current_year():
 for t in [standings_templates, history_templates, draft_templates, admin_templates, mock_draft_templates]:
     register_static_assets(t.env)
     t.env.globals['get_team_logo'] = get_team_logo
+    t.env.globals['normalize_team_abbr'] = normalize_team_abbr
     t.env.globals['current_season_label'] = _current_season_label
     t.env.globals['current_year'] = _current_year()
 
