@@ -3,6 +3,7 @@ import logging
 import os
 import time
 
+import pandas as pd
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Path, Query, Request
@@ -583,10 +584,11 @@ def get_profile_portfolio(_auth: dict = Depends(require_auth)):
                     for pid, grp in season_dr.groupby("playerId")}
             records = {}
             if standings is not None and not standings.empty and "season" in standings.columns:
+                # A team with no standings row is treated as 0 games played.
                 for row in standings[standings["season"] == season].to_dict("records"):
-                    records[str(row.get("team"))] = {"wins": row.get("wins"),
-                                                     "losses": row.get("losses"),
-                                                     "ties": row.get("ties")}
+                    records[str(row.get("team"))] = {
+                        k: (0 if pd.isna(row.get(k)) else row.get(k))
+                        for k in ("wins", "losses", "ties")}
             sim = analysis.simulate_pool_finish_odds(pool, projections, records)
             mine = sim.get(player_id)
             if mine:

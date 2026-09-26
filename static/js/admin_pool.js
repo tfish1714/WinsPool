@@ -8,6 +8,7 @@
 const POOL_MAX_PAYOUTS = 10;
 let _poolReady = false;
 let _poolMembers = 0;
+let _poolLoadToken = 0;
 
 function _poolHeaders(json) {
     const headers = {};
@@ -114,16 +115,52 @@ function _poolRender(cfg) {
 }
 
 async function _poolLoad(season) {
+    // Token guards against a slow response for a previously selected season
+    // overwriting the form after the admin has switched seasons.
+    const token = ++_poolLoadToken;
     _poolStatus('Loading...');
     try {
         const res = await fetch('/api/admin/pool/config?season=' + encodeURIComponent(season),
             { headers: _poolHeaders(false), credentials: 'same-origin' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        _poolRender(await res.json());
+        const data = await res.json();
+        if (token !== _poolLoadToken) return;
+        _poolRender(data);
         _poolStatus('');
     } catch (e) {
+        if (token !== _poolLoadToken) return;
         _poolStatus('Could not load pool settings.', true);
     }
+}
+
+function _poolFirstUnusedPlace() {
+    const used = new Set();
+    document.querySelectorAll('#pool-payout-rows .pool-place').forEach(s => used.add(s.value));
+    for (let i = 1; i <= POOL_MAX_PAYOUTS; i++) {
+        if (!used.has(String(i))) return i;
+    }
+    return used.has('last') ? POOL_MAX_PAYOUTS : 'last';
+}
+
+function _poolDuplicatePlace(payouts) {
+    const seen = new Set();
+    for (const p of payouts) {
+        if (seen.has(p.place)) return p.place;
+        seen.add(p.place);
+    }
+    return null;
+}
+
+async function _poolErrorMessage(res) {
+    let detail = '';
+    try {
+        const body = await res.json();
+        const d = body && body.detail;
+        if (typeof d === 'string') detail = d;
+        else if (Array.isArray(d) && d.length) detail = d.map(x => x.msg || '').filter(Boolean).join('; ');
+        else if (body && typeof body.error === 'string') detail = body.error;
+    } catch (e) { /* no JSON body */ }
+    return 'Invalid settings' + (detail ? ': ' + detail : '. Check payouts and amounts.');
 }
 
 async function _poolSave() {
@@ -131,6 +168,13 @@ async function _poolSave() {
     const season = parseInt(sel.value, 10);
     if (isNaN(season)) { _poolStatus('Choose a season first.', true); return; }
     const { fee, payouts } = _poolCollect();
+    if (!payouts.length) { _poolStatus('Add at least one payout before saving.', true); return; }
+    const dup = _poolDuplicatePlace(payouts);
+    if (dup !== null) {
+        _poolStatus('Each place can only be used once (duplicate: ' +
+            (dup === 'last' ? 'Last place' : 'Place ' + dup) + ').', true);
+        return;
+    }
     const btn = _poolEl('pool-save-btn');
     btn.disabled = true;
     _poolStatus('Saving...');
@@ -143,10 +187,11 @@ async function _poolSave() {
         });
         if (!res.ok) {
             _poolStatus(res.status === 422 || res.status === 400
-                ? 'Invalid settings: check for duplicate places or negative amounts.'
+                ? await _poolErrorMessage(res)
                 : 'Save failed (HTTP ' + res.status + ').', true);
             return;
         }
+        if (sel.value !== String(season)) return; // admin switched seasons mid-save
         _poolRender(await res.json());
         _poolStatus('Saved.');
     } catch (e) {
@@ -188,7 +233,7 @@ document.addEventListener('DOMContentLoaded', () => {
     _poolEl('pool-add-payout').addEventListener('click', () => {
         const rows = document.querySelectorAll('#pool-payout-rows .pool-payout-row').length;
         if (rows >= POOL_MAX_PAYOUTS) { _poolStatus('At most ' + POOL_MAX_PAYOUTS + ' payouts.', true); return; }
-        _poolAddRow(Math.min(rows + 1, POOL_MAX_PAYOUTS), '');
+        _poolAddRow(_poolFirstUnusedPlace(), '');
         _poolUpdateSummary();
     });
     _poolEl('pool-save-btn').addEventListener('click', _poolSave);

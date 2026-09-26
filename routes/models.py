@@ -128,7 +128,7 @@ class PoolPayoutItem(BaseModel):
 class PoolConfigRequest(BaseModel):
     season: int = Field(ge=2000, le=2100)
     entryFee: float = Field(ge=0, le=1_000_000)
-    payouts: List[PoolPayoutItem] = Field(default_factory=list, max_length=10)
+    payouts: List[PoolPayoutItem] = Field(min_length=1, max_length=10)
 
     @model_validator(mode="after")
     def _no_duplicate_places(self):

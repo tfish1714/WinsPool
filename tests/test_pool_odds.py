@@ -69,6 +69,33 @@ class TestSimulatePoolFinishOdds:
         r = simulate_pool_finish_odds({1: ["A"], 2: ["B"]}, proj, rec, top_n=1, n_sims=2000)
         assert r[1]["win_prob"] > 0.0
 
+    def test_mid_season_projection_scaled_by_remaining_games(self):
+        # A is 6-3 with 8 left and projected 10 wins: expected final is
+        # 6 + 8/17 * 10 = 10.7 (not 10, and not 6 + 10 = 16 capped at 14).
+        # B is a completed 10-7 season, so A's win odds pin down A's mean:
+        # ~0.92 when scaled, ~0.5 if the projection were used unscaled,
+        # ~1.0 if it were added on top of current wins.
+        rec = {"A": {"wins": 6, "losses": 3, "ties": 0},
+               "B": {"wins": 10, "losses": 7, "ties": 0}}
+        proj = {"A": {"projected_wins": 10.0, "std_dev": 0.0},
+                "B": {"projected_wins": 10.0, "std_dev": 0.0}}
+        r = simulate_pool_finish_odds({1: ["A"], 2: ["B"]}, proj, rec, top_n=1, n_sims=20000)
+        assert 0.85 < r[1]["win_prob"] < 0.99
+        # never exceeds wins + remaining: A cannot pass a completed 14-win team
+        rec["B"] = {"wins": 14, "losses": 3, "ties": 0}
+        r = simulate_pool_finish_odds({1: ["A"], 2: ["B"]}, proj, rec, top_n=1, n_sims=20000)
+        assert r[1]["win_prob"] < 0.001
+
+    def test_sd_floor_when_std_dev_zero_and_games_remain(self):
+        # A is 15-1 with one game left, std_dev 0: unfloored, A would end
+        # at exactly 15 + 1/17 * 1 > 15 and beat a completed 15-win B every time.
+        rec = {"A": {"wins": 15, "losses": 1, "ties": 0},
+               "B": {"wins": 15, "losses": 2, "ties": 0}}
+        proj = {"A": {"projected_wins": 1.0, "std_dev": 0.0},
+                "B": {"projected_wins": 15.0, "std_dev": 0.0}}
+        r = simulate_pool_finish_odds({1: ["A"], 2: ["B"]}, proj, rec, top_n=1, n_sims=20000)
+        assert 0.3 < r[1]["win_prob"] < 0.99
+
 
 @pytest.fixture
 def auth_player():
@@ -119,6 +146,16 @@ class TestPortfolioRouteOdds:
                             "losses": 0, "ties": 0} for t in PROJ])
         b = _get(_dr(), PROJ, {"draft_active": False}, standings=st).json()
         assert b["top2_prob"] == 1.0 and b["win_prob"] == 1.0
+
+    def test_nan_standings_row_treated_as_zero(self, auth_player):
+        st = pd.DataFrame([{"season": 2026, "team": "KC", "wins": float("nan"),
+                            "losses": float("nan"), "ties": float("nan")}])
+        b = _get(_dr(), PROJ, {"draft_active": False}, standings=st).json()
+        assert b["available"] is True
+        assert b["top2_prob"] is not None and 0 <= b["top2_prob"] <= 1
+        # player 3 (24.5 projected) sits between players 4 (27.5) and 5 (25.5 -> lower)
+        # rather than being ranked last as a NaN total would be
+        assert 1.5 < b["expected_rank"] < 2.6
 
     @pytest.mark.parametrize("dr,proj,cfg,reason", [
         (_dr(), PROJ, {"draft_active": True}, "draft_in_progress"),

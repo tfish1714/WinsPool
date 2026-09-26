@@ -86,6 +86,17 @@ class TestAdminPoolConfig:
         assert r.status_code in (400, 422)
         m.assert_not_called()
 
+    @pytest.mark.parametrize("payload", [
+        {"season": 2026, "entryFee": 10, "payouts": []},
+        {"season": 2026, "entryFee": 10},
+    ])
+    def test_post_rejects_empty_or_missing_payouts(self, admin_token, store, payload):
+        with patch("services.pool_service.set_config_settings") as m:
+            r = TestClient(app).post("/api/admin/pool/config", headers=_h(admin_token), json=payload)
+        assert r.status_code in (400, 422)
+        assert "payout" in r.text.lower()
+        m.assert_not_called()
+
     def test_non_admin_forbidden(self, store):
         tok = create_token(player_id=2, role="player")
         h = {"Authorization": f"Bearer {tok}"}

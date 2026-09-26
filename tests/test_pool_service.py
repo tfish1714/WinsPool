@@ -59,7 +59,7 @@ class TestGetPoolConfig:
 class TestSetPoolConfig:
     def test_merges_seasons(self):
         existing = _cfg(2025, fee=10)
-        with patch("services.pool_service.get_config_settings", return_value=existing),              patch("services.pool_service.set_config_settings") as m:
+        with patch("services.pool_service.get_config_settings", return_value=existing),                 patch("services.pool_service.set_config_settings") as m:
             saved = set_pool_config(2026, 150, [{"place": 1, "amount": 1000}])
         assert saved == {"entry_fee": 150.0, "payouts": [{"place": 1, "amount": 1000.0}]}
         m.assert_called_once()
