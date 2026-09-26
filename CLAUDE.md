@@ -185,7 +185,7 @@ services/
   chat_service.py        # Draft room chat message persistence
 templates/               # Jinja2 HTML (server-rendered)
 static/
-  style.css              # Bump ?v=N on the <link> in base.html whenever changing CSS to bust browser cache
+  style.css              # Cache-busted automatically: base.html links it via static_url('style.css') (services/static_assets.py), which appends a ?v=<content hash>; no manual version bump needed
   js/
     main.js              # Page init, nav rendering (updateNav), event handling; uses stale-while-revalidate via localStorage
     ui_renderer.js       # Dynamic DOM rendering
@@ -208,8 +208,9 @@ docs/                    # Architecture and model documentation (prediction_mode
 ### Newer API endpoints
 
 All require auth (`require_auth`) unless noted.
-- `GET /api/pool/status[?season=]` — pool fee / prize pot summary from `services/pool_service.py::build_pool_status`: `entry_fee`, `total_count`, `paid_count`, `total_pot`, `collected`, `payouts` (place/pct/amount), and only the *caller's own* `my_paid` — no other player's paid flag is returned. Season defaults to the active season. Fee and payout split live in the `config/settings` doc (`pool_entry_fee`, `pool_payouts`); admins set them with `POST /api/admin/pool/config` (`entryFee`, `payouts[]` of `{place, pct}`, total pct <= 100).
-- `GET /api/profile/portfolio` — the caller's 3-team season outlook via `analysis.compute_portfolio_projection`. Response is `{season, available, reason, ...}`; `available: false` with `reason` of `draft_in_progress` (non-admins while `draft_active` is set — same projection gating as the draft room), `no_teams`, or `no_projections`. Math is documented in `docs/prediction_model.md` ("Player Portfolio Projection").
+- `GET /api/pool/status[?season=]` — pool fee / prize pot summary from `services/pool_service.py::build_pool_status`: `entry_fee`, `total_count`, `paid_count`, `total_pot`, `collected`, `payouts` (`place`/`label`/`amount`, in dollars), `payout_total`, `pot_balance` (`total_pot - payout_total`), and only the *caller's own* `my_paid` — no other player's paid flag is returned. Season defaults to the active season. Config is per season in the `config/settings` doc under `pool_config` (`{"<season>": {entry_fee, payouts: [{place, amount}]}}`); `place` is a positive int or `"last"` (last-place money back). Missing fields fall back to defaults: entry fee 200, payouts 1st 1400 / 2nd 600. Amounts are dollars (not percentages) and are the source of truth.
+- `GET /api/admin/pool/config?season=` (admin) — that season's `entry_fee`, `payouts`, `member_count`, `total_pot`, `payout_total`, `pot_balance`, and `is_default` (true when nothing has been saved for the season). `POST /api/admin/pool/config` (admin) takes `{season, entryFee, payouts[]}` of `{place, amount}` (1 to 10 payouts, no duplicate places, non-negative amounts; an empty payouts list is rejected) and merges only that season into `pool_config`. Edited in the admin panel's Pool tab (`static/js/admin_pool.js`). `pool_config` is stripped from the public settings endpoint.
+- `GET /api/profile/portfolio` — the caller's 3-team season outlook via `analysis.compute_portfolio_projection`. Response is `{season, available, reason, ...}`; `available: false` with `reason` of `draft_in_progress` (non-admins while `draft_active` is set — same projection gating as the draft room), `no_teams`, or `no_projections`. When available it also carries pool-finish odds from `analysis.simulate_pool_finish_odds` (a Monte Carlo over every player's drafted teams, using current standings records): `top2_prob` (probability of finishing in the top 2), `win_prob`, `expected_rank`, and `pool_size`; these are `null`/`0` when unavailable or if the simulation fails (the rest of the portfolio is still returned). Math is documented in `docs/prediction_model.md` ("Player Portfolio Projection").
 - `GET /api/predictions/accuracy` takes an optional `?season=` filter and always returns `available_seasons`; the admin ML Accuracy tab has a season dropdown driven by it (see `docs/prediction_model.md`).
 
 ### Data Flow & Caching

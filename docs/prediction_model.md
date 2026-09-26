@@ -553,6 +553,15 @@ re-deriving the math by hand each time:
 - **`playoff_prob_any`**: `1 - prod(1 - p_i)` (again assuming independence); `expected_playoff_teams` is `sum(p_i)`.
 - Teams without a projection are skipped. Non-admins get `available: false, reason: "draft_in_progress"` while the draft is active, matching the draft-room projection gating.
 
+### Pool finish odds (`simulate_pool_finish_odds`)
+
+The same endpoint also returns `top2_prob`, `win_prob`, `expected_rank`, and `pool_size`, from `analysis.simulate_pool_finish_odds()`, a Monte Carlo (default 10,000 trials, fixed seed) over the whole pool, not just the caller:
+
+- **Per-team draw**: each team's final wins are drawn from an independent `Normal(mean, sd)`, clipped to `[wins, wins + remaining]`. Teams are treated as **independent** (an approximation: no division/schedule correlation).
+- **Remaining-games scaling**: with `remaining = 17 - games played` (from the standings record), `mean = wins + (remaining / 17) * projected_wins` and `sd = std_dev * sqrt(remaining / 17)`, floored at 0.5 while games remain. A team with no standings row is treated as 0 games played (full-season projection); a completed season is deterministic.
+- **Player totals and ranking**: a player's total is the sum of their teams' draws. Each trial ranks players by descending total, with ties broken randomly.
+- **Outputs**: `top2_prob` = share of trials with rank <= 2 (the payout depth default; forced to 1.0 when the pool has 2 or fewer players), `win_prob` = share with rank 1, `expected_rank` = mean rank, `pool_size` = number of players with drafted teams. The per-team playoff proxy above is unchanged.
+
 ## Accuracy Endpoint Season Filter
 
 `GET /api/predictions/accuracy` accepts an optional `?season=<year>`. When given, only that season is computed and returned in `seasons`/`overall`; without it, all candidate seasons are included (unchanged). The response always includes `available_seasons` (every candidate season, regardless of the filter) so the admin ML Accuracy tab (`static/js/admin_accuracy.js`) can populate its season dropdown (`#accuracy-season-filter`) from an unfiltered list. The tab now shows the overall banner whenever an `overall` object is returned, rather than only when `overall.total > 0`.
