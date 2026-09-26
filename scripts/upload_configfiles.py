@@ -28,7 +28,13 @@ def _init_firebase():
     # get_db() returns None whenever USE_LOCAL_DATA is true (repo CLAUDE.md
     # gotcha), so a Firestore-writing script must force it off first.
     os.environ["USE_LOCAL_DATA"] = "False"
-    db = get_db()
+    # With no credentials, get_db() does not return None: _init_firebase()
+    # returns None and firestore.client() then raises ValueError (no default
+    # app). Treat that as "no client" so the failure path below actually runs.
+    try:
+        db = get_db()
+    except ValueError:
+        db = None
     if db is None:
         log.error("No FIREBASE_CREDENTIALS env var and no firebase_credentials.json found.")
         sys.exit(1)

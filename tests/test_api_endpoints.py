@@ -330,7 +330,7 @@ class TestPredictionExplainGrading:
         normalizing team names, not normalize every row of every season."""
         import pandas as pd
         from unittest.mock import patch
-        import services.nn_feature_engine as nfe
+        import services.utils as su
 
         target = self._mock_games_df().iloc[0].to_dict()
         others = [
@@ -340,7 +340,7 @@ class TestPredictionExplainGrading:
         ]
         games = pd.DataFrame([target, *others])
         seen = []
-        real = nfe._normalize_team
+        real = su.normalize_team_abbr
 
         def spy(team):
             seen.append(team)
@@ -348,10 +348,11 @@ class TestPredictionExplainGrading:
 
         pred = {"pred_winner": "KC", "pred_su_conf": 60, "pred_ats_pick": "KC",
                 "model_spread": 5.0, "explanation": {"vegas_line": -2.5}}
-        with patch.object(nfe, "_normalize_team", spy):
+        with patch.object(su, "normalize_team_abbr", spy):
             body = self._explain(auth_token, pred, games)
 
         assert body["actual_winner"] == "KC"
+        assert seen, "spy never fired; the test would pass vacuously"
         irrelevant = {"OLD1", "OLD2", "WK2A", "WK2B", "NEW1", "NEW2"}
         assert not irrelevant & set(seen), f"normalized rows outside season/week: {irrelevant & set(seen)}"
 

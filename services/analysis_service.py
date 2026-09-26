@@ -781,7 +781,7 @@ def get_player_analytics(
 
 
 # ---------------------------------------------------------------------------
-# Season progress computation (moved from data_service.py)
+# Player analytics
 # ---------------------------------------------------------------------------
 
 def get_player_analytics_data(player_id: int) -> Optional[Dict[str, Any]]:
@@ -818,6 +818,10 @@ def process_games_data(games: pd.DataFrame) -> pd.DataFrame:
     games.rename(columns={'winner': 'team'}, inplace=True)
     return games
 
+
+# ---------------------------------------------------------------------------
+# Season progress computation (moved from data_service.py)
+# ---------------------------------------------------------------------------
 
 def get_season_progress(season: int, week: int) -> Dict[str, Any]:
     """Compute player and team wins for a season up to a given week.

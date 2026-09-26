@@ -185,7 +185,13 @@ def _build_predictions_map(year: int, ft_lookup: dict,
 
 def _init_firestore():
     os.environ["USE_LOCAL_DATA"] = "False"
-    db = get_db()
+    # With no credentials, get_db() does not return None: _init_firebase()
+    # returns None and firestore.client() then raises ValueError (no default
+    # app). Treat that as "no client" so the failure path below actually runs.
+    try:
+        db = get_db()
+    except ValueError:
+        db = None
     if db is None:
         raise FileNotFoundError(
             "No Firebase credentials found. Set FIREBASE_CREDENTIALS env var "

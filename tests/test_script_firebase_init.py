@@ -2,7 +2,7 @@
 import importlib
 import os
 import pathlib
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -42,3 +42,19 @@ def test_init_fails_loudly_without_credentials(monkeypatch, module_name, func, e
     monkeypatch.setattr(mod, "get_db", lambda: None)
     with pytest.raises(exc):
         getattr(mod, func)()
+
+
+@pytest.mark.parametrize("module_name,func,exc", CASES)
+def test_init_fails_loudly_on_real_no_credentials_path(monkeypatch, module_name, func, exc):
+    """Drive the real get_db(): with no credentials it raises ValueError from
+    firestore.client(), which the scripts must translate into their failure mode."""
+    import firebase_admin
+
+    mod = importlib.import_module(module_name)
+    monkeypatch.setattr(firebase_admin, "_apps", {})
+    monkeypatch.delenv("FIREBASE_CREDENTIALS", raising=False)
+    with patch("pathlib.Path.exists", return_value=False):
+        with pytest.raises(exc) as info:
+            getattr(mod, func)()
+    if exc is SystemExit:
+        assert info.value.code == 1

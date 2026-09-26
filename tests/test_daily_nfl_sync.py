@@ -251,7 +251,10 @@ class TestInitializeFirebase:
         import scripts.daily_nfl_sync as daily_nfl_sync
         sentinel_client = object()
         monkeypatch.setattr(daily_nfl_sync, "get_db", lambda: sentinel_client)
-        assert daily_nfl_sync.initialize_firebase() is sentinel_client
+        # get_db() reuses an already-initialized app; the script must not
+        # wrap or replace the client it gets back.
+        result = daily_nfl_sync.initialize_firebase()
+        assert result is sentinel_client
 
     def test_uses_env_var_credentials_when_present(self, monkeypatch):
         """Credential decoding now lives in db_service; see tests/test_db_service_init_firebase.py."""
@@ -275,15 +278,28 @@ class TestInitializeFirebase:
         import scripts.daily_nfl_sync as daily_nfl_sync
         monkeypatch.delenv("FIREBASE_CREDENTIALS", raising=False)
         sentinel_client = object()
-        monkeypatch.setattr(daily_nfl_sync, "get_db", lambda: sentinel_client)
+        calls = []
+
+        def fake_get_db():
+            calls.append(1)
+            return sentinel_client
+
+        monkeypatch.setattr(daily_nfl_sync, "get_db", fake_get_db)
+        # Without the env var the script asks get_db() exactly once and passes
+        # through whatever client it returns; the file fallback itself is covered
+        # in test_db_service_init_firebase.py.
         assert daily_nfl_sync.initialize_firebase() is sentinel_client
+        assert calls == [1]
 
     def test_exits_when_no_env_var_and_no_local_file(self, monkeypatch):
         import scripts.daily_nfl_sync as daily_nfl_sync
+        import firebase_admin
+        from unittest.mock import patch
+        monkeypatch.setattr(firebase_admin, "_apps", {})
         monkeypatch.delenv("FIREBASE_CREDENTIALS", raising=False)
-        monkeypatch.setattr(daily_nfl_sync, "get_db", lambda: None)
 
-        with pytest.raises(SystemExit) as exc_info:
+        # Real get_db() path: firestore.client() raises ValueError with no default app.
+        with patch("pathlib.Path.exists", return_value=False), pytest.raises(SystemExit) as exc_info:
             daily_nfl_sync.initialize_firebase()
 
         assert exc_info.value.code == 1
