@@ -9,6 +9,78 @@ _VAPID_PUBLIC  = os.environ.get("VAPID_PUBLIC_KEY", "")
 _VAPID_PRIVATE = os.environ.get("VAPID_PRIVATE_KEY", "")
 _VAPID_EMAIL   = os.environ.get("VAPID_CLAIMS_EMAIL", "mailto:admin@example.com")
 
+# HTTP statuses a push service returns when a subscription is permanently
+# invalid (unsubscribed, expired, app uninstalled). Retrying is pointless and
+# keeping the token just adds a failure to every future broadcast.
+_GONE_STATUS_CODES = (404, 410)
+
+
+def is_configured() -> bool:
+    return bool(_VAPID_PUBLIC and _VAPID_PRIVATE)
+
+
+def _is_gone_error(exc: Exception) -> bool:
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return status in _GONE_STATUS_CODES
+
+
+def _prune_subscription(player_id, failed_sub: dict) -> bool:
+    """Delete a dead push_subscription. Returns True only if a field was deleted.
+
+    The failed subscription may have come from the warm players cache, which
+    can lag Firestore: a browser that resubscribed already stored a newer
+    subscription. So the delete only happens when the stored endpoint still
+    equals the failed one (read-compare-update, not a transaction: the window
+    is milliseconds and a lost race only costs one re-subscribe prompt).
+    """
+    from services.db_service import get_db
+    db = get_db()
+    if db is None:
+        # Local-data mode: nothing to delete, and firebase_admin is not needed.
+        return False
+    ref = db.collection("players").document(str(player_id))
+    snap = ref.get()
+    stored = (snap.to_dict() or {}).get("push_subscription") if snap.exists else None
+    if not isinstance(stored, dict) or stored.get("endpoint") != failed_sub.get("endpoint"):
+        logger.info("push_service: not pruning player %s, stored subscription differs or is gone", player_id)
+        return False
+    from firebase_admin import firestore
+    ref.update({"push_subscription": firestore.DELETE_FIELD})
+    _invalidate_players_cache()
+    logger.info("push_service: pruned dead push subscription for player %s", player_id)
+    return True
+
+
+def _invalidate_players_cache() -> None:
+    """Drop this process's static bucket and tell every other process to do so."""
+    import services.cache_service as cs
+    from services.db_service import signal_data_update
+    cs.clear_data_cache(cs.DOMAIN_STATIC)
+    signal_data_update("static")
+
+
+def _deliver(player_id, sub: dict, title: str, body: str) -> str:
+    """Send one notification. Returns "sent", "failed", or "pruned"."""
+    from pywebpush import webpush
+    try:
+        webpush(
+            subscription_info=sub,
+            data=json.dumps({"title": title, "body": body}),
+            vapid_private_key=_VAPID_PRIVATE,
+            vapid_claims={"sub": _VAPID_EMAIL},
+        )
+        logger.info("push_service: sent push to player %s", player_id)
+        return "sent"
+    except Exception as e:
+        logger.warning("push_service: send failed for player %s: %s", player_id, e)
+        if _is_gone_error(e):
+            try:
+                if _prune_subscription(player_id, sub):
+                    return "pruned"
+            except Exception:
+                logger.exception("push_service: prune failed for player %s", player_id)
+        return "failed"
+
 
 def save_push_subscription(player_id: int, subscription: dict) -> bool:
     """Store the browser's push subscription object on the player's Firestore document."""
@@ -17,6 +89,7 @@ def save_push_subscription(player_id: int, subscription: dict) -> bool:
         get_db().collection("players").document(str(player_id)).update(
             {"push_subscription": subscription}
         )
+        _invalidate_players_cache()
         return True
     except Exception:
         logger.exception("push_service: failed to save subscription for player %s", player_id)
@@ -68,15 +141,34 @@ def send_push_notification(player_id: int, title: str, body: str) -> bool:
             logger.info("push_service: no push subscription stored for player %s", player_id)
             return False
 
-        from pywebpush import webpush, WebPushException
-        webpush(
-            subscription_info=sub,
-            data=json.dumps({"title": title, "body": body}),
-            vapid_private_key=_VAPID_PRIVATE,
-            vapid_claims={"sub": _VAPID_EMAIL},
-        )
-        logger.info("push_service: sent push to player %s", player_id)
-        return True
+        return _deliver(player_id, sub, title, body) == "sent"
     except Exception as e:
         logger.warning("push_service: send failed for player %s: %s", player_id, e)
         return False
+
+
+def broadcast_push_notification(title: str, body: str) -> dict:
+    """Send title/body to every player with a stored push_subscription.
+
+    Returns {"total", "sent", "failed", "pruned"} where total counts only
+    players that actually had a subscription. One bad subscription never
+    stops the loop.
+    """
+    from services.db_service import get_db
+    counts = {"total": 0, "sent": 0, "failed": 0, "pruned": 0}
+    db = get_db()
+    if db is None:
+        logger.warning("push_service: broadcast skipped, no database (local data mode)")
+        return counts
+    for doc in db.collection("players").stream():
+        sub = (doc.to_dict() or {}).get("push_subscription")
+        if not isinstance(sub, dict):
+            continue
+        counts["total"] += 1
+        outcome = _deliver(doc.id, sub, title, body)
+        counts[outcome] += 1
+    logger.info(
+        "push_service: broadcast complete total=%d sent=%d failed=%d pruned=%d",
+        counts["total"], counts["sent"], counts["failed"], counts["pruned"],
+    )
+    return counts

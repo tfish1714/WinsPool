@@ -18,6 +18,7 @@ from routes.models import (
     CreatePlayerRequest, UpdatePlayerRequest, TargetPlayerRequest,
     SetTempPasswordRequest, SeasonRequest, RecapWeekRequest,
     RecapYearRequest, GenerateRecapRequest, SaveBroadcastRecapRequest,
+    PushBroadcastRequest,
 )
 from services.cache_service import get_game_predictions, get_prediction_features
 from services.data_service import (
@@ -32,6 +33,7 @@ from services.db_service import (
 )
 from services.constants import PASSWORD_COMPLEXITY_RE, UNDRAFTED_SENTINEL
 from services.draft_service import sanitize_state, wipe_draft_cache
+from services.rate_limit_service import get_limiter
 from services.session_service import require_admin
 import services.ai_service as ai_service
 import services.chat_service as chat_service
@@ -441,6 +443,38 @@ async def save_and_broadcast_recap(body: SaveBroadcastRecapRequest, _: dict = De
         return JSONResponse(content={"message": f"Week {body.week} recap saved and broadcast to {len(emails)} players."})
     except Exception as e:
         logger.exception("Unhandled error in admin endpoint")
+        return server_error()
+
+
+_broadcast_limiter = get_limiter("admin-push-broadcast", 1, 60.0)
+
+
+@router.post("/admin/push/broadcast")
+async def broadcast_push(body: PushBroadcastRequest, admin: dict = Depends(require_admin)):
+    """Send a custom push notification to every subscribed player (admin only).
+
+    One broadcast per minute per admin: each call fans out one VAPID request
+    per subscriber, so this is the quota guard issue #88 asks for. The limiter
+    has no lock, so it is checked here on the event loop; only the blocking
+    push loop goes to the threadpool.
+    """
+    try:
+        import services.push_service as push_service
+        if not push_service.is_configured():
+            return JSONResponse(status_code=503, content={"error": "Push notifications are not configured."})
+        allowed, retry_after = _broadcast_limiter.check(str(admin.get("sub")))
+        if not allowed:
+            return JSONResponse(
+                status_code=429,
+                content={"error": f"A broadcast was sent recently. Try again in {retry_after} seconds."},
+                headers={"Retry-After": str(retry_after)},
+            )
+        from starlette.concurrency import run_in_threadpool
+        result = await run_in_threadpool(push_service.broadcast_push_notification, body.title, body.body)
+        logger.info("admin push broadcast by player %s: %s", admin.get("sub"), result)
+        return JSONResponse(content=result)
+    except Exception:
+        logger.exception("Unhandled error in broadcast_push")
         return server_error()
 
 

@@ -514,3 +514,145 @@ class TestLastLoginTracking:
         assert update_args[0] == "12"
         assert "last_login" in update_args[1]
         assert isinstance(update_args[1]["last_login"], float)
+
+
+# ---------------------------------------------------------------------------
+# IP-based rate limiting on login / set_password / check_player
+# ---------------------------------------------------------------------------
+
+def _login_unknown(c, email="nobody@example.com", headers=None):
+    return c.post("/api/login", json={"email": email, "password": "x"}, headers=headers or {})
+
+
+def test_login_rate_limited_after_five_attempts_per_ip(monkeypatch):
+    monkeypatch.setattr("routes.auth_routes.get_player_by_email", lambda e: None)
+    c = TestClient(app)
+    codes = [_login_unknown(c).status_code for _ in range(5)]
+    assert codes == [401] * 5
+    resp = _login_unknown(c)
+    assert resp.status_code == 429
+    assert int(resp.headers["Retry-After"]) >= 1
+    assert "error" in resp.json()
+
+
+def test_login_429_body_and_retry_after_are_consistent(monkeypatch):
+    monkeypatch.setattr("routes.auth_routes.get_player_by_email", lambda e: None)
+    c = TestClient(app)
+    for _ in range(5):
+        _login_unknown(c)
+    resp = _login_unknown(c)
+    retry = resp.headers["Retry-After"]
+    assert retry.isdigit() and int(retry) >= 1
+    assert resp.json()["error"].startswith("Too many requests")
+    assert retry in resp.json()["error"]
+
+
+def test_valid_logins_succeed_for_attempts_one_to_five():
+    player = {
+        "playerId": 1, "email": "ok@example.com", "fullName": "Ok",
+        "password_hash": "hash", "role": "user",
+    }
+    c = TestClient(app)
+    with patch("routes.auth_routes.get_player_by_email", return_value=player), \
+         patch("routes.auth_routes.verify_password", return_value=True), \
+         patch("routes.auth_routes._is_legacy_sha256", return_value=False), \
+         patch("routes.auth_routes.update_player_profile"):
+        codes = [c.post("/api/login", json={"email": "ok@example.com", "password": "x"}).status_code
+                 for _ in range(6)]
+    assert codes == [200] * 5 + [429]
+
+
+def test_login_allowed_again_after_window_passes(monkeypatch):
+    from routes import auth_routes
+    now = [1000.0]
+    monkeypatch.setattr(auth_routes._login_limiter, "_clock", lambda: now[0])
+    monkeypatch.setattr("routes.auth_routes.get_player_by_email", lambda e: None)
+    c = TestClient(app)
+    assert [_login_unknown(c).status_code for _ in range(5)] == [401] * 5
+    assert _login_unknown(c).status_code == 429
+    now[0] += auth_routes._login_limiter.window_seconds + 1
+    assert _login_unknown(c).status_code == 401
+
+
+def test_set_password_shares_the_login_bucket(monkeypatch):
+    monkeypatch.setattr("routes.auth_routes.get_player_by_email", lambda e: None)
+    c = TestClient(app)
+    for _ in range(5):
+        _login_unknown(c)
+    resp = c.post("/api/set_password", json={
+        "email": "a@b.com", "password": "Aa1!aaaaaaaaaa", "confirm_password": "Aa1!aaaaaaaaaa"})
+    assert resp.status_code == 429
+    assert "Retry-After" in resp.headers
+
+
+def test_spoofed_left_forwarded_for_entries_do_not_evade_limit(monkeypatch):
+    monkeypatch.setattr("routes.auth_routes.get_player_by_email", lambda e: None)
+    c = TestClient(app)
+    codes = []
+    for i in range(6):
+        codes.append(_login_unknown(c, headers={"X-Forwarded-For": f"10.0.0.{i}, 203.0.113.7"}).status_code)
+    assert codes[:5] == [401] * 5 and codes[5] == 429
+
+
+def test_different_client_ips_have_separate_buckets(monkeypatch):
+    monkeypatch.setattr("routes.auth_routes.get_player_by_email", lambda e: None)
+    c = TestClient(app)
+    for _ in range(5):
+        _login_unknown(c, headers={"X-Forwarded-For": "203.0.113.7"})
+    assert _login_unknown(c, headers={"X-Forwarded-For": "203.0.113.8"}).status_code == 401
+
+
+def test_check_player_has_its_own_looser_bucket(monkeypatch):
+    monkeypatch.setattr("routes.auth_routes.get_player_by_email", lambda e: None)
+    c = TestClient(app)
+    for _ in range(5):
+        _login_unknown(c)                        # exhaust the login bucket
+    assert c.get("/api/check_player", params={"email": "a@b.com"}).status_code == 200
+    codes = [c.get("/api/check_player", params={"email": "a@b.com"}).status_code for _ in range(40)]
+    assert 429 in codes
+    assert codes[:20] == [200] * 20              # lookup allowance (30) is well above login's (5)
+
+
+def test_limit_follows_limiter_max_requests(monkeypatch):
+    from routes import auth_routes
+    monkeypatch.setattr(auth_routes._login_limiter, "max_requests", 2)
+    monkeypatch.setattr("routes.auth_routes.get_player_by_email", lambda e: None)
+    c = TestClient(app)
+    assert [_login_unknown(c).status_code for _ in range(3)] == [401, 401, 429]
+
+
+def test_env_int_parses_valid_value(monkeypatch):
+    from routes.auth_routes import _env_int
+    monkeypatch.setenv("X_TEST_LIMIT", "7")
+    assert _env_int("X_TEST_LIMIT", 5) == 7
+
+
+def test_env_int_invalid_string_falls_back_to_default(monkeypatch):
+    from routes.auth_routes import _env_int
+    monkeypatch.setenv("X_TEST_LIMIT", "lots")
+    assert _env_int("X_TEST_LIMIT", 5) == 5
+
+
+def test_env_int_zero_and_negative_clamp_to_one(monkeypatch):
+    from routes.auth_routes import _env_int
+    monkeypatch.setenv("X_TEST_LIMIT", "0")
+    assert _env_int("X_TEST_LIMIT", 5) == 1
+    monkeypatch.setenv("X_TEST_LIMIT", "-3")
+    assert _env_int("X_TEST_LIMIT", 5) == 1
+
+
+def _profile_update(c):
+    return c.post("/api/profile/update", json={"playerId": "1", "currentPassword": "wrong"})
+
+
+def test_profile_update_rate_limited_after_five_attempts_sharing_login_bucket(monkeypatch):
+    monkeypatch.setattr("services.db_service.get_player_by_id", lambda pid: None)
+    c = TestClient(app)
+    assert [_profile_update(c).status_code for _ in range(5)] == [404] * 5
+    resp = _profile_update(c)
+    assert resp.status_code == 429
+    assert int(resp.headers["Retry-After"]) >= 1
+    assert "error" in resp.json()
+    # shared bucket: login is now blocked too
+    monkeypatch.setattr("routes.auth_routes.get_player_by_email", lambda e: None)
+    assert _login_unknown(c).status_code == 429

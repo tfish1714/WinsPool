@@ -90,3 +90,76 @@ def test_set_config_settings_no_auth_returns_401():
     """POST /api/admin/config/settings with no auth token returns 401."""
     response = client.post("/api/admin/config/settings", json={"draft_active": True})
     assert response.status_code == 401
+
+
+def test_get_config_settings_includes_integer_latest_week():
+    data = client.get("/api/config/settings").json()
+    assert "latest_week" in data
+    assert isinstance(data["latest_week"], int) and data["latest_week"] >= 0
+
+
+def test_get_config_latest_week_fails_closed_to_zero(monkeypatch):
+    import routes.api_routes as api_routes
+    api_routes._reset_latest_week_cache()
+
+    def boom():
+        raise RuntimeError("data unavailable")
+
+    monkeypatch.setattr(api_routes, "_active_season_latest_week", boom)
+    # The endpoint must still return 200 with latest_week == 0.
+    response = client.get("/api/config/settings")
+    assert response.status_code == 200
+    assert response.json()["latest_week"] == 0
+
+
+def test_latest_week_cached_within_ttl(monkeypatch):
+    import routes.api_routes as api_routes
+    api_routes._reset_latest_week_cache()
+    calls = []
+
+    def fake():
+        calls.append(1)
+        return 7
+
+    monkeypatch.setattr(api_routes, "_active_season_latest_week", fake)
+    assert api_routes._safe_latest_week() == 7
+    assert api_routes._safe_latest_week() == 7
+    assert len(calls) == 1
+
+
+def test_latest_week_recomputed_after_ttl(monkeypatch):
+    import routes.api_routes as api_routes
+    api_routes._reset_latest_week_cache()
+    now = [1000.0]
+    monkeypatch.setattr(api_routes.time, "monotonic", lambda: now[0])
+    values = iter([7, 8])
+    calls = []
+
+    def fake():
+        calls.append(1)
+        return next(values)
+
+    monkeypatch.setattr(api_routes, "_active_season_latest_week", fake)
+    assert api_routes._safe_latest_week() == 7
+    now[0] += api_routes._LATEST_WEEK_TTL_SECONDS + 1
+    assert api_routes._safe_latest_week() == 8
+    assert len(calls) == 2
+
+
+def test_latest_week_failure_is_not_cached(monkeypatch):
+    import routes.api_routes as api_routes
+    api_routes._reset_latest_week_cache()
+    outcomes = [RuntimeError("down"), 9]
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        out = outcomes[len(calls) - 1]
+        if isinstance(out, Exception):
+            raise out
+        return out
+
+    monkeypatch.setattr(api_routes, "_active_season_latest_week", flaky)
+    assert api_routes._safe_latest_week() == 0
+    assert api_routes._safe_latest_week() == 9
+    assert len(calls) == 2

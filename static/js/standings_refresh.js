@@ -96,6 +96,8 @@
                 patchPlayer(root, row);
             });
         });
+        // Values changed in place; let listeners (tiebreaker highlights) recompute.
+        document.dispatchEvent(new CustomEvent('standings:patched'));
     }
 
     async function poll(year) {

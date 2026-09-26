@@ -93,12 +93,24 @@ Write-Host "[DEPLOY] Deploying to Google Cloud Run..." -ForegroundColor Cyan
 # 5 minutes regardless of activity or tab focus, not by anything in this
 # app's code. 3600 is Cloud Run's documented maximum (60 min); this doesn't
 # eliminate periodic reconnects, it just spaces them out ~12x further apart.
+# --max-instances=1 is a correctness requirement, not just a cost cap: the
+# live draft room's WebSocket ConnectionManager/connected_players and the auth
+# rate limiter (services/rate_limit_service.py) keep state in-process, so a
+# second instance would split a draft room in two and double every per-IP
+# limit. It also bounds worst-case spend. This matches the value production
+# already runs (verified with `gcloud run services describe winspool`);
+# raising it requires moving that state out of process first.
+# --concurrency=80 is Cloud Run's default, pinned so it is reviewable; with
+# one 1-vCPU instance it caps in-flight requests instead of letting a burst
+# queue unbounded work.
 gcloud run deploy winspool `
     --image $IMAGE_TAG `
     --platform managed `
     --region us-east1 `
     --allow-unauthenticated `
     --timeout=3600 `
+    --max-instances=1 `
+    --concurrency=80 `
     --set-env-vars ($envVars -join ",") `
     --set-secrets "FIREBASE_CREDENTIALS=FIREBASE_CREDENTIALS:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,SMTP_PASSWORD=SMTP_PASSWORD:latest,JWT_SECRET=JWT_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest"
 

@@ -201,10 +201,13 @@
 
 
         <!-- Tiebreaker key + refresh note -->
+        <div id="tb-tooltip" class="tb-tooltip" role="tooltip" hidden></div>
         <div class="tiebreaker-note">
             <strong>Tiebreakers:</strong>
             TB1 = worst team wins · TB2 = 2nd-worst team wins · TB3 = best team wins ·
             TB4 = worst team pt diff · TB5 = 2nd-worst pt diff · TB6 = best team pt diff
+            <br>
+            Players are ranked by total wins first; ties are broken by TB1 through TB6 in order. A highlighted tiebreaker cell shows the tier that separated two tied players (hover, tap, or focus it for details).
         </div>
         {% if refreshTime %}
         <div class="refresh-note">Data refreshed: {{ refreshTime }}</div>
@@ -232,4 +235,5 @@
 </script>
 <script src="{{ static_url('js/standings.js') }}"></script>
 <script src="{{ static_url('js/standings_refresh.js') }}"></script>
+<script type="module" src="{{ static_url('js/tiebreaker_explain.js') }}"></script>
 {% endblock %}

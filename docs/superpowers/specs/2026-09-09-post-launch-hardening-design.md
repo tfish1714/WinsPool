@@ -160,6 +160,8 @@ revisit only if trigger coverage actually expands enough to need it.
 
 ## 4. Cost Checks
 
+> Note: the scaling guardrail (max-instances=1, concurrency=80) is now codified in `deploy/deploy.ps1`.
+
 ### Problem
 No cost tracking or budget alerting exists on the `fishbone-wins-pool` GCP
 project. The app now has real, ongoing infra spend (a web service + 4

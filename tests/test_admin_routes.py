@@ -973,3 +973,74 @@ class TestDraftSnapshotStatus:
         resp = client.get("/api/admin/draft_snapshot/2026")
         assert resp.status_code in (401, 403)
 
+
+# ── /api/admin/push/broadcast ─────────────────────────────────────────────────
+
+_ZEROS = {"total": 0, "sent": 0, "failed": 0, "pruned": 0}
+
+
+def _bcast(admin_token, **body):
+    payload = {"title": "Draft tonight", "body": "8pm ET, be there."}
+    payload.update(body)
+    return client.post("/api/admin/push/broadcast", json=payload, headers={"Authorization": admin_token})
+
+
+def test_broadcast_requires_admin(auth_token):
+    resp = client.post("/api/admin/push/broadcast", json={"title": "t", "body": "b"},
+                       headers={"Authorization": auth_token})
+    assert resp.status_code in (401, 403)
+
+
+def test_broadcast_requires_auth():
+    assert client.post("/api/admin/push/broadcast", json={"title": "t", "body": "b"}).status_code in (401, 403)
+
+
+def test_broadcast_delivers_and_returns_summary(admin_token, monkeypatch):
+    import services.push_service as ps
+    monkeypatch.setattr(ps, "is_configured", lambda: True)
+    calls = []
+    monkeypatch.setattr(ps, "broadcast_push_notification",
+                        lambda t, b: calls.append((t, b)) or {"total": 2, "sent": 2, "failed": 0, "pruned": 0})
+    resp = _bcast(admin_token)
+    assert resp.status_code == 200
+    assert resp.json() == {"total": 2, "sent": 2, "failed": 0, "pruned": 0}
+    assert calls == [("Draft tonight", "8pm ET, be there.")]
+
+
+def test_broadcast_strips_whitespace_before_sending(admin_token, monkeypatch):
+    import services.push_service as ps
+    monkeypatch.setattr(ps, "is_configured", lambda: True)
+    calls = []
+    monkeypatch.setattr(ps, "broadcast_push_notification",
+                        lambda t, b: calls.append((t, b)) or dict(_ZEROS))
+    assert _bcast(admin_token, title="  Hi  ", body=" There ").status_code == 200
+    assert calls == [("Hi", "There")]
+
+
+def test_broadcast_503_when_push_not_configured(admin_token, monkeypatch):
+    import services.push_service as ps
+    monkeypatch.setattr(ps, "is_configured", lambda: False)
+    resp = _bcast(admin_token)
+    assert resp.status_code == 503 and "error" in resp.json()
+
+
+@pytest.mark.parametrize("bad", [
+    {"title": ""}, {"title": "   "}, {"body": ""}, {"body": "   "}, {"body": "x" * 501}, {"title": "x" * 101},
+])
+def test_broadcast_rejects_invalid_bodies_and_sends_nothing(admin_token, monkeypatch, bad):
+    import services.push_service as ps
+    monkeypatch.setattr(ps, "is_configured", lambda: True)
+    sent = []
+    monkeypatch.setattr(ps, "broadcast_push_notification", lambda t, b: sent.append(1))
+    assert _bcast(admin_token, **bad).status_code == 422
+    assert sent == []
+
+
+def test_broadcast_second_call_within_a_minute_is_429(admin_token, monkeypatch):
+    import services.push_service as ps
+    monkeypatch.setattr(ps, "is_configured", lambda: True)
+    monkeypatch.setattr(ps, "broadcast_push_notification", lambda t, b: dict(_ZEROS))
+    assert _bcast(admin_token).status_code == 200
+    second = _bcast(admin_token)
+    assert second.status_code == 429 and int(second.headers["Retry-After"]) >= 1
+

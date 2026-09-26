@@ -37,6 +37,10 @@ def live_server():
     env = os.environ.copy()
     env["USE_LOCAL_DATA"] = "true"
     env["DISABLE_OUTBOUND_EMAIL"] = "true"
+    # The suite logs in dozens of times a minute from one address; the
+    # production auth rate limit (5/min per IP) would 429 unrelated tests.
+    env["AUTH_RATE_LIMIT_PER_MINUTE"] = "100000"
+    env["AUTH_LOOKUP_RATE_LIMIT_PER_MINUTE"] = "100000"
     env["PORT"] = str(port)
     env.setdefault("JWT_SECRET", "e2e-test-jwt-secret-not-for-production")
 

@@ -82,6 +82,32 @@ docker run -p 8000:8080 -e USE_LOCAL_DATA=True winspool
 
 ---
 
+## Scaling and cost guardrails
+
+`deploy/deploy.ps1` pins `--max-instances=1` and `--concurrency=80` on the `winspool` web service.
+
+Live settings, verified read-only on 2026-09-25: `autoscaling.knative.dev/maxScale: '1'`, `containerConcurrency: 80`, `timeoutSeconds: 3600`, cpu `1000m` (1 vCPU), memory `512Mi`.
+
+**Why max-instances must stay 1.** The live draft room's WebSocket state (`ConnectionManager` / `connected_players`) and the auth rate limiter (`services/rate_limit_service.py`) live in process memory. A second instance would split a draft room in two and double every per-IP limit. It also bounds worst-case spend. Do not raise it until that state is moved out of process.
+
+**Service-level vs revision-level maxScale.** The service also carries a service-level `maxScale` annotation of 20, while the revision-level `maxScale` is 1. The effective cap is the lower value (1).
+
+**Auth rate limiting env vars** (all optional, read at startup):
+
+- `TRUSTED_PROXY_HOPS` (default `1`): how many positions from the right of `X-Forwarded-For` is the real client IP. Correct for direct Cloud Run access; set it to `2` if Firebase Hosting or a load balancer is ever put in front.
+- `AUTH_RATE_LIMIT_PER_MINUTE` (default `5`): per-IP limit shared by `/api/login`, `/api/set_password` and `/api/profile/update`.
+- `AUTH_LOOKUP_RATE_LIMIT_PER_MINUTE` (default `30`): per-IP limit for `/api/check_player`.
+
+**Post-deploy verification.** Make 6 bad logins from your own machine; the 6th should return 429. The log warning `auth rate limit hit: ip=` should show your public IP, matching `httpRequest.remoteIp` in the Cloud Run request log. If it shows a different address (for example a Google proxy), adjust `TRUSTED_PROXY_HOPS`.
+
+**Re-verify:**
+
+```
+gcloud run services describe winspool --region us-east1 --project fishbone-wins-pool --format="yaml(spec.template.metadata.annotations,spec.template.spec.containerConcurrency,spec.template.spec.timeoutSeconds)"
+```
+
+The scheduled jobs (`winspool-sync-daily`, `winspool-live-scores`, `winspool-schedule-kickoffs`, `winspool-predict-daily`) are separate Cloud Run Jobs with their own task limits; these service flags do not apply to them.
+
 ## Scheduled Jobs (Cloud Scheduler + Cloud Tasks)
 
 Data sync, live scores, prediction regen, and kickoff-time scheduling run as

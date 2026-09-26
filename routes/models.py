@@ -1,6 +1,6 @@
 """routes/models.py — Pydantic request body schemas for all POST endpoints."""
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel
+from typing import Annotated, Any, Dict, List, Optional
+from pydantic import BaseModel, StringConstraints
 
 
 # --- Auth ---
@@ -106,3 +106,8 @@ class MockDraftPickRequest(BaseModel):
 class MockDraftResultsRequest(BaseModel):
     season: int
     rosters: Dict[str, List[str]]
+
+
+class PushBroadcastRequest(BaseModel):
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+    body: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]

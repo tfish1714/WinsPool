@@ -133,7 +133,7 @@
                 <a href="/wins-pool/{{ current_year|default(2024) }}"><i data-lucide="trophy"></i> Standings</a>
                 <a href="/schedule"><i data-lucide="calendar"></i> Schedule</a>
                 <a href="/draft-results"><i data-lucide="clipboard-list"></i> Draft Results</a>
-                <a href="/playoff-race"><i data-lucide="flag"></i> Playoff Race</a>
+                <a href="/playoff-race" id="drawer-playoff-race-link" class="hidden"><i data-lucide="flag"></i> Playoff Race</a>
                 <a href="/wins-pool/{{ current_year|default(2024) }}/weekbyweek"><i data-lucide="bar-chart-3"></i> Weekly Progress</a>
                 <a href="/headtohead"><i data-lucide="users"></i> Head to Head</a>
                 <a href="/draft/history"><i data-lucide="book-open"></i> Draft History</a>
@@ -157,7 +157,7 @@
             <a href="/draft-results" class="btb-item" id="btb-draft-tab" data-path="/draft-results">
                 <i data-lucide="clipboard-list" id="btb-draft-icon"></i><span id="btb-draft-label">Drafts</span>
             </a>
-            <a href="/playoff-race" class="btb-item" data-path="/playoff-race">
+            <a href="/playoff-race" class="btb-item hidden" id="btb-playoff-tab" data-path="/playoff-race">
                 <i data-lucide="flag"></i><span>Playoff</span>
             </a>
             <button class="btb-item" id="btb-more-tab">

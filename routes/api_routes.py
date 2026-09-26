@@ -502,6 +502,44 @@ async def push_client_error(request: Request, _auth: dict = Depends(require_auth
     return JSONResponse(content={"ok": True})
 
 
+def _active_season_latest_week() -> int:
+    """Latest week of the active season, or 0 when it cannot be determined.
+
+    The nav uses this to decide whether the Playoff Race link is shown, so
+    every failure path returns 0 (link stays hidden) rather than raising.
+    """
+    from services.data_service import get_active_season, get_latest_week_for_year
+    _, _, games, _, _, draft_results, rules = load_data()
+    season = get_active_season(games, draft_results, rules)
+    return int(get_latest_week_for_year(games, season))
+
+
+_LATEST_WEEK_TTL_SECONDS = 30
+# (monotonic timestamp, value) of the last SUCCESSFUL lookup, or None.
+_latest_week_cache = None
+
+
+def _reset_latest_week_cache() -> None:
+    global _latest_week_cache
+    _latest_week_cache = None
+
+
+def _safe_latest_week() -> int:
+    """Cached (30s) latest_week; failures return 0 and are never cached."""
+    global _latest_week_cache
+    now = time.monotonic()
+    cached = _latest_week_cache
+    if cached is not None and now - cached[0] < _LATEST_WEEK_TTL_SECONDS:
+        return cached[1]
+    try:
+        value = max(0, int(_active_season_latest_week()))
+    except Exception:
+        logger.exception("config: could not determine latest_week")
+        return 0
+    _latest_week_cache = (now, value)
+    return value
+
+
 @router.get("/config/settings")
 def get_config():
     """Returns app config. Public — all users need draft_active on page load."""
@@ -509,6 +547,7 @@ def get_config():
     version = {
         "app_version": os.environ.get("APP_VERSION", "dev"),
         "app_deployed_at": os.environ.get("APP_DEPLOYED_AT", ""),
+        "latest_week": _safe_latest_week(),
     }
     try:
         return JSONResponse(content={**get_config_settings(), **version})

@@ -5,8 +5,9 @@ import os
 import re
 import secrets
 import time
+from typing import Optional
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 
 from routes.models import (
@@ -19,12 +20,47 @@ from services.db_service import (
 from services.constants import PASSWORD_COMPLEXITY_RE
 from services.session_service import create_token, _TOKEN_EXPIRY_SECONDS, require_auth
 import services.email_service as email_service
+from services.rate_limit_service import get_limiter, client_ip
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 
 _IS_PROD = os.environ.get("ENVIRONMENT", "development").lower() == "production"
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, default)))
+    except ValueError:
+        return default
+
+
+# login and set_password share one bucket: both accept guessable secrets and
+# an attacker should not get a fresh allowance by alternating endpoints.
+# check_player (email enumeration) gets a looser bucket of its own because
+# the sign-in screen calls it on every email entry.
+_login_limiter = get_limiter("auth-login", _env_int("AUTH_RATE_LIMIT_PER_MINUTE", 5))
+_lookup_limiter = get_limiter("auth-lookup", _env_int("AUTH_LOOKUP_RATE_LIMIT_PER_MINUTE", 30))
+
+
+def _rate_limited_response(request: Request, limiter) -> Optional[JSONResponse]:
+    """A 429 JSONResponse (with Retry-After) if this client is over the limit, else None.
+
+    Called first in each guarded handler so every attempt counts, including
+    unknown-email requests that would otherwise return before any lockout logic.
+    The limiter has no lock, so callers must be async handlers (event-loop serialized).
+    """
+    ip = client_ip(request)
+    allowed, retry_after = limiter.check(ip)
+    if allowed:
+        return None
+    logger.warning("auth rate limit hit: ip=%s path=%s retry_after=%ss", ip, request.url.path, retry_after)
+    return JSONResponse(
+        status_code=429,
+        content={"error": f"Too many requests. Try again in {retry_after} seconds."},
+        headers={"Retry-After": str(retry_after)},
+    )
 
 
 def _player_role(player: dict) -> str:
@@ -82,12 +118,15 @@ def _set_session_cookie(response: JSONResponse, token: str) -> JSONResponse:
 
 
 @router.get("/check_player")
-async def check_player(email: str):
+async def check_player(request: Request, email: str):
     """Checks if a player exists and if they already have a password set.
 
     Always returns HTTP 200 to prevent email enumeration. If the email is
     not found, returns exists=False with no additional metadata.
     """
+    limited = _rate_limited_response(request, _lookup_limiter)
+    if limited:
+        return limited
     if not email:
         return JSONResponse(status_code=400, content={"error": "Email is required."})
 
@@ -105,7 +144,10 @@ async def check_player(email: str):
 
 
 @router.post("/set_password")
-async def set_password(body: SetPasswordRequest):
+async def set_password(request: Request, body: SetPasswordRequest):
+    limited = _rate_limited_response(request, _login_limiter)
+    if limited:
+        return limited
     try:
         email = body.email.strip().lower()
         password = body.password
@@ -169,7 +211,10 @@ async def set_password(body: SetPasswordRequest):
 
 
 @router.post("/login")
-async def login(body: LoginRequest):
+async def login(request: Request, body: LoginRequest):
+    limited = _rate_limited_response(request, _login_limiter)
+    if limited:
+        return limited
     try:
         email = body.email.strip().lower()
         password = body.password
@@ -281,7 +326,12 @@ async def get_profile(_auth: dict = Depends(require_auth)):
 
 
 @router.post("/profile/update")
-async def update_profile(body: UpdateProfileRequest):
+async def update_profile(body: UpdateProfileRequest, request: Request):
+    # Shares the login bucket: this endpoint verifies currentPassword, so it is
+    # otherwise an unthrottled password-guess oracle that skips lockout.
+    limited = _rate_limited_response(request, _login_limiter)
+    if limited:
+        return limited
     try:
         pid = body.playerId
         full_name = body.fullName.strip()

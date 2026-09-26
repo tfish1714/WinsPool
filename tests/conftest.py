@@ -28,6 +28,28 @@ def mock_env_vars(monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "test-jwt-secret-for-winspool-tests-only")
 
 
+@pytest.fixture(autouse=True)
+def reset_latest_week_cache():
+    """The /api/config/settings latest_week TTL cache is module-level state."""
+    def _reset():
+        mod = sys.modules.get("routes.api_routes")
+        if mod is not None:
+            mod._reset_latest_week_cache()
+    _reset()
+    yield
+    _reset()
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiters():
+    """Every TestClient request shares one client address; without this the
+    per-IP auth limiter would leak state between unrelated tests."""
+    from services.rate_limit_service import reset_all
+    reset_all()
+    yield
+    reset_all()
+
+
 @pytest.fixture
 def auth_token(monkeypatch):
     """A valid JWT Bearer token for a regular player (role='user')."""
