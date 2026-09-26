@@ -165,19 +165,24 @@ def _mock_load_data():
 @patch("routes.history_routes.load_data", return_value=_mock_load_data())
 @patch("routes.history_routes.get_season_projection_legacy_shape",
        return_value={"KC": {"projected_wins": 12.0}})
-def test_player_profile_page_returns_200(mock_preds, mock_load):
+@patch("services.analysis_service.load_data", return_value=_mock_load_data())
+@patch("services.analysis_service.get_season_projection_legacy_shape",
+       return_value={"KC": {"projected_wins": 12.0}})
+def test_player_profile_page_returns_200(mock_svc_preds, mock_svc_load, mock_preds, mock_load):
     resp = client.get("/history/player/1")
     assert resp.status_code == 200
 
 
 @patch("routes.history_routes.load_data", return_value=_mock_load_data())
 @patch("routes.history_routes.get_season_projection_legacy_shape", return_value={})
-def test_player_profile_page_returns_404_for_unknown_player(mock_preds, mock_load):
+@patch("services.analysis_service.load_data", return_value=_mock_load_data())
+@patch("services.analysis_service.get_season_projection_legacy_shape", return_value={})
+def test_player_profile_page_returns_404_for_unknown_player(mock_svc_preds, mock_svc_load, mock_preds, mock_load):
     resp = client.get("/history/player/999")
     assert resp.status_code == 404
 
 
-@patch("routes.history_routes._get_player_analytics_data")
+@patch("routes.api_routes.get_player_analytics_data")
 def test_api_player_analytics_returns_200(mock_data):
     mock_data.return_value = {
         "player": {"playerId": 1, "fullName": "Alice Smith", "nickName": "Alice"},

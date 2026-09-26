@@ -17,7 +17,7 @@ from services.session_service import require_auth, require_admin
 import services.analysis_service as analysis
 from services.analysis_service import get_season_progress
 from services.cache_service import get_prediction_features
-from routes.history_routes import _get_player_analytics_data
+from services.analysis_service import get_player_analytics_data
 
 logger = logging.getLogger(__name__)
 
@@ -374,7 +374,7 @@ def get_player_analytics_endpoint(
 ):
     """Multi-season analytics payload for Chart.js on the player profile page."""
     try:
-        result = _get_player_analytics_data(player_id)
+        result = get_player_analytics_data(player_id)
         if result is None:
             return not_found()
         return JSONResponse(content=result)

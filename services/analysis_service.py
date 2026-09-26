@@ -12,6 +12,7 @@ except Exception:
 from typing import Dict, List, Any, Optional
 from services.constants import UNDRAFTED_SENTINEL, TIEBREAKER_SORT_COLS, DRAFT_ROUNDS, TEAMS_PER_PLAYER, PODIUM_SIZE
 from services.utils import filter_season
+from services.data_service import load_data, get_active_season, get_season_projection_legacy_shape
 
 logger = logging.getLogger(__name__)
 
@@ -782,6 +783,27 @@ def get_player_analytics(
 # ---------------------------------------------------------------------------
 # Season progress computation (moved from data_service.py)
 # ---------------------------------------------------------------------------
+
+def get_player_analytics_data(player_id: int) -> Optional[Dict[str, Any]]:
+    """Load and compute analytics for one player. Returns None if player not found."""
+    standings_master, _, all_games, players, _, all_draft_results, rules = load_data()
+    player_row = players[players["playerId"] == player_id] if not players.empty else pd.DataFrame()
+    if player_row.empty:
+        return None
+    player_seasons = (
+        all_draft_results[all_draft_results["playerId"] == player_id]["season"].unique()
+        if not all_draft_results.empty else []
+    )
+    # Resolver, not get_preseason_predictions: these are historical seasons, whose
+    # projections live in consensus_projections now. frozen=True: a player's
+    # past-season draft value must not keep moving as the model is retrained.
+    preseason_preds = {int(s): get_season_projection_legacy_shape(int(s), frozen=True) for s in player_seasons}
+    active_season = get_active_season(all_games, all_draft_results, rules)
+    return get_player_analytics(
+        player_id, all_draft_results, standings_master, players, preseason_preds,
+        active_season=active_season,
+    )
+
 
 def process_games_data(games: pd.DataFrame) -> pd.DataFrame:
     """Compute cumulative wins for each team per week from raw games data."""

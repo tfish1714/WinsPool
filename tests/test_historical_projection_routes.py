@@ -72,16 +72,42 @@ def test_player_profile_shows_consensus_projection_for_historical_season(
     deleted_preseason_rows,
 ):
     """Was 0.0 with vsProjected inflated to the full win total."""
-    import routes.history_routes as history_routes
+    import services.analysis_service as analysis_service
 
-    with patch.object(history_routes, "load_data", return_value=_mock_load_data()):
-        analytics = history_routes._get_player_analytics_data(1)
+    with patch.object(analysis_service, "load_data", return_value=_mock_load_data()):
+        analytics = analysis_service.get_player_analytics_data(1)
 
     pick = analytics["seasons"][0]["picks"][0]
     assert pick["team"] == "KC"
     assert pick["actualWins"] == 11
     assert pick["projectedWins"] == 9.5, "historical projection lost -- reads 0.0"
     assert pick["vsProjected"] == 1.5
+
+
+def test_service_get_player_analytics_data_uses_consensus_projection(deleted_preseason_rows):
+    import services.analysis_service as analysis_service
+
+    with patch.object(analysis_service, "load_data", return_value=_mock_load_data()):
+        analytics = analysis_service.get_player_analytics_data(1)
+
+    pick = analytics["seasons"][0]["picks"][0]
+    assert pick["team"] == "KC"
+    assert pick["projectedWins"] == 9.5
+    assert pick["vsProjected"] == 1.5
+
+
+def test_service_get_player_analytics_data_returns_none_for_unknown_player(deleted_preseason_rows):
+    import services.analysis_service as analysis_service
+
+    with patch.object(analysis_service, "load_data", return_value=_mock_load_data()):
+        assert analysis_service.get_player_analytics_data(999) is None
+
+
+def test_history_routes_no_longer_defines_private_analytics_helper():
+    import routes.history_routes as history_routes
+    import routes.api_routes as api_routes
+    assert not hasattr(history_routes, "_get_player_analytics_data")
+    assert not hasattr(api_routes, "_get_player_analytics_data")
 
 
 # --- routes/draft_routes.py: the historical draft recap ---------------------
