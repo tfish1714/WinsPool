@@ -40,6 +40,16 @@ def reset_latest_week_cache():
     _reset()
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limiters():
+    """Every TestClient request shares one client address; without this the
+    per-IP auth limiter would leak state between unrelated tests."""
+    from services.rate_limit_service import reset_all
+    reset_all()
+    yield
+    reset_all()
+
+
 @pytest.fixture
 def auth_token(monkeypatch):
     """A valid JWT Bearer token for a regular player (role='user')."""
