@@ -100,6 +100,7 @@ def _init_firebase():
         sys.exit(1)
     return db
 
+
 def _model_version_string() -> str:
     """Concrete ensemble versions, e.g. 'nn_v14+xgb_v8+lr_v6'.
 

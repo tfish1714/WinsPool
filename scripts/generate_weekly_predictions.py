@@ -124,6 +124,7 @@ def _init_firebase():
         sys.exit(1)
     return db
 
+
 def _upload_weekly_predictions(records: list, dry_run: bool):
     if dry_run:
         print(f"  [dry-run] Would upload {len(records)} game predictions.")

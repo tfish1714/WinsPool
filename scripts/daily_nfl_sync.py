@@ -22,6 +22,7 @@ def initialize_firebase():
         sys.exit(1)
     return db
 
+
 def batch_upload(db, collection_name, dataframe, id_col=None, diff_before_write=False) -> int:
     """Upload a DataFrame to Firestore in batches of 400.
 

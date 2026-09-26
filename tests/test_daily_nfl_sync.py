@@ -254,6 +254,7 @@ class TestInitializeFirebase:
         assert daily_nfl_sync.initialize_firebase() is sentinel_client
 
     def test_uses_env_var_credentials_when_present(self, monkeypatch):
+        """Credential decoding now lives in db_service; see tests/test_db_service_init_firebase.py."""
         import scripts.daily_nfl_sync as daily_nfl_sync
         monkeypatch.setenv("USE_LOCAL_DATA", "true")
         import os
@@ -270,6 +271,7 @@ class TestInitializeFirebase:
         assert seen["use_local"].lower() == "false"
 
     def test_falls_back_to_local_file_when_no_env_var(self, monkeypatch):
+        """Credential decoding now lives in db_service; see tests/test_db_service_init_firebase.py."""
         import scripts.daily_nfl_sync as daily_nfl_sync
         monkeypatch.delenv("FIREBASE_CREDENTIALS", raising=False)
         sentinel_client = object()

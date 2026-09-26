@@ -34,6 +34,7 @@ def _init_firebase():
         sys.exit(1)
     return db
 
+
 # --- CSV → Firestore mapping -------------------------------------------------
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent
 
