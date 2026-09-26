@@ -3,6 +3,7 @@ import { AuthService } from './auth_service.js';
 import { UiRenderer } from './ui_renderer.js';
 import { WebSocketService } from './websocket_service.js';
 import { initChat, loadHistory, appendMessage } from './chat.js';
+import { isPlayoffRaceVisible } from './nav_gating.js';
 
 /**
  * WinsPool Main Application Module (Refactored)
@@ -17,6 +18,8 @@ class App {
         this.shameTimerInterval = null;
         this.draftActive = localStorage.getItem('nfl_wins_draft_active') === 'true';
         this.mockDraftActive = localStorage.getItem('nfl_wins_mock_draft_active') === 'true';
+        // 0 (hidden) on a fresh browser so the Playoff Race link never flashes in.
+        this.latestWeek = Number(localStorage.getItem('nfl_wins_latest_week')) || 0;
 
         this.ws = new WebSocketService({
             onMessage: (msg) => this.handleWsMessage(msg),
@@ -85,6 +88,13 @@ class App {
                 localStorage.setItem('nfl_wins_mock_draft_active', String(freshMockDraftActive));
                 if (freshMockDraftActive !== this.mockDraftActive) {
                     this.mockDraftActive = freshMockDraftActive;
+                    needsNavUpdate = true;
+                }
+
+                const freshLatestWeek = Number(cfg.latest_week) || 0;
+                localStorage.setItem('nfl_wins_latest_week', String(freshLatestWeek));
+                if (freshLatestWeek !== this.latestWeek) {
+                    this.latestWeek = freshLatestWeek;
                     needsNavUpdate = true;
                 }
 
@@ -161,8 +171,11 @@ class App {
             this.draftActive
                 ? { href: '/draft',   label: 'Live Draft',   paths: ['/draft'], live: true }
                 : { href: '/draft-results', label: 'Draft Results', paths: ['/draft-results'] },
-            { href: '/playoff-race',  label: 'Playoff Race', paths: ['/playoff-race'] },
         ];
+        const showPlayoffRace = isPlayoffRaceVisible(this.latestWeek);
+        if (showPlayoffRace) {
+            primaryLinks.push({ href: '/playoff-race', label: 'Playoff Race', paths: ['/playoff-race'] });
+        }
         if (role === 'admin') {
             primaryLinks.push({ href: '/admin', label: 'Admin', paths: ['/admin'], admin: true });
         }
@@ -241,6 +254,10 @@ class App {
         if (drawerMockDraft) {
             drawerMockDraft.classList.toggle('hidden', !this.mockDraftActive);
         }
+
+        // ── Drawer + bottom tab Playoff Race entries ──
+        document.getElementById('drawer-playoff-race-link')?.classList.toggle('hidden', !showPlayoffRace);
+        document.getElementById('btb-playoff-tab')?.classList.toggle('hidden', !showPlayoffRace);
 
         // ── Drawer footer ──
         const drawerFooter = document.getElementById('drawer-user-identity');
