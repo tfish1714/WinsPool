@@ -34,6 +34,8 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from services.utils import normalize_team_abbr
+
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
@@ -84,8 +86,6 @@ _POS_GROUP: Dict[str, str] = {
     "S": "s", "FS": "s", "SS": "s", "SAF": "s",
 }
 
-_TEAM_MAP = {"LAR": "LA", "WSH": "WAS", "JAC": "JAX", "OAK": "LV", "SD": "LAC", "STL": "LA"}
-
 # Availability weight scale -- applied on top of the existing age multiplier
 # and depth discount as a third, independent factor. A player ruled Out or
 # Doubtful is still on the 53-man roster (so _ACTIVE_STATUSES doesn't
@@ -100,8 +100,7 @@ _AVAILABILITY_WEIGHTS: Dict[str, float] = {"Out": 0.0, "Doubtful": 0.15, "Questi
 # --------------------------------------------------------------------------- #
 
 def _norm_team(t: str) -> str:
-    t = str(t).upper().strip()
-    return _TEAM_MAP.get(t, t)
+    return normalize_team_abbr(str(t))
 
 
 def _read_safe(path: str, **kw) -> pd.DataFrame:

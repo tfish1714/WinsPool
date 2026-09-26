@@ -17,7 +17,7 @@ from services.session_service import require_auth, require_admin
 import services.analysis_service as analysis
 from services.analysis_service import get_season_progress
 from services.cache_service import get_prediction_features
-from routes.history_routes import _get_player_analytics_data
+from services.analysis_service import get_player_analytics_data
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ def get_prediction_accuracy(_auth: dict = Depends(require_auth)):
     """ML prediction accuracy vs actual game results, by season and week."""
     try:
         from services.cache_service import get_game_predictions
-        from services.nn_feature_engine import _normalize_team
+        from services.utils import normalize_team_abbr
         from services.prediction_service import build_result_lookup, get_candidate_seasons
         import pathlib, json, numpy as np
 
@@ -125,7 +125,7 @@ def get_prediction_accuracy(_auth: dict = Depends(require_auth)):
                 pw = pred.get('pred_winner')
                 if pw is None:
                     continue
-                correct = int(_normalize_team(str(pw)) == actual)
+                correct = int(normalize_team_abbr(str(pw)) == actual)
                 wk = int(key[1:3])
                 if wk not in by_week:
                     by_week[wk] = {'week': wk, 'total': 0, 'correct': 0}
@@ -192,13 +192,13 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
     """Return the stored explanation (feature values) for a single game prediction."""
     try:
         from services.cache_service import get_game_predictions
-        from services.nn_feature_engine import _normalize_team
+        from services.utils import normalize_team_abbr
         from services.betting_screener_service import grade_ats_pick
         from services.utils import edge_vs_vegas
         import math
         import pandas as pd
-        ht = _normalize_team(home)
-        at = _normalize_team(away)
+        ht = normalize_team_abbr(home)
+        at = normalize_team_abbr(away)
         key = f"W{week:02d}_{ht}_{at}"
         preds = get_game_predictions(season)
         pred = preds.get(key)
@@ -221,8 +221,8 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
             # team columns across all of them on each modal open is wasted work.
             season_week = all_games[(all_games["season"] == season) & (all_games["week"] == week)]
             mask = (
-                (season_week["home_team"].apply(_normalize_team) == ht) &
-                (season_week["away_team"].apply(_normalize_team) == at)
+                (season_week["home_team"].apply(normalize_team_abbr) == ht) &
+                (season_week["away_team"].apply(normalize_team_abbr) == at)
             )
             matched = season_week[mask]
             if not matched.empty:
@@ -257,7 +257,7 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
         is_correct = None
         pw = pred.get("pred_winner")
         if actual_winner is not None and pw is not None:
-            is_correct = (_normalize_team(str(pw)) == actual_winner)
+            is_correct = (normalize_team_abbr(str(pw)) == actual_winner)
 
         # ATS grading -- grade_ats_pick() wraps grade_bet(), the helper the
         # betting backtester already uses, so there is one copy of the
@@ -374,7 +374,7 @@ def get_player_analytics_endpoint(
 ):
     """Multi-season analytics payload for Chart.js on the player profile page."""
     try:
-        result = _get_player_analytics_data(player_id)
+        result = get_player_analytics_data(player_id)
         if result is None:
             return not_found()
         return JSONResponse(content=result)
@@ -402,9 +402,9 @@ def get_game_prediction_features(
     (home_team listed first), matching what feature_audit_service stores.
     """
     try:
-        from services.nn_feature_engine import _normalize_team
-        ht = _normalize_team(home_team)   # home team first in game_key
-        at = _normalize_team(away_team)   # away team second
+        from services.utils import normalize_team_abbr
+        ht = normalize_team_abbr(home_team)   # home team first in game_key
+        at = normalize_team_abbr(away_team)   # away team second
         game_key = f"W{int(week):02d}_{ht}_{at}"
 
         doc = get_prediction_features(season)

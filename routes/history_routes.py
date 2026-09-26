@@ -190,30 +190,9 @@ async def headtohead_by_year(request: Request, year: int):
 
 # ─── Player Profile ───────────────────────────────────────────────────────────
 
-def _get_player_analytics_data(player_id: int) -> dict | None:
-    """Load and compute analytics for one player. Returns None if player not found."""
-    standings_master, _, all_games, players, _, all_draft_results, rules = load_data()
-    player_row = players[players["playerId"] == player_id] if not players.empty else pd.DataFrame()
-    if player_row.empty:
-        return None
-    player_seasons = (
-        all_draft_results[all_draft_results["playerId"] == player_id]["season"].unique()
-        if not all_draft_results.empty else []
-    )
-    # Resolver, not get_preseason_predictions: these are historical seasons, whose
-    # projections live in consensus_projections now. frozen=True: a player's
-    # past-season draft value must not keep moving as the model is retrained.
-    preseason_preds = {int(s): get_season_projection_legacy_shape(int(s), frozen=True) for s in player_seasons}
-    active_season = get_active_season(all_games, all_draft_results, rules)
-    return analysis.get_player_analytics(
-        player_id, all_draft_results, standings_master, players, preseason_preds,
-        active_season=active_season,
-    )
-
-
 @router.get("/history/player/{player_id}")
 async def player_profile(request: Request, player_id: int):
-    analytics = _get_player_analytics_data(player_id)
+    analytics = analysis.get_player_analytics_data(player_id)
     if analytics is None:
         raise HTTPException(status_code=404, detail="Player not found")
     return templates.TemplateResponse(request, "player_profile.html", {

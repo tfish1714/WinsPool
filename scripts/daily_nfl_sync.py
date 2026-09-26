@@ -3,35 +3,30 @@ import sys
 import pathlib
 import pandas as pd
 import numpy as np
-import firebase_admin
-from firebase_admin import credentials, firestore
+
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+from services.db_service import get_db
 
 RAWDATA_DIR = pathlib.Path(__file__).parent.parent / "rawdata"
 POOL_START_YEAR = 2013  # Earliest season in the pool
 
 
 def initialize_firebase():
-    """Initialize Firebase from FIREBASE_CREDENTIALS env var or local file."""
-    if firebase_admin._apps:
-        return firestore.client()
-
-    creds_b64 = os.environ.get("FIREBASE_CREDENTIALS")
-    if creds_b64:
-        import base64, tempfile
-        decoded = base64.b64decode(creds_b64).decode("utf-8")
-        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-        tmp.write(decoded)
-        tmp.close()
-        cred = credentials.Certificate(tmp.name)
-    else:
-        creds_path = pathlib.Path(__file__).parent.parent / "firebase_credentials.json"
-        if not creds_path.exists():
-            print("ERROR: No FIREBASE_CREDENTIALS env var and no firebase_credentials.json found.")
-            sys.exit(1)
-        cred = credentials.Certificate(str(creds_path))
-
-    firebase_admin.initialize_app(cred)
-    return firestore.client()
+    """Return the shared Firestore client from services.db_service.get_db()."""
+    # get_db() returns None whenever USE_LOCAL_DATA is true (repo CLAUDE.md
+    # gotcha), so a Firestore-writing script must force it off first.
+    os.environ["USE_LOCAL_DATA"] = "False"
+    # With no credentials, get_db() does not return None: _init_firebase()
+    # returns None and firestore.client() then raises ValueError (no default
+    # app). Treat that as "no client" so the failure path below actually runs.
+    try:
+        db = get_db()
+    except ValueError:
+        db = None
+    if db is None:
+        print("ERROR: No FIREBASE_CREDENTIALS env var and no firebase_credentials.json found.")
+        sys.exit(1)
+    return db
 
 
 def batch_upload(db, collection_name, dataframe, id_col=None, diff_before_write=False) -> int:

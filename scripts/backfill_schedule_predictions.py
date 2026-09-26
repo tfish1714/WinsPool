@@ -44,7 +44,8 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
 import pandas as pd
 
-from services.nn_feature_engine import build_master_feature_table, _normalize_team
+from services.nn_feature_engine import build_master_feature_table
+from services.utils import normalize_team_abbr
 from services.nn_prediction_service import NNPredictionService, build_ensemble_lookup
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
@@ -52,6 +53,7 @@ from services.nn_projection_engine import NNProjectionEngine, build_mc_predictio
 from services.cache_service import get_game_predictions, write_game_predictions, write_prediction_features
 from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 from services.feature_audit_service import compute_feature_audit
+from services.db_service import get_db
 from services.model_version import get_feature_version, build_ensemble_version_string
 
 
@@ -91,8 +93,8 @@ def _build_predictions_map(year: int, ft_lookup: dict,
         yr_games = games_df[games_df["season"] == year] if "season" in games_df.columns else games_df
         for _, row in yr_games.iterrows():
             if pd.notna(row.get("result")) and row.get("game_type") == "REG":
-                ht = _normalize_team(str(row.get("home_team", "") or ""))
-                at = _normalize_team(str(row.get("away_team", "") or ""))
+                ht = normalize_team_abbr(str(row.get("home_team", "") or ""))
+                at = normalize_team_abbr(str(row.get("away_team", "") or ""))
                 wk = row.get("week")
                 if ht and at and wk is not None:
                     key = f"W{int(wk):02d}_{ht}_{at}"
@@ -113,8 +115,8 @@ def _build_predictions_map(year: int, ft_lookup: dict,
             wk = row.get("week")
             if wk is None or pd.isna(wk):
                 continue
-            ht = _normalize_team(str(row.get("home_team", "") or ""))
-            at = _normalize_team(str(row.get("away_team", "") or ""))
+            ht = normalize_team_abbr(str(row.get("home_team", "") or ""))
+            at = normalize_team_abbr(str(row.get("away_team", "") or ""))
             if not ht or not at:
                 continue
             if f"W{int(wk):02d}_{ht}_{at}" not in played_keys:
@@ -138,7 +140,7 @@ def _build_predictions_map(year: int, ft_lookup: dict,
 
             # Vegas line from schedule if available
             sched_row = schedule_df[
-                (schedule_df["home_team"].apply(_normalize_team) == ht)
+                (schedule_df["home_team"].apply(normalize_team_abbr) == ht)
                 & (schedule_df["week"] == wk)
             ]
             sl_val = None
@@ -182,29 +184,20 @@ def _build_predictions_map(year: int, ft_lookup: dict,
 # ---------------------------------------------------------------------------
 
 def _init_firestore():
-    import firebase_admin
-    from firebase_admin import credentials
-    if not firebase_admin._apps:
-        creds_b64 = os.environ.get("FIREBASE_CREDENTIALS")
-        if creds_b64:
-            import base64, tempfile
-            decoded = base64.b64decode(creds_b64).decode("utf-8")
-            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-            tmp.write(decoded)
-            tmp.close()
-            cred = credentials.Certificate(tmp.name)
-            os.unlink(tmp.name)
-        else:
-            creds_path = pathlib.Path(__file__).parent.parent / "firebase_credentials.json"
-            if not creds_path.exists():
-                raise FileNotFoundError(
-                    "No Firebase credentials found. Set FIREBASE_CREDENTIALS env var "
-                    "or place firebase_credentials.json in the project root."
-                )
-            cred = credentials.Certificate(str(creds_path))
-        firebase_admin.initialize_app(cred)
-    import firebase_admin.firestore as fs
-    return fs.client()
+    os.environ["USE_LOCAL_DATA"] = "False"
+    # With no credentials, get_db() does not return None: _init_firebase()
+    # returns None and firestore.client() then raises ValueError (no default
+    # app). Treat that as "no client" so the failure path below actually runs.
+    try:
+        db = get_db()
+    except ValueError:
+        db = None
+    if db is None:
+        raise FileNotFoundError(
+            "No Firebase credentials found. Set FIREBASE_CREDENTIALS env var "
+            "or place firebase_credentials.json in the project root."
+        )
+    return db
 
 
 # ---------------------------------------------------------------------------
@@ -284,8 +277,8 @@ def main():
     print(f"\n[2/3] Building feature table ({min_s}–{max_s})...")
     t0 = time.time()
     ft = build_master_feature_table(min_season=min_s, max_season=max_s)
-    ft["home_team"] = ft["home_team"].apply(_normalize_team)
-    ft["away_team"] = ft["away_team"].apply(_normalize_team)
+    ft["home_team"] = ft["home_team"].apply(normalize_team_abbr)
+    ft["away_team"] = ft["away_team"].apply(normalize_team_abbr)
     print(f"  {len(ft)} completed games in {time.time()-t0:.1f}s")
 
     ft_lookup = build_ensemble_lookup(ft, nn_svc, xgb_svc, lr_svc)

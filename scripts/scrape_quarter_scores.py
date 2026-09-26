@@ -41,6 +41,8 @@ import requests
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
+from services.utils import normalize_team_abbr  # noqa: E402
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -51,9 +53,7 @@ GAMES_CSV = RAWDATA_DIR / "schedules" / "games.csv"
 
 def _normalize_nflverse_team(abbr: str) -> str:
     """Normalize nflverse historical team codes to current codes (matches TEAM_CODE_MAP output)."""
-    _map = {"OAK": "LV", "SD": "LAC", "STL": "LA", "LAR": "LA", "WSH": "WAS", "JAC": "JAX"}
-    abbr = str(abbr).upper().strip()
-    return _map.get(abbr, abbr)
+    return normalize_team_abbr(str(abbr))
 
 
 def _load_expected_games(seasons: list[int]) -> dict[tuple, set[str]]:

@@ -52,8 +52,9 @@ from services.nn_prediction_service import NNPredictionService, build_ensemble_l
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
 from services.nn_feature_engine import (
-    build_master_feature_table, FEATURE_COLUMNS, _normalize_team,
+    build_master_feature_table, FEATURE_COLUMNS,
 )
+from services.utils import normalize_team_abbr
 from services.constants import UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 import services.live_score_service as live_scores
 from services.email_service import send_alert_email
@@ -78,8 +79,8 @@ def _build_completed_results(games: pd.DataFrame, year: int) -> dict:
     for _, row in yr_games.iterrows():
         res = row.get("result")
         if pd.notna(res) and res != UNDRAFTED_SENTINEL and row.get("game_type") == "REG":
-            ht = _normalize_team(str(row.get("home_team", "") or ""))
-            at = _normalize_team(str(row.get("away_team", "") or ""))
+            ht = normalize_team_abbr(str(row.get("home_team", "") or ""))
+            at = normalize_team_abbr(str(row.get("away_team", "") or ""))
             wk = row.get("week")
             if ht and at and wk is not None:
                 completed[f"W{int(wk):02d}_{ht}_{at}"] = float(res)
@@ -147,8 +148,8 @@ def _publish_game_probs(game_ids: list, games: pd.DataFrame, year: int, game_pro
 
     pmap = {}
     for _, row in target.iterrows():
-        ht = _normalize_team(str(row.get('home_team', '') or ''))
-        at = _normalize_team(str(row.get('away_team', '') or ''))
+        ht = normalize_team_abbr(str(row.get('home_team', '') or ''))
+        at = normalize_team_abbr(str(row.get('away_team', '') or ''))
         wk = row.get('week')
         if not (ht and at and wk is not None):
             continue
@@ -201,8 +202,8 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
     unplayed_idx: list = []
 
     for i, (_, row) in enumerate(schedule_df.iterrows()):
-        ht = _normalize_team(str(row.get('home_team', '') or ''))
-        at = _normalize_team(str(row.get('away_team', '') or ''))
+        ht = normalize_team_abbr(str(row.get('home_team', '') or ''))
+        at = normalize_team_abbr(str(row.get('away_team', '') or ''))
         wk = row.get('week')
 
         pred = pred_lookup.get((year, int(wk), ht, at)) if (ht and at and wk is not None) else None
@@ -244,8 +245,8 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
 
         for i in unplayed_idx:
             row = schedule_df.iloc[i]
-            ht = _normalize_team(str(row.get('home_team', '') or ''))
-            at = _normalize_team(str(row.get('away_team', '') or ''))
+            ht = normalize_team_abbr(str(row.get('home_team', '') or ''))
+            at = normalize_team_abbr(str(row.get('away_team', '') or ''))
             wk = row.get('week')
             if not (ht and at and wk is not None):
                 continue
@@ -353,8 +354,8 @@ def build_year(standings, games, players, draft_order, draft_results,
             if 'pred_winner' in pc:
                 pmap = {}
                 for _, r in schedule_df[pc].dropna(subset=['pred_winner']).iterrows():
-                    ht = _normalize_team(str(r.get('home_team', '') or ''))
-                    at = _normalize_team(str(r.get('away_team', '') or ''))
+                    ht = normalize_team_abbr(str(r.get('home_team', '') or ''))
+                    at = normalize_team_abbr(str(r.get('away_team', '') or ''))
                     wk = r.get('week')
                     if ht and at and wk is not None:
                         entry = {
@@ -595,8 +596,8 @@ def main():
         try:
             from services.espn_injury_service import get_espn_injury_overrides
             target_pairs = list(zip(
-                target_rows["home_team"].map(_normalize_team),
-                target_rows["away_team"].map(_normalize_team),
+                target_rows["home_team"].map(normalize_team_abbr),
+                target_rows["away_team"].map(normalize_team_abbr),
             ))
             espn_overrides = get_espn_injury_overrides(target_pairs, year, week, RAWDATA_DIR)
         except Exception as e:

@@ -31,7 +31,8 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, log_loss, brier_score_loss, roc_auc_score
 
-from services.nn_feature_engine import build_master_feature_table, FEATURE_COLUMNS, RAWDATA_DIR, _read_csv_safe, _normalize_team
+from services.nn_feature_engine import build_master_feature_table, FEATURE_COLUMNS, RAWDATA_DIR, _read_csv_safe
+from services.utils import normalize_team_abbr
 from services.nn_prediction_service import NNPredictionService
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
@@ -104,8 +105,8 @@ def _load_elo_probs(rawdata_dir: pathlib.Path) -> pd.DataFrame:
     df = _read_csv_safe(str(rawdata_dir / "elo_computed.csv"))
     if df.empty:
         return pd.DataFrame()
-    df["home_team"] = df["home_team"].apply(_normalize_team)
-    df["away_team"] = df["away_team"].apply(_normalize_team)
+    df["home_team"] = df["home_team"].apply(normalize_team_abbr)
+    df["away_team"] = df["away_team"].apply(normalize_team_abbr)
     df["season"]    = pd.to_numeric(df["season"], errors="coerce")
     df["week"]      = pd.to_numeric(df["week"],   errors="coerce")
     df["elo_prob"]  = pd.to_numeric(df["home_exp"], errors="coerce").clip(PROB_CLIP_MIN, PROB_CLIP_MAX)
@@ -117,8 +118,8 @@ def _load_mov_probs(rawdata_dir: pathlib.Path) -> pd.DataFrame:
     df = _read_csv_safe(str(path))
     if df.empty:
         return pd.DataFrame()
-    df["home_team"]  = df["home_team"].apply(_normalize_team)
-    df["away_team"]  = df["away_team"].apply(_normalize_team)
+    df["home_team"]  = df["home_team"].apply(normalize_team_abbr)
+    df["away_team"]  = df["away_team"].apply(normalize_team_abbr)
     df["home_score"] = pd.to_numeric(df["home_score"], errors="coerce")
     df["away_score"] = pd.to_numeric(df["away_score"], errors="coerce")
     df["season"]     = pd.to_numeric(df["season"],     errors="coerce")

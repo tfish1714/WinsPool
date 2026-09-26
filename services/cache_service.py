@@ -140,7 +140,7 @@ def merge_game_predictions(df: pd.DataFrame, season: int) -> pd.DataFrame:
     Matches rows by W{wk:02d}_{home}_{away} key. Safe to call even when no
     predictions exist — returns df unchanged.
     """
-    from services.nn_feature_engine import _normalize_team
+    from services.utils import normalize_team_abbr
     preds = get_game_predictions(season)
     if not preds:
         return df
@@ -151,8 +151,8 @@ def merge_game_predictions(df: pd.DataFrame, season: int) -> pd.DataFrame:
 
     def _key(row):
         wk = row.get('week')
-        ht = _normalize_team(str(row.get('home_team', '') or ''))
-        at = _normalize_team(str(row.get('away_team', '') or ''))
+        ht = normalize_team_abbr(str(row.get('home_team', '') or ''))
+        at = normalize_team_abbr(str(row.get('away_team', '') or ''))
         if wk is None or not ht or not at:
             return None
         return f"W{int(wk):02d}_{ht}_{at}"

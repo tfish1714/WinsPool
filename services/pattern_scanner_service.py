@@ -35,7 +35,7 @@ import numpy as np
 import pandas as pd
 
 from services.betting_screener_service import FILTERABLE_FEATURES, _feature_row, _flip_row, grade_bet
-from services.nn_feature_engine import _normalize_team
+from services.utils import normalize_team_abbr
 
 DEFAULT_TEST_SEASONS = 5
 DEFAULT_MIN_SAMPLE = 50
@@ -52,8 +52,8 @@ def build_bet_frame(predictions_by_season: dict, games_df) -> pd.DataFrame:
     results_by_key = {}
     if games_df is not None and not games_df.empty:
         for row in games_df.itertuples(index=False):
-            ht = _normalize_team(str(getattr(row, "home_team", "") or ""))
-            at = _normalize_team(str(getattr(row, "away_team", "") or ""))
+            ht = normalize_team_abbr(str(getattr(row, "home_team", "") or ""))
+            at = normalize_team_abbr(str(getattr(row, "away_team", "") or ""))
             wk = getattr(row, "week", None)
             season = getattr(row, "season", None)
             if ht and at and wk is not None and season is not None:

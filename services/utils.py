@@ -2,7 +2,7 @@ import math
 
 import pandas as pd
 
-from services.constants import PROB_CLIP_MAX, PROB_CLIP_MIN, SPREAD_TO_PROB_SCALE
+from services.constants import PROB_CLIP_MAX, PROB_CLIP_MIN, SPREAD_TO_PROB_SCALE, TEAM_ABBR_MAP
 
 
 # Sign convention throughout (nflverse): a positive spread_line / model_spread
@@ -98,13 +98,15 @@ def get_team_logo_url(team_code: str) -> str:
     return f"https://a.espncdn.com/i/teamlogos/nfl/500/{code}.png"
 
 def normalize_team_abbr(abbr: str) -> str:
-    """Maps various source abbreviations to the canonical ones used in the repo."""
-    mapping = {
-        "LAR": "LA",
-        "WSH": "WAS",
-        "JAC": "JAX"
-    }
-    return mapping.get(abbr.upper(), abbr.upper())
+    """Maps various source abbreviations to the canonical ones used in the repo.
+
+    Non-string input (pandas NaN, None) is returned unchanged so this can be
+    applied over a DataFrame column without raising.
+    """
+    if not isinstance(abbr, str):
+        return abbr
+    cleaned = abbr.upper().strip()
+    return TEAM_ABBR_MAP.get(cleaned, cleaned)
 
 
 def abbreviate_player_name(name: str) -> str:

@@ -28,7 +28,7 @@ import math
 from typing import Optional
 
 from services.cache_service import get_game_predictions
-from services.nn_feature_engine import _normalize_team
+from services.utils import normalize_team_abbr
 
 # Elo data starts in 2006 (see services/cache_service.py's get_all_elo_history);
 # earlier seasons have Vegas spreads but no elo_diff, so they'd only ever match
@@ -157,10 +157,10 @@ def grade_ats_pick(pick, home_team: str, away_team: str,
     record can never produce a confident-looking grade."""
     if not pick:
         return None
-    normalized = _normalize_team(str(pick))
-    if normalized == _normalize_team(str(home_team)):
+    normalized = normalize_team_abbr(str(pick))
+    if normalized == normalize_team_abbr(str(home_team)):
         side = "home"
-    elif normalized == _normalize_team(str(away_team)):
+    elif normalized == normalize_team_abbr(str(away_team)):
         side = "away"
     else:
         return None
@@ -231,8 +231,8 @@ def screen_games(
     results_by_key = {}
     if games_df is not None and not games_df.empty:
         for row in games_df.itertuples(index=False):
-            ht = _normalize_team(str(getattr(row, "home_team", "") or ""))
-            at = _normalize_team(str(getattr(row, "away_team", "") or ""))
+            ht = normalize_team_abbr(str(getattr(row, "home_team", "") or ""))
+            at = normalize_team_abbr(str(getattr(row, "away_team", "") or ""))
             wk = getattr(row, "week", None)
             season = getattr(row, "season", None)
             if ht and at and wk is not None and season is not None:

@@ -16,7 +16,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from services.constants import ELO_TO_SPREAD
+from services.constants import ELO_TO_SPREAD, TEAM_ABBR_MAP  # noqa: F401  (TEAM_ABBR_MAP re-exported)
+from services.utils import normalize_team_abbr
 
 logger = logging.getLogger(__name__)
 
@@ -109,10 +110,8 @@ def compute_injury_discount(age: float) -> float:
     else:
         return INJURY_DISCOUNT_OLD
 
-# Canonical team abbreviation normalization
-TEAM_ABBR_MAP = {
-    "LAR": "LA", "WSH": "WAS", "JAC": "JAX", "OAK": "LV", "SD": "LAC", "STL": "LA"
-}
+# Canonical team abbreviation normalization: TEAM_ABBR_MAP lives in
+# services.constants and is applied by services.utils.normalize_team_abbr.
 
 TURNOVER_REGRESSION = 0.50
 
@@ -158,9 +157,8 @@ FEATURE_COLUMNS = [
 # ---------------------------------------------------------------------------
 
 def _normalize_team(abbr: str) -> str:
-    if not isinstance(abbr, str):
-        return abbr
-    return TEAM_ABBR_MAP.get(abbr.upper().strip(), abbr.upper().strip())
+    """Backward-compatible alias for services.utils.normalize_team_abbr."""
+    return normalize_team_abbr(abbr)
 
 
 def _read_csv_safe(path: str, **kwargs) -> pd.DataFrame:

@@ -225,7 +225,7 @@ def _project_fold_in_season(fold_year, nn_svc, xgb_svc, lr_svc, n_sims: int = 20
     from services.nn_projection_engine import NNProjectionEngine
     from scripts.daily_nfl_sync import load_games
     from scripts.cache_builder import _build_completed_results
-    from services.nn_feature_engine import _normalize_team
+    from services.utils import normalize_team_abbr
 
     engine = NNProjectionEngine(nn_svc=nn_svc, xgb_svc=xgb_svc, lr_svc=lr_svc)
     engine.initialize(fold_year)
@@ -234,8 +234,8 @@ def _project_fold_in_season(fold_year, nn_svc, xgb_svc, lr_svc, n_sims: int = 20
     yr_games = all_games[
         (all_games["season"] == fold_year) & (all_games["game_type"] == "REG")
     ].copy()
-    yr_games["home_team"] = yr_games["home_team"].apply(_normalize_team)
-    yr_games["away_team"] = yr_games["away_team"].apply(_normalize_team)
+    yr_games["home_team"] = yr_games["home_team"].apply(normalize_team_abbr)
+    yr_games["away_team"] = yr_games["away_team"].apply(normalize_team_abbr)
 
     schedule = yr_games[["season", "week", "home_team", "away_team"]].copy()
 
