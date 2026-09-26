@@ -106,3 +106,10 @@ PRESEASON_ELO_WEIGHTS = {
     "off_rush_epa": 0.09,
     "ol_av":        0.02,
 }
+
+# Playoff Race page/nav activation: the link is hidden in the early season
+# and appears once the active season reaches this week.
+PLAYOFF_RACE_MIN_WEEK = 10
+
+# "Podium" for the playoff-race magic number: finishing in the top N.
+PODIUM_SIZE = 3

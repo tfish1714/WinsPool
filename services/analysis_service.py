@@ -9,8 +9,8 @@ try:
     pd.set_option('future.no_silent_downcasting', True)
 except Exception:
     pass  # Option added in pandas 2.2; silently skip on older versions
-from typing import Dict, List, Any
-from services.constants import UNDRAFTED_SENTINEL, TIEBREAKER_SORT_COLS, DRAFT_ROUNDS, TEAMS_PER_PLAYER
+from typing import Dict, List, Any, Optional
+from services.constants import UNDRAFTED_SENTINEL, TIEBREAKER_SORT_COLS, DRAFT_ROUNDS, TEAMS_PER_PLAYER, PODIUM_SIZE
 from services.utils import filter_season
 
 logger = logging.getLogger(__name__)
@@ -197,6 +197,42 @@ def create_what_if_scenario_matrix(schedule: pd.DataFrame, record_by_week: pd.Da
     return scenario_matrix
 
 
+def _kth_highest(values: List[int], k: int) -> Optional[int]:
+    """The k-th highest value (1-indexed), or None when fewer than k values exist."""
+    ordered = sorted(values, reverse=True)
+    return ordered[k - 1] if len(ordered) >= k else None
+
+
+def _compute_magic_numbers(records: List[Dict[str, Any]]) -> None:
+    """Attach clinch and elimination magic numbers to each record in place.
+
+    magic_number: wins this player still needs to be strictly ahead of every
+    opponent's best possible finish (opponent_max_wins - current_wins + 1),
+    clamped at 0 (0 == clinched). podium_magic_number is the same test against
+    the PODIUM_SIZE-th best opponent, so at most PODIUM_SIZE - 1 opponents can
+    still reach the player. eliminated / podium_eliminated use the strict
+    `>=` convention (a tie on wins is decided by tiebreakers later, so it is
+    not treated as a guaranteed loss until an opponent's CURRENT wins already
+    reach this player's best possible total).
+    """
+    for rec in records:
+        others = [o for o in records if o is not rec]
+        other_max = [o['max_wins'] for o in others]
+        other_cur = [o['current_wins'] for o in others]
+
+        first_bar = max(other_max) if other_max else None
+        rec['magic_number'] = (
+            0 if first_bar is None else max(0, first_bar - rec['current_wins'] + 1)
+        )
+        podium_bar = _kth_highest(other_max, PODIUM_SIZE)
+        rec['podium_magic_number'] = (
+            0 if podium_bar is None else max(0, podium_bar - rec['current_wins'] + 1)
+        )
+        reached = sum(1 for c in other_cur if c >= rec['max_wins'])
+        rec['eliminated'] = reached >= 1
+        rec['podium_eliminated'] = reached >= PODIUM_SIZE
+
+
 def calculate_playoff_race(schedule: pd.DataFrame, standings_df: pd.DataFrame) -> List[Dict[str, Any]]:
     """
     For each player, compute:
@@ -271,6 +307,8 @@ def calculate_playoff_race(schedule: pd.DataFrame, standings_df: pd.DataFrame) -
             })
         rec['race'] = race_info
         rec['rank'] = i + 1
+
+    _compute_magic_numbers(records)
 
     if is_debug:
         logger.debug("calculate_playoff_race processing took %.3fs", time.time() - start_op)

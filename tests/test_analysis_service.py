@@ -105,3 +105,117 @@ def test_get_remaining_games_treats_sentinel_result_as_unplayed():
         {"result": 10.0, "fullName_away": "TFish", "fullName_home": "Opp"},
     ])
     assert get_remaining_games("TFish", df) == 1
+
+
+def _race_schedule(games):
+    """games: list of (away_owner, home_owner, result). result None = unplayed.
+
+    result > 0 means the home owner won, result < 0 means the away owner won.
+    """
+    return pd.DataFrame([
+        {"fullName_away": a, "fullName_home": h,
+         "result": (-1000 if r is None else r), "week": i + 1}
+        for i, (a, h, r) in enumerate(games)
+    ])
+
+
+def _hand_built_race():
+    # Hand-computed state (current_wins / remaining / max_wins):
+    #   A: 2 / 1 / 3   (beat B twice at home; C@A unplayed)
+    #   B: 0 / 1 / 1   (D@B unplayed)
+    #   C: 1 / 1 / 2   (won at D; C@A unplayed)
+    #   D: 0 / 1 / 1   (lost to C; D@B unplayed)
+    schedule = _race_schedule([
+        ("B", "A", 3), ("B", "A", 7), ("C", "D", -4),
+        ("C", "A", None), ("D", "B", None),
+    ])
+    return {r["player"]: r for r in calculate_playoff_race(schedule, pd.DataFrame())}
+
+
+def test_magic_number_concrete_values_hand_computed():
+    race = _hand_built_race()
+    assert (race["A"]["current_wins"], race["A"]["max_wins"]) == (2, 3)
+    assert (race["B"]["current_wins"], race["B"]["max_wins"]) == (0, 1)
+    assert (race["C"]["current_wins"], race["C"]["max_wins"]) == (1, 2)
+    assert (race["D"]["current_wins"], race["D"]["max_wins"]) == (0, 1)
+    # first place: best opponent max - own wins + 1
+    assert race["A"]["magic_number"] == 1   # 2 - 2 + 1
+    assert race["B"]["magic_number"] == 4   # 3 - 0 + 1
+    assert race["C"]["magic_number"] == 3   # 3 - 1 + 1
+    assert race["D"]["magic_number"] == 4   # 3 - 0 + 1
+    # podium: 3rd-highest opponent max - own wins + 1, clamped at 0
+    assert race["A"]["podium_magic_number"] == 0   # opp max 2,1,1 -> 1 - 2 + 1 = 0
+    assert race["B"]["podium_magic_number"] == 2   # opp max 3,2,1 -> 1 - 0 + 1
+    assert race["C"]["podium_magic_number"] == 1   # opp max 3,1,1 -> 1 - 1 + 1
+    assert race["D"]["podium_magic_number"] == 2   # opp max 3,2,1 -> 1 - 0 + 1
+
+
+def test_eliminated_flags_hand_computed():
+    race = _hand_built_race()
+    assert race["A"]["eliminated"] is False        # nobody has 3 wins
+    assert race["B"]["eliminated"] is True         # A(2), C(1) already >= B max 1
+    assert race["C"]["eliminated"] is True         # A(2) >= C max 2
+    assert race["D"]["eliminated"] is True
+    # only 2 opponents at/above B's max, need PODIUM_SIZE (3) for podium elimination
+    assert all(race[p]["podium_eliminated"] is False for p in "ABCD")
+
+
+def test_podium_eliminated_when_three_opponents_already_reach_max():
+    schedule = _race_schedule([
+        ("X", "P1", 5), ("X", "P2", 5), ("X", "P3", 5), ("X", "P1", None),
+    ])
+    race = {r["player"]: r for r in calculate_playoff_race(schedule, pd.DataFrame())}
+    assert race["X"]["max_wins"] == 1
+    assert race["X"]["eliminated"] is True
+    assert race["X"]["podium_eliminated"] is True
+    assert race["P1"]["podium_eliminated"] is False
+
+
+def test_magic_number_zero_when_clinched():
+    # A already has 3 wins and nobody else can reach 3.
+    schedule = _race_schedule([("B", "A", 1), ("B", "A", 1), ("B", "A", 1)])
+    race = {r["player"]: r for r in calculate_playoff_race(schedule, pd.DataFrame())}
+    assert race["A"]["current_wins"] == 3
+    assert race["A"]["magic_number"] == 0
+    assert race["A"]["podium_magic_number"] == 0
+
+
+def test_magic_number_single_player_does_not_crash():
+    schedule = _race_schedule([("A", "A", 5)])
+    race = calculate_playoff_race(schedule, pd.DataFrame())
+    assert len(race) == 1
+    assert race[0]["magic_number"] == 0
+    assert race[0]["podium_magic_number"] == 0
+    assert race[0]["eliminated"] is False
+    assert race[0]["podium_eliminated"] is False
+
+
+def test_magic_number_single_player_with_remaining_games():
+    schedule = _race_schedule([("A", "A", None), ("A", "A", None)])
+    race = calculate_playoff_race(schedule, pd.DataFrame())
+    assert len(race) == 1
+    assert race[0]["magic_number"] == 0
+    assert race[0]["podium_magic_number"] == 0
+    assert race[0]["eliminated"] is False
+
+
+def test_magic_number_two_players_podium_trivially_clinched():
+    # Fewer than PODIUM_SIZE opponents: podium is trivially clinched.
+    schedule = _race_schedule([("B", "A", 1), ("A", "B", None)])
+    race = {r["player"]: r for r in calculate_playoff_race(schedule, pd.DataFrame())}
+    assert race["A"]["podium_magic_number"] == 0
+    assert race["B"]["podium_magic_number"] == 0
+    assert race["B"]["podium_eliminated"] is False
+
+
+def test_existing_playoff_race_keys_unchanged():
+    schedule = _race_schedule([("B", "A", -1), ("A", "B", None)])
+    rec = calculate_playoff_race(schedule, pd.DataFrame())[0]
+    for key in ("player", "current_wins", "remaining_games", "max_wins", "race", "rank"):
+        assert key in rec
+
+
+def test_playoff_constants_importable():
+    from services.constants import PLAYOFF_RACE_MIN_WEEK, PODIUM_SIZE
+    assert PLAYOFF_RACE_MIN_WEEK == 10
+    assert PODIUM_SIZE == 3
