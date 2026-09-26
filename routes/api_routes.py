@@ -502,6 +502,26 @@ async def push_client_error(request: Request, _auth: dict = Depends(require_auth
     return JSONResponse(content={"ok": True})
 
 
+def _active_season_latest_week() -> int:
+    """Latest week of the active season, or 0 when it cannot be determined.
+
+    The nav uses this to decide whether the Playoff Race link is shown, so
+    every failure path returns 0 (link stays hidden) rather than raising.
+    """
+    from services.data_service import get_active_season, get_latest_week_for_year
+    _, _, games, _, _, draft_results, rules = load_data()
+    season = get_active_season(games, draft_results, rules)
+    return int(get_latest_week_for_year(games, season))
+
+
+def _safe_latest_week() -> int:
+    try:
+        return max(0, int(_active_season_latest_week()))
+    except Exception:
+        logger.exception("config: could not determine latest_week")
+        return 0
+
+
 @router.get("/config/settings")
 def get_config():
     """Returns app config. Public — all users need draft_active on page load."""
@@ -509,6 +529,7 @@ def get_config():
     version = {
         "app_version": os.environ.get("APP_VERSION", "dev"),
         "app_deployed_at": os.environ.get("APP_DEPLOYED_AT", ""),
+        "latest_week": _safe_latest_week(),
     }
     try:
         return JSONResponse(content={**get_config_settings(), **version})

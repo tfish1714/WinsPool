@@ -90,3 +90,22 @@ def test_set_config_settings_no_auth_returns_401():
     """POST /api/admin/config/settings with no auth token returns 401."""
     response = client.post("/api/admin/config/settings", json={"draft_active": True})
     assert response.status_code == 401
+
+
+def test_get_config_settings_includes_integer_latest_week():
+    data = client.get("/api/config/settings").json()
+    assert "latest_week" in data
+    assert isinstance(data["latest_week"], int) and data["latest_week"] >= 0
+
+
+def test_get_config_latest_week_fails_closed_to_zero(monkeypatch):
+    import routes.api_routes as api_routes
+
+    def boom():
+        raise RuntimeError("data unavailable")
+
+    monkeypatch.setattr(api_routes, "_active_season_latest_week", boom)
+    # The endpoint must still return 200 with latest_week == 0.
+    response = client.get("/api/config/settings")
+    assert response.status_code == 200
+    assert response.json()["latest_week"] == 0
