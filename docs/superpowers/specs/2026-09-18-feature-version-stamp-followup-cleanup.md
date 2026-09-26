@@ -49,6 +49,13 @@ implementing item #1, not the rest of the rollout.
 
 ## Observability / durability gaps
 
+> **Update 2026-09-25:** promotion gate decisions are now logged as
+> structured `promotion_gate ...` lines from `services/model_promotion.py`
+> (`promotion_gate schema_check ...` and a single
+> `promotion_gate decision=PROMOTED|REJECTED|SKIPPED_NO_BASELINE ...` per
+> gate call, with candidate/baseline accuracy and AUC). The force-promote
+> branches still log the caught error and stamp `force_promoted`.
+
 - **`--force-promote` discards the exact failure detail it's overriding.**
   `services/nn_prediction_service.py`, `services/xgb_prediction_service.py`,
   `services/lr_prediction_service.py` all use a bare `except ValueError:`

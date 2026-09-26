@@ -246,7 +246,7 @@ class XGBPredictionService:
 
         from services.model_promotion import find_same_schema_best, assert_promotion_ready
         entries = [v for v in registry.values() if isinstance(v, dict) and "feature_columns" in v]
-        best_metrics = find_same_schema_best(entries, FEATURE_COLUMNS)
+        best_metrics = find_same_schema_best(entries, FEATURE_COLUMNS, model_name="XGB")
         force_promoted = False
         try:
             assert_promotion_ready(self._eval_metrics or {}, best_metrics, "XGB")
