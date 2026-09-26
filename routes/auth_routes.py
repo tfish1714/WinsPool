@@ -1,5 +1,6 @@
 """routes/auth_routes.py — Authentication and player profile endpoints."""
 import hashlib
+import hmac
 import logging
 import os
 import re
@@ -41,6 +42,7 @@ def _env_int(name: str, default: int) -> int:
 # check_player (email enumeration) gets a looser bucket of its own because
 # the sign-in screen calls it on every email entry.
 _login_limiter = get_limiter("auth-login", _env_int("AUTH_RATE_LIMIT_PER_MINUTE", 5))
+_MFA_MAX_ATTEMPTS = 5
 _lookup_limiter = get_limiter("auth-lookup", _env_int("AUTH_LOOKUP_RATE_LIMIT_PER_MINUTE", 30))
 
 
@@ -269,7 +271,8 @@ async def login(request: Request, body: LoginRequest):
             mfa_token_hash = hashlib.sha256(mfa_code.encode()).hexdigest()
             update_player_profile(str(player["playerId"]), {
                 "mfa_token": mfa_token_hash,
-                "mfa_expiry": time.time() + 600
+                "mfa_expiry": time.time() + 600,
+                "mfa_attempts": 0,
             })
             player_email = player.get("email")
             if player_email:
@@ -326,7 +329,8 @@ async def get_profile(_auth: dict = Depends(require_auth)):
 
 
 @router.post("/profile/update")
-async def update_profile(body: UpdateProfileRequest, request: Request):
+async def update_profile(body: UpdateProfileRequest, request: Request,
+                         _auth: dict = Depends(require_auth)):
     # Shares the login bucket: this endpoint verifies currentPassword, so it is
     # otherwise an unthrottled password-guess oracle that skips lockout.
     limited = _rate_limited_response(request, _login_limiter)
@@ -334,6 +338,10 @@ async def update_profile(body: UpdateProfileRequest, request: Request):
         return limited
     try:
         pid = body.playerId
+        # A session may only edit its own profile. Both sides are normalised to
+        # str: the JWT sub is a str, playerId may be numeric-ish.
+        if str(_auth["sub"]) != str(pid):
+            return JSONResponse(status_code=403, content={"error": "Forbidden."})
         full_name = body.fullName.strip()
         nickname = body.nickName.strip()
         new_email = body.email.strip().lower()
@@ -349,7 +357,22 @@ async def update_profile(body: UpdateProfileRequest, request: Request):
         if not player:
             return JSONResponse(status_code=404, content={"error": "Player not found."})
 
+        # Same lockout gate as /api/login.
+        lockout = player.get("lockout_until")
+        if lockout and time.time() < lockout:
+            rem = int((lockout - time.time()) // 60)
+            return JSONResponse(status_code=429, content={"error": f"Account locked. Try again in {rem} minutes."})
+
         if not verify_password(curr_password, player.get("password_hash")):
+            # Count the failure exactly as /api/login does.
+            fails = _int_field(player, "failed_login_attempts") + 1
+            lockout_ts = time.time() + 1800 if fails >= 5 else None
+            update_player_profile(str(player["playerId"]), {
+                "failed_login_attempts": fails,
+                **(({"lockout_until": lockout_ts}) if lockout_ts else {})
+            })
+            if lockout_ts:
+                return JSONResponse(status_code=429, content={"error": "Too many failed login attempts. Account locked for 30 minutes."})
             return JSONResponse(status_code=401, content={"error": "Incorrect current password."})
 
         if new_email and new_email != player.get("email"):
@@ -371,6 +394,9 @@ async def update_profile(body: UpdateProfileRequest, request: Request):
             updates["must_change_password"] = False
 
         updates["mfa_enabled"] = bool(mfa_enabled)
+        # A verified password clears the counters, mirroring login's reset_fields.
+        updates["failed_login_attempts"] = 0
+        updates["lockout_until"] = None
 
         if updates:
             update_player_profile(str(pid), updates)
@@ -382,7 +408,12 @@ async def update_profile(body: UpdateProfileRequest, request: Request):
 
 
 @router.post("/mfa/verify")
-async def verify_mfa(body: MfaVerifyRequest):
+async def verify_mfa(body: MfaVerifyRequest, request: Request):
+    # Unauthenticated by design (the caller has no session yet), so the per-IP
+    # login bucket is the first line of defense against code guessing.
+    limited = _rate_limited_response(request, _login_limiter)
+    if limited:
+        return limited
     try:
         pid = body.playerId
         code = body.code
@@ -397,14 +428,26 @@ async def verify_mfa(body: MfaVerifyRequest):
         stored_hash = player.get("mfa_token")
         expiry = player.get("mfa_expiry", 0)
 
-        if not stored_hash or time.time() > expiry:
+        # An unset Firestore field arrives as float('nan') (truthy), so require
+        # a real non-empty str before treating the code as pending.
+        if not isinstance(stored_hash, str) or not stored_hash or time.time() > expiry:
             return JSONResponse(status_code=401, content={"error": "MFA code expired or invalid."})
 
+        attempts = _int_field(player, "mfa_attempts")
+        if attempts >= _MFA_MAX_ATTEMPTS:
+            return JSONResponse(status_code=401, content={"error": "Too many incorrect codes. Please log in again to get a new code."})
+
         submitted_hash = hashlib.sha256(str(code).encode()).hexdigest()
-        if submitted_hash != stored_hash:
+        if not hmac.compare_digest(submitted_hash.encode(), stored_hash.encode()):
+            attempts += 1
+            if attempts >= _MFA_MAX_ATTEMPTS:
+                update_player_profile(pid, {"mfa_token": None, "mfa_expiry": 0, "mfa_attempts": attempts})
+                logger.warning("MFA code invalidated after %d wrong attempts for player %s", attempts, pid)
+                return JSONResponse(status_code=401, content={"error": "Too many incorrect codes. Please log in again to get a new code."})
+            update_player_profile(pid, {"mfa_attempts": attempts})
             return JSONResponse(status_code=401, content={"error": "Incorrect verification code."})
 
-        update_player_profile(pid, {"mfa_token": None, "mfa_expiry": 0, "last_login": time.time()})
+        update_player_profile(pid, {"mfa_token": None, "mfa_expiry": 0, "mfa_attempts": 0, "last_login": time.time()})
 
         role = _player_role(player)
         token = create_token(int(pid), role)

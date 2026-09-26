@@ -320,7 +320,7 @@ class TestMfaVerify:
         assert "expired" in resp.json()["error"].lower()
 
     def test_mfa_verify_wrong_code_returns_401(self):
-        with patch("services.db_service.get_player_by_id", return_value=self._player()):
+        with patch("services.db_service.get_player_by_id", return_value=self._player()),              patch("routes.auth_routes.update_player_profile"):
             resp = client.post("/api/mfa/verify", json={"playerId": "99", "code": "000000"})
         assert resp.status_code == 401
 
@@ -401,13 +401,13 @@ class TestProfileUpdate:
         resp = client.post("/api/profile/update", json={
             "playerId": "99",
             "currentPassword": "",
-        })
+        }, headers=_bearer(99))
         assert resp.status_code == 400
 
     def test_profile_update_wrong_password_returns_401(self):
         with patch("services.db_service.get_player_by_id", return_value=self._player()), \
              patch("routes.auth_routes.verify_password", return_value=False):
-            resp = client.post("/api/profile/update", json=self._BASE_BODY)
+            resp = client.post("/api/profile/update", json=self._BASE_BODY, headers=_bearer(99))
         assert resp.status_code == 401
 
     def test_profile_update_email_collision_returns_400(self):
@@ -415,7 +415,7 @@ class TestProfileUpdate:
         with patch("services.db_service.get_player_by_id", return_value=self._player()), \
              patch("routes.auth_routes.verify_password", return_value=True), \
              patch("routes.auth_routes.get_player_by_email", return_value=collision):
-            resp = client.post("/api/profile/update", json=self._BASE_BODY)
+            resp = client.post("/api/profile/update", json=self._BASE_BODY, headers=_bearer(99))
         assert resp.status_code == 400
         assert "already in use" in resp.json()["error"].lower()
 
@@ -424,7 +424,7 @@ class TestProfileUpdate:
         with patch("services.db_service.get_player_by_id", return_value=self._player()), \
              patch("routes.auth_routes.verify_password", return_value=True), \
              patch("routes.auth_routes.get_player_by_email", return_value=None):
-            resp = client.post("/api/profile/update", json=body)
+            resp = client.post("/api/profile/update", json=body, headers=_bearer(99))
         assert resp.status_code == 400
 
     def test_profile_update_happy_path_returns_200(self):
@@ -433,9 +433,112 @@ class TestProfileUpdate:
         with patch("services.db_service.get_player_by_id", return_value=self._player()), \
              patch("routes.auth_routes.verify_password", return_value=True), \
              patch("routes.auth_routes.update_player_profile") as mock_update:
-            resp = client.post("/api/profile/update", json=body)
+            resp = client.post("/api/profile/update", json=body, headers=_bearer(99))
         assert resp.status_code == 200
         mock_update.assert_called_once()
+
+
+def _bearer(player_id):
+    from services.session_service import create_token
+    return {"Authorization": f"Bearer {create_token(player_id, 'user')}"}
+
+
+class TestProfileUpdateAuth:
+    """/api/profile/update requires a session and only edits the caller's own profile."""
+
+    _BODY = {
+        "playerId": "99",
+        "currentPassword": "OldPass1!LongPwd",
+        "fullName": "New Name",
+        "nickName": "nn",
+        "email": "old@test.com",
+        "mfaEnabled": False,
+    }
+
+    def _player(self, **extra):
+        return {
+            "playerId": 99, "email": "old@test.com", "password_hash": "hash",
+            "role": "user", "failed_login_attempts": 0, "lockout_until": None,
+            **extra,
+        }
+
+    def test_no_token_returns_401(self):
+        resp = client.post("/api/profile/update", json=self._BODY)
+        assert resp.status_code == 401
+
+    def test_garbage_cookie_returns_401_not_500(self):
+        resp = client.post("/api/profile/update", json=self._BODY,
+                           cookies={"session_token": "garbage"})
+        assert resp.status_code == 401
+
+    def test_token_for_other_player_returns_403(self):
+        with patch("services.db_service.get_player_by_id", return_value=self._player()) as get_p,              patch("routes.auth_routes.verify_password", return_value=True) as vp,              patch("routes.auth_routes.update_player_profile") as upd:
+            resp = client.post("/api/profile/update", json=self._BODY, headers=_bearer(7))
+        assert resp.status_code == 403
+        assert resp.json() == {"error": "Forbidden."}
+        get_p.assert_not_called()
+        vp.assert_not_called()
+        upd.assert_not_called()
+
+    def test_matching_token_and_correct_password_returns_200(self):
+        with patch("services.db_service.get_player_by_id", return_value=self._player()),              patch("routes.auth_routes.verify_password", return_value=True),              patch("routes.auth_routes.update_player_profile") as upd:
+            resp = client.post("/api/profile/update", json=self._BODY, headers=_bearer(99))
+        assert resp.status_code == 200
+        assert resp.json() == {"message": "Profile updated successfully!"}
+        upd.assert_called_once()
+
+    def test_cookie_only_auth_works(self):
+        from services.session_service import create_token
+        with patch("services.db_service.get_player_by_id", return_value=self._player()),              patch("routes.auth_routes.verify_password", return_value=True),              patch("routes.auth_routes.update_player_profile"):
+            resp = client.post("/api/profile/update", json=self._BODY,
+                               cookies={"session_token": create_token(99, "user")})
+        assert resp.status_code == 200
+
+    def test_success_resets_failure_counters_in_same_write(self):
+        with patch("services.db_service.get_player_by_id",
+                   return_value=self._player(failed_login_attempts=3)),              patch("routes.auth_routes.verify_password", return_value=True),              patch("routes.auth_routes.update_player_profile") as upd:
+            client.post("/api/profile/update", json=self._BODY, headers=_bearer(99))
+        upd.assert_called_once()
+        sent = upd.call_args[0][1]
+        assert sent["failed_login_attempts"] == 0
+        assert sent["lockout_until"] is None
+
+    def test_wrong_password_increments_failed_attempts(self):
+        with patch("services.db_service.get_player_by_id",
+                   return_value=self._player(failed_login_attempts=1)),              patch("routes.auth_routes.verify_password", return_value=False),              patch("routes.auth_routes.update_player_profile") as upd:
+            resp = client.post("/api/profile/update", json=self._BODY, headers=_bearer(99))
+        assert resp.status_code == 401
+        assert resp.json()["error"] == "Incorrect current password."
+        upd.assert_called_once_with("99", {"failed_login_attempts": 2})
+
+    def test_nan_failed_attempts_treated_as_zero(self):
+        with patch("services.db_service.get_player_by_id",
+                   return_value=self._player(failed_login_attempts=float("nan"))),              patch("routes.auth_routes.verify_password", return_value=False),              patch("routes.auth_routes.update_player_profile") as upd:
+            resp = client.post("/api/profile/update", json=self._BODY, headers=_bearer(99))
+        assert resp.status_code == 401
+        upd.assert_called_once_with("99", {"failed_login_attempts": 1})
+
+    def test_fifth_wrong_password_locks_account_and_blocks_correct_password_and_login(self):
+        store = self._player(failed_login_attempts=4)
+
+        def fake_update(pid, updates):
+            store.update(updates)
+
+        with patch("services.db_service.get_player_by_id", side_effect=lambda pid: dict(store)),              patch("routes.auth_routes.get_player_by_email", side_effect=lambda e: dict(store)),              patch("routes.auth_routes.verify_password", side_effect=lambda p, h: p == "OldPass1!LongPwd"),              patch("routes.auth_routes.update_player_profile", side_effect=fake_update):
+            bad = client.post("/api/profile/update",
+                              json={**self._BODY, "currentPassword": "wrong"}, headers=_bearer(99))
+            assert bad.status_code == 429
+            assert "locked" in bad.json()["error"].lower()
+            assert store["lockout_until"] > time.time()
+
+            good = client.post("/api/profile/update", json=self._BODY, headers=_bearer(99))
+            assert good.status_code == 429
+            assert "locked" in good.json()["error"].lower()
+
+            login = client.post("/api/login",
+                                json={"email": "old@test.com", "password": "OldPass1!LongPwd"})
+            assert login.status_code == 429
+            assert "locked" in login.json()["error"].lower()
 
 
 # ── Last Login Tracking Tests ──────────────────────────────────────────────
@@ -642,7 +745,9 @@ def test_env_int_zero_and_negative_clamp_to_one(monkeypatch):
 
 
 def _profile_update(c):
-    return c.post("/api/profile/update", json={"playerId": "1", "currentPassword": "wrong"})
+    return c.post("/api/profile/update",
+                  json={"playerId": "1", "currentPassword": "wrong"},
+                  headers=_bearer(1))
 
 
 def test_profile_update_rate_limited_after_five_attempts_sharing_login_bucket(monkeypatch):
@@ -656,3 +761,83 @@ def test_profile_update_rate_limited_after_five_attempts_sharing_login_bucket(mo
     # shared bucket: login is now blocked too
     monkeypatch.setattr("routes.auth_routes.get_player_by_email", lambda e: None)
     assert _login_unknown(c).status_code == 429
+
+
+class TestMfaAttemptCap:
+    _CODE = "123456"
+    _HASH = hashlib.sha256(_CODE.encode()).hexdigest()
+
+    def _store(self, **extra):
+        return {
+            "playerId": 99, "email": "mfa@test.com", "role": "user",
+            "mfa_token": self._HASH, "mfa_expiry": time.time() + 600,
+            **extra,
+        }
+
+    def _verify(self, store, code):
+        def fake_update(pid, updates):
+            store.update(updates)
+        with patch("services.db_service.get_player_by_id", side_effect=lambda pid: dict(store)), \
+             patch("routes.auth_routes.update_player_profile", side_effect=fake_update):
+            return client.post("/api/mfa/verify", json={"playerId": "99", "code": code})
+
+    def test_four_wrong_codes_leave_code_valid(self):
+        store = self._store()
+        for _ in range(4):
+            assert self._verify(store, "000000").status_code == 401
+        assert store["mfa_attempts"] == 4
+        assert store["mfa_token"] == self._HASH
+        assert self._verify(store, self._CODE).status_code == 200
+
+    def test_fifth_wrong_code_invalidates_code_and_correct_code_then_fails(self):
+        store = self._store(mfa_attempts=4)
+        resp = self._verify(store, "000000")
+        assert resp.status_code == 401
+        assert "log in again" in resp.json()["error"].lower()
+        assert store["mfa_token"] is None
+        assert store["mfa_expiry"] == 0
+        assert self._verify(store, self._CODE).status_code == 401
+
+    def test_correct_code_at_or_over_cap_is_rejected(self):
+        store = self._store(mfa_attempts=5)
+        assert self._verify(store, self._CODE).status_code == 401
+
+    def test_successful_verify_clears_code_and_attempts(self):
+        store = self._store(mfa_attempts=2)
+        assert self._verify(store, self._CODE).status_code == 200
+        assert store["mfa_token"] is None
+        assert store["mfa_expiry"] == 0
+        assert store["mfa_attempts"] == 0
+
+    def test_nan_and_missing_attempts_count_as_zero(self):
+        store = self._store(mfa_attempts=float("nan"))
+        assert self._verify(store, "000000").status_code == 401
+        assert store["mfa_attempts"] == 1
+        store2 = self._store()
+        assert self._verify(store2, "000000").status_code == 401
+        assert store2["mfa_attempts"] == 1
+
+    def test_unset_mfa_token_nan_returns_401_not_500(self):
+        store = self._store(mfa_token=float("nan"))
+        assert self._verify(store, self._CODE).status_code == 401
+
+    def test_cap_invalidation_is_logged_without_the_code(self, caplog):
+        store = self._store(mfa_attempts=4)
+        with caplog.at_level("WARNING", logger="routes.auth_routes"):
+            self._verify(store, "654321")
+        text = " ".join(r.getMessage() for r in caplog.records)
+        assert "99" in text
+        assert "654321" not in text
+
+    def test_verify_is_rate_limited_and_shares_login_bucket(self):
+        with patch("services.db_service.get_player_by_id", return_value=None):
+            codes = [client.post("/api/mfa/verify",
+                                 json={"playerId": "999", "code": "1"}).status_code
+                     for _ in range(5)]
+            resp = client.post("/api/mfa/verify", json={"playerId": "999", "code": "1"})
+        assert codes == [404] * 5
+        assert resp.status_code == 429
+        assert int(resp.headers["Retry-After"]) >= 1
+        with patch("routes.auth_routes.get_player_by_email", return_value=None):
+            assert client.post("/api/login",
+                               json={"email": "x@y.com", "password": "x"}).status_code == 429

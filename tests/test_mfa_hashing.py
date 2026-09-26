@@ -85,3 +85,59 @@ def test_correct_mfa_code_still_verifies():
         resp = client.post("/api/mfa/verify", json={"playerId": "42", "code": raw_code})
         assert resp.status_code == 200, f"MFA verify failed: {resp.json()}"
         assert resp.json().get("status") == "success"
+
+
+def test_issuing_a_new_mfa_code_resets_attempt_counter():
+    captured = {}
+    fake_player = {
+        "playerId": "42", "email": "test@example.com", "password_hash": "h",
+        "mfa_enabled": True, "role": "user", "fullName": "T",
+        "must_change_password": False, "lockout_until": None,
+        "failed_login_attempts": 0, "mfa_attempts": 4,
+    }
+    with patch("routes.auth_routes.get_player_by_email", return_value=fake_player), \
+         patch("routes.auth_routes.verify_password", return_value=True), \
+         patch("routes.auth_routes._is_legacy_sha256", return_value=False), \
+         patch("routes.auth_routes.update_player_profile",
+               side_effect=lambda pid, u: captured.update(u)), \
+         patch("routes.auth_routes.email_service"):
+        from fastapi.testclient import TestClient
+        from main import app
+        resp = TestClient(app).post("/api/login",
+                                    json={"email": "test@example.com", "password": "x"})
+    assert resp.json()["status"] == "mfa_required"
+    assert captured["mfa_attempts"] == 0
+
+
+def test_mfa_digest_comparison_uses_hmac_compare_digest():
+    import time
+    import hmac
+    raw = "123456"
+    fake_player = {
+        "playerId": "42", "mfa_token": _sha256(raw), "mfa_expiry": time.time() + 600,
+        "role": "user", "fullName": "T", "email": "t@example.com",
+    }
+    real = hmac.compare_digest
+    with patch("services.db_service.get_player_by_id", return_value=fake_player), \
+         patch("routes.auth_routes.update_player_profile"), \
+         patch("routes.auth_routes.create_token", return_value="jwt"), \
+         patch("routes.auth_routes.hmac.compare_digest", side_effect=real) as spy:
+        from fastapi.testclient import TestClient
+        from main import app
+        resp = TestClient(app).post("/api/mfa/verify", json={"playerId": "42", "code": raw})
+    assert resp.status_code == 200
+    spy.assert_called_once()
+
+
+def test_mfa_non_ascii_stored_digest_returns_401_not_500():
+    import time
+    fake_player = {
+        "playerId": "42", "mfa_token": "café", "mfa_expiry": time.time() + 600,
+        "role": "user", "email": "t@example.com",
+    }
+    with patch("services.db_service.get_player_by_id", return_value=fake_player), \
+         patch("routes.auth_routes.update_player_profile"):
+        from fastapi.testclient import TestClient
+        from main import app
+        resp = TestClient(app).post("/api/mfa/verify", json={"playerId": "42", "code": "123456"})
+    assert resp.status_code == 401
