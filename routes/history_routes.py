@@ -6,7 +6,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from services.data_service import load_data, get_available_years, get_active_season, get_season_projection_legacy_shape
-from services.utils import abbreviate_player_name as _first_name, filter_season
+from services.utils import abbreviate_player_name as _first_name, filter_season, normalize_team_abbr
 import services.analysis_service as analysis
 from services.cache_service import get_game_predictions
 from services.db_service import get_config_settings
@@ -250,7 +250,8 @@ async def teams_redirect(request: Request):
         if draft_results is not None and not draft_results.empty and "season" in draft_results.columns:
             mine = draft_results[(draft_results["season"] == season)
                                  & (draft_results["playerId"] == player_id)].sort_values("draftPick")
-            teams = [str(t) for t in mine["team"].dropna().tolist() if str(t) in team_page_service.TEAM_NAMES]
+            teams = [normalize_team_abbr(str(t)) for t in mine["team"].dropna().tolist()]
+            teams = [t for t in teams if t in team_page_service.TEAM_NAMES]
             if teams:
                 target = teams[0]
     return RedirectResponse(f"/team/{target}", status_code=302)

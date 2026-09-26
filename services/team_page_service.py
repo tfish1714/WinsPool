@@ -74,7 +74,10 @@ def _player_name(players, player_id) -> str:
     row = players[players["playerId"] == player_id]
     if row.empty:
         return f"Player {player_id}"
-    return str(row.iloc[0].get("fullName", f"Player {player_id}"))
+    name = row.iloc[0].get("fullName")
+    if name is None or pd.isna(name) or not str(name).strip():
+        return f"Player {player_id}"
+    return str(name)
 
 
 def _pool_winner(data: dict, season: int):
@@ -92,12 +95,19 @@ def _pool_winner(data: dict, season: int):
             "wins": _int(top["TotalWins"])}
 
 
+def _cached_winner(cache: dict, data: dict, season: int):
+    if season not in cache:
+        cache[season] = _pool_winner(data, season)
+    return cache[season]
+
+
 def _history(team: str, current_season: int, data: dict) -> list:
     dr = data.get("draft_results")
     if _empty(dr) or "season" not in dr.columns or "team" not in dr.columns:
         return []
-    mine = dr[dr["team"] == team]
+    mine = dr[dr["team"].apply(normalize_team_abbr) == team]
     history = []
+    winners = {}  # season -> pool winner, so each season is computed at most once
     for season in sorted({int(s) for s in mine["season"].dropna()}, reverse=True):
         pick_row = mine[mine["season"] == season].sort_values("draftPick").iloc[0]
         pid = _int(pick_row["playerId"])
@@ -107,7 +117,7 @@ def _history(team: str, current_season: int, data: dict) -> list:
             "drafter": {"playerId": pid, "name": _player_name(data.get("players"), pid)},
             "pick": _int(pick_row.get("draftPick")) or None,
             # The in-progress season has no winner yet, only a leader.
-            "pool_winner": None if season == current_season else _pool_winner(data, season),
+            "pool_winner": None if season == current_season else _cached_winner(winners, data, season),
         })
     return history
 
@@ -156,7 +166,8 @@ def _current(team: str, season: int, data: dict, include_projections: bool) -> d
                 if prob is not None:
                     win_prob = prob if home else 1.0 - prob
                     entry["win_prob"] = round(win_prob, 4)
-                    entry["projected"] = "W" if win_prob > 0.5 else "L"
+                    # An exact toss-up has no projected side (win_prob stays 0.5).
+                    entry["projected"] = None if win_prob == 0.5 else "W" if win_prob > 0.5 else "L"
             schedule.append(entry)
 
     projected_wins = None
@@ -164,11 +175,12 @@ def _current(team: str, season: int, data: dict, include_projections: bool) -> d
     if include_projections:
         projected_wins = _num(((data.get("projections") or {}).get(team) or {}).get("projected_wins"))
         unplayed = [r for r in schedule if r["status"] == "unplayed"]
-        with_proj = [r for r in unplayed if r["projected"] is not None]
-        if not unplayed or with_proj:
+        # Only when every unplayed game has a projected side; otherwise the
+        # wins+losses total would fall short of the season length.
+        if all(r["projected"] is not None for r in unplayed):
             projected_record = {
-                "wins": record["wins"] + sum(r["projected"] == "W" for r in with_proj),
-                "losses": record["losses"] + sum(r["projected"] == "L" for r in with_proj),
+                "wins": record["wins"] + sum(r["projected"] == "W" for r in unplayed),
+                "losses": record["losses"] + sum(r["projected"] == "L" for r in unplayed),
             }
     return {"record": record, "projected_wins": projected_wins,
             "schedule": schedule, "projected_record": projected_record}

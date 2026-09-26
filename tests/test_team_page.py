@@ -120,9 +120,58 @@ class TestBuildTeamPage:
         assert rows[6]["win_prob"] is None and rows[6]["projected"] is None
         assert cur["projected_wins"] == 11.4
 
-    def test_projected_record_sums(self):
+    def test_projected_record_none_when_any_unplayed_game_unpredicted(self):
+        # Default data: week 6 is unplayed with no stored prediction, so a
+        # partial sum would fall short of the season length; contract is None.
         cur = _build("KC")["current"]
-        assert cur["projected_record"] == {"wins": 3, "losses": 1}
+        assert cur["projected_record"] is None
+
+    def test_projected_record_sums(self):
+        preds = {"W03_KC_LV": {"pred_prob": 0.7}, "W05_DEN_KC": {"pred_prob": 0.7},
+                 "W06_KC_DEN": {"pred_prob": 0.6}}
+        cur = _build("KC", predictions=preds)["current"]
+        assert cur["projected_record"] == {"wins": 4, "losses": 1}
+        played = cur["record"]["wins"] + cur["record"]["losses"] + cur["record"]["ties"]
+        unplayed = sum(r["status"] == "unplayed" for r in cur["schedule"])
+        assert cur["projected_record"]["wins"] + cur["projected_record"]["losses"] == played + unplayed
+
+    def test_exact_toss_up_is_neutral(self):
+        preds = {"W03_KC_LV": {"pred_prob": 0.5}, "W05_DEN_KC": {"pred_prob": 0.7},
+                 "W06_KC_DEN": {"pred_prob": 0.6}}
+        cur = _build("KC", predictions=preds)["current"]
+        row = {r["week"]: r for r in cur["schedule"]}[3]
+        assert row["win_prob"] == 0.5 and row["projected"] is None
+        assert cur["projected_record"] is None
+
+    def test_nan_player_name_falls_back(self):
+        d = _data()
+        d["players"] = pd.DataFrame([{"playerId": 2, "fullName": float("nan")},
+                                     {"playerId": 1, "fullName": "  "}])
+        p = tps.build_team_page("KC", 2026, d, True)
+        names = [h["drafter"]["name"] for h in p["history"]]
+        assert names == ["Player 1", "Player 2"]
+
+    def test_pool_winner_computed_once_per_season(self):
+        d = _data()
+        # two rows for the same completed season (same team drafted twice)
+        d["draft_results"] = pd.concat([d["draft_results"], pd.DataFrame(
+            [{"playerId": 1, "season": 2025, "draftPick": 9, "team": "KC"}])], ignore_index=True)
+        import services.analysis_service as analysis
+        calls = []
+        real = analysis.calculate_wins_pool_standings
+        def spy(*a, **k):
+            calls.append(a[3])
+            return real(*a, **k)
+        with patch.object(analysis, "calculate_wins_pool_standings", spy):
+            tps.build_team_page("KC", 2026, d, True)
+        assert len(calls) == len(set(calls))
+
+    def test_legacy_team_code_in_draft_results_matches(self):
+        d = _data()
+        d["draft_results"] = pd.DataFrame([
+            {"playerId": 1, "season": 2025, "draftPick": 4, "team": "LAR"}])
+        p = tps.build_team_page("LA", 2026, d, True)
+        assert [h["season"] for h in p["history"]] == [2025]
 
     def test_bye_week_row(self):
         rows = {r["week"]: r for r in _build("KC")["current"]["schedule"]}

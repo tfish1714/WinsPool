@@ -72,6 +72,8 @@
             if (g.status === 'played') {
                 badge = el('span', 'team-page__badge team-page__badge--' + g.result.toLowerCase(),
                     g.result + (g.score ? ' ' + g.score : ''));
+            } else if (g.win_prob !== null && g.win_prob !== undefined && !g.projected) {
+                badge = el('span', 'team-page__badge team-page__badge--proj', 'Toss-up (50%)');
             } else if (g.projected) {
                 badge = el('span', 'team-page__badge team-page__badge--proj',
                     g.projected + ' (proj ' + Math.round(g.win_prob * 100) + '%)');
