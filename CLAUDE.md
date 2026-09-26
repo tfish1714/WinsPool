@@ -209,6 +209,10 @@ docs/                    # Architecture and model documentation (prediction_mode
 
 `GET /team/{abbr}` (`routes/history_routes.py`, case-insensitive, 404 for an unknown team) renders `templates/team.html` via `static/js/team_page.js` from `services/team_page_service.py::build_team_page()`: pool-season history (record, drafter linking to `/player/{id}`, pick, pool winner for completed seasons only) plus this season's schedule with the stored ensemble projection overlaid (`pred_prob` is the HOME win probability; an away team uses `1 - pred_prob`; byes are rows). Projected wins, per-game win probability/projection and projected record are withheld from non-admins while `draft_active` is set; history, results and the dropdown always render. `GET /teams` (the More-menu "Teams" entry, in both `main.js` `moreLinks` and the `base.html` drawer) redirects to the viewer's first drafted team this season (from the `session_token` cookie), else the first team alphabetically.
 
+### Standings player links
+
+On `/wins-pool/{year}` the player NAME is the only link in each of the three server-rendered variants (leader card, desktop row, stacked mobile card): `<a class="player-link" href="/player/{playerId}">`, with a 44px-min-height tap target (`.player-link` in `style.css`). Team logos/chips stay non-links. `standings_refresh.js` patches text in place and never rebuilds name markup, so the links survive the 30s poll. On the player page, only the team abbreviation text in each pick cell links to `/team/{abbr}` (`.team-link`). Contract tests: `tests/test_standings_player_links.py`.
+
 ### Newer API endpoints
 
 All require auth (`require_auth`) unless noted.

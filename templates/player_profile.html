@@ -114,7 +114,7 @@
             <td style="color:var(--primary-color); font-weight:700;">{{ s.totalWins }}</td>
             {% for pick in s.picks %}
             <td style="font-size:0.82rem; line-height:1.6;">
-              <strong>{{ pick.team }}</strong> &nbsp;<span style="color:var(--text-secondary);">Pick #{{ pick.pickNum }}</span><br>
+              <strong><a class="team-link" href="/team/{{ pick.team }}">{{ pick.team }}</a></strong> &nbsp;<span style="color:var(--text-secondary);">Pick #{{ pick.pickNum }}</span><br>
               {{ pick.actualWins }}W
               {% if pick.vsProjected is not none %}
               <span style="color:{{ 'var(--primary-color)' if pick.vsProjected >= 0 else 'var(--neg)' }};">

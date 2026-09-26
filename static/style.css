@@ -4058,3 +4058,30 @@ a.pool-chip-mine:hover { text-decoration: underline; }
   .team-page__select { min-width: 0; width: 100%; }
   .team-page__picker { width: 100%; }
 }
+
+/* Standings player-name link and player-page team link: mobile-safe tap targets.
+   The link is the only new tap target in each standings rendering. */
+.player-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    min-width: 44px;
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px dotted transparent;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.player-link:hover,
+.player-link:focus-visible {
+    color: var(--leader, var(--ink));
+    border-bottom-color: currentColor;
+}
+
+.team-link {
+    display: inline-block;
+    padding: 12px 6px;
+    margin: -12px -6px;
+    color: inherit;
+    text-decoration: underline dotted;
+}

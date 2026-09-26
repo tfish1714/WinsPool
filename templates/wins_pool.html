@@ -51,7 +51,7 @@
         <section class="wp-leader desktop-only-table" data-player-id="{{ leader['playerId'] }}">
             <div class="wp-leader-rank">1</div>
             <div>
-                <div class="wp-leader-name">{{ leader['fullName'] }}</div>
+                <div class="wp-leader-name"><a class="player-link" href="/player/{{ leader['playerId'] }}">{{ leader['fullName'] }}</a></div>
                 <div class="wp-leader-sub"><span data-role="total">{{ leader['TotalWins'] }}</span>W total &nbsp;·&nbsp; {{ leader['team1'] }} · {{ leader['team2'] }} · {{ leader['team3'] }}</div>
                 <div class="wp-leader-teams">
                     <div class="wp-leader-team" data-team="{{ leader['team1'] }}">
@@ -103,7 +103,7 @@
             <div class="wp-row" data-player-id="{{ row['playerId'] }}">
                 <div class="wp-row-rank" data-role="rank">{{ row['Rank'] }}</div>
                 <div class="wp-row-player">
-                    <div class="wp-row-name">{{ row['fullName'] }}</div>
+                    <div class="wp-row-name"><a class="player-link" href="/player/{{ row['playerId'] }}">{{ row['fullName'] }}</a></div>
                     <div class="wp-row-meta"><span data-role="total">{{ row['TotalWins'] }}</span>W total</div>
                 </div>
                 <div class="wp-row-total"><span data-role="total">{{ row['TotalWins'] }}</span><span class="wp-row-w">W</span></div>
@@ -145,7 +145,7 @@
             <div class="standings-stacked-card" data-player-id="{{ row['playerId'] }}">
                 <div class="standings-stacked-card__header">
                     <span class="standings-stacked-card__rank" data-role="rank">{{ row['Rank'] }}</span>
-                    <span class="standings-stacked-card__name">{{ row['fullName'] }}</span>
+                    <span class="standings-stacked-card__name"><a class="player-link" href="/player/{{ row['playerId'] }}">{{ row['fullName'] }}</a></span>
                     <span class="standings-stacked-card__score{% if loop.first %} leader{% endif %}"><span data-role="total">{{ row['TotalWins'] }}</span>W</span>
                 </div>
                 <div class="standings-stacked-card__teams">
