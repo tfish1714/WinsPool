@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import re
 import time
@@ -947,7 +948,6 @@ def get_season_progress(season: int, week: int) -> Dict[str, Any]:
 
 
 def _normal_cdf(z: float) -> float:
-    import math
     return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
 
 
@@ -962,7 +962,6 @@ def compute_portfolio_projection(team_projections: dict, player_teams: list,
     5th/95th percentiles (expected -/+ 1.645 std), clamped to [0, 17*n].
     Teams with no projection are skipped.
     """
-    import math
     teams = []
     for team in player_teams:
         proj = team_projections.get(team)

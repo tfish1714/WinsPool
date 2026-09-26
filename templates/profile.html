@@ -149,7 +149,7 @@
         }
 
         // Season Outlook card: isolated so a failure never affects the profile form.
-        try {
+        (async () => { try {
             const token = localStorage.getItem('nfl_wins_token');
             const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
             const presp = await fetch('/api/profile/portfolio', { headers, credentials: 'same-origin' });
@@ -187,7 +187,7 @@
             }
         } catch (err) {
             console.error("Failed to load season outlook:", err);
-        }
+        } })();
 
         document.getElementById('profile-form').addEventListener('submit', async (e) => {
             e.preventDefault();
