@@ -95,69 +95,31 @@ def get_prediction_accuracy(_auth: dict = Depends(require_auth)):
     try:
         from services.cache_service import get_game_predictions
         from services.nn_feature_engine import _normalize_team
+        from services.prediction_service import build_result_lookup, get_candidate_seasons
         import pathlib, json, numpy as np
 
         _, _, all_games, _, _, _, _ = load_data()
 
-        # Build a result lookup: normalized_key -> actual_winner (or None for ties/unplayed)
-        result_lookup = {}
-        if not all_games.empty:
-            played = all_games[all_games['result'].notna() & (all_games['result'] != -1000)]
-            for _, row in played.iterrows():
-                wk = row.get('week')
-                ht = _normalize_team(str(row.get('home_team', '') or ''))
-                at = _normalize_team(str(row.get('away_team', '') or ''))
-                res = row.get('result', 0)
-                if not wk or not ht or not at:
-                    continue
-                key = f"W{int(wk):02d}_{ht}_{at}"
-                if res > 0:
-                    result_lookup[key] = ht
-                elif res < 0:
-                    result_lookup[key] = at
-                # ties: key not stored → skipped in accuracy
-
-        # Discover which seasons have predictions.
-        # Local mode: glob .local_db/game_predictions_*.json
-        # Production mode (no .local_db): list Firestore game_predictions collection
         local_db = pathlib.Path('.local_db')
         seasons_data = {}
         overall_correct = overall_total = 0
-
-        pred_files = sorted(local_db.glob('game_predictions_*.json')) if local_db.exists() else []
-        if pred_files:
-            candidate_seasons = []
-            for pfile in pred_files:
-                try:
-                    candidate_seasons.append(int(pfile.stem.split('_')[-1]))
-                except ValueError:
-                    pass
-        else:
-            # Production: enumerate from Firestore
-            candidate_seasons = []
-            try:
-                from services.db_service import get_db
-                db_client = get_db()
-                if db_client:
-                    for doc in db_client.collection('game_predictions').stream():
-                        try:
-                            candidate_seasons.append(int(doc.id))
-                        except ValueError:
-                            pass
-            except Exception:
-                pass
+        candidate_seasons = get_candidate_seasons()
 
         for season in candidate_seasons:
             preds = get_game_predictions(season)
             if not preds:
                 continue
+            # Scoped per season: the key has no season component (see
+            # build_result_lookup).
+            result_lookup = build_result_lookup(all_games, season)
 
             by_week = {}
             s_correct = s_total = 0
             for key, pred in preds.items():
                 if not pred.get('locked'):
                     continue
-                actual = result_lookup.get(key)
+                entry = result_lookup.get(key)
+                actual = entry["winner"] if entry else None
                 if actual is None:
                     continue
                 pw = pred.get('pred_winner')

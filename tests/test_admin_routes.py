@@ -1044,3 +1044,39 @@ def test_broadcast_second_call_within_a_minute_is_429(admin_token, monkeypatch):
     second = _bcast(admin_token)
     assert second.status_code == 429 and int(second.headers["Retry-After"]) >= 1
 
+
+
+def test_predictions_games_returns_actuals_and_grading(admin_token, monkeypatch):
+    import inspect
+    import routes.admin_routes as admin_routes
+    games = pd.DataFrame([
+        {"season": 3000, "week": 1, "home_team": "KC", "away_team": "BAL", "result": 3,
+         "home_score": 27, "away_score": 24, "spread_line": -2.5},
+        {"season": 3000, "week": 1, "home_team": "DEN", "away_team": "LV", "result": -7,
+         "home_score": 10, "away_score": 17, "spread_line": 3.0},
+        {"season": 3000, "week": 1, "home_team": "SF", "away_team": "SEA", "result": -1000,
+         "home_score": None, "away_score": None, "spread_line": -4.0},
+    ])
+    monkeypatch.setattr(admin_routes, "load_data", lambda *a, **k: (None, None, games, None, None, None, None))
+    monkeypatch.setattr(admin_routes, "get_game_predictions", lambda s: {
+        "W01_KC_BAL": {"pred_winner": "KC"},                        # correct; vegas from schedule
+        "W01_DEN_LV": {"pred_winner": "DEN", "explanation": {"vegas_line": 9.5}},  # wrong; stored line wins
+        "W01_SF_SEA": {"pred_winner": "SF"},                        # unplayed
+    })
+    resp = client.get("/api/admin/predictions/games?season=3000&week=1",
+                      headers={"Authorization": admin_token})
+    assert resp.status_code == 200
+    by_key = {g["key"]: g for g in resp.json()["games"]}
+    kc, den, sf = by_key["W01_KC_BAL"], by_key["W01_DEN_LV"], by_key["W01_SF_SEA"]
+    assert (kc["actual_winner"], kc["is_correct"], kc["home_score"], kc["away_score"]) == ("KC", True, 27, 24)
+    assert kc["vegas_line"] == -2.5
+    assert (den["actual_winner"], den["is_correct"]) == ("LV", False)
+    assert den["vegas_line"] == 9.5
+    assert sf["actual_winner"] is None and sf["is_correct"] is None
+    assert sf["home_score"] is None
+
+
+def test_predictions_games_route_has_no_iterrows():
+    import inspect
+    import routes.admin_routes as admin_routes
+    assert "iterrows" not in inspect.getsource(admin_routes.get_predictions_games)

@@ -967,3 +967,92 @@ def enrich_schedule_with_predictions(
     schedule_df["pred_ats_pick"] = pred_ats
 
     return schedule_df
+
+
+# ---------------------------------------------------------------------------
+# Result lookup shared by the prediction accuracy / per-game admin routes
+# ---------------------------------------------------------------------------
+
+def build_result_lookup(all_games: pd.DataFrame, season: Optional[int] = None) -> Dict[str, dict]:
+    """Map W{week:02d}_{HOME}_{AWAY} -> actual result for every completed game.
+
+    Vectorized (no row-wise iteration). Completed means `result` is present and
+    not the UNDRAFTED_SENTINEL "unplayed" marker. Rows with week 0/NaN or an
+    empty team are skipped. A tie stores winner None. If two rows collide on
+    a key the last one wins, as the old sequential loop did. Pass `season` to
+    scope the lookup: the key has no season component, so an unscoped lookup
+    over several seasons can grade one season against another's result.
+    """
+    from services.nn_feature_engine import _normalize_team
+
+    if all_games is None or all_games.empty:
+        return {}
+    played = all_games[all_games['result'].notna() & (all_games['result'] != UNDRAFTED_SENTINEL)]
+    if season is not None:
+        played = played[played['season'] == season]
+    if played.empty:
+        return {}
+
+    week = pd.to_numeric(played['week'], errors='coerce')
+    home = played['home_team'].fillna('').astype(str).map(_normalize_team)
+    away = played['away_team'].fillna('').astype(str).map(_normalize_team)
+    keep = week.notna() & (week != 0) & (home != '') & (away != '')
+    if not keep.any():
+        return {}
+    week, home, away = week[keep], home[keep], away[keep]
+    result = played.loc[keep, 'result']
+
+    keys = 'W' + week.astype(int).map('{:02d}'.format) + '_' + home + '_' + away
+    winners = np.where(result > 0, home, np.where(result < 0, away, None))
+
+    def _int_or_none(col: str) -> list:
+        if col not in played.columns:
+            return [None] * len(keys)
+        s = pd.to_numeric(played.loc[keep, col], errors='coerce')
+        return [None if pd.isna(v) else int(v) for v in s]
+
+    if 'spread_line' in played.columns:
+        spreads = pd.to_numeric(played.loc[keep, 'spread_line'], errors='coerce')
+        spread_list = [None if pd.isna(v) else float(v) for v in spreads]
+    else:
+        spread_list = [None] * len(keys)
+
+    return {
+        k: {"winner": w, "home_score": hs, "away_score": as_, "spread_line": sl}
+        for k, w, hs, as_, sl in zip(
+            keys, winners, _int_or_none('home_score'), _int_or_none('away_score'), spread_list
+        )
+    }
+
+
+def get_candidate_seasons() -> List[int]:
+    """Seasons that have stored game predictions.
+
+    Local mode: .local_db/game_predictions_<season>.json files. Production (no
+    such files): the Firestore `game_predictions` collection's document ids.
+    Unparseable names/ids are skipped; a Firestore failure yields [].
+    """
+    import pathlib
+
+    local_db = pathlib.Path('.local_db')
+    pred_files = sorted(local_db.glob('game_predictions_*.json')) if local_db.exists() else []
+    seasons: List[int] = []
+    if pred_files:
+        for pfile in pred_files:
+            try:
+                seasons.append(int(pfile.stem.split('_')[-1]))
+            except ValueError:
+                pass
+        return seasons
+    try:
+        from services.db_service import get_db
+        db_client = get_db()
+        if db_client:
+            for doc in db_client.collection('game_predictions').stream():
+                try:
+                    seasons.append(int(doc.id))
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    return seasons
