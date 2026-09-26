@@ -3981,3 +3981,26 @@ table.wp-data-table tbody td:last-child {
     /* Pad page content so bottom bar doesn't cover it */
     #content { padding-bottom: 72px; }
 }
+
+/* Decisive tiebreaker highlight + explainer (static/js/tiebreaker_explain.js) */
+.tb-decisive {
+    outline: 2px solid var(--accent-gold, #c9a24a);
+    outline-offset: 2px;
+    border-radius: 4px;
+    cursor: help;
+}
+.tb-tooltip {
+    position: absolute;
+    z-index: 1000;
+    max-width: min(320px, calc(100vw - 16px));
+    padding: 0.6rem 0.75rem;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    white-space: pre-line;
+    color: var(--ink, #fff);
+    background: rgba(0, 0, 0, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    pointer-events: none;
+}
+.tb-tooltip[hidden] { display: none; }
