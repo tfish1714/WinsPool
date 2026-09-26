@@ -72,3 +72,47 @@ class TestSetMemberPaid:
              patch("services.db_service._save_df_to_local"):
             result = set_member_paid(2024, 1, True)
         assert result is True
+
+
+class TestPoolStatusSeesPaidToggle:
+    """set_member_paid must invalidate the static cache so readers of
+    load_data()'s draft_order bucket (GET /api/pool/status) see the change."""
+
+    def test_cached_static_bucket_reflects_toggle(self):
+        import services.cache_service as cs
+        import services.data_service as ds
+        from services.pool_service import build_pool_status
+
+        store = {"draft_order": pd.DataFrame([
+            {"season": 2024, "playerId": 1, "draftOrder": 1, "paid": False},
+            {"season": 2024, "playerId": 2, "draftOrder": 2, "paid": False},
+        ])}
+
+        def fake_get(name, filters=None):
+            return store.get(name, pd.DataFrame()).copy()
+
+        def fake_save(name, df):
+            store[name] = df.copy()
+
+        cs.clear_data_cache(cs.DOMAIN_STATIC)
+        try:
+            with patch("services.data_service.get_collection_df", side_effect=fake_get), \
+                 patch("services.db_service.get_collection_df", side_effect=fake_get), \
+                 patch("services.db_service._save_df_to_local", side_effect=fake_save), \
+                 patch("services.db_service.get_db", return_value=None):
+                before = build_pool_status(ds._get_static_bucket()["draft_order"], {}, 2024, 1)
+                assert before["paid_count"] == 0
+                assert set_member_paid(2024, 1, True) is True
+                after = build_pool_status(ds._get_static_bucket()["draft_order"], {}, 2024, 1)
+            assert after["paid_count"] == 1
+            assert after["my_paid"] is True
+        finally:
+            cs.clear_data_cache(cs.DOMAIN_STATIC)
+
+    def test_signals_other_processes_when_firestore_available(self):
+        with patch("services.db_service.get_collection_df", return_value=_draft_order_df()), \
+             patch("services.db_service.get_db", return_value=MagicMock()), \
+             patch("services.db_service._save_df_to_local"), \
+             patch("services.db_service.signal_data_update") as mock_signal:
+            set_member_paid(2024, 1, True)
+        mock_signal.assert_called_once_with("static")

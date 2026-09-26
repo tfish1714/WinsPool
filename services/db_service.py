@@ -479,6 +479,11 @@ def set_member_paid(season: int, player_id: int, paid: bool) -> bool:
         db.collection("draft_order").document(doc_id).update({"paid": paid})
     order_df.loc[mask, "paid"] = paid
     _save_df_to_local("draft_order", order_df)
+
+    # load_data()'s static bucket holds its own copy of draft_order; drop it
+    # (and signal other processes) so /api/pool/status sees the new flag.
+    clear_data_cache(DOMAIN_STATIC)
+    signal_data_update(DOMAIN_STATIC)
     return True
 
 
