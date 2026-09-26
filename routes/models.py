@@ -1,6 +1,6 @@
 """routes/models.py — Pydantic request body schemas for all POST endpoints."""
 from typing import Annotated, Any, Dict, List, Optional
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 
 # --- Auth ---
@@ -111,3 +111,20 @@ class MockDraftResultsRequest(BaseModel):
 class PushBroadcastRequest(BaseModel):
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
     body: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+class PoolPayoutItem(BaseModel):
+    place: int = Field(ge=1)
+    pct: float = Field(ge=0, le=100)
+
+
+class PoolConfigRequest(BaseModel):
+    season: Optional[int] = None
+    entryFee: float = Field(ge=0, le=1_000_000)
+    payouts: List[PoolPayoutItem] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def _payouts_total(self):
+        if sum(p.pct for p in self.payouts) > 100.0001:
+            raise ValueError("payout percentages must not exceed 100 in total")
+        return self

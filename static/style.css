@@ -4004,3 +4004,13 @@ table.wp-data-table tbody td:last-child {
     pointer-events: none;
 }
 .tb-tooltip[hidden] { display: none; }
+
+/* Pool fee / prize pot banner (wins pool page) */
+.pool-fee-card { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; padding: 14px 18px; margin-bottom: 24px; border: 1px solid var(--line-strong); border-radius: 12px; background: rgba(255, 255, 255, 0.03); }
+.pool-fee-card[hidden] { display: none; }
+.pool-fee-pot { font-size: 18px; font-weight: 700; }
+.pool-fee-sub { font-size: 13px; opacity: 0.75; }
+.pool-fee-split { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; }
+.pool-fee-mine { font-size: 13px; font-weight: 600; }
+.pool-fee-mine.is-paid { color: var(--pos); }
+@media (max-width: 480px) { .pool-fee-card { flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 14px; } }

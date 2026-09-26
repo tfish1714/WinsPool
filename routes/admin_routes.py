@@ -18,7 +18,7 @@ from routes.models import (
     CreatePlayerRequest, UpdatePlayerRequest, TargetPlayerRequest,
     SetTempPasswordRequest, SeasonRequest, RecapWeekRequest,
     RecapYearRequest, GenerateRecapRequest, SaveBroadcastRecapRequest,
-    PushBroadcastRequest,
+    PushBroadcastRequest, PoolConfigRequest,
 )
 from services.cache_service import get_game_predictions, get_prediction_features
 from services.data_service import (
@@ -29,7 +29,7 @@ from services.response_helpers import server_error
 from services.db_service import (
     add_draft_order, add_draft_rule, add_player, delete_draft_results_for_season,
     delete_season_data, get_collection_df, get_metadata, get_password_hash, save_weekly_recap,
-    set_member_paid, sync_draft_snapshot_for_season, update_player_credentials, update_player_profile,
+    set_config_settings, set_member_paid, sync_draft_snapshot_for_season, update_player_credentials, update_player_profile,
 )
 from services.constants import PASSWORD_COMPLEXITY_RE, UNDRAFTED_SENTINEL
 from services.draft_service import sanitize_state, wipe_draft_cache
@@ -841,4 +841,20 @@ async def get_admin_prediction_features(
         return JSONResponse(content=doc)
     except Exception:
         logger.exception("Unhandled error in get_admin_prediction_features")
+        return server_error()
+
+
+
+@router.post("/admin/pool/config")
+async def set_pool_config(body: PoolConfigRequest, _: dict = Depends(require_admin)):
+    """Store the pool entry fee and payout split (global config settings)."""
+    try:
+        payouts = [{"place": p.place, "pct": float(p.pct)} for p in body.payouts]
+        set_config_settings({
+            "pool_entry_fee": float(body.entryFee),
+            "pool_payouts": payouts or [{"place": 1, "pct": 100.0}],
+        })
+        return JSONResponse(content={"ok": True})
+    except Exception:
+        logger.exception("Unhandled error in set_pool_config")
         return server_error()

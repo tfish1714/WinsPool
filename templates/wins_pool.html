@@ -28,6 +28,8 @@
             </div>
         </header>
 
+        <div id="pool-fee-banner" class="pool-fee-card" data-year="{{ year }}" hidden></div>
+
         {% if draft_pending %}
         <div class="card-glass" style="padding: 2.5rem 1.5rem; text-align: center;">
             <div class="eyebrow">Draft in progress</div>
@@ -235,5 +237,6 @@
 </script>
 <script src="{{ static_url('js/standings.js') }}"></script>
 <script src="{{ static_url('js/standings_refresh.js') }}"></script>
+<script src="{{ static_url('js/pool_fee.js') }}"></script>
 <script type="module" src="{{ static_url('js/tiebreaker_explain.js') }}"></script>
 {% endblock %}

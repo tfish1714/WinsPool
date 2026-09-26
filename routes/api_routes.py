@@ -13,6 +13,8 @@ from services.response_helpers import error_response, server_error, not_found, u
 from services.draft_service import sanitize_state
 from services.live_standings_service import build_live_standings_payload
 from services.utils import filter_season
+from services.db_service import get_config_settings
+from services.pool_service import build_pool_status
 from services.session_service import require_auth, require_admin
 import services.analysis_service as analysis
 from services.analysis_service import get_season_progress
@@ -535,4 +537,24 @@ async def set_config(request: Request, _auth: dict = Depends(require_admin)):
         return JSONResponse(content={"ok": True, **allowed})
     except Exception:
         logger.exception("set_config error")
+        return server_error()
+
+
+
+@router.get("/pool/status")
+def get_pool_status(season: int | None = None, _auth: dict = Depends(require_auth)):
+    """Pool fee/prize pot summary: aggregate counts plus the caller's own paid flag only."""
+    try:
+        from services.data_service import get_active_season
+        _, _, games, _, order_df, draft_results, rules = load_data()
+        if season is None:
+            season = int(get_active_season(games, draft_results, rules))
+        try:
+            player_id = int(_auth.get("sub"))
+        except (TypeError, ValueError):
+            player_id = None
+        status = build_pool_status(order_df, get_config_settings(), season, player_id)
+        return JSONResponse(content=status)
+    except Exception:
+        logger.exception("Unhandled error in get_pool_status")
         return server_error()
