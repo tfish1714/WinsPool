@@ -176,7 +176,7 @@
                         body.appendChild(line('Chance to win the pool', `${Math.round(p.win_prob * 100)}%`));
                     }
                     const basisText = p.odds_basis === 'per_game'
-                        ? `Based on ${p.games_remaining} remaining games`
+                        ? `Based on ${p.games_remaining} remaining ${p.games_remaining === 1 ? 'game' : 'games'} in the season`
                         : p.odds_basis === 'team_projection'
                             ? 'Based on preseason team projections'
                             : '';

@@ -627,6 +627,9 @@ def get_profile_portfolio(_auth: dict = Depends(require_auth)):
                         for k in ("wins", "losses", "ties")}
             remaining, n_stored = _remaining_games_with_probs(games, season)
             if n_stored > 0:
+                # Wins only: ties are not counted as wins (pool ranks by wins; ties are tracked separately),
+                # so standings-derived base wins match the pool definition.
+                # games_remaining is the league-wide count of unplayed REG games, not just the pool's teams.
                 base_wins = {t: r.get("wins") for t, r in records.items()}
                 sim = analysis.simulate_pool_finish_odds_from_games(pool, base_wins, remaining)
                 basis, n_remaining = "per_game", len(remaining)

@@ -115,6 +115,33 @@ class TestRoutePerGame:
         assert b["odds_basis"] == "per_game"
         assert b["games_remaining"] == 2
 
+    def test_pred_prob_is_home_win_probability_end_to_end(self):
+        # A holds the home team (KC), B the away team (BUF); the only remaining game
+        # has pred_prob 0.99 (home win). Inverting the probability would flip these.
+        dr = pd.DataFrame([{"season": 2026, "team": "KC", "playerId": 3},
+                           {"season": 2026, "team": "BUF", "playerId": 4}])
+        games = _games([(2, "REG", "KC", "BUF", None)])
+        preds = {"W02_KC_BUF": {"pred_prob": 0.99}}
+        load = (None, None, games, None, pd.DataFrame(), dr, pd.DataFrame())
+
+        def fetch(pid):
+            app.dependency_overrides[require_auth] = lambda: {"sub": str(pid), "role": "player"}
+            try:
+                with patch("routes.api_routes.load_data", return_value=load), \
+                     patch("services.data_service.get_active_season", return_value=2026), \
+                     patch("routes.api_routes.get_season_projection_legacy_shape", return_value=PROJ), \
+                     patch("routes.api_routes.get_config_settings", return_value={"draft_active": False}), \
+                     patch("services.cache_service.get_game_predictions", return_value=preds):
+                    return TestClient(app).get("/api/profile/portfolio").json()
+            finally:
+                app.dependency_overrides.pop(require_auth, None)
+
+        a, b = fetch(3), fetch(4)
+        assert a["odds_basis"] == "per_game"
+        assert a["win_prob"] > 0.9
+        assert b["win_prob"] < 0.1
+        assert a["win_prob"] > b["win_prob"] + 0.5
+
     def test_unavailable_has_null_basis(self, auth_player):
         load = (None, None, pd.DataFrame(), None, pd.DataFrame(), _dr().assign(playerId=99), pd.DataFrame())
         with patch("routes.api_routes.load_data", return_value=load), \
