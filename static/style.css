@@ -3984,7 +3984,7 @@ table.wp-data-table tbody td:last-child {
 
 /* Decisive tiebreaker highlight + explainer (static/js/tiebreaker_explain.js) */
 .tb-decisive {
-    outline: 2px solid var(--accent, #c9a24a);
+    outline: 2px solid var(--accent-gold, #c9a24a);
     outline-offset: 2px;
     border-radius: 4px;
     cursor: help;
