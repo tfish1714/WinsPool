@@ -287,3 +287,57 @@ def test_profile_form_surfaces_detail_and_handles_401_and_stores_fresh_token():
     for eid in ("full-name", "nickname", "email", "current-password", "new-password",
                 "confirm-new-password", "mfa-enabled"):
         assert f"getElementById('{eid}')" in src
+
+
+# --- review follow-ups: MFA challenge revocation, overflow ------------------
+
+def _give_pending_mfa(pid):
+    from services import db_service
+    db_service.update_player_profile(str(pid), {"mfa_token": "somehash", "mfa_expiry": time.time() + 600})
+
+
+def _assert_no_pending_mfa(pid):
+    from services import db_service
+    p = db_service.get_player_by_id(pid)
+    assert p.get("mfa_token") in (None, "")
+    assert not p.get("mfa_expiry")
+
+
+def test_update_player_credentials_clears_pending_mfa(players):
+    from services import db_service
+    _give_pending_mfa(2)
+    db_service.update_player_credentials("2", db_service.get_password_hash("a" * 12 + "A1!"))
+    _assert_no_pending_mfa(2)
+
+
+def test_admin_reset_password_clears_pending_mfa(players):
+    c = TestClient(app)
+    admin = c.post("/api/login", json={"email": "admin@example.com", "password": STRONG_PW}).json()["token"]
+    _give_pending_mfa(2)
+    r = c.post("/api/admin/reset_password", headers=_bearer(admin), json={"targetPlayerId": "2"})
+    assert r.status_code == 200, r.text
+    _assert_no_pending_mfa(2)
+
+
+def test_profile_password_change_clears_pending_mfa(players):
+    c = TestClient(app)
+    tok = c.post("/api/login", json={"email": "user@example.com", "password": STRONG_PW}).json()["token"]
+    _give_pending_mfa(2)
+    r = c.post("/api/profile/update", headers=_bearer(tok), json={
+        "currentPassword": STRONG_PW, "newPassword": "Another-Strong-Pw-7#",
+        "playerId": "2", "fullName": "User", "nickName": "U", "email": "user@example.com", "mfaEnabled": False})
+    assert r.status_code == 200, r.text
+    _assert_no_pending_mfa(2)
+
+
+def test_non_password_update_keeps_pending_mfa(players):
+    from services import db_service
+    _give_pending_mfa(2)
+    db_service.update_player_profile("2", {"nickName": "Newname"})
+    assert db_service.get_player_by_id(2).get("mfa_token") == "somehash"
+
+
+def test_as_version_overflow_is_zero_not_error():
+    assert session_service._as_version(float("inf")) == 0
+    assert session_service._as_version(float("-inf")) == 0
+    assert session_service.token_is_current({"tv": 0}, {"token_version": float("inf")}) is True

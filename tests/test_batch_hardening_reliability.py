@@ -131,7 +131,9 @@ class TestRoutesFailClosedBehavior:
         monkeypatch.setenv("USE_LOCAL_DATA", "False")
         monkeypatch.setattr(db_service, "get_db", lambda: None)
         load = (None, None, pd.DataFrame(), None, pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
-        with patch("routes.api_routes.load_data", return_value=load),              patch("services.data_service.get_active_season", return_value=2026),              patch("routes.api_routes.get_season_projection_legacy_shape", return_value={}):
+        with patch("routes.api_routes.load_data", return_value=load), \
+             patch("services.data_service.get_active_season", return_value=2026), \
+             patch("routes.api_routes.get_season_projection_legacy_shape", return_value={}):
             return api_routes.build_player_outlook(1, is_admin)
 
     def test_outlook_non_admin_blocked(self, monkeypatch):
@@ -141,14 +143,44 @@ class TestRoutesFailClosedBehavior:
         assert self._outlook(monkeypatch, True)["reason"] != "draft_in_progress"
 
     def test_team_page_hides_projections_for_non_admin_and_serves_admin(self, monkeypatch):
-        import inspect
-        from routes import history_routes
+        import json
+        import re
+        import pandas as pd
+        from fastapi.testclient import TestClient
+        from main import app
+        from services.session_service import create_token
+
         monkeypatch.setenv("USE_LOCAL_DATA", "False")
-        monkeypatch.setattr(db_service, "get_db", lambda: None)
-        assert history_routes.is_draft_active_fail_closed() is True
-        # gate expression: admins bypass, non-admins are blocked
-        src = inspect.getsource(history_routes.team_page)
-        assert "is_admin or not is_draft_active_fail_closed()" in src
+        monkeypatch.setattr(db_service, "get_db", lambda: None)  # config unreadable
+        standings = pd.DataFrame([{"season": 2025, "team": "KC", "wins": 14, "losses": 3, "ties": 0}])
+        players = pd.DataFrame([{"playerId": 1, "fullName": "Alice", "nickName": "Alice"}])
+        draft = pd.DataFrame([{"playerId": 1, "season": 2025, "draftPick": 4, "team": "KC"}])
+        games = pd.DataFrame([
+            {"season": 2026, "week": 3, "game_type": "REG", "home_team": "KC", "away_team": "LV",
+             "result": None, "home_score": None, "away_score": None}])
+        load = (standings, pd.DataFrame(), games, players, pd.DataFrame(), draft, pd.DataFrame())
+        preds = {"W03_KC_LV": {"pred_prob": 0.7}}
+        client = TestClient(app, follow_redirects=False)
+
+        def fetch(token):
+            with patch("routes.history_routes.load_data", return_value=load), \
+                 patch("routes.history_routes.get_active_season", return_value=2026), \
+                 patch("routes.history_routes.get_game_predictions", return_value=preds), \
+                 patch("routes.history_routes.get_season_projection_legacy_shape",
+                       return_value={"KC": {"projected_wins": 11.4}}):
+                r = client.get("/team/KC", cookies={"session_token": token})
+            assert r.status_code == 200
+            m = re.search(r'<script id="teamData" type="application/json">(.*?)</script>', r.text, re.S)
+            return json.loads(m.group(1))["current"]
+
+        non_admin = fetch(create_token(1, "player"))
+        assert non_admin["projected_wins"] is None
+        assert non_admin["projected_record"] is None
+        assert all(g["win_prob"] is None and g["projected"] is None for g in non_admin["schedule"])
+
+        admin = fetch(create_token(9, "admin"))
+        assert admin["projected_wins"] == 11.4
+        assert any(g["win_prob"] is not None for g in admin["schedule"])
 
 
 # ---------- require_db logging ----------
@@ -171,7 +203,8 @@ def test_eval_skip_existing_with_firestore_reads_firestore(monkeypatch):
     nn = MagicMock()
     monkeypatch.setattr(wme, "NNPredictionService", nn)
     with patch("services.cache_service._read_nn_weekly_accuracy_firestore",
-               return_value=_rows([14])),          patch("services.cache_service.write_nn_weekly_accuracy_rows") as write:
+               return_value=_rows([14])), \
+         patch("services.cache_service.write_nn_weekly_accuracy_rows") as write:
         wme.main()
     nn.assert_not_called()
     write.assert_not_called()

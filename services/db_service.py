@@ -496,6 +496,10 @@ def update_player_profile(player_id: str, updates: dict, bump_token_version: boo
     Increment (atomic, immune to a stale cached read); locally it is +1 on
     the frame value.
     """
+    if bump_token_version:
+        # A password change/clear must also kill any pending MFA challenge,
+        # or a code issued before the change could still complete a login.
+        updates = {**updates, "mfa_token": None, "mfa_expiry": 0}
     db = get_db()
     if db:
         payload = dict(updates)

@@ -94,8 +94,16 @@ def _get_static_bucket():
     cached = cs.get_domain(cs.DOMAIN_STATIC)
     if cached is not None:
         return cached
+    # Race guard: a clear/signal that lands while the fetch is in flight
+    # (e.g. a token_version bump) means the fetched frame may predate it. Stamp
+    # the fill with its START time so a newer remote signal still triggers a
+    # refetch, and drop the result entirely if this process cleared the domain
+    # mid-fetch (the caller still gets the data, it just is not kept as current).
+    generation = cs.get_domain_generation(cs.DOMAIN_STATIC)
+    started = time.time()
     bucket = _fetch_static_bucket()
-    cs.set_domain(cs.DOMAIN_STATIC, bucket)
+    if cs.get_domain_generation(cs.DOMAIN_STATIC) == generation:
+        cs.set_domain(cs.DOMAIN_STATIC, bucket, started)
     return bucket
 
 

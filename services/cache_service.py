@@ -42,6 +42,9 @@ DOMAIN_SIGNAL_FIELDS = {
 
 _DOMAIN_CACHE: dict = {}
 _DOMAIN_TIMESTAMPS: dict = {}
+# Bumped by every clear so a fill that started before a clear can detect it
+# raced with an invalidation and must not be stored as current.
+_DOMAIN_GENERATION: dict = {}
 _CACHE_TTL_SECONDS = 3600  # 1-hour TTL; used only by data_service.py's _get_active_bucket() as a defensive backstop -- historical/static are signal-only per the design spec, see data_service.py's _get_historical_bucket()/_get_static_bucket()
 _LAST_REMOTE_CHECK = 0
 _REMOTE_CHECK_INTERVAL = 60  # Check Firestore for invalidation every 60 seconds
@@ -58,8 +61,14 @@ def set_domain(domain: str, value, timestamp: float = None) -> None:
     _DOMAIN_TIMESTAMPS[domain] = timestamp if timestamp is not None else time.time()
 
 
+def get_domain_generation(domain: str) -> int:
+    """Current invalidation generation of `domain` (0 if never cleared)."""
+    return _DOMAIN_GENERATION.get(domain, 0)
+
+
 def clear_domain(domain: str) -> None:
     """Evict one domain's cached value and timestamp."""
+    _DOMAIN_GENERATION[domain] = _DOMAIN_GENERATION.get(domain, 0) + 1
     _DOMAIN_CACHE.pop(domain, None)
     _DOMAIN_TIMESTAMPS.pop(domain, None)
 
@@ -80,6 +89,8 @@ def clear_data_cache(domain: str = None) -> None:
         clear_domain(domain)
         logger.info("Cache domain '%s' cleared.", domain)
     else:
+        for d in set(_DOMAIN_CACHE) | set(_DOMAIN_TIMESTAMPS) | set(_DOMAIN_GENERATION) | set(DOMAIN_SIGNAL_FIELDS):
+            _DOMAIN_GENERATION[d] = _DOMAIN_GENERATION.get(d, 0) + 1
         _DOMAIN_CACHE.clear()
         _DOMAIN_TIMESTAMPS.clear()
         logger.info("All cache domains cleared.")

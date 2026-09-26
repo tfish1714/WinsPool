@@ -67,7 +67,7 @@ def _as_version(value) -> int:
     unset Firestore field arriving through pandas) count as 0."""
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
