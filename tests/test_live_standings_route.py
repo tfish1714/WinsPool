@@ -147,6 +147,7 @@ def _render_standings_page():
         patch("routes.standings_routes.analysis.get_draft_progress", return_value=(10, 10)),
         patch("routes.standings_routes.analysis.calculate_wins_pool_standings",
               return_value=two_players),
+        patch("routes.standings_routes.analysis.compute_team_records", return_value={}),
         patch("routes.standings_routes.analysis.get_enriched_schedule",
               return_value=pd.DataFrame()),
         patch("routes.standings_routes.analysis.player_winlossmatrix",

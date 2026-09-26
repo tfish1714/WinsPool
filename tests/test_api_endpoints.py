@@ -354,3 +354,33 @@ class TestPredictionExplainGrading:
         assert body["actual_winner"] == "KC"
         irrelevant = {"OLD1", "OLD2", "WK2A", "WK2B", "NEW1", "NEW2"}
         assert not irrelevant & set(seen), f"normalized rows outside season/week: {irrelevant & set(seen)}"
+
+
+def test_prediction_accuracy_route_matches_expected_aggregation(auth_token, monkeypatch):
+    import pandas as pd
+    import routes.api_routes as api_routes
+    games = pd.DataFrame([
+        {"season": 3000, "week": 1, "home_team": "KC", "away_team": "BAL", "result": 3,
+         "home_score": 27, "away_score": 24, "spread_line": -2.5},
+        {"season": 3000, "week": 1, "home_team": "DEN", "away_team": "LV", "result": -7,
+         "home_score": 10, "away_score": 17, "spread_line": 3.0},
+    ])
+    monkeypatch.setattr(api_routes, "load_data", lambda *a, **k: (None, None, games, None, None, None, None))
+    monkeypatch.setattr("services.prediction_service.get_candidate_seasons", lambda: [3000])
+    monkeypatch.setattr("services.cache_service.get_game_predictions", lambda s: {
+        "W01_KC_BAL": {"locked": True, "pred_winner": "KC"},     # correct
+        "W01_DEN_LV": {"locked": True, "pred_winner": "DEN"},    # wrong
+        "W01_XX_YY": {"locked": True, "pred_winner": "XX"},      # no result -> ignored
+        "W01_SF_SEA": {"locked": False, "pred_winner": "SF"},    # not locked -> ignored
+    })
+    resp = client.get("/api/predictions/accuracy", headers={"Authorization": auth_token})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["overall"] == {"total": 2, "correct": 1, "accuracy": 50.0}
+    assert body["seasons"][0]["by_week"] == [{"week": 1, "total": 2, "correct": 1, "accuracy": 50.0}]
+
+
+def test_prediction_accuracy_route_has_no_iterrows():
+    import inspect
+    import routes.api_routes as api_routes
+    assert "iterrows" not in inspect.getsource(api_routes.get_prediction_accuracy)

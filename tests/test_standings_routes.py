@@ -66,14 +66,46 @@ def _wins_pool_frame():
     return pd.DataFrame([row(1, "Ann Lee", 1, 3), row(2, "Bo Kim", 2, 2)])
 
 
-def _render_wins_pool(monkeypatch):
+def _real_season_frames():
+    """A small consistent season so the real analysis functions can run."""
+    empty = pd.DataFrame()
+    games = pd.DataFrame([
+        {"season": YEAR, "week": 1, "game_type": "REG", "home_team": "KC", "away_team": "BAL",
+         "result": 3, "home_score": 27, "away_score": 24, "gameday": "2000-09-10"},
+        {"season": YEAR, "week": 2, "game_type": "REG", "home_team": "BAL", "away_team": "KC",
+         "result": -1000, "home_score": None, "away_score": None, "gameday": "2000-09-17"},
+    ])
+    # The template reads three team slots per player.
+    picks = [(1, "KC", 1), (2, "BAL", 2), (2, "DEN", 3), (1, "SF", 4), (1, "NE", 5), (2, "LA", 6)]
+    draft = pd.DataFrame([
+        {"season": YEAR, "team": t, "playerId": p, "draftPick": n} for p, t, n in picks
+    ])
+    players = pd.DataFrame([{"playerId": 1, "fullName": "Ann Lee", "nickName": "Ann"},
+                            {"playerId": 2, "fullName": "Bo Kim", "nickName": "Bo"}])
+    standings = pd.DataFrame([
+        {"team": "KC", "season": YEAR, "wins": 1, "losses": 0, "ties": 0, "scored": 27, "allowed": 24},
+        {"team": "BAL", "season": YEAR, "wins": 0, "losses": 1, "ties": 0, "scored": 24, "allowed": 27},
+    ])
+    return standings, empty, games, players, empty, draft, empty
+
+
+def _render_wins_pool(monkeypatch, real_analysis=False):
     import routes.standings_routes as sr
     empty = pd.DataFrame()
+    if real_analysis:
+        # Leave the real analysis functions in place; only feed load_data.
+        monkeypatch.setattr(sr, "load_data", lambda *a, **k: _real_season_frames())
+        monkeypatch.setattr(sr, "get_available_years", lambda *a, **k: [YEAR])
+        monkeypatch.setattr(sr, "get_active_season", lambda *a, **k: YEAR)
+        monkeypatch.setattr(sr.db, "get_weekly_recap", lambda *a, **k: None)
+        return client.get(f"/wins-pool/{YEAR}")
     games = pd.DataFrame([{"season": YEAR, "week": 5, "result": 1}])
     monkeypatch.setattr(sr, "load_data", lambda *a, **k: (empty, empty, games, empty, empty, empty, empty))
     monkeypatch.setattr(sr, "filter_season", lambda df, year: df)
     monkeypatch.setattr(sr.analysis, "get_draft_progress", lambda *a, **k: (0, 0))
     monkeypatch.setattr(sr.analysis, "calculate_wins_pool_standings", lambda *a, **k: _wins_pool_frame())
+    # The stub games frame has no team columns; the route now precomputes records.
+    monkeypatch.setattr(sr.analysis, "compute_team_records", lambda *a, **k: {})
     monkeypatch.setattr(sr.analysis, "get_enriched_schedule", lambda *a, **k: empty)
     monkeypatch.setattr(sr.analysis, "player_winlossmatrix", lambda *a, **k: empty)
     monkeypatch.setattr(sr, "get_latest_week_for_year", lambda games, year: 5)
@@ -123,3 +155,31 @@ def test_completed_season_three_way_tie_renders_tied_not_eliminated(monkeypatch)
     assert resp.text.count("Tied (tiebreakers)") >= 3
     assert "Magic #: <strong>Eliminated</strong>" not in resp.text
     assert "Podium #: <strong>Eliminated</strong>" not in resp.text
+
+
+def test_wins_pool_by_year_computes_team_records_exactly_once(monkeypatch):
+    import routes.standings_routes as sr
+    calls = []
+    real = sr.analysis.compute_team_records
+
+    def spy(games, season):
+        calls.append(season)
+        return real(games, season)
+
+    real_calc = sr.analysis.calculate_wins_pool_standings
+    outputs = []
+
+    def capture(*a, **k):
+        out = real_calc(*a, **k)
+        outputs.append(out)
+        return out
+
+    monkeypatch.setattr(sr.analysis, "compute_team_records", spy)
+    monkeypatch.setattr(sr.analysis, "calculate_wins_pool_standings", capture)
+    resp = _render_wins_pool(monkeypatch, real_analysis=True)
+    assert resp.status_code == 200
+    assert calls == [YEAR]
+    # The shared records still reach the standings: KC is 1-0, BAL is 0-1.
+    by_player = outputs[0].set_index("playerId")
+    assert by_player.loc[1, "global_record1"] == "1-0"
+    assert by_player.loc[2, "global_record1"] == "0-1"

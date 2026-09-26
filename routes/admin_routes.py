@@ -528,33 +528,9 @@ async def get_predictions_games(season: int, week: int, _: dict = Depends(requir
         preds = get_game_predictions(season)
 
         # Build actual-winner lookup from nfl_games
+        from services.prediction_service import build_result_lookup
         _, _, all_games, _, _, _, _ = load_data()
-        result_lookup: dict = {}
-        if all_games is not None and not all_games.empty:
-            played = all_games[
-                (all_games['season'] == season) &
-                all_games['result'].notna() & (all_games['result'] != -1000)
-            ]
-            for _, row in played.iterrows():
-                wk = row.get('week')
-                ht = _normalize_team(str(row.get('home_team', '') or ''))
-                at = _normalize_team(str(row.get('away_team', '') or ''))
-                res = row.get('result', 0)
-                if not wk or not ht or not at:
-                    continue
-                key = f"W{int(wk):02d}_{ht}_{at}"
-                winner = None
-                if res > 0:
-                    winner = ht
-                elif res < 0:
-                    winner = at
-                sl = row.get('spread_line')
-                result_lookup[key] = {
-                    "winner":      winner,
-                    "home_score":  int(row.get('home_score')) if row.get('home_score') is not None else None,
-                    "away_score":  int(row.get('away_score')) if row.get('away_score') is not None else None,
-                    "spread_line": float(sl) if sl is not None and str(sl) not in ('', 'nan') else None,
-                }
+        result_lookup = build_result_lookup(all_games, season)
 
         week_prefix = f"W{week:02d}_"
         games = []

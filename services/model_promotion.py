@@ -33,7 +33,27 @@ PROMOTION_GATES: dict[str, float] = {
 }
 
 
-def find_same_schema_best(entries: list[dict], new_feature_columns: list[str]) -> Optional[dict]:
+def _fmt(value) -> str:
+    """Format a metric for a log line; None or non-numeric renders as n/a."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "n/a"
+    return f"{value:.4f}"
+
+
+def _decision_fields(model_name: str, new_metrics: dict, best_metrics: Optional[dict]) -> str:
+    best = best_metrics or {}
+    return (
+        f"model={model_name} "
+        f"candidate_accuracy={_fmt(new_metrics.get('test_accuracy'))} "
+        f"baseline_accuracy={_fmt(best.get('test_accuracy'))} "
+        f"candidate_auc={_fmt(new_metrics.get('test_auc'))} "
+        f"baseline_auc={_fmt(best.get('test_auc'))}"
+    )
+
+
+def find_same_schema_best(
+    entries: list[dict], new_feature_columns: list[str], model_name: str = ""
+) -> Optional[dict]:
     """Return the metrics dict of the best entry that shares
     new_feature_columns exactly, or None if no entry shares this schema
     (the first model of its generation -- nothing to gate against yet).
@@ -42,12 +62,21 @@ def find_same_schema_best(entries: list[dict], new_feature_columns: list[str]) -
     test_accuracy otherwise (NN, which never computes test_auc) -- both
     metrics live on a comparable 0-1 scale, so the fallback doesn't change
     what "best" means, only what's measurable for that model type.
+
+    Logs a `promotion_gate schema_check` line. `entries` in that line is
+    the list the caller passed in; the XGB/LR services pre-filter to
+    registry entries that carry feature_columns, so it reflects that
+    filtered list, not the raw registry size.
     """
     candidates = [
         e for e in entries
         if e.get("feature_columns") == new_feature_columns
         and e.get("metrics", {}).get("test_accuracy") is not None
     ]
+    logger.info(
+        "promotion_gate schema_check model=%s entries=%d same_schema=%d feature_columns=%d",
+        model_name or "?", len(entries), len(candidates), len(new_feature_columns),
+    )
     if not candidates:
         return None
     rank_key = "test_auc" if all(
@@ -66,8 +95,9 @@ def assert_promotion_ready(new_metrics: dict, best_metrics: Optional[dict], mode
     """
     if best_metrics is None:
         logger.info(
-            "%s: no same-schema baseline in registry; promotion gate skipped",
-            model_name,
+            "promotion_gate decision=SKIPPED_NO_BASELINE %s "
+            "(%s: no same-schema baseline in registry; promotion gate skipped)",
+            _decision_fields(model_name, new_metrics, None), model_name,
         )
         return
     failures = {}
@@ -79,8 +109,17 @@ def assert_promotion_ready(new_metrics: dict, best_metrics: Optional[dict], mode
         if new_v < best_v + tolerance:
             failures[metric] = {"new": new_v, "best": best_v, "tolerance": tolerance}
     if failures:
+        logger.warning(
+            "promotion_gate decision=REJECTED %s failed=%s",
+            _decision_fields(model_name, new_metrics, best_metrics), ",".join(sorted(failures)),
+        )
         raise ValueError(
             f"{model_name}: new model regressed vs. same-schema best on held-out "
             f"test set: {failures}. Not promoting -- investigate before overriding "
             f"with --force-promote."
         )
+    logger.info(
+        "promotion_gate decision=PROMOTED %s tolerances=%s",
+        _decision_fields(model_name, new_metrics, best_metrics),
+        ",".join(f"{m.replace('test_', '')}:{t}" for m, t in PROMOTION_GATES.items()),
+    )
