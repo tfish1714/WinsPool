@@ -129,7 +129,8 @@ def _get(dr, proj, config, standings=None):
     with patch("routes.api_routes.load_data", return_value=load), \
          patch("services.data_service.get_active_season", return_value=2026), \
          patch("routes.api_routes.get_season_projection_legacy_shape", return_value=proj), \
-         patch("routes.api_routes.get_config_settings", return_value=config):
+         patch("routes.api_routes.is_draft_active_fail_closed",
+               return_value=bool(config.get("draft_active"))):
         return TestClient(app).get("/api/profile/portfolio")
 
 
