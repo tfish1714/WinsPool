@@ -9,6 +9,58 @@ _VAPID_PUBLIC  = os.environ.get("VAPID_PUBLIC_KEY", "")
 _VAPID_PRIVATE = os.environ.get("VAPID_PRIVATE_KEY", "")
 _VAPID_EMAIL   = os.environ.get("VAPID_CLAIMS_EMAIL", "mailto:admin@example.com")
 
+# HTTP statuses a push service returns when a subscription is permanently
+# invalid (unsubscribed, expired, app uninstalled). Retrying is pointless and
+# keeping the token just adds a failure to every future broadcast.
+_GONE_STATUS_CODES = (404, 410)
+
+
+def is_configured() -> bool:
+    return bool(_VAPID_PUBLIC and _VAPID_PRIVATE)
+
+
+def _is_gone_error(exc: Exception) -> bool:
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return status in _GONE_STATUS_CODES
+
+
+def _prune_subscription(player_id) -> None:
+    """Delete a dead push_subscription and tell every process the players cache changed."""
+    from services.db_service import get_db, signal_data_update
+    db = get_db()
+    if db is None:
+        # Local-data mode: nothing to delete, and firebase_admin is not needed.
+        return
+    from firebase_admin import firestore
+    db.collection("players").document(str(player_id)).update(
+        {"push_subscription": firestore.DELETE_FIELD}
+    )
+    signal_data_update("static")
+    logger.info("push_service: pruned dead push subscription for player %s", player_id)
+
+
+def _deliver(player_id, sub: dict, title: str, body: str) -> str:
+    """Send one notification. Returns "sent", "failed", or "pruned"."""
+    from pywebpush import webpush
+    try:
+        webpush(
+            subscription_info=sub,
+            data=json.dumps({"title": title, "body": body}),
+            vapid_private_key=_VAPID_PRIVATE,
+            vapid_claims={"sub": _VAPID_EMAIL},
+        )
+        logger.info("push_service: sent push to player %s", player_id)
+        return "sent"
+    except Exception as e:
+        logger.warning("push_service: send failed for player %s: %s", player_id, e)
+        if _is_gone_error(e):
+            try:
+                _prune_subscription(player_id)
+                return "pruned"
+            except Exception:
+                logger.exception("push_service: prune failed for player %s", player_id)
+        return "failed"
+
 
 def save_push_subscription(player_id: int, subscription: dict) -> bool:
     """Store the browser's push subscription object on the player's Firestore document."""
@@ -68,15 +120,34 @@ def send_push_notification(player_id: int, title: str, body: str) -> bool:
             logger.info("push_service: no push subscription stored for player %s", player_id)
             return False
 
-        from pywebpush import webpush, WebPushException
-        webpush(
-            subscription_info=sub,
-            data=json.dumps({"title": title, "body": body}),
-            vapid_private_key=_VAPID_PRIVATE,
-            vapid_claims={"sub": _VAPID_EMAIL},
-        )
-        logger.info("push_service: sent push to player %s", player_id)
-        return True
+        return _deliver(player_id, sub, title, body) == "sent"
     except Exception as e:
         logger.warning("push_service: send failed for player %s: %s", player_id, e)
         return False
+
+
+def broadcast_push_notification(title: str, body: str) -> dict:
+    """Send title/body to every player with a stored push_subscription.
+
+    Returns {"total", "sent", "failed", "pruned"} where total counts only
+    players that actually had a subscription. One bad subscription never
+    stops the loop.
+    """
+    from services.db_service import get_db
+    counts = {"total": 0, "sent": 0, "failed": 0, "pruned": 0}
+    db = get_db()
+    if db is None:
+        logger.warning("push_service: broadcast skipped, no database (local data mode)")
+        return counts
+    for doc in db.collection("players").stream():
+        sub = (doc.to_dict() or {}).get("push_subscription")
+        if not isinstance(sub, dict):
+            continue
+        counts["total"] += 1
+        outcome = _deliver(doc.id, sub, title, body)
+        counts[outcome] += 1
+    logger.info(
+        "push_service: broadcast complete total=%d sent=%d failed=%d pruned=%d",
+        counts["total"], counts["sent"], counts["failed"], counts["pruned"],
+    )
+    return counts

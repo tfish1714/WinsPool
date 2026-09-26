@@ -106,3 +106,124 @@ def test_success_logs_info_and_returns_true(monkeypatch, caplog):
             result = push_service.send_push_notification(1, "title", "body")
     assert result is True
     assert any("sent push to player 1" in r.message for r in caplog.records)
+
+
+class _Resp:
+    def __init__(self, status):
+        self.status_code = status
+
+
+class _PushError(Exception):
+    def __init__(self, status):
+        super().__init__(f"push failed {status}")
+        self.response = _Resp(status)
+
+
+def _player_doc(pid, sub):
+    doc = MagicMock()
+    doc.id = str(pid)
+    doc.to_dict.return_value = {"push_subscription": sub} if sub is not None else {}
+    return doc
+
+
+def _configure(monkeypatch):
+    monkeypatch.setattr(push_service, "_VAPID_PUBLIC", "pub")
+    monkeypatch.setattr(push_service, "_VAPID_PRIVATE", "priv")
+
+
+def test_410_on_single_send_prunes_subscription(monkeypatch):
+    _configure(monkeypatch)
+    sub = {"endpoint": "https://push.example.com/x", "keys": {"auth": "a", "p256dh": "b"}}
+    db = _mock_db_with_doc(exists=True, subscription=sub)
+    with patch("services.db_service.get_db", return_value=db), \
+         patch("services.db_service.signal_data_update") as signal, \
+         patch("pywebpush.webpush", side_effect=_PushError(410)):
+        assert push_service.send_push_notification(7, "t", "b") is False
+    db.collection.return_value.document.return_value.update.assert_called_once()
+    signal.assert_called_once_with("static")
+
+
+def test_non_gone_failure_never_prunes(monkeypatch):
+    _configure(monkeypatch)
+    sub = {"endpoint": "https://push.example.com/x", "keys": {"auth": "a", "p256dh": "b"}}
+    db = _mock_db_with_doc(exists=True, subscription=sub)
+    with patch("services.db_service.get_db", return_value=db), \
+         patch("pywebpush.webpush", side_effect=_PushError(500)):
+        assert push_service.send_push_notification(7, "t", "b") is False
+    db.collection.return_value.document.return_value.update.assert_not_called()
+
+
+def test_prune_in_local_mode_without_db_does_not_crash(monkeypatch):
+    _configure(monkeypatch)
+    sub = {"endpoint": "https://push.example.com/x", "keys": {"auth": "a", "p256dh": "b"}}
+    with patch("services.db_service.get_db", return_value=None), \
+         patch("pywebpush.webpush", side_effect=_PushError(410)):
+        assert push_service._deliver(7, sub, "t", "b") == "pruned"
+
+
+def test_broadcast_counts_sent_failed_and_pruned(monkeypatch):
+    _configure(monkeypatch)
+    sub = lambda n: {"endpoint": f"https://push.example.com/{n}", "keys": {"auth": "a", "p256dh": "b"}}
+    docs = [_player_doc(1, sub(1)), _player_doc(2, sub(2)), _player_doc(3, sub(3)),
+            _player_doc(4, None), _player_doc(5, float("nan"))]
+    db = MagicMock()
+    db.collection.return_value.stream.return_value = docs
+    outcomes = {"https://push.example.com/1": None,
+                "https://push.example.com/2": _PushError(404),
+                "https://push.example.com/3": _PushError(500)}
+
+    def fake_webpush(subscription_info, **kwargs):
+        err = outcomes[subscription_info["endpoint"]]
+        if err:
+            raise err
+
+    with patch("services.db_service.get_db", return_value=db), \
+         patch("services.db_service.signal_data_update"), \
+         patch("pywebpush.webpush", side_effect=fake_webpush):
+        result = push_service.broadcast_push_notification("Hello", "World")
+    assert result == {"total": 3, "sent": 1, "failed": 1, "pruned": 1}
+
+
+def test_broadcast_prunes_only_the_gone_subscription(monkeypatch):
+    _configure(monkeypatch)
+    docs = [_player_doc(1, {"endpoint": "e1"}), _player_doc(2, {"endpoint": "e2"})]
+    db = MagicMock()
+    db.collection.return_value.stream.return_value = docs
+    errors = {"e1": _PushError(500), "e2": _PushError(410)}
+
+    def fake_webpush(subscription_info, **kwargs):
+        raise errors[subscription_info["endpoint"]]
+
+    with patch("services.db_service.get_db", return_value=db), \
+         patch("services.db_service.signal_data_update"), \
+         patch("pywebpush.webpush", side_effect=fake_webpush):
+        result = push_service.broadcast_push_notification("t", "b")
+    assert result == {"total": 2, "sent": 0, "failed": 1, "pruned": 1}
+    updates = db.collection.return_value.document
+    updates.assert_called_once_with("2")
+    updates.return_value.update.assert_called_once()
+
+
+def test_broadcast_with_no_subscriptions_returns_zeros(monkeypatch):
+    _configure(monkeypatch)
+    db = MagicMock()
+    db.collection.return_value.stream.return_value = [_player_doc(1, None)]
+    with patch("services.db_service.get_db", return_value=db):
+        assert push_service.broadcast_push_notification("t", "b") == {
+            "total": 0, "sent": 0, "failed": 0, "pruned": 0}
+
+
+def test_broadcast_in_local_mode_without_db_does_not_crash(monkeypatch):
+    _configure(monkeypatch)
+    with patch("services.db_service.get_db", return_value=None):
+        assert push_service.broadcast_push_notification("t", "b") == {
+            "total": 0, "sent": 0, "failed": 0, "pruned": 0}
+
+
+def test_broadcast_logs_a_summary_line(monkeypatch, caplog):
+    _configure(monkeypatch)
+    db = MagicMock()
+    db.collection.return_value.stream.return_value = []
+    with patch("services.db_service.get_db", return_value=db), caplog.at_level(logging.INFO):
+        push_service.broadcast_push_notification("t", "b")
+    assert any("broadcast complete" in r.message for r in caplog.records)
