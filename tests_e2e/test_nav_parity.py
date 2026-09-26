@@ -47,6 +47,14 @@ def test_desktop_and_mobile_nav_expose_the_same_destinations(
     if path is not None:
         page.goto(f"{live_server}{path}")
     page.wait_for_selector("#nav-primary-links a", timeout=10000)
+    # updateNav() renders once from the localStorage cache, then re-renders when
+    # _backgroundSync() gets /api/config/settings back. Wait for that sync
+    # (it always writes nfl_wins_latest_week) so we compare settled navs, not a
+    # cached first paint racing the drawer's later toggle.
+    page.wait_for_function(
+        "() => localStorage.getItem('nfl_wins_latest_week') !== null", timeout=10000
+    )
+    page.wait_for_load_state("networkidle")
 
     desktop_hrefs = _visible_hrefs(page.locator("#nav-primary-links a"))
     desktop_hrefs |= _visible_hrefs(page.locator("#nav-more-dropdown a"))

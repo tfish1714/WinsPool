@@ -10,6 +10,7 @@ from services.data_service import (
     load_data, get_available_years, get_latest_season_and_week,
     get_latest_week_for_year, get_active_season,
 )
+from services.constants import PLAYOFF_RACE_MIN_WEEK
 from services.response_helpers import server_error
 from services.utils import abbreviate_player_name as _first_name, filter_season
 import services.db_service as db
@@ -148,6 +149,7 @@ async def playoff_race_by_year(request: Request, year: int):
     standings = filter_season(all_st, year)
     games = filter_season(all_games, year)
     draft_results = filter_season(all_draft_results, year)
+    latest_week = get_latest_week_for_year(games, year)
 
     try:
         schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
@@ -161,6 +163,7 @@ async def playoff_race_by_year(request: Request, year: int):
 
     return templates.TemplateResponse(request, "playoff_race.html", {
         "race": race_data,
+        "magic_active": latest_week >= PLAYOFF_RACE_MIN_WEEK,
         "year": year,
         "current_year": get_active_season(all_games, all_draft_results, rules),
         "available_years": _yrs,
