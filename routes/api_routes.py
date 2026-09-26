@@ -523,7 +523,7 @@ def get_config():
     }
     try:
         public = {k: v for k, v in get_config_settings().items()
-                  if k not in ("pool_entry_fee", "pool_payouts", "pool_config")}
+                  if k not in ("pool_config",)}
         return JSONResponse(content={**public, **version})
     except Exception:
         logger.exception("get_config error")
@@ -551,6 +551,41 @@ async def set_config(request: Request, _auth: dict = Depends(require_admin)):
 
 
 
+def _remaining_games_with_probs(games, season: int):
+    """Unplayed regular-season games as (home, away, home_win_prob).
+
+    Unplayed = `result` null or the UNDRAFTED_SENTINEL marker.  Probability is the
+    stored game prediction's `pred_prob` (the HOME win probability); a game with no
+    stored prediction uses 0.5.  Returns (games, number_with_stored_prediction).
+    """
+    from services.cache_service import get_game_predictions
+    from services.constants import UNDRAFTED_SENTINEL
+    from services.utils import normalize_team_abbr
+    if games is None or games.empty:
+        return [], 0
+    g = games[games["season"] == season]
+    if "game_type" in g.columns:
+        g = g[g["game_type"] == "REG"]
+    g = g[g["result"].isna() | (g["result"] == UNDRAFTED_SENTINEL)]
+    if g.empty:
+        return [], 0
+    preds = get_game_predictions(season) or {}
+    out, n_stored = [], 0
+    for row in g.to_dict("records"):
+        home = normalize_team_abbr(row.get("home_team"))
+        away = normalize_team_abbr(row.get("away_team"))
+        week = pd.to_numeric(row.get("week"), errors="coerce")
+        if not isinstance(home, str) or not isinstance(away, str) or pd.isna(week) or not home or not away:
+            continue
+        prob = (preds.get(f"W{int(week):02d}_{home}_{away}") or {}).get("pred_prob")
+        if prob is None or pd.isna(prob):
+            prob = 0.5
+        else:
+            n_stored += 1
+        out.append((home, away, float(prob)))
+    return out, n_stored
+
+
 @router.get("/profile/portfolio")
 def get_profile_portfolio(_auth: dict = Depends(require_auth)):
     """Caller's season outlook. Projections are withheld from non-admins while the draft is active."""
@@ -559,7 +594,8 @@ def get_profile_portfolio(_auth: dict = Depends(require_auth)):
         standings, _, games, _, _, draft_results, rules = load_data()
         season = int(get_active_season(games, draft_results, rules))
         base = {"season": season, "available": False, "reason": None,
-                "top2_prob": None, "win_prob": None, "expected_rank": None, "pool_size": 0}
+                "top2_prob": None, "win_prob": None, "expected_rank": None, "pool_size": 0,
+                "odds_basis": None, "games_remaining": None}
         if get_config_settings().get("draft_active") and _auth.get("role") != "admin":
             return JSONResponse(content={**base, "reason": "draft_in_progress"})
         try:
@@ -589,13 +625,22 @@ def get_profile_portfolio(_auth: dict = Depends(require_auth)):
                     records[str(row.get("team"))] = {
                         k: (0 if pd.isna(row.get(k)) else row.get(k))
                         for k in ("wins", "losses", "ties")}
-            sim = analysis.simulate_pool_finish_odds(pool, projections, records)
+            remaining, n_stored = _remaining_games_with_probs(games, season)
+            if n_stored > 0:
+                base_wins = {t: r.get("wins") for t, r in records.items()}
+                sim = analysis.simulate_pool_finish_odds_from_games(pool, base_wins, remaining)
+                basis, n_remaining = "per_game", len(remaining)
+            else:
+                sim = analysis.simulate_pool_finish_odds(pool, projections, records)
+                basis, n_remaining = "team_projection", None
             mine = sim.get(player_id)
             if mine:
                 odds = {"top2_prob": round(mine["top_n_prob"], 4),
                         "win_prob": round(mine["win_prob"], 4),
                         "expected_rank": round(mine["expected_rank"], 2),
-                        "pool_size": len(pool)}
+                        "pool_size": len(pool),
+                        "odds_basis": basis,
+                        "games_remaining": n_remaining}
         except Exception:
             logger.exception("pool finish odds failed; returning portfolio without them")
         return JSONResponse(content={**base, "available": True, **result, **odds})

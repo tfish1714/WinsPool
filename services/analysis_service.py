@@ -1014,6 +1014,60 @@ def simulate_pool_finish_odds(player_teams: dict, team_projections: dict, team_r
     return out
 
 
+def simulate_pool_finish_odds_from_games(player_teams: dict, base_wins: dict,
+                                         remaining_games: list, n_sims: int = 10000,
+                                         seed: int = 0, top_n: int = 2) -> dict:
+    """Monte Carlo of every player's pool finish from per-game win probabilities.
+
+    remaining_games: [(home_team, away_team, home_win_prob)], each unplayed game
+    sampled ONCE per simulation (home wins with the given probability, else away)
+    so a player holding both sides gets exactly one win from it.  base_wins maps
+    team -> actual wins to date (missing -> 0).  Ranking uses a random tie-break.
+    Returns {player_id: {"top_n_prob", "win_prob", "expected_rank"}}.
+    """
+    player_ids = list(player_teams.keys())
+    n_players = len(player_ids)
+    if n_players == 0:
+        return {}
+    teams = sorted({t for ts in player_teams.values() for t in ts})
+    idx = {t: i for i, t in enumerate(teams)}
+    rng = np.random.default_rng(seed)
+    n_sims = max(int(n_sims), 1)
+    base = np.array([float(base_wins.get(t) or 0) for t in teams])
+    indicator = np.zeros((len(teams), n_players))
+    for j, pid in enumerate(player_ids):
+        for t in player_teams[pid]:
+            indicator[idx[t], j] = 1.0
+    team_wins = np.tile(base, (n_sims, 1))
+    games = [(h, a, p) for h, a, p in remaining_games if h in idx or a in idx]
+    if games:
+        probs = np.array([float(p) for _, _, p in games])
+        home_wins = rng.random((n_sims, len(games))) < probs[None, :]
+        home_m = np.zeros((len(games), len(teams)))
+        away_m = np.zeros((len(games), len(teams)))
+        for g, (h, a, _) in enumerate(games):
+            if h in idx:
+                home_m[g, idx[h]] = 1.0
+            if a in idx:
+                away_m[g, idx[a]] = 1.0
+        team_wins = team_wins + home_wins @ home_m + (~home_wins) @ away_m
+    totals = team_wins @ indicator
+    jittered = totals + rng.random(totals.shape) * 1e-6
+    order = np.argsort(-jittered, axis=1)
+    ranks = np.empty_like(order)
+    rows = np.arange(n_sims)[:, None]
+    ranks[rows, order] = np.arange(1, n_players + 1)[None, :]
+    out = {}
+    for j, pid in enumerate(player_ids):
+        r = ranks[:, j]
+        out[pid] = {
+            "top_n_prob": 1.0 if n_players <= top_n else float((r <= top_n).mean()),
+            "win_prob": float((r == 1).mean()),
+            "expected_rank": float(r.mean()),
+        }
+    return out
+
+
 def compute_portfolio_projection(team_projections: dict, player_teams: list,
                                  playoff_wins_threshold: float = 9.5) -> dict:
     """Summarise a player's 3-team portfolio from per-team win projections.

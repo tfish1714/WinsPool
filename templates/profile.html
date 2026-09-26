@@ -175,6 +175,17 @@
                     if (typeof p.win_prob === 'number') {
                         body.appendChild(line('Chance to win the pool', `${Math.round(p.win_prob * 100)}%`));
                     }
+                    const basisText = p.odds_basis === 'per_game'
+                        ? `Based on ${p.games_remaining} remaining games`
+                        : p.odds_basis === 'team_projection'
+                            ? 'Based on preseason team projections'
+                            : '';
+                    if (basisText) {
+                        const note = document.createElement('div');
+                        note.style.cssText = 'color:var(--text-secondary); font-size:0.8rem; padding-bottom:0.25rem;';
+                        note.textContent = basisText;
+                        body.appendChild(note);
+                    }
                     body.appendChild(line('Expected wins', p.expected_wins.toFixed(1)));
                     body.appendChild(line('Likely range (5th-95th)', `${p.floor.toFixed(1)} - ${p.ceiling.toFixed(1)}`));
                     body.appendChild(line('Chance at least one team makes playoffs', `${Math.round(p.playoff_prob_any * 100)}%`));
