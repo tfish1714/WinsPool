@@ -493,12 +493,15 @@ def apply_tiebreakers(reshaped_df: pd.DataFrame) -> pd.DataFrame:
 # Empty-string suffixes on merges 4-6 avoid column-name collisions with the
 # columns already added in earlier merges. The final frame has one row per
 # game with both owners' names, the winner's owner, and ML predictions.
-def get_enriched_schedule(games, draft_results, players, season):
+def get_enriched_schedule(games, draft_results, players, season, team_records=None):
     """Join games with draft ownership, player metadata, standings, and predictions.
 
     Performs a 6-way merge so each game row carries the owning player's name,
     their team's season record, and ML win-probability for display in the
     schedule tab.
+
+    `team_records`, when given, is reused instead of rescanning `games` (the
+    standings page computes it once and shares it). None means compute it here.
     """
     import time
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
@@ -547,7 +550,8 @@ def get_enriched_schedule(games, draft_results, players, season):
     final_merged = final_merged.sort_values(sort_cols, ascending=[True] * len(sort_cols), na_position='last')
     
     # Calculate Global Team Records using the shared vectorized utility
-    team_records = compute_team_records(games, season)
+    if team_records is None:
+        team_records = compute_team_records(games, season)
     final_merged['away_record'] = final_merged['away_team'].apply(lambda t: format_team_record(t, team_records))
     final_merged['home_record'] = final_merged['home_team'].apply(lambda t: format_team_record(t, team_records))
     
@@ -589,7 +593,7 @@ def get_draft_progress(draft_results: pd.DataFrame, rules: pd.DataFrame) -> tupl
     picks_expected = (len(rules) if rules is not None else 0) * TEAMS_PER_PLAYER
     return picks_made, picks_expected
 
-def calculate_wins_pool_standings(standings, draft_results, players, season, games=None):
+def calculate_wins_pool_standings(standings, draft_results, players, season, games=None, team_records=None):
     """Compute per-player cumulative win totals from game results and draft assignments.
 
     Merges standings with draft_results and players to produce a DataFrame
@@ -647,9 +651,12 @@ def calculate_wins_pool_standings(standings, draft_results, players, season, gam
 
     wins_pool_standings = pd.merge(wins_pool_standings, players, on='playerId', how='inner')
     
-    # Optional: Attach global team records if games DF is passed
-    if games is not None and not games.empty:
+    # Optional: Attach global team records
+    # A precomputed dict (even an empty one: a season with no played games) is
+    # used as is; otherwise fall back to computing from `games` when passed.
+    if team_records is None and games is not None and not games.empty:
         team_records = compute_team_records(games, season)
+    if team_records is not None:
         wins_pool_standings['global_record'] = wins_pool_standings['team'].apply(
             lambda t: format_team_record(t, team_records)
         )

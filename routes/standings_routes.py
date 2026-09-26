@@ -64,19 +64,23 @@ async def wins_pool_by_year(request: Request, year: int):
         draft_results = filter_season(all_draft_results, year)
         rules_year = filter_season(rules, year)
 
+        # Both analysis calls below need the same per-team W-L-T table; scan
+        # the season's games once and share it (GitHub #95).
+        team_records = analysis.compute_team_records(games, year) if not games.empty else None
+
         picks_made, picks_expected = analysis.get_draft_progress(draft_results, rules_year)
         draft_pending = picks_expected > 0 and picks_made < picks_expected
 
         sorted_df = (
             pd.DataFrame() if draft_pending
-            else analysis.calculate_wins_pool_standings(standings, draft_results, players, year, games)
+            else analysis.calculate_wins_pool_standings(standings, draft_results, players, year, games, team_records=team_records)
         )
         current_year = get_active_season(all_games, all_draft_results, rules)
         available_years = get_available_years(all_draft_results, all_games, rules)
         if year not in available_years:
             available_years = sorted(available_years + [year])
 
-        schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
+        schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year, team_records=team_records)
         latest_week = get_latest_week_for_year(games, year)
         unique_weeks = (
             sorted(schedule_enriched["week"].dropna().astype(int).unique().tolist())

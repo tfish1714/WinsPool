@@ -236,3 +236,70 @@ def test_completed_season_three_way_tie_at_top_nobody_eliminated():
         assert race[p]["eliminated"] is False
         assert race[p]["podium_eliminated"] is False
         assert race[p]["magic_number"] == 1
+
+
+from unittest.mock import patch
+
+
+def _games_two_teams(season=3000):
+    return pd.DataFrame([
+        {"season": season, "week": 1, "game_type": "REG", "home_team": "KC", "away_team": "BAL",
+         "result": 3, "home_score": 27, "away_score": 24, "gameday": "2000-09-10"},
+        {"season": season, "week": 2, "game_type": "REG", "home_team": "BAL", "away_team": "KC",
+         "result": -1000, "home_score": None, "away_score": None, "gameday": "2000-09-17"},
+    ])
+
+
+def _draft_players(season=3000):
+    draft = pd.DataFrame([
+        {"season": season, "team": "KC", "playerId": 1, "draftPick": 1},
+        {"season": season, "team": "BAL", "playerId": 2, "draftPick": 2},
+    ])
+    players = pd.DataFrame([{"playerId": 1, "fullName": "Ann"}, {"playerId": 2, "fullName": "Bo"}])
+    return draft, players
+
+
+def test_get_enriched_schedule_uses_precomputed_records_without_recomputing():
+    from services import analysis_service as a
+    draft, players = _draft_players()
+    games = _games_two_teams()
+    baseline = a.get_enriched_schedule(games, draft, players, 3000)
+    records = a.compute_team_records(games, 3000)
+    with patch.object(a, "compute_team_records", side_effect=AssertionError("must not recompute")):
+        result = a.get_enriched_schedule(games, draft, players, 3000, team_records=records)
+    pd.testing.assert_frame_equal(result.reset_index(drop=True), baseline.reset_index(drop=True))
+
+
+def test_get_enriched_schedule_empty_dict_records_is_not_recomputed():
+    from services import analysis_service as a
+    draft, players = _draft_players()
+    with patch.object(a, "compute_team_records", side_effect=AssertionError("must not recompute")):
+        out = a.get_enriched_schedule(_games_two_teams(), draft, players, 3000, team_records={})
+    assert set(out["home_record"]) == {"0-0"}
+
+
+def test_calculate_wins_pool_standings_uses_precomputed_records():
+    from services import analysis_service as a
+    draft, players = _draft_players()
+    games = _games_two_teams()
+    standings = pd.DataFrame([
+        {"team": "KC", "season": 3000, "wins": 1, "losses": 0, "ties": 0, "scored": 27, "allowed": 24},
+        {"team": "BAL", "season": 3000, "wins": 0, "losses": 1, "ties": 0, "scored": 24, "allowed": 27},
+    ])
+    baseline = a.calculate_wins_pool_standings(standings, draft, players, 3000, games)
+    records = a.compute_team_records(games, 3000)
+    with patch.object(a, "compute_team_records", side_effect=AssertionError("must not recompute")):
+        result = a.calculate_wins_pool_standings(standings, draft, players, 3000, games, team_records=records)
+    drop = ["refreshTime"]
+    pd.testing.assert_frame_equal(result.drop(columns=drop), baseline.drop(columns=drop))
+
+
+def test_calculate_wins_pool_standings_records_without_games_frame():
+    from services import analysis_service as a
+    draft, players = _draft_players()
+    standings = pd.DataFrame()
+    out = a.calculate_wins_pool_standings(standings, draft, players, 3000, games=None,
+                                          team_records={"KC": {"W": 1, "L": 0, "T": 0}})
+    assert not out.empty
+    ann = out[out["playerId"] == 1].iloc[0]
+    assert ann["team1"] == "KC" and ann["global_record1"] == "1-0"
