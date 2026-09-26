@@ -519,8 +519,9 @@ def _run_weekly_eval_if_tuesday(games, current_year: int) -> None:
     Runs on Tuesday only, for the same reason as the weekly backfill: it is
     the first day every game of the prior week (including Monday Night
     Football) is final. It is called early in main(), before the forward-
-    looking prediction regeneration, so the snapshot grades the model that
-    made the predictions rather than one refreshed afterward.
+    looking prediction regeneration, purely so a slow or failed prediction
+    rebuild cannot cause it to be skipped. (weekly_model_eval.py reloads the
+    current models itself, so ordering does not affect which model is graded.)
 
     Wholly non-fatal: a failure, timeout or missing week only prints a
     warning and never fails the daily job.

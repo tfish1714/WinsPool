@@ -54,3 +54,47 @@ def test_require_db_honors_getter(monkeypatch):
     fake = MagicMock()
     monkeypatch.setattr(db_service, "get_db", lambda: None)
     assert db_service.require_db(getter=lambda: fake) is fake
+
+
+def test_get_db_concurrent_first_calls_do_not_raise(monkeypatch):
+    """Two threads racing the lazy init must not surface initialize_app's
+    'default Firebase app already exists' ValueError."""
+    import base64
+    import threading
+    import time
+
+    monkeypatch.setenv("USE_LOCAL_DATA", "False")
+    monkeypatch.setenv("FIREBASE_CREDENTIALS", base64.b64encode(b"{}").decode())
+    monkeypatch.setattr(firebase_admin, "_apps", {})
+    barrier = threading.Barrier(2)
+
+    def fake_initialize_app(cred=None, *a, **kw):
+        try:
+            barrier.wait(timeout=0.5)
+        except threading.BrokenBarrierError:
+            pass
+        time.sleep(0.05)
+        if firebase_admin._apps:
+            raise ValueError("The default Firebase app already exists.")
+        firebase_admin._apps["[DEFAULT]"] = object()
+
+    errors = []
+    results = []
+
+    def worker():
+        try:
+            results.append(db_service.get_db())
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    with patch("firebase_admin.credentials.Certificate", return_value=MagicMock()), \
+         patch("firebase_admin.initialize_app", side_effect=fake_initialize_app), \
+         patch("firebase_admin.firestore.client", return_value=MagicMock()):
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+    assert errors == []
+    assert len(results) == 2 and all(r is not None for r in results)

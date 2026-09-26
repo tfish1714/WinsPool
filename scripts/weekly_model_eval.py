@@ -14,8 +14,9 @@ Usage:
 Firestore collection (services/cache_service.py), a durable per-week record
 of what the model predicted before the outcome was known -- unlike
 game_predictions, which cache_builder.py silently recomputes with whatever
-model is currently deployed on every daily run. This script stays manual
-(run it yourself after each week finishes); nothing schedules it.
+model is currently deployed on every daily run. winspool-predict-daily
+runs it automatically on Tuesdays (cache_builder.py); you can also run it
+manually for any week.
 """
 
 import sys

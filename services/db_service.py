@@ -6,6 +6,7 @@ import json
 import pandas as pd
 import hashlib
 import time
+import threading
 import bcrypt
 from services.cache_service import clear_data_cache, DOMAIN_STATIC
 
@@ -95,7 +96,12 @@ def _init_firebase():
             return None
         cred = credentials.Certificate(str(creds_path))
 
-    firebase_admin.initialize_app(cred)
+    try:
+        firebase_admin.initialize_app(cred)
+    except ValueError:
+        # Another thread initialized the default app first; that's fine.
+        if not firebase_admin._apps:
+            raise
     return firestore.client()
 
 
@@ -105,6 +111,9 @@ use_local_env = os.environ.get("USE_LOCAL_DATA", "False").lower() == "true"
 # require credentials.
 
 
+_INIT_LOCK = threading.Lock()
+
+
 def get_db():
     """Return the Firestore client, or None in local mode / without credentials."""
     if os.environ.get("USE_LOCAL_DATA", "False").lower() == "true":
@@ -112,8 +121,10 @@ def get_db():
     import firebase_admin
     from firebase_admin import firestore
     if not firebase_admin._apps:
-        if _init_firebase() is None:
-            return None
+        with _INIT_LOCK:
+            if not firebase_admin._apps:
+                if _init_firebase() is None:
+                    return None
     try:
         return firestore.client()
     except ValueError:

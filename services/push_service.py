@@ -128,7 +128,10 @@ def _get_push_subscription(player_id: int):
                 return sub
 
     from services.db_service import get_db
-    doc = get_db().collection("players").document(str(player_id)).get()
+    db = get_db()
+    if db is None:
+        return None
+    doc = db.collection("players").document(str(player_id)).get()
     if not doc.exists:
         logger.info("push_service: no player document for %s", player_id)
         return None

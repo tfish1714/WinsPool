@@ -14,6 +14,20 @@ def test_get_config_settings_public():
     assert isinstance(data["draft_active"], bool)
 
 
+def test_get_config_settings_hides_pool_financials():
+    """The public config endpoint must not leak pool fee/payout settings."""
+    from unittest.mock import patch
+    fake = {"draft_active": False, "mock_draft_active": False,
+            "pool_entry_fee": 50.0, "pool_payouts": [{"place": 1, "pct": 100.0}],
+            "other_flag": True}
+    with patch("services.db_service.get_config_settings", return_value=fake):
+        data = client.get("/api/config/settings").json()
+    assert "pool_entry_fee" not in data
+    assert "pool_payouts" not in data
+    assert data["other_flag"] is True
+    assert data["draft_active"] is False
+
+
 def test_get_config_settings_includes_mock_draft_active():
     """mock_draft_active defaults present alongside draft_active on the same doc."""
     response = client.get("/api/config/settings")

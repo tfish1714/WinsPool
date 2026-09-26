@@ -45,6 +45,10 @@ class TestComputePortfolioProjection:
         r = compute_portfolio_projection({"KC": {"projected_wins": 11, "std_dev": 0}}, ["KC"])
         assert 0.9 < r["teams"][0]["playoff_prob"] <= 1
 
+    def test_floor_clamped_at_zero(self):
+        r = compute_portfolio_projection({"KC": {"projected_wins": 1, "std_dev": 6}}, ["KC"])
+        assert r["floor"] == 0
+
     def test_ceiling_capped(self):
         r = compute_portfolio_projection({"KC": {"projected_wins": 17, "std_dev": 5}}, ["KC"])
         assert r["ceiling"] <= 17

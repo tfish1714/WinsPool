@@ -521,7 +521,9 @@ def get_config():
         "latest_week": _safe_latest_week(),
     }
     try:
-        return JSONResponse(content={**get_config_settings(), **version})
+        public = {k: v for k, v in get_config_settings().items()
+                  if k not in ("pool_entry_fee", "pool_payouts")}
+        return JSONResponse(content={**public, **version})
     except Exception:
         logger.exception("get_config error")
         return JSONResponse(content={"draft_active": False, **version})

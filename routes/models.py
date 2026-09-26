@@ -119,7 +119,6 @@ class PoolPayoutItem(BaseModel):
 
 
 class PoolConfigRequest(BaseModel):
-    season: Optional[int] = None
     entryFee: float = Field(ge=0, le=1_000_000)
     payouts: List[PoolPayoutItem] = Field(default_factory=list, max_length=20)
 

@@ -180,7 +180,9 @@
                     msg.style.cssText = 'color:var(--text-secondary); margin:0;';
                     msg.textContent = p.reason === 'no_teams'
                         ? 'No teams drafted yet for this season.'
-                        : 'Season outlook appears once the draft is complete.';
+                        : p.reason === 'no_projections'
+                            ? 'Projections are not available for this season yet.'
+                            : 'Season outlook appears once the draft is complete.';
                     body.appendChild(msg);
                 }
                 document.getElementById('portfolio-card').style.display = 'block';

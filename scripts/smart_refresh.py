@@ -106,6 +106,8 @@ def _fetch_results_from_firestore(game_ids: list) -> dict:
     from services.db_service import get_db
 
     db = get_db()
+    if db is None:
+        return {}
     results = {}
     col = db.collection("nfl_games")
     for gid in game_ids:

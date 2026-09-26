@@ -102,6 +102,14 @@ class TestPoolConfigRoute:
                                  json={"entryFee": -1, "payouts": [{"place": 1, "pct": 100}]})
         assert r.status_code in (400, 422)
 
+    def test_rejects_payouts_over_100_percent(self, admin_token):
+        with patch("routes.admin_routes.set_config_settings") as m:
+            r = TestClient(app).post("/api/admin/pool/config", headers={"Authorization": admin_token},
+                                     json={"entryFee": 10,
+                                           "payouts": [{"place": 1, "pct": 70}, {"place": 2, "pct": 40}]})
+        assert r.status_code in (400, 422)
+        m.assert_not_called()
+
     def test_non_admin_forbidden(self):
         tok = create_token(player_id=2, role="player")
         r = TestClient(app).post("/api/admin/pool/config", headers={"Authorization": f"Bearer {tok}"},
