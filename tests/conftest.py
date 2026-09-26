@@ -31,10 +31,13 @@ def mock_env_vars(monkeypatch):
 @pytest.fixture(autouse=True)
 def reset_latest_week_cache():
     """The /api/config/settings latest_week TTL cache is module-level state."""
-    from routes.api_routes import _reset_latest_week_cache
-    _reset_latest_week_cache()
+    def _reset():
+        mod = sys.modules.get("routes.api_routes")
+        if mod is not None:
+            mod._reset_latest_week_cache()
+    _reset()
     yield
-    _reset_latest_week_cache()
+    _reset()
 
 
 @pytest.fixture

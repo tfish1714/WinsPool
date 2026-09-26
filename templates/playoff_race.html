@@ -16,7 +16,7 @@
                 </p>
                 {% if magic_active %}
                 <p style="color:var(--ink-2); margin:0.25rem 0 0; font-size:.8rem;">
-                    Magic #: wins still needed to finish strictly ahead of every opponent's best case. Podium #: same for a top-3 finish.
+                    Magic #: wins (or opponent losses) still needed to finish strictly ahead of every opponent's best case. Podium #: same for a top-3 finish.
                 </p>
                 {% endif %}
             </div>
@@ -58,6 +58,8 @@
                         Magic #: <strong>Eliminated</strong>
                         {% elif rec.magic_number == 0 %}
                         Magic #: <strong>Clinched</strong>
+                        {% elif rec.magic_number == 1 and rec.current_wins == rec.max_wins %}
+                        Magic #: <strong>Tied (tiebreakers)</strong>
                         {% else %}
                         Magic #: <strong>{{ rec.magic_number }}</strong>
                         {% endif %}
@@ -67,6 +69,8 @@
                         Podium #: <strong>Eliminated</strong>
                         {% elif rec.podium_magic_number == 0 %}
                         Podium #: <strong>Clinched</strong>
+                        {% elif rec.podium_magic_number == 1 and rec.current_wins == rec.max_wins %}
+                        Podium #: <strong>Tied (tiebreakers)</strong>
                         {% else %}
                         Podium #: <strong>{{ rec.podium_magic_number }}</strong>
                         {% endif %}

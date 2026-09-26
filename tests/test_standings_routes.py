@@ -23,12 +23,12 @@ def _load(week):
     return empty, empty, games, empty, empty, empty, empty
 
 
-def _render(week, monkeypatch):
+def _render(week, monkeypatch, schedule=None):
     # Patch the names routes/standings_routes.py actually imports.
     import routes.standings_routes as sr
     monkeypatch.setattr(sr, "load_data", lambda *a, **k: _load(week))
     monkeypatch.setattr(sr, "get_latest_week_for_year", lambda games, year: week)
-    monkeypatch.setattr(sr.analysis, "get_enriched_schedule", lambda *a, **k: _schedule())
+    monkeypatch.setattr(sr.analysis, "get_enriched_schedule", lambda *a, **k: _schedule() if schedule is None else schedule)
     monkeypatch.setattr(sr, "get_available_years", lambda *a, **k: [YEAR])
     monkeypatch.setattr(sr, "get_active_season", lambda *a, **k: YEAR)
     return client.get(f"/playoff-race/{YEAR}")
@@ -107,3 +107,19 @@ def test_live_refresh_announces_patches_so_highlights_recompute():
     import pathlib
     src = (pathlib.Path(__file__).resolve().parent.parent / "static" / "js" / "standings_refresh.js").read_text(encoding="utf-8")
     assert "standings:patched" in src
+
+
+def test_completed_season_three_way_tie_renders_tied_not_eliminated(monkeypatch):
+    # Cyclic results: Ann beats Bo, Bo beats Cy, Cy beats Ann -> 1 win each,
+    # no games left. A tie on wins is settled by tiebreakers, so nobody is
+    # eliminated and nobody has clinched; the cell must say so.
+    schedule = pd.DataFrame([
+        {"fullName_away": "Bo", "fullName_home": "Ann", "result": 3, "week": 1},
+        {"fullName_away": "Cy", "fullName_home": "Bo", "result": 3, "week": 2},
+        {"fullName_away": "Ann", "fullName_home": "Cy", "result": 3, "week": 3},
+    ])
+    resp = _render(PLAYOFF_RACE_MIN_WEEK, monkeypatch, schedule)
+    assert resp.status_code == 200
+    assert resp.text.count("Tied (tiebreakers)") >= 3
+    assert "Magic #: <strong>Eliminated</strong>" not in resp.text
+    assert "Podium #: <strong>Eliminated</strong>" not in resp.text

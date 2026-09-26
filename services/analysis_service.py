@@ -210,10 +210,11 @@ def _compute_magic_numbers(records: List[Dict[str, Any]]) -> None:
     opponent's best possible finish (opponent_max_wins - current_wins + 1),
     clamped at 0 (0 == clinched). podium_magic_number is the same test against
     the PODIUM_SIZE-th best opponent, so at most PODIUM_SIZE - 1 opponents can
-    still reach the player. eliminated / podium_eliminated use the strict
-    `>=` convention (a tie on wins is decided by tiebreakers later, so it is
-    not treated as a guaranteed loss until an opponent's CURRENT wins already
-    reach this player's best possible total).
+    still reach the player. eliminated / podium_eliminated require an
+    opponent's CURRENT wins to be strictly greater than this player's best
+    possible total (max_wins): a tie on wins is decided by tiebreakers, so a
+    player who can still tie is not eliminated. podium_eliminated needs at
+    least PODIUM_SIZE such opponents.
     """
     for rec in records:
         others = [o for o in records if o is not rec]
@@ -228,7 +229,7 @@ def _compute_magic_numbers(records: List[Dict[str, Any]]) -> None:
         rec['podium_magic_number'] = (
             0 if podium_bar is None else max(0, podium_bar - rec['current_wins'] + 1)
         )
-        reached = sum(1 for c in other_cur if c >= rec['max_wins'])
+        reached = sum(1 for c in other_cur if c > rec['max_wins'])
         rec['eliminated'] = reached >= 1
         rec['podium_eliminated'] = reached >= PODIUM_SIZE
 

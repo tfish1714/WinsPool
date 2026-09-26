@@ -153,17 +153,22 @@ def test_magic_number_concrete_values_hand_computed():
 def test_eliminated_flags_hand_computed():
     race = _hand_built_race()
     assert race["A"]["eliminated"] is False        # nobody has 3 wins
-    assert race["B"]["eliminated"] is True         # A(2), C(1) already >= B max 1
-    assert race["C"]["eliminated"] is True         # A(2) >= C max 2
+    assert race["B"]["eliminated"] is True         # A(2), C(1) already > B max 1
+    # A(2) only EQUALS C's max (2): C can still tie A and win on tiebreakers,
+    # so C is not eliminated (elimination needs an opponent's current wins
+    # strictly greater than this player's max wins).
+    assert race["C"]["eliminated"] is False
     assert race["D"]["eliminated"] is True
-    # only 2 opponents at/above B's max, need PODIUM_SIZE (3) for podium elimination
+    # only 2 opponents above B's max, need PODIUM_SIZE (3) for podium elimination
     assert all(race[p]["podium_eliminated"] is False for p in "ABCD")
 
 
-def test_podium_eliminated_when_three_opponents_already_reach_max():
+def test_podium_eliminated_when_three_opponents_already_exceed_max():
     schedule = _race_schedule([
         ("X", "P1", 5), ("X", "P2", 5), ("X", "P3", 5), ("X", "P1", None),
+        ("X", "P1", 5), ("X", "P2", 5), ("X", "P3", 5),
     ])
+    # P1..P3 each have 2 wins, strictly above X's max of 1.
     race = {r["player"]: r for r in calculate_playoff_race(schedule, pd.DataFrame())}
     assert race["X"]["max_wins"] == 1
     assert race["X"]["eliminated"] is True
@@ -219,3 +224,15 @@ def test_playoff_constants_importable():
     from services.constants import PLAYOFF_RACE_MIN_WEEK, PODIUM_SIZE
     assert PLAYOFF_RACE_MIN_WEEK == 10
     assert PODIUM_SIZE == 3
+
+
+def test_completed_season_three_way_tie_at_top_nobody_eliminated():
+    # Cyclic results, 1 win each, 0 games left. Ties are decided by
+    # tiebreakers, so no one is eliminated (including the eventual champion).
+    schedule = _race_schedule([("B", "A", 1), ("C", "B", 1), ("A", "C", 1)])
+    race = {r["player"]: r for r in calculate_playoff_race(schedule, pd.DataFrame())}
+    for p in "ABC":
+        assert race[p]["current_wins"] == race[p]["max_wins"] == 1
+        assert race[p]["eliminated"] is False
+        assert race[p]["podium_eliminated"] is False
+        assert race[p]["magic_number"] == 1

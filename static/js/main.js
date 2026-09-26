@@ -255,7 +255,7 @@ class App {
             drawerMockDraft.classList.toggle('hidden', !this.mockDraftActive);
         }
 
-        // ── Drawer + bottom tab Playoff Race entries ──
+        // -- Drawer + bottom tab Playoff Race entries --
         document.getElementById('drawer-playoff-race-link')?.classList.toggle('hidden', !showPlayoffRace);
         document.getElementById('btb-playoff-tab')?.classList.toggle('hidden', !showPlayoffRace);
 
