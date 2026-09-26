@@ -14,7 +14,7 @@ from services.response_helpers import error_response, server_error, not_found, u
 from services.draft_service import sanitize_state
 from services.live_standings_service import build_live_standings_payload
 from services.utils import filter_season
-from services.db_service import get_config_settings
+from services.db_service import get_config_settings, is_draft_active_fail_closed
 from services.pool_service import build_pool_status
 from services.session_service import require_auth, require_admin
 import services.analysis_service as analysis
@@ -598,7 +598,7 @@ def build_player_outlook(player_id: int, is_admin: bool) -> dict:
     base = {"season": season, "available": False, "reason": None,
             "top2_prob": None, "win_prob": None, "expected_rank": None, "pool_size": 0,
             "odds_basis": None, "games_remaining": None}
-    if get_config_settings().get("draft_active") and not is_admin:
+    if is_draft_active_fail_closed() and not is_admin:
         return {**base, "reason": "draft_in_progress"}
     teams = []
     if draft_results is not None and not draft_results.empty and "season" in draft_results.columns:

@@ -9,7 +9,7 @@ from services.data_service import load_data, get_available_years, get_active_sea
 from services.utils import abbreviate_player_name as _first_name, filter_season, normalize_team_abbr
 import services.analysis_service as analysis
 from services.cache_service import get_game_predictions
-from services.db_service import get_config_settings
+from services.db_service import get_config_settings, is_draft_active_fail_closed
 from services.session_service import decode_token
 import services.team_page_service as team_page_service
 
@@ -262,7 +262,7 @@ async def team_page(request: Request, abbr: str):
     standings, _, games, players, _, draft_results, rules = load_data()
     season = int(get_active_season(games, draft_results, rules))
     _, is_admin = _viewer(request)
-    include_projections = is_admin or not get_config_settings().get("draft_active")
+    include_projections = is_admin or not is_draft_active_fail_closed()
     data = {
         "standings": standings, "games": games, "players": players, "draft_results": draft_results,
         "predictions": get_game_predictions(season) if include_projections else {},

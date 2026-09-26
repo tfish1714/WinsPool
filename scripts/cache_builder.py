@@ -539,7 +539,8 @@ def _run_weekly_eval_if_tuesday(games, current_year: int) -> None:
     print(f"[cache_builder] Tuesday -- running weekly model eval for week {week}...")
     _run_subprocess_step(
         [sys.executable, str(SCRIPTS_DIR / "weekly_model_eval.py"),
-         "--season", str(current_year), "--week", str(week), "--firestore"],
+         "--season", str(current_year), "--week", str(week), "--firestore",
+         "--skip-existing"],
         "weekly eval", 900, swallow_errors=True,
         timeout_note=" -- the daily build continues",
     )

@@ -105,8 +105,6 @@ def _init_firebase():
     return firestore.client()
 
 
-use_local_env = os.environ.get("USE_LOCAL_DATA", "False").lower() == "true"
-
 # Firebase is initialized lazily by get_db(); importing this module must never
 # require credentials.
 
@@ -146,7 +144,8 @@ def require_db(exit_on_missing: bool = True, missing_message: str | None = None,
         "Firestore is unavailable: set FIREBASE_CREDENTIALS or provide firebase_credentials.json."
     )
     if exit_on_missing:
-        logger.error(message)
+        # Console print only (CLI visibility); logging it too would emit the
+        # same message twice.
         print(message)
         sys.exit(1)
     raise (exc_type or FileNotFoundError)(message)
@@ -652,6 +651,26 @@ def get_config_settings() -> dict:
         return default
     doc = db.collection("config").document("settings").get()
     return {**default, **(doc.to_dict() if doc.exists else {})}
+
+
+def is_draft_active_fail_closed() -> bool:
+    """True when the draft is active, treating an unreadable config as active.
+
+    Used to gate projections from non-admins: in remote mode a missing
+    Firestore client or a failed config read must hide projections rather
+    than leak them. Local dev mode (USE_LOCAL_DATA=true) mirrors
+    get_config_settings() exactly.
+    """
+    use_local = os.environ.get("USE_LOCAL_DATA", "False").lower() == "true"
+    if use_local:
+        return bool(get_config_settings().get("draft_active"))
+    try:
+        if get_db() is None:
+            return True
+        return bool(get_config_settings().get("draft_active"))
+    except Exception:
+        logger.exception("draft_active read failed; failing closed")
+        return True
 
 
 def set_config_settings(data: dict):

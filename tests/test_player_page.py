@@ -149,7 +149,7 @@ def _portfolio(path, caller_role="player", draft_active=False, caller_id="4"):
         with patch("routes.api_routes.load_data", return_value=_api_load()), \
              patch("services.data_service.get_active_season", return_value=2026), \
              patch("routes.api_routes.get_season_projection_legacy_shape", return_value=PROJ), \
-             patch("routes.api_routes.get_config_settings", return_value={"draft_active": draft_active}), \
+             patch("routes.api_routes.is_draft_active_fail_closed", return_value=draft_active), \
              patch("services.cache_service.get_game_predictions", return_value={}):
             return TestClient(app).get(path)
     finally:

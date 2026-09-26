@@ -967,9 +967,13 @@ class TestWeeklyEvalStep:
         step = self._run(22, _eval_games())
         step.assert_called_once()
         cmd = step.call_args[0][0]
-        assert cmd[-5:] == ["--season", "2026", "--week", "3", "--firestore"]
+        assert cmd[-6:] == ["--season", "2026", "--week", "3", "--firestore",
+                            "--skip-existing"]
         assert cmd[1].endswith("weekly_model_eval.py")
         assert step.call_args.kwargs["swallow_errors"] is True
+        # label and timeout are positional args 2 and 3 of _run_subprocess_step
+        assert step.call_args[0][1] == "weekly eval"
+        assert step.call_args[0][2] == 900
 
     def test_wednesday_does_not_run(self):
         assert not self._run(23, _eval_games()).called
@@ -982,6 +986,11 @@ class TestWeeklyEvalStep:
         order = []
         games = _eval_games()
         empty = pd.DataFrame()
+
+        def _nn_marker(*a, **k):
+            order.append("model_load")
+            raise Exception("skip ML load")
+
         with patch.object(cb, "_run_weekly_eval_if_tuesday",
                           side_effect=lambda *a, **k: order.append("eval")), \
              patch.object(cb, "_run_weekly_backfill_if_tuesday"), \
@@ -992,10 +1001,10 @@ class TestWeeklyEvalStep:
                                                           empty, empty, empty)), \
              patch.object(cb, "get_available_years", return_value=[2026]), \
              patch.object(cb, "_years_to_build", return_value=[2026]), \
-             patch.object(cb, "NNPredictionService", side_effect=Exception("skip ML load")), \
+             patch.object(cb, "NNPredictionService", side_effect=_nn_marker), \
              patch("sys.argv", ["cache_builder.py", "--skip-sync"]):
             cb.main()
-        assert order == ["eval", "build_year"]
+        assert order == ["eval", "model_load", "build_year"]
 
 
 class TestApplyPredictionsCarriesExplanation:

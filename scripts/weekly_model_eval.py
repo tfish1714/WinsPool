@@ -246,6 +246,11 @@ def main():
         help="Also push these weekly rows to the Firestore nn_weekly_accuracy "
              "collection (used by the admin ML Accuracy panel's weekly-snapshot view)."
     )
+    parser.add_argument(
+        "--skip-existing", action="store_true",
+        help="Exit 0 without evaluating if the nn_weekly_accuracy store already has "
+             "a snapshot for every requested season/week (default: overwrite)."
+    )
     args = parser.parse_args()
 
     if args.firestore:
@@ -260,6 +265,21 @@ def main():
         weeks = list(range(args.week[0], args.week[1] + 1))
     else:
         weeks = args.week
+
+    if args.skip_existing:
+        from services.cache_service import (
+            get_nn_weekly_accuracy_season, _read_nn_weekly_accuracy_firestore,
+        )
+        # With --firestore the authoritative store is Firestore (the module-level
+        # _USE_LOCAL in cache_service was fixed at import time, before the
+        # override above), so read it directly.
+        existing = (_read_nn_weekly_accuracy_firestore(args.season) if args.firestore
+                    else get_nn_weekly_accuracy_season(args.season)) or []
+        have = {int(r.get("week")) for r in existing if r.get("week") is not None}
+        if set(weeks) <= have:
+            print(f"[weekly_model_eval] Snapshot already exists for season "
+                  f"{args.season} week(s) {weeks}; --skip-existing set, skipping.")
+            return
 
     print("=" * 65)
     print("  NFL Ensemble (NN+XGB+LR) -- Weekly Accuracy Tracker")
