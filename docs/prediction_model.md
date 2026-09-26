@@ -542,6 +542,21 @@ re-deriving the math by hand each time:
 
 ---
 
+## Player Portfolio Projection
+
+`analysis.compute_portfolio_projection()` (`services/analysis_service.py`) backs `GET /api/profile/portfolio`. It summarises a player's drafted teams from the per-team Monte Carlo output (`projected_wins`, `std_dev`) — it does not re-simulate.
+
+- **Per-team playoff probability**: `P(wins >= 9.5)` under `Normal(projected_wins, sd)`, with `sd` floored at 0.5. The 9.5-win threshold (`playoff_wins_threshold`) is a rough proxy for making the playoffs, not a seeding/tiebreak model.
+- **Portfolio expected wins**: sum of the teams' projected wins.
+- **Portfolio std dev**: `sqrt(sum of per-team variances)`. This is an **independence approximation** — team outcomes are treated as uncorrelated, though real outcomes are not (e.g. two teams in the same division play each other, so one's win is the other's loss). The spread is therefore approximate.
+- **Floor / ceiling**: the approximate 5th / 95th percentiles, `expected -/+ 1.645 * std`, clamped to `[0, 17 * n_teams]`.
+- **`playoff_prob_any`**: `1 - prod(1 - p_i)` (again assuming independence); `expected_playoff_teams` is `sum(p_i)`.
+- Teams without a projection are skipped. Non-admins get `available: false, reason: "draft_in_progress"` while the draft is active, matching the draft-room projection gating.
+
+## Accuracy Endpoint Season Filter
+
+`GET /api/predictions/accuracy` accepts an optional `?season=<year>`. When given, only that season is computed and returned in `seasons`/`overall`; without it, all candidate seasons are included (unchanged). The response always includes `available_seasons` (every candidate season, regardless of the filter) so the admin ML Accuracy tab (`static/js/admin_accuracy.js`) can populate its season dropdown (`#accuracy-season-filter`) from an unfiltered list. The tab now shows the overall banner whenever an `overall` object is returned, rather than only when `overall.total > 0`.
+
 ## Data Sources by Feature Group
 
 | Feature Group | Source File(s) | Coverage |

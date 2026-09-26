@@ -142,7 +142,7 @@ GCP_PROJECT/GCP_REGION=...           # Used by schedule_kickoffs.py to target th
 GCP_TASKS_QUEUE=...                  # Cloud Tasks queue name (winspool-kickoff-triggers)
 GCP_SCHEDULER_SERVICE_ACCOUNT=...    # Service account schedule_kickoffs.py's enqueued tasks authenticate as
 VAPID_PUBLIC_KEY=...        # Web Push VAPID public key (base64url)
-VAPID_PRIVATE_KEY=...       # Web Push VAPID private key (base64url)
+VAPID_PRIVATE_KEY=...       # Web Push VAPID private key (base64url) — in prod delivered via Secret Manager (`vapid-private-key`, bound with `--set-secrets` in `deploy/deploy.ps1`), not a plain env var; see DEPLOY.md
 VAPID_CLAIMS_EMAIL=...      # Contact email included in VAPID JWT claims
 DISABLE_OUTBOUND_EMAIL=...  # True → no-ops all Resend sends (safety gate; set by the tests_e2e/ harness so browser tests never send real mail)
 E2E_TEST_PLAYER_IDS=...     # Comma-separated seeded e2e test player IDs (first is admin) — from scripts/seed_e2e_test_players.py; required to run tests_e2e/
@@ -151,6 +151,7 @@ E2E_CLAIM_TEST_PLAYER_ID=...    # Dedicated no-password lifecycle account for te
 E2E_MFA_TEST_PLAYER_ID=...      # Dedicated mfa_enabled=True lifecycle account for tests_e2e/test_mfa.py — from scripts/seed_e2e_test_players.py's "Lifecycle account IDs" print output; required to run that test, else it skips
 E2E_LOCKOUT_TEST_PLAYER_ID=...  # Dedicated lifecycle account for tests_e2e/test_lockout.py — from scripts/seed_e2e_test_players.py's "Lifecycle account IDs" print output; required to run that test, else it skips
 E2E_TEMPWORD_TEST_PLAYER_ID=... # Dedicated lifecycle account for tests_e2e/test_forced_password_change.py — from scripts/seed_e2e_test_players.py's "Lifecycle account IDs" print output; required to run that test, else it skips
+GIT_SHA=...                 # Baked into images at build time (Docker ARG/ENV, see Deployment); defaults to 'unknown'
 PORT=8000
 ```
 
@@ -180,7 +181,7 @@ services/
   email_service.py       # Resend-based email: weekly recaps, MFA codes, and send_alert_email() job-failure alerts
   live_score_service.py  # Live game score updates
   live_standings_service.py  # Payload shaping for GET /api/live-standings (standings page's 30s poll, static/js/standings_refresh.js)
-  push_service.py        # Web Push notifications (VAPID)
+  push_service.py        # Web Push notifications (VAPID); a failed players-cache invalidation after saving/pruning a subscription is logged as a warning and no longer fails the push operation
   chat_service.py        # Draft room chat message persistence
 templates/               # Jinja2 HTML (server-rendered)
 static/
@@ -203,6 +204,13 @@ rawdata/                 # NFL raw data (NOT committed)
 docs/                    # Architecture and model documentation (prediction_model.md, etc.)
 .local_db/               # Local pickle cache (NOT committed)
 ```
+
+### Newer API endpoints
+
+All require auth (`require_auth`) unless noted.
+- `GET /api/pool/status[?season=]` — pool fee / prize pot summary from `services/pool_service.py::build_pool_status`: `entry_fee`, `total_count`, `paid_count`, `total_pot`, `collected`, `payouts` (place/pct/amount), and only the *caller's own* `my_paid` — no other player's paid flag is returned. Season defaults to the active season. Fee and payout split live in the `config/settings` doc (`pool_entry_fee`, `pool_payouts`); admins set them with `POST /api/admin/pool/config` (`entryFee`, `payouts[]` of `{place, pct}`, total pct <= 100).
+- `GET /api/profile/portfolio` — the caller's 3-team season outlook via `analysis.compute_portfolio_projection`. Response is `{season, available, reason, ...}`; `available: false` with `reason` of `draft_in_progress` (non-admins while `draft_active` is set — same projection gating as the draft room), `no_teams`, or `no_projections`. Math is documented in `docs/prediction_model.md` ("Player Portfolio Projection").
+- `GET /api/predictions/accuracy` takes an optional `?season=` filter and always returns `available_seasons`; the admin ML Accuracy tab has a season dropdown driven by it (see `docs/prediction_model.md`).
 
 ### Data Flow & Caching
 
@@ -230,7 +238,7 @@ Firestore collections and their local equivalents:
 | `game_predictions` | `.local_db/game_predictions_{year}.json` | JSON, not pkl; one doc per season |
 | `analytics_cache` | `.local_db/analytics/{analytic}_{year}_{week}.json` | JSON |
 | `elo_history` | `.local_db/elo_history_{season}.json` | JSON, one doc per season; written by `scripts/compute_elo.py --firestore` (not the normal service-write path — see gotcha below); powers the admin Elo Ratings Explorer |
-| `nn_weekly_accuracy` | `.local_db/nn_weekly_accuracy_{season}.json` | JSON, one doc per season; written by `scripts/weekly_model_eval.py --firestore` (manual, run once a week's games finish — nothing schedules it). Durable per-week accuracy snapshot that survives later retrains, unlike `game_predictions` which `cache_builder.py` recomputes with whatever model is currently deployed every day. Powers the admin ML Accuracy tab's "Weekly Snapshots" panel. Writes upsert by week rather than overwrite the season doc, since each run only evaluates the weeks passed on its command line |
+| `nn_weekly_accuracy` | `.local_db/nn_weekly_accuracy_{season}.json` | JSON, one doc per season; written by `scripts/weekly_model_eval.py --firestore` (manual, run once a week's games finish; additionally, `winspool-predict-daily`'s `cache_builder.py` now runs it automatically on Tuesdays for the latest fully-completed regular-season week — see Scheduled Jobs). Durable per-week accuracy snapshot that survives later retrains, unlike `game_predictions` which `cache_builder.py` recomputes with whatever model is currently deployed every day. Powers the admin ML Accuracy tab's "Weekly Snapshots" panel. Writes upsert by week rather than overwrite the season doc, since each run only evaluates the weeks passed on its command line |
 | `config` | *(no local pkl — always reads Firestore)* | Single doc `config/settings`; stores `draft_active` flag and app-level settings |
 
 `.local_db/backup_preseason_consensus_*.json` holds the pre-migration backup of
@@ -267,6 +275,22 @@ Firestore call would catch `None.collection(...)`'s `AttributeError` and only
 `logger.error` it, so the script would print a false success message. That's
 exactly what left prod's `elo_history` collection empty for days: the script
 had been run without this override and reported success anyway.
+
+**Current contract (`services/db_service.py`)**: `get_db()` is lazy — importing
+`db_service` no longer initializes Firebase (or needs credentials). `get_db()`
+returns `None` in local mode (`USE_LOCAL_DATA=True`) **and** when no
+credentials are available (init failed / no default app). Firestore-writing
+scripts should obtain their client via `get_db()` / `require_db()` *after*
+forcing `USE_LOCAL_DATA=False`. `require_db(exit_on_missing=True,
+missing_message=None, exc_type=None, getter=None)` does both: it sets
+`USE_LOCAL_DATA=False`, calls the getter (default `get_db`), returns the client,
+and otherwise either logs/prints the message and `sys.exit(1)`s or, with
+`exit_on_missing=False`, raises `exc_type` (default `FileNotFoundError`). The
+`getter` kwarg lets a script pass its own module-level `get_db` so test
+monkeypatches keep working. Used by `daily_nfl_sync.py`,
+`backfill_schedule_predictions.py`, `generate_weekly_predictions.py`,
+`predict_season.py`, and `upload_configfiles.py` (their existing
+`initialize_firebase`-style function names are kept as thin wrappers).
 
 ### Auth
 
@@ -343,7 +367,7 @@ repeated by normal deploys).
 | Job | Entrypoint | Trigger | What it does |
 |---|---|---|---|
 | `winspool-sync-daily` | `scripts/run_cron.py` | Daily 9:00 UTC (Aug–Jan `winspool-sync-daily-trigger`; Feb 1–10 `-trigger-feb`) | nflverse raw data sync → `compute_elo.py --firestore` → `daily_nfl_sync.py` (standings + `nfl_games`) |
-| `winspool-predict-daily` | `scripts/cache_builder.py` | Daily 9:15 UTC (same Aug–Jan / Feb 1–10 split) | Regenerates predictions/analytics cache; the only job that installs `requirements-ml.txt` (`Dockerfile.predict`). Also now owns `preseason_predictions` (previously written only by a human running `predict_season.py` manually) — it refreshes the current/next season's team win projections daily and locks them once that season is complete (`locked=True`), so a later unscoped run won't silently overwrite a finished season's projections with the current model. Only runs the write for `year >= current_year` (or `--force`); a completed past season is skipped entirely. **Footgun**: manually re-running `predict_season.py` on any season writes a payload with no `locked` field at all, which silently clears the lock — it's now effectively a manual-override tool, not a routine one. |
+| `winspool-predict-daily` | `scripts/cache_builder.py` | Daily 9:15 UTC (same Aug–Jan / Feb 1–10 split) | Regenerates predictions/analytics cache; on Tuesdays also runs `weekly_model_eval.py --season <year> --week <latest fully-completed REG week> --firestore` early in `main()` (before predictions are regenerated, so the snapshot grades the model that made them) via `_run_weekly_eval_if_tuesday()` — non-fatal, 900s timeout, skipped if no week is complete yet; the only job that installs `requirements-ml.txt` (`Dockerfile.predict`). Also now owns `preseason_predictions` (previously written only by a human running `predict_season.py` manually) — it refreshes the current/next season's team win projections daily and locks them once that season is complete (`locked=True`), so a later unscoped run won't silently overwrite a finished season's projections with the current model. Only runs the write for `year >= current_year` (or `--force`); a completed past season is skipped entirely. **Footgun**: manually re-running `predict_season.py` on any season writes a payload with no `locked` field at all, which silently clears the lock — it's now effectively a manual-override tool, not a routine one. |
 | `winspool-live-scores` | `scripts/sync_live_scores.py` | Every 2 min (Sept–Jan `winspool-live-scores-trigger` = `*/2 * * 9-12,1 *`; Feb 1–10 `-trigger-feb` = `*/2 * 1-10 2 *`; both moved from `*/5` on 2026-09-24, safe because of the fast exit below); fast-exits outside game windows (20 min before first kickoff until 30 min after the last, or 4.5h after it if games aren't final; `--force` overrides). The container has no `rawdata/`, so the check does one small nflverse schedule GET and fails open on any error. The `*/2` cadence is only cost-neutral once the `winspool-sync` image with the fast exit is deployed (`deploy.ps1`); on an older image every run does full work. | Authoritative re-sync (narrow, last-7-days `nfl_games` window) + best-effort ESPN live-score overlay (`is_live`/`clock`/`period`) — **only overlays games nflverse's own `schedules` data source carries, which never includes preseason (`game_type="PRE"`) games at all**, confirmed 2026-08-21 |
 | `winspool-schedule-kickoffs` | `scripts/schedule_kickoffs.py` | Weekly, Tuesdays 10:00 UTC, Sept–Jan (`winspool-schedule-kickoffs-trigger`) | Reads the upcoming week's real kickoff times, enqueues 3 Cloud Tasks per kickoff cluster against the Cloud Run Jobs Admin API: sync (kickoff−75min), routine predict (kickoff−60min), and an ESPN-aware `cache_builder.py --resimulate` re-run (kickoff−20min, `RESIMULATE_LEAD_MINUTES` in `schedule_kickoffs.py` — must fire after the routine predict run, not before, or the routine run's stale prediction overwrites the fresher one; still unvalidated against a real measured runtime). Also runs the weekly betting-edge alert (`_run_betting_alert()`, piggybacked here rather than its own job — see `docs/superpowers/specs/2026-09-09-betting-edge-alert-design.md`) right after the kickoff tasks are enqueued: composes `pattern_scanner_service.scan_angles` + `betting_screener_service.screen_games` into a validated-angle-match + raw-`edge_vs_vegas`-outlier summary, emailing `BETTING_ALERT_EMAIL` only if either tier is non-empty. Wholly non-fatal — a screener bug can't fail the kickoff-task enqueue this job actually exists for. |
 
@@ -422,6 +446,18 @@ or missing model files happen to exist there (discovered when a worktree-built
 `winspool-predict` image had only `nn_v1.keras`, the first-ever model, instead
 of the current `nn_v14.keras` — Cloud Run Jobs don't error on a wrong model
 version, they just predict worse). Run `deploy.ps1` from the main checkout.
+
+**`GIT_SHA` build arg**: `Dockerfile`, `Dockerfile.sync`, and `Dockerfile.predict`
+each declare `ARG GIT_SHA=unknown` / `ENV GIT_SHA=$GIT_SHA` *after* the
+`pip install` layer and *before* `COPY . .`, so a new commit SHA doesn't
+invalidate the dependency cache (`tests/test_dockerfile_layer_order.py` pins
+this). `cloudbuild-{sync,predict}.yaml` pass it via `--build-arg
+GIT_SHA=$_GIT_SHA`, and `deploy.ps1` supplies `_GIT_SHA` (full `git rev-parse
+HEAD`) for the two job images. The web service `Dockerfile` has the ARG/ENV
+but `deploy.ps1` deploys it without a build arg, so it stays `unknown` there.
+
+**VAPID private key** is bound from Secret Manager (`vapid-private-key`) by
+`deploy.ps1`'s `--set-secrets`; DEPLOY.md has the one-time secret/IAM setup.
 
 **Gotcha: each scheduled job needs a `MAX_RETRIES` env var matching its own
 `--max-retries`.** `send_alert_email()` (`services/email_service.py`) only
