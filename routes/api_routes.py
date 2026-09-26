@@ -555,9 +555,10 @@ def get_profile_portfolio(_auth: dict = Depends(require_auth)):
     """Caller's season outlook. Projections are withheld from non-admins while the draft is active."""
     try:
         from services.data_service import get_active_season
-        _, _, games, _, _, draft_results, rules = load_data()
+        standings, _, games, _, _, draft_results, rules = load_data()
         season = int(get_active_season(games, draft_results, rules))
-        base = {"season": season, "available": False, "reason": None}
+        base = {"season": season, "available": False, "reason": None,
+                "top2_prob": None, "win_prob": None, "expected_rank": None, "pool_size": 0}
         if get_config_settings().get("draft_active") and _auth.get("role") != "admin":
             return JSONResponse(content={**base, "reason": "draft_in_progress"})
         try:
@@ -575,7 +576,27 @@ def get_profile_portfolio(_auth: dict = Depends(require_auth)):
         if not projections:
             return JSONResponse(content={**base, "reason": "no_projections"})
         result = analysis.compute_portfolio_projection(projections, teams)
-        return JSONResponse(content={**base, "available": True, **result})
+        odds = {}
+        try:
+            season_dr = draft_results[draft_results["season"] == season]
+            pool = {int(pid): [str(t) for t in grp["team"].dropna().tolist()]
+                    for pid, grp in season_dr.groupby("playerId")}
+            records = {}
+            if standings is not None and not standings.empty and "season" in standings.columns:
+                for row in standings[standings["season"] == season].to_dict("records"):
+                    records[str(row.get("team"))] = {"wins": row.get("wins"),
+                                                     "losses": row.get("losses"),
+                                                     "ties": row.get("ties")}
+            sim = analysis.simulate_pool_finish_odds(pool, projections, records)
+            mine = sim.get(player_id)
+            if mine:
+                odds = {"top2_prob": round(mine["top_n_prob"], 4),
+                        "win_prob": round(mine["win_prob"], 4),
+                        "expected_rank": round(mine["expected_rank"], 2),
+                        "pool_size": len(pool)}
+        except Exception:
+            logger.exception("pool finish odds failed; returning portfolio without them")
+        return JSONResponse(content={**base, "available": True, **result, **odds})
     except Exception:
         logger.exception("Unhandled error in get_profile_portfolio")
         return server_error()

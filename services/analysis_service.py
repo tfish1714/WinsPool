@@ -951,6 +951,69 @@ def _normal_cdf(z: float) -> float:
     return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
 
 
+def simulate_pool_finish_odds(player_teams: dict, team_projections: dict, team_records: dict,
+                              season_games: int = 17, n_sims: int = 10000, seed: int = 0,
+                              top_n: int = 2) -> dict:
+    """Monte Carlo of every player's pool finish.
+
+    Each team's final wins ~ Normal(mean, sd) clipped to [wins, wins + remaining],
+    where mean = wins + remaining/season_games * projected_wins and
+    sd = std_dev * sqrt(remaining/season_games) (floored at 0.5 while games remain;
+    exact once the season is complete).  Teams are treated as independent.  A
+    player's total is the sum over their teams; players are ranked per simulation
+    by descending total with a random tie-break.  Returns
+    {player_id: {"top_n_prob", "win_prob", "expected_rank"}}.
+    """
+    player_ids = list(player_teams.keys())
+    n_players = len(player_ids)
+    if n_players == 0:
+        return {}
+    teams = sorted({t for ts in player_teams.values() for t in ts if
+                    (team_projections.get(t) or {}).get("projected_wins") is not None})
+    rng = np.random.default_rng(seed)
+    n_sims = max(int(n_sims), 1)
+    totals = np.zeros((n_sims, n_players))
+    if teams:
+        idx = {t: i for i, t in enumerate(teams)}
+        wins0 = np.zeros(len(teams))
+        remaining = np.zeros(len(teams))
+        mean = np.zeros(len(teams))
+        sd = np.zeros(len(teams))
+        for t, i in idx.items():
+            proj = team_projections[t]
+            rec = team_records.get(t) or {}
+            w = float(rec.get("wins") or 0)
+            played = w + float(rec.get("losses") or 0) + float(rec.get("ties") or 0)
+            rem = max(season_games - played, 0.0)
+            frac = rem / season_games if season_games else 0.0
+            wins0[i], remaining[i] = w, rem
+            mean[i] = w + frac * float(proj["projected_wins"])
+            if rem > 0:
+                sd[i] = max(float(proj.get("std_dev") or 0) * math.sqrt(frac), 0.5)
+        samples = rng.normal(mean, sd, size=(n_sims, len(teams)))
+        samples = np.clip(samples, wins0, wins0 + remaining)
+        indicator = np.zeros((len(teams), n_players))
+        for j, pid in enumerate(player_ids):
+            for t in player_teams[pid]:
+                if t in idx:
+                    indicator[idx[t], j] = 1.0
+        totals = samples @ indicator
+    jittered = totals + rng.random(totals.shape) * 1e-6
+    order = np.argsort(-jittered, axis=1)
+    ranks = np.empty_like(order)
+    rows = np.arange(n_sims)[:, None]
+    ranks[rows, order] = np.arange(1, n_players + 1)[None, :]
+    out = {}
+    for j, pid in enumerate(player_ids):
+        r = ranks[:, j]
+        out[pid] = {
+            "top_n_prob": 1.0 if n_players <= top_n else float((r <= top_n).mean()),
+            "win_prob": float((r == 1).mean()),
+            "expected_rank": float(r.mean()),
+        }
+    return out
+
+
 def compute_portfolio_projection(team_projections: dict, player_teams: list,
                                  playoff_wins_threshold: float = 9.5) -> dict:
     """Summarise a player's 3-team portfolio from per-team win projections.
