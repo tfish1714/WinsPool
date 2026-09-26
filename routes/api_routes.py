@@ -522,7 +522,7 @@ def get_config():
     }
     try:
         public = {k: v for k, v in get_config_settings().items()
-                  if k not in ("pool_entry_fee", "pool_payouts")}
+                  if k not in ("pool_entry_fee", "pool_payouts", "pool_config")}
         return JSONResponse(content={**public, **version})
     except Exception:
         logger.exception("get_config error")

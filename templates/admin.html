@@ -108,6 +108,32 @@
         <button class="admin-tab-btn tab-btn" data-tab="accuracy-section">ML Accuracy</button>
         <button class="admin-tab-btn tab-btn" data-tab="consensus-section">Consensus</button>
         <button class="admin-tab-btn tab-btn" data-tab="betting-section">Betting</button>
+        <button class="admin-tab-btn tab-btn" data-tab="pool-section">Pool</button>
+    </div>
+
+    <!-- Pool Fee & Payouts Tab -->
+    <div id="pool-section" class="tab-content card-glass hidden" style="height: auto;">
+        <h2>Pool Fee and Payouts</h2>
+        <p>Entry fee and dollar payouts are set per season. Members see the prize pot and payouts on the wins pool page.</p>
+        <div class="pool-config-grid">
+            <div>
+                <label for="pool-season-select" class="pool-label">Season</label>
+                <select id="pool-season-select" class="admin-input"></select>
+            </div>
+            <div>
+                <label for="pool-entry-fee" class="pool-label">Entry fee ($)</label>
+                <input id="pool-entry-fee" type="number" min="0" step="0.01" class="admin-input">
+            </div>
+        </div>
+        <div id="pool-default-note" class="pool-note"></div>
+        <h4 class="pool-label" style="margin-top: 1rem;">Payouts</h4>
+        <div id="pool-payout-rows"></div>
+        <button type="button" id="pool-add-payout" class="admin-tab-btn">Add payout</button>
+        <div id="pool-summary" class="pool-summary"></div>
+        <div style="margin-top: 1rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+            <button type="button" id="pool-save-btn" class="btn-primary">Save</button>
+            <span id="pool-status" role="status"></span>
+        </div>
     </div>
 
     <!-- Season Management Card -->
@@ -593,6 +619,7 @@
 <script type="module" src="{{ static_url('js/admin_elo.js') }}"></script>
 <script type="module" src="{{ static_url('js/admin_accuracy.js') }}"></script>
 <script type="module" src="{{ static_url('js/admin_betting.js') }}"></script>
+<script type="module" src="{{ static_url('js/admin_pool.js') }}"></script>
 <script type="module" src="{{ static_url('js/admin_pattern_scanner.js') }}"></script>
 <script type="module" src="{{ static_url('js/schedule_explain.js') }}"></script>
 <script src="{{ static_url('js/admin_health.js') }}"></script>

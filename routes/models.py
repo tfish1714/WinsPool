@@ -1,6 +1,6 @@
 """routes/models.py — Pydantic request body schemas for all POST endpoints."""
-from typing import Annotated, Any, Dict, List, Optional
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 
 # --- Auth ---
@@ -114,16 +114,25 @@ class PushBroadcastRequest(BaseModel):
 
 
 class PoolPayoutItem(BaseModel):
-    place: int = Field(ge=1)
-    pct: float = Field(ge=0, le=100)
+    place: Union[int, Literal["last"]]
+    amount: float = Field(ge=0, le=10_000_000)
+
+    @field_validator("place")
+    @classmethod
+    def _place_positive(cls, v):
+        if isinstance(v, int) and not isinstance(v, bool) and v < 1:
+            raise ValueError("place must be >= 1 or 'last'")
+        return v
 
 
 class PoolConfigRequest(BaseModel):
+    season: int = Field(ge=2000, le=2100)
     entryFee: float = Field(ge=0, le=1_000_000)
-    payouts: List[PoolPayoutItem] = Field(default_factory=list, max_length=20)
+    payouts: List[PoolPayoutItem] = Field(default_factory=list, max_length=10)
 
     @model_validator(mode="after")
-    def _payouts_total(self):
-        if sum(p.pct for p in self.payouts) > 100.0001:
-            raise ValueError("payout percentages must not exceed 100 in total")
+    def _no_duplicate_places(self):
+        places = [p.place for p in self.payouts]
+        if len(set(places)) != len(places):
+            raise ValueError("duplicate payout places")
         return self

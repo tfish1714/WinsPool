@@ -41,7 +41,9 @@
 
             const list = add(el, 'ul', 'pool-fee-split', '');
             d.payouts.forEach(function (p) {
-                add(list, 'li', '', ordinal(p.place) + ': ' + money(p.amount));
+                // Server supplies the label ("1st", "Last place"); pot balance is admin-only, never shown here.
+                const label = p.label || (typeof p.place === 'number' ? ordinal(p.place) : 'Last place');
+                add(list, 'li', '', label + ': ' + money(p.amount));
             });
 
             if (d.my_paid !== null && d.my_paid !== undefined) {

@@ -19,11 +19,13 @@ def test_get_config_settings_hides_pool_financials():
     from unittest.mock import patch
     fake = {"draft_active": False, "mock_draft_active": False,
             "pool_entry_fee": 50.0, "pool_payouts": [{"place": 1, "pct": 100.0}],
+            "pool_config": {"2026": {"entry_fee": 200, "payouts": [{"place": 1, "amount": 1400}]}},
             "other_flag": True}
     with patch("services.db_service.get_config_settings", return_value=fake):
         data = client.get("/api/config/settings").json()
     assert "pool_entry_fee" not in data
     assert "pool_payouts" not in data
+    assert "pool_config" not in data
     assert data["other_flag"] is True
     assert data["draft_active"] is False
 

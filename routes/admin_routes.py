@@ -38,6 +38,7 @@ from services.session_service import require_admin
 import services.ai_service as ai_service
 import services.chat_service as chat_service
 import services.email_service as email_service
+import services.pool_service as pool_service
 import services.recap_service as recap_service
 
 logger = logging.getLogger(__name__)
@@ -845,16 +846,44 @@ async def get_admin_prediction_features(
 
 
 
+def _pool_config_response(season: int) -> dict:
+    """Shared GET/POST body: the season's config plus member-count-derived pot figures."""
+    settings = pool_service.get_config_settings()
+    cfg = pool_service.get_pool_config(settings, season)
+    _, _, _, _, order_df, _, _ = load_data()
+    member_count = 0
+    if order_df is not None and not order_df.empty and "season" in order_df.columns:
+        member_count = int((order_df["season"].astype(int) == season).sum())
+    pot = pool_service.summarize_pot(cfg["entry_fee"], member_count, cfg["payouts"])
+    return {
+        "season": season,
+        "entry_fee": cfg["entry_fee"],
+        "payouts": cfg["payouts"],
+        "member_count": member_count,
+        **pot,
+        "is_default": not pool_service.has_pool_config(settings, season),
+    }
+
+
+@router.get("/admin/pool/config")
+async def get_pool_config_admin(season: int, _: dict = Depends(require_admin)):
+    """Per-season pool fee and dollar payouts, with pot figures for the current member count."""
+    try:
+        return JSONResponse(content=_pool_config_response(season))
+    except Exception:
+        logger.exception("Unhandled error in get_pool_config_admin")
+        return server_error()
+
+
 @router.post("/admin/pool/config")
 async def set_pool_config(body: PoolConfigRequest, _: dict = Depends(require_admin)):
-    """Store the pool entry fee and payout split (global config settings)."""
+    """Store one season's pool entry fee and dollar payouts (other seasons untouched)."""
     try:
-        payouts = [{"place": p.place, "pct": float(p.pct)} for p in body.payouts]
-        set_config_settings({
-            "pool_entry_fee": float(body.entryFee),
-            "pool_payouts": payouts or [{"place": 1, "pct": 100.0}],
-        })
-        return JSONResponse(content={"ok": True})
+        pool_service.set_pool_config(
+            body.season, body.entryFee,
+            [{"place": p.place, "amount": p.amount} for p in body.payouts],
+        )
+        return JSONResponse(content=_pool_config_response(body.season))
     except Exception:
         logger.exception("Unhandled error in set_pool_config")
         return server_error()
