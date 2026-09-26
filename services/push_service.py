@@ -24,19 +24,39 @@ def _is_gone_error(exc: Exception) -> bool:
     return status in _GONE_STATUS_CODES
 
 
-def _prune_subscription(player_id) -> None:
-    """Delete a dead push_subscription and tell every process the players cache changed."""
-    from services.db_service import get_db, signal_data_update
+def _prune_subscription(player_id, failed_sub: dict) -> bool:
+    """Delete a dead push_subscription. Returns True only if a field was deleted.
+
+    The failed subscription may have come from the warm players cache, which
+    can lag Firestore: a browser that resubscribed already stored a newer
+    subscription. So the delete only happens when the stored endpoint still
+    equals the failed one (read-compare-update, not a transaction: the window
+    is milliseconds and a lost race only costs one re-subscribe prompt).
+    """
+    from services.db_service import get_db
     db = get_db()
     if db is None:
         # Local-data mode: nothing to delete, and firebase_admin is not needed.
-        return
+        return False
+    ref = db.collection("players").document(str(player_id))
+    snap = ref.get()
+    stored = (snap.to_dict() or {}).get("push_subscription") if snap.exists else None
+    if not isinstance(stored, dict) or stored.get("endpoint") != failed_sub.get("endpoint"):
+        logger.info("push_service: not pruning player %s, stored subscription differs or is gone", player_id)
+        return False
     from firebase_admin import firestore
-    db.collection("players").document(str(player_id)).update(
-        {"push_subscription": firestore.DELETE_FIELD}
-    )
-    signal_data_update("static")
+    ref.update({"push_subscription": firestore.DELETE_FIELD})
+    _invalidate_players_cache()
     logger.info("push_service: pruned dead push subscription for player %s", player_id)
+    return True
+
+
+def _invalidate_players_cache() -> None:
+    """Drop this process's static bucket and tell every other process to do so."""
+    import services.cache_service as cs
+    from services.db_service import signal_data_update
+    cs.clear_data_cache(cs.DOMAIN_STATIC)
+    signal_data_update("static")
 
 
 def _deliver(player_id, sub: dict, title: str, body: str) -> str:
@@ -55,8 +75,8 @@ def _deliver(player_id, sub: dict, title: str, body: str) -> str:
         logger.warning("push_service: send failed for player %s: %s", player_id, e)
         if _is_gone_error(e):
             try:
-                _prune_subscription(player_id)
-                return "pruned"
+                if _prune_subscription(player_id, sub):
+                    return "pruned"
             except Exception:
                 logger.exception("push_service: prune failed for player %s", player_id)
         return "failed"
@@ -69,6 +89,7 @@ def save_push_subscription(player_id: int, subscription: dict) -> bool:
         get_db().collection("players").document(str(player_id)).update(
             {"push_subscription": subscription}
         )
+        _invalidate_players_cache()
         return True
     except Exception:
         logger.exception("push_service: failed to save subscription for player %s", player_id)

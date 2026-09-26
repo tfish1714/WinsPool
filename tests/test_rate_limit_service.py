@@ -2,8 +2,6 @@
 proxy-aware client IP helper."""
 from types import SimpleNamespace
 
-import pytest
-
 from services.rate_limit_service import RateLimiter, client_ip, get_limiter, reset_all
 
 
@@ -103,3 +101,15 @@ def test_registry_reuses_named_limiter_and_reset_all_clears():
     assert a.check("ip")[0] is False
     reset_all()
     assert a.check("ip")[0] is True
+
+
+def test_client_ip_reads_trusted_hops_from_env(monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXY_HOPS", "2")
+    assert client_ip(_req("1.1.1.1, 2.2.2.2, 3.3.3.3")) == "2.2.2.2"
+
+
+def test_client_ip_invalid_or_nonpositive_env_hops_falls_back_to_one(monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXY_HOPS", "abc")
+    assert client_ip(_req("1.1.1.1, 2.2.2.2")) == "2.2.2.2"
+    monkeypatch.setenv("TRUSTED_PROXY_HOPS", "0")
+    assert client_ip(_req("1.1.1.1, 2.2.2.2")) == "2.2.2.2"

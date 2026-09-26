@@ -49,6 +49,7 @@ _registry: dict[str, RateLimiter] = {}
 
 
 def get_limiter(name: str, max_requests: int, window_seconds: float = 60.0) -> RateLimiter:
+    """Return the named limiter; its limits are fixed at first creation (later args are ignored)."""
     if name not in _registry:
         _registry[name] = RateLimiter(max_requests, window_seconds)
     return _registry[name]

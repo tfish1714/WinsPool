@@ -139,7 +139,9 @@ def test_410_on_single_send_prunes_subscription(monkeypatch):
          patch("services.db_service.signal_data_update") as signal, \
          patch("pywebpush.webpush", side_effect=_PushError(410)):
         assert push_service.send_push_notification(7, "t", "b") is False
-    db.collection.return_value.document.return_value.update.assert_called_once()
+    from firebase_admin import firestore
+    db.collection.return_value.document.return_value.update.assert_called_once_with(
+        {"push_subscription": firestore.DELETE_FIELD})
     signal.assert_called_once_with("static")
 
 
@@ -153,12 +155,111 @@ def test_non_gone_failure_never_prunes(monkeypatch):
     db.collection.return_value.document.return_value.update.assert_not_called()
 
 
-def test_prune_in_local_mode_without_db_does_not_crash(monkeypatch):
+def _stored_by_id(db, stored):
+    """Make db.collection(...).document(pid).get() return that player's stored subscription."""
+    def _document(pid):
+        ref = MagicMock()
+        snap = MagicMock()
+        snap.exists = str(pid) in stored
+        snap.to_dict.return_value = {"push_subscription": stored.get(str(pid))}
+        ref.get.return_value = snap
+        return ref
+    db.collection.return_value.document.side_effect = _document
+
+
+def test_prune_in_local_mode_without_db_reports_failed_not_pruned(monkeypatch):
+    # Nothing was deleted when there is no database, so the outcome must not
+    # claim "pruned" (it would inflate the broadcast summary).
     _configure(monkeypatch)
     sub = {"endpoint": "https://push.example.com/x", "keys": {"auth": "a", "p256dh": "b"}}
     with patch("services.db_service.get_db", return_value=None), \
          patch("pywebpush.webpush", side_effect=_PushError(410)):
+        assert push_service._deliver(7, sub, "t", "b") == "failed"
+
+
+def test_stale_cached_sub_410_does_not_delete_newer_stored_sub(monkeypatch):
+    """Cache holds old sub A, Firestore already holds newer sub B."""
+    import services.cache_service as cs
+    _configure(monkeypatch)
+    sub_a = {"endpoint": "https://push.example.com/A", "keys": {"auth": "a", "p256dh": "b"}}
+    sub_b = {"endpoint": "https://push.example.com/B", "keys": {"auth": "a", "p256dh": "b"}}
+    cs.set_domain(cs.DOMAIN_STATIC, {"players": pd.DataFrame([{"playerId": 7, "push_subscription": sub_a}])})
+    db = _mock_db_with_doc(exists=True, subscription=sub_b)
+    with patch("services.db_service.get_db", return_value=db), \
+         patch("services.db_service.signal_data_update") as signal, \
+         patch("pywebpush.webpush", side_effect=_PushError(410)) as wp:
+        assert push_service.send_push_notification(7, "t", "b") is False
+    assert wp.call_args.kwargs["subscription_info"]["endpoint"].endswith("/A")
+    db.collection.return_value.document.return_value.update.assert_not_called()
+    signal.assert_not_called()
+
+
+def test_prune_when_stored_doc_is_missing_does_not_update(monkeypatch):
+    _configure(monkeypatch)
+    db = _mock_db_with_doc(exists=False)
+    with patch("services.db_service.get_db", return_value=db), \
+         patch("pywebpush.webpush", side_effect=_PushError(410)):
+        assert push_service._deliver(7, {"endpoint": "e"}, "t", "b") == "failed"
+    db.collection.return_value.document.return_value.update.assert_not_called()
+
+
+def test_real_prune_clears_local_static_cache(monkeypatch):
+    import services.cache_service as cs
+    _configure(monkeypatch)
+    sub = {"endpoint": "e"}
+    cs.set_domain(cs.DOMAIN_STATIC, {"players": pd.DataFrame()})
+    db = _mock_db_with_doc(exists=True, subscription=sub)
+    with patch("services.db_service.get_db", return_value=db), \
+         patch("services.db_service.signal_data_update"), \
+         patch("pywebpush.webpush", side_effect=_PushError(410)):
         assert push_service._deliver(7, sub, "t", "b") == "pruned"
+    assert cs.get_domain(cs.DOMAIN_STATIC) is None
+
+
+def test_prune_raising_reports_failed_and_broadcast_continues(monkeypatch):
+    _configure(monkeypatch)
+    docs = [_player_doc(1, {"endpoint": "e1"}), _player_doc(2, {"endpoint": "e2"})]
+    db = MagicMock()
+    db.collection.return_value.stream.return_value = docs
+    ref = MagicMock()
+    snap = MagicMock()
+    snap.exists = True
+    snap.to_dict.return_value = {"push_subscription": {"endpoint": "e1"}}
+    ref.get.return_value = snap
+    ref.update.side_effect = RuntimeError("firestore down")
+    db.collection.return_value.document.return_value = ref
+    outcomes = {"e1": _PushError(410), "e2": None}
+
+    def fake_webpush(subscription_info, **kwargs):
+        err = outcomes[subscription_info["endpoint"]]
+        if err:
+            raise err
+
+    with patch("services.db_service.get_db", return_value=db), \
+         patch("services.db_service.signal_data_update"), \
+         patch("pywebpush.webpush", side_effect=fake_webpush):
+        result = push_service.broadcast_push_notification("t", "b")
+    assert result == {"total": 2, "sent": 1, "failed": 1, "pruned": 0}
+
+
+def test_save_push_subscription_clears_cache_and_signals(monkeypatch):
+    import services.cache_service as cs
+    cs.set_domain(cs.DOMAIN_STATIC, {"players": pd.DataFrame()})
+    db = MagicMock()
+    with patch("services.db_service.get_db", return_value=db), \
+         patch("services.db_service.signal_data_update") as signal:
+        assert push_service.save_push_subscription(7, {"endpoint": "B"}) is True
+    signal.assert_called_once_with("static")
+    assert cs.get_domain(cs.DOMAIN_STATIC) is None
+
+
+def test_save_push_subscription_failure_does_not_signal(monkeypatch):
+    db = MagicMock()
+    db.collection.return_value.document.return_value.update.side_effect = RuntimeError("x")
+    with patch("services.db_service.get_db", return_value=db), \
+         patch("services.db_service.signal_data_update") as signal:
+        assert push_service.save_push_subscription(7, {"endpoint": "B"}) is False
+    signal.assert_not_called()
 
 
 def test_broadcast_counts_sent_failed_and_pruned(monkeypatch):
@@ -168,6 +269,7 @@ def test_broadcast_counts_sent_failed_and_pruned(monkeypatch):
             _player_doc(4, None), _player_doc(5, float("nan"))]
     db = MagicMock()
     db.collection.return_value.stream.return_value = docs
+    _stored_by_id(db, {"2": sub(2), "3": sub(3)})
     outcomes = {"https://push.example.com/1": None,
                 "https://push.example.com/2": _PushError(404),
                 "https://push.example.com/3": _PushError(500)}
@@ -190,6 +292,10 @@ def test_broadcast_prunes_only_the_gone_subscription(monkeypatch):
     db = MagicMock()
     db.collection.return_value.stream.return_value = docs
     errors = {"e1": _PushError(500), "e2": _PushError(410)}
+    stored = MagicMock()
+    stored.exists = True
+    stored.to_dict.return_value = {"push_subscription": {"endpoint": "e2"}}
+    db.collection.return_value.document.return_value.get.return_value = stored
 
     def fake_webpush(subscription_info, **kwargs):
         raise errors[subscription_info["endpoint"]]

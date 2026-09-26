@@ -326,7 +326,12 @@ async def get_profile(_auth: dict = Depends(require_auth)):
 
 
 @router.post("/profile/update")
-async def update_profile(body: UpdateProfileRequest):
+async def update_profile(body: UpdateProfileRequest, request: Request):
+    # Shares the login bucket: this endpoint verifies currentPassword, so it is
+    # otherwise an unthrottled password-guess oracle that skips lockout.
+    limited = _rate_limited_response(request, _login_limiter)
+    if limited:
+        return limited
     try:
         pid = body.playerId
         full_name = body.fullName.strip()

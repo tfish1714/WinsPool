@@ -613,9 +613,46 @@ def test_check_player_has_its_own_looser_bucket(monkeypatch):
     assert codes[:20] == [200] * 20              # lookup allowance (30) is well above login's (5)
 
 
-def test_limit_is_configurable_via_env(monkeypatch):
+def test_limit_follows_limiter_max_requests(monkeypatch):
     from routes import auth_routes
     monkeypatch.setattr(auth_routes._login_limiter, "max_requests", 2)
     monkeypatch.setattr("routes.auth_routes.get_player_by_email", lambda e: None)
     c = TestClient(app)
     assert [_login_unknown(c).status_code for _ in range(3)] == [401, 401, 429]
+
+
+def test_env_int_parses_valid_value(monkeypatch):
+    from routes.auth_routes import _env_int
+    monkeypatch.setenv("X_TEST_LIMIT", "7")
+    assert _env_int("X_TEST_LIMIT", 5) == 7
+
+
+def test_env_int_invalid_string_falls_back_to_default(monkeypatch):
+    from routes.auth_routes import _env_int
+    monkeypatch.setenv("X_TEST_LIMIT", "lots")
+    assert _env_int("X_TEST_LIMIT", 5) == 5
+
+
+def test_env_int_zero_and_negative_clamp_to_one(monkeypatch):
+    from routes.auth_routes import _env_int
+    monkeypatch.setenv("X_TEST_LIMIT", "0")
+    assert _env_int("X_TEST_LIMIT", 5) == 1
+    monkeypatch.setenv("X_TEST_LIMIT", "-3")
+    assert _env_int("X_TEST_LIMIT", 5) == 1
+
+
+def _profile_update(c):
+    return c.post("/api/profile/update", json={"playerId": "1", "currentPassword": "wrong"})
+
+
+def test_profile_update_rate_limited_after_five_attempts_sharing_login_bucket(monkeypatch):
+    monkeypatch.setattr("services.db_service.get_player_by_id", lambda pid: None)
+    c = TestClient(app)
+    assert [_profile_update(c).status_code for _ in range(5)] == [404] * 5
+    resp = _profile_update(c)
+    assert resp.status_code == 429
+    assert int(resp.headers["Retry-After"]) >= 1
+    assert "error" in resp.json()
+    # shared bucket: login is now blocked too
+    monkeypatch.setattr("routes.auth_routes.get_player_by_email", lambda e: None)
+    assert _login_unknown(c).status_code == 429
