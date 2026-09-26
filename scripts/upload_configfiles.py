@@ -17,7 +17,7 @@ import logging
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
-from services.db_service import get_db
+from services.db_service import get_db, require_db
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 log = logging.getLogger(__name__)
@@ -25,20 +25,10 @@ log = logging.getLogger(__name__)
 # --- Firebase init -----------------------------------------------------------
 def _init_firebase():
     """Return the shared Firestore client from services.db_service.get_db()."""
-    # get_db() returns None whenever USE_LOCAL_DATA is true (repo CLAUDE.md
-    # gotcha), so a Firestore-writing script must force it off first.
-    os.environ["USE_LOCAL_DATA"] = "False"
-    # With no credentials, get_db() does not return None: _init_firebase()
-    # returns None and firestore.client() then raises ValueError (no default
-    # app). Treat that as "no client" so the failure path below actually runs.
-    try:
-        db = get_db()
-    except ValueError:
-        db = None
-    if db is None:
-        log.error("No FIREBASE_CREDENTIALS env var and no firebase_credentials.json found.")
-        sys.exit(1)
-    return db
+    return require_db(
+        missing_message="No FIREBASE_CREDENTIALS env var and no firebase_credentials.json found.",
+        getter=lambda: get_db(),
+    )
 
 
 # --- CSV → Firestore mapping -------------------------------------------------

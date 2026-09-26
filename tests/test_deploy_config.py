@@ -51,3 +51,12 @@ def test_existing_flags_are_preserved():
 
 def test_guardrail_rationale_is_documented_in_script():
     assert "in-process" in SCRIPT and "max-instances" in SCRIPT
+
+
+def test_vapid_private_key_uses_secret_manager_not_env_var():
+    block = _web_deploy_block()
+    assert re.search(r"--set-secrets[^\n]*VAPID_PRIVATE_KEY=vapid-private-key:latest", block)
+    assert "vapid-private-key:latest" in block
+    assert "VAPID_PRIVATE_KEY=$vapidPrivateKey" not in SCRIPT
+    env_block = SCRIPT[SCRIPT.index("$envVars = @("):SCRIPT.index("Write-Host \"[BUILD]")]
+    assert "VAPID_PRIVATE_KEY=" not in env_block

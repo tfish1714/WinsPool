@@ -37,7 +37,7 @@ from services.nn_feature_engine import (
     RAWDATA_DIR,
 )
 from services.utils import normalize_team_abbr
-from services.db_service import get_db
+from services.db_service import get_db, require_db
 from services.nn_projection_engine import NNProjectionEngine
 
 from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
@@ -91,20 +91,10 @@ def _load_schedule(rawdata_dir: pathlib.Path, season: int, prior_season: int) ->
 
 def _init_firebase():
     """Return the shared Firestore client from services.db_service.get_db()."""
-    # get_db() returns None whenever USE_LOCAL_DATA is true (repo CLAUDE.md
-    # gotcha), so a Firestore-writing script must force it off first.
-    os.environ["USE_LOCAL_DATA"] = "False"
-    # With no credentials, get_db() does not return None: _init_firebase()
-    # returns None and firestore.client() then raises ValueError (no default
-    # app). Treat that as "no client" so the failure path below actually runs.
-    try:
-        db = get_db()
-    except ValueError:
-        db = None
-    if db is None:
-        print("ERROR: No Firebase credentials found. Use --dry-run to skip upload.")
-        sys.exit(1)
-    return db
+    return require_db(
+        missing_message="ERROR: No Firebase credentials found. Use --dry-run to skip upload.",
+        getter=lambda: get_db(),
+    )
 
 
 def _model_version_string() -> str:

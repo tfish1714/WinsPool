@@ -37,7 +37,7 @@ def test_init_returns_shared_db_client_and_forces_remote_mode(monkeypatch, modul
 
 
 @pytest.mark.parametrize("module_name,func,exc", CASES)
-def test_init_fails_loudly_without_credentials(monkeypatch, module_name, func, exc):
+def test_init_fails_loudly_when_get_db_returns_none(monkeypatch, module_name, func, exc):
     mod = importlib.import_module(module_name)
     monkeypatch.setattr(mod, "get_db", lambda: None)
     with pytest.raises(exc):

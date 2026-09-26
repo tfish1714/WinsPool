@@ -101,19 +101,44 @@ def _init_firebase():
 
 use_local_env = os.environ.get("USE_LOCAL_DATA", "False").lower() == "true"
 
-# Only initialize Firebase when not in local-data mode
-if not use_local_env:
-    _init_firebase()
+# Firebase is initialized lazily by get_db(); importing this module must never
+# require credentials.
 
 
 def get_db():
+    """Return the Firestore client, or None in local mode / without credentials."""
     if os.environ.get("USE_LOCAL_DATA", "False").lower() == "true":
         return None
     import firebase_admin
-    if not firebase_admin._apps:
-        _init_firebase()
     from firebase_admin import firestore
-    return firestore.client()
+    if not firebase_admin._apps:
+        if _init_firebase() is None:
+            return None
+    try:
+        return firestore.client()
+    except ValueError:
+        return None
+
+
+def require_db(exit_on_missing: bool = True, missing_message: str | None = None,
+               exc_type=None, getter=None):
+    """Force remote mode and return the Firestore client, failing loudly if absent.
+
+    For scripts that write to Firestore. `getter` lets a script pass its own
+    module-level get_db so test monkeypatches keep working.
+    """
+    os.environ["USE_LOCAL_DATA"] = "False"
+    client = (getter or get_db)()
+    if client is not None:
+        return client
+    message = missing_message or (
+        "Firestore is unavailable: set FIREBASE_CREDENTIALS or provide firebase_credentials.json."
+    )
+    if exit_on_missing:
+        logger.error(message)
+        print(message)
+        sys.exit(1)
+    raise (exc_type or FileNotFoundError)(message)
 
 def signal_data_update(domain: str = "static") -> None:
     """Signal that `domain`'s cached data changed, so every process (this

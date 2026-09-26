@@ -77,7 +77,7 @@ $envVars = @(
 if ($fromEmail) { $envVars += "FROM_EMAIL=$fromEmail" }
 if ($alertEmail) { $envVars += "ALERT_EMAIL=$alertEmail" }
 if ($vapidPublicKey) { $envVars += "VAPID_PUBLIC_KEY=$vapidPublicKey" }
-if ($vapidPrivateKey) { $envVars += "VAPID_PRIVATE_KEY=$vapidPrivateKey" }
+# VAPID_PRIVATE_KEY is delivered via Secret Manager (--set-secrets below), not as a plain env var.
 if ($vapidClaimsEmail) { $envVars += "VAPID_CLAIMS_EMAIL=$vapidClaimsEmail" }
 if (-not ($vapidPublicKey -and $vapidPrivateKey)) {
     Write-Host "[WARN] VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY not both set in .env -- push notifications will silently stay disabled on this deploy." -ForegroundColor Yellow
@@ -112,7 +112,7 @@ gcloud run deploy winspool `
     --max-instances=1 `
     --concurrency=80 `
     --set-env-vars ($envVars -join ",") `
-    --set-secrets "FIREBASE_CREDENTIALS=FIREBASE_CREDENTIALS:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,SMTP_PASSWORD=SMTP_PASSWORD:latest,JWT_SECRET=JWT_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest"
+    --set-secrets "FIREBASE_CREDENTIALS=FIREBASE_CREDENTIALS:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,SMTP_PASSWORD=SMTP_PASSWORD:latest,JWT_SECRET=JWT_SECRET:latest,RESEND_API_KEY=RESEND_API_KEY:latest,VAPID_PRIVATE_KEY=vapid-private-key:latest"
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "[SUCCESS] Cloud Run Deployment Complete!" -ForegroundColor Green

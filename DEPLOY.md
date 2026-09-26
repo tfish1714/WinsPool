@@ -50,6 +50,29 @@ echo -n "YOUR_RESEND_KEY" | gcloud secrets create RESEND_API_KEY --data-file=-
 echo -n "YOUR_JWT_SECRET" | gcloud secrets create JWT_SECRET --data-file=-
 ```
 
+### VAPID private key (Secret Manager)
+
+`deploy.ps1` now injects `VAPID_PRIVATE_KEY` from Secret Manager
+(`--set-secrets VAPID_PRIVATE_KEY=vapid-private-key:latest`) instead of a plain
+env var. Before the next deploy the operator must:
+
+```bash
+# 1. Create the secret from the value currently in .env
+echo -n "YOUR_VAPID_PRIVATE_KEY" | gcloud secrets create vapid-private-key --data-file=-
+
+# 2. Let the Cloud Run service account read it
+gcloud secrets add-iam-policy-binding vapid-private-key \
+  --member="serviceAccount:<CLOUD_RUN_SERVICE_ACCOUNT>" \
+  --role="roles/secretmanager.secretAccessor"
+
+# 3. One-time: drop the old plain env var (Cloud Run rejects a name used as both env var and secret)
+gcloud run services update winspool --region us-east1 --remove-env-vars=VAPID_PRIVATE_KEY
+```
+
+Deferred decision: whether to rotate the VAPID keypair now that the old private
+key has lived as a plain env var. Rotation invalidates every existing browser
+push subscription, so it is not done automatically.
+
 ---
 
 ## Environment Variables

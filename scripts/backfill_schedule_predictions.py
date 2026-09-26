@@ -53,7 +53,7 @@ from services.nn_projection_engine import NNProjectionEngine, build_mc_predictio
 from services.cache_service import get_game_predictions, write_game_predictions, write_prediction_features
 from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
 from services.feature_audit_service import compute_feature_audit
-from services.db_service import get_db
+from services.db_service import get_db, require_db
 from services.model_version import get_feature_version, build_ensemble_version_string
 
 
@@ -184,20 +184,15 @@ def _build_predictions_map(year: int, ft_lookup: dict,
 # ---------------------------------------------------------------------------
 
 def _init_firestore():
-    os.environ["USE_LOCAL_DATA"] = "False"
-    # With no credentials, get_db() does not return None: _init_firebase()
-    # returns None and firestore.client() then raises ValueError (no default
-    # app). Treat that as "no client" so the failure path below actually runs.
-    try:
-        db = get_db()
-    except ValueError:
-        db = None
-    if db is None:
-        raise FileNotFoundError(
+    return require_db(
+        exit_on_missing=False,
+        exc_type=FileNotFoundError,
+        missing_message=(
             "No Firebase credentials found. Set FIREBASE_CREDENTIALS env var "
             "or place firebase_credentials.json in the project root."
-        )
-    return db
+        ),
+        getter=lambda: get_db(),
+    )
 
 
 # ---------------------------------------------------------------------------

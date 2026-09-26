@@ -12,6 +12,11 @@ WORKDIR /app
 COPY requirements.txt requirements-gemini.txt ./
 RUN pip install --no-cache-dir -r requirements.txt -r requirements-gemini.txt
 
+# Baked in at build time (kept below the pip install layer so a changed
+# commit SHA doesn't invalidate the dependency cache).
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
+
 # Copy the source code
 COPY . .
 

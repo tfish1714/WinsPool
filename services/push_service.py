@@ -46,7 +46,13 @@ def _prune_subscription(player_id, failed_sub: dict) -> bool:
         return False
     from firebase_admin import firestore
     ref.update({"push_subscription": firestore.DELETE_FIELD})
-    _invalidate_players_cache()
+    try:
+        _invalidate_players_cache()
+    except Exception:
+        logger.warning(
+            "push_service: players cache invalidation failed after pruning subscription for player %s",
+            player_id, exc_info=True,
+        )
     logger.info("push_service: pruned dead push subscription for player %s", player_id)
     return True
 
@@ -89,11 +95,17 @@ def save_push_subscription(player_id: int, subscription: dict) -> bool:
         get_db().collection("players").document(str(player_id)).update(
             {"push_subscription": subscription}
         )
-        _invalidate_players_cache()
-        return True
     except Exception:
         logger.exception("push_service: failed to save subscription for player %s", player_id)
         return False
+    try:
+        _invalidate_players_cache()
+    except Exception:
+        logger.warning(
+            "push_service: players cache invalidation failed after saving subscription for player %s",
+            player_id, exc_info=True,
+        )
+    return True
 
 
 def _get_push_subscription(player_id: int):

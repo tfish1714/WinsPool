@@ -333,3 +333,31 @@ def test_broadcast_logs_a_summary_line(monkeypatch, caplog):
     with patch("services.db_service.get_db", return_value=db), caplog.at_level(logging.INFO):
         push_service.broadcast_push_notification("t", "b")
     assert any("broadcast complete" in r.message for r in caplog.records)
+
+
+def test_save_returns_true_and_warns_when_cache_invalidation_raises(caplog):
+    db = MagicMock()
+    with patch("services.db_service.get_db", return_value=db), \
+         patch.object(push_service, "_invalidate_players_cache", side_effect=RuntimeError("boom")), \
+         caplog.at_level(logging.WARNING):
+        assert push_service.save_push_subscription(42, {"endpoint": "e"}) is True
+    assert any(r.levelno == logging.WARNING and "42" in r.getMessage() for r in caplog.records)
+
+
+def test_save_returns_false_when_firestore_update_raises():
+    db = MagicMock()
+    db.collection.return_value.document.return_value.update.side_effect = RuntimeError("write failed")
+    with patch("services.db_service.get_db", return_value=db), \
+         patch.object(push_service, "_invalidate_players_cache") as inval:
+        assert push_service.save_push_subscription(42, {"endpoint": "e"}) is False
+    inval.assert_not_called()
+
+
+def test_deliver_reports_pruned_even_if_cache_invalidation_raises(monkeypatch):
+    _configure(monkeypatch)
+    sub = {"endpoint": "e"}
+    db = _mock_db_with_doc(exists=True, subscription=sub)
+    with patch("services.db_service.get_db", return_value=db), \
+         patch.object(push_service, "_invalidate_players_cache", side_effect=RuntimeError("boom")), \
+         patch("pywebpush.webpush", side_effect=_PushError(410)):
+        assert push_service._deliver(7, sub, "t", "b") == "pruned"
