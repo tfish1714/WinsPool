@@ -506,19 +506,39 @@ function renderWeekPanel(seasonData) {
 
 // ── Data fetch ─────────────────────────────────────────────────────────────────
 
-async function loadAccuracyData() {
+function _setupSeasonFilter(availableSeasons) {
+    const sel = document.getElementById('accuracy-season-filter');
+    if (!sel) return;
+    if (!sel.dataset.bound) {
+        sel.dataset.bound = '1';
+        sel.addEventListener('change', () => loadAccuracyData(sel.value));
+    }
+    if (sel.options.length <= 1 && Array.isArray(availableSeasons)) {
+        [...availableSeasons].sort((a, b) => b - a).forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = String(s);
+            opt.textContent = String(s);
+            sel.appendChild(opt);
+        });
+    }
+}
+
+async function loadAccuracyData(season) {
     const table = document.getElementById('acc-season-table');
     table.innerHTML = '<div style="padding:2rem; text-align:center; color:var(--text-secondary);">Loading accuracy data…</div>';
 
     try {
         const token   = localStorage.getItem('nfl_wins_token');
         const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-        const resp = await fetch('/api/predictions/accuracy', { headers });
+        const seasonParam = (typeof season === 'string' || typeof season === 'number') && season !== ''
+            ? `?season=${encodeURIComponent(season)}` : '';
+        const resp = await fetch(`/api/predictions/accuracy${seasonParam}`, { headers });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         _accuracyData = await resp.json();
+        _setupSeasonFilter(_accuracyData.available_seasons);
 
         const overall = _accuracyData.overall;
-        if (overall && overall.total > 0) {
+        if (overall) {
             const banner = document.getElementById('acc-overall');
             banner.style.display = 'flex';
             document.getElementById('acc-overall-pct').textContent   = `${overall.accuracy}%`;

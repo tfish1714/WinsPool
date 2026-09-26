@@ -3,9 +3,9 @@ import logging
 import os
 import time
 
-from typing import Annotated
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, Path, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import JSONResponse
 
 from services.data_service import load_data, get_latest_season_and_week, get_season_projection_legacy_shape
@@ -92,7 +92,7 @@ from services.cache_service import merge_game_predictions as _merge_game_predict
 
 
 @router.get("/predictions/accuracy")
-def get_prediction_accuracy(_auth: dict = Depends(require_auth)):
+def get_prediction_accuracy(season: Optional[int] = Query(None), _auth: dict = Depends(require_auth)):
     """ML prediction accuracy vs actual game results, by season and week."""
     try:
         from services.cache_service import get_game_predictions
@@ -106,6 +106,9 @@ def get_prediction_accuracy(_auth: dict = Depends(require_auth)):
         seasons_data = {}
         overall_correct = overall_total = 0
         candidate_seasons = get_candidate_seasons()
+        available_seasons = list(candidate_seasons)
+        if season is not None:
+            candidate_seasons = [season]
 
         for season in candidate_seasons:
             preds = get_game_predictions(season)
@@ -183,7 +186,11 @@ def get_prediction_accuracy(_auth: dict = Depends(require_auth)):
         for row in seasons_list:
             row['model_version'] = version_map.get(row['season'])
 
-        return JSONResponse(content={'seasons': seasons_list, 'overall': overall})
+        return JSONResponse(content={
+            'seasons': seasons_list,
+            'overall': overall,
+            'available_seasons': available_seasons,
+        })
     except Exception as e:
         logger.exception("Unhandled error in /api/predictions/accuracy")
         return server_error()
