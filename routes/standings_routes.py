@@ -215,6 +215,16 @@ async def schedule_by_year(request: Request, year: int):
         schedule_enriched = schedule_enriched.copy()
         schedule_enriched['gametime_display'] = schedule_enriched['gametime'].apply(_fmt_gametime)
 
+    if not schedule_enriched.empty and 'period' in schedule_enriched.columns:
+        schedule_enriched = schedule_enriched.copy()
+        # period is NaN for every game the live-scores job hasn't touched,
+        # which forces the whole column to float64 -- an in-progress game's
+        # real value (e.g. 1) renders as "Q1.0" in the template's
+        # `Q{{ row['period'] }}` unless cast back to a plain int here.
+        schedule_enriched['period'] = schedule_enriched['period'].apply(
+            lambda p: None if pd.isna(p) else int(p)
+        )
+
     latest_week = get_latest_week_for_year(games, year) if not games.empty else 1
     unique_weeks = (
         sorted(schedule_enriched["week"].dropna().astype(int).unique().tolist())

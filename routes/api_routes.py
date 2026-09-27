@@ -339,10 +339,17 @@ def get_live_scores(year: int):
         if games.empty or "game_id" not in games.columns:
             return JSONResponse(content={})
         cols = [c for c in _LIVE_SCORE_COLS if c in games.columns]
-        out = {
-            str(row["game_id"]): sanitize_state({c: row[c] for c in cols})
-            for _, row in games.iterrows()
-        }
+        out = {}
+        for _, row in games.iterrows():
+            values = {c: row[c] for c in cols}
+            # period is NaN for every game the live-scores job hasn't touched,
+            # which forces the whole column to float64 -- an in-progress
+            # game's real value (e.g. 1) comes out as 1.0 and renders as
+            # "Q1.0" client-side unless cast back to int here (matches
+            # live_standings_service.py's _live_games_by_team()).
+            period = values.get("period")
+            values["period"] = None if period is None or pd.isna(period) else int(period)
+            out[str(row["game_id"])] = sanitize_state(values)
         return JSONResponse(content=out)
     except Exception:
         logger.exception("Unhandled error in /api/live-scores")
