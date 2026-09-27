@@ -26,8 +26,11 @@ async function fetchWithTimeout(url, options = {}) {
         const response = await fetch(url, { ...options, headers: mergedHeaders, signal: controller.signal });
         clearTimeout(timer);
         if (!response.ok) {
-            const err = await response.json().catch(() => ({ error: 'Unknown API Error' }));
-            throw new Error(err.error || response.statusText);
+            const err = await response.json().catch(() => ({}));
+            // FastAPI errors carry `detail`; app-level JSON errors carry `error`.
+            const raw = err && (err.detail || err.error);
+            const msg = raw ? (typeof raw === 'string' ? raw : JSON.stringify(raw)) : (response.statusText || 'Request failed');
+            throw new Error(`${response.status}: ${msg}`);
         }
         return await response.json();
     } catch (e) {

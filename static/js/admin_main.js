@@ -4,6 +4,20 @@ import { AuthService } from './auth_service.js';
 import { formatRelativeTime, isFresh } from './relative_time.js';
 
 /**
+ * Build an Error whose message is "<status>: <server message>" from a failed
+ * fetch Response (FastAPI `detail` first, then app-level `error`). Exposed on
+ * window so the other admin_*.js modules can share it.
+ */
+async function adminHttpError(res) {
+    let body = {};
+    try { body = await res.json(); } catch (e) { /* not JSON */ }
+    const raw = body && (body.detail || body.error);
+    const msg = raw ? (typeof raw === 'string' ? raw : JSON.stringify(raw)) : (res.statusText || 'Request failed');
+    return new Error(`${res.status}: ${msg}`);
+}
+window.adminHttpError = adminHttpError;
+
+/**
  * WinsPool Admin Application Module (Refactored)
  * Handles draft setup, player management, and system utilities.
  */
@@ -75,8 +89,12 @@ class AdminApp {
 
         ApiService.fetchSeasons(this.playerId)
             .then(({ seasons }) => populate(seasons))
-            .catch(() => {
-                sel.innerHTML = '<option value="">Error loading seasons</option>';
+            .catch((e) => {
+                sel.innerHTML = '';
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = `Error loading seasons (${(e && e.message) || 'unknown error'})`;
+                sel.appendChild(opt);
             });
 
         sel.addEventListener('change', () => {
@@ -808,7 +826,7 @@ async function initDraftActiveToggle() {
                 },
                 body: JSON.stringify({ draft_active: next }),
             });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            if (!res.ok) throw await adminHttpError(res);
             // Sync localStorage + live nav immediately (surgical — no nav flash)
             localStorage.setItem('nfl_wins_draft_active', String(next));
             if (window.App) {
@@ -865,7 +883,7 @@ async function initMockDraftActiveToggle() {
                 },
                 body: JSON.stringify({ mock_draft_active: next }),
             });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            if (!res.ok) throw await adminHttpError(res);
             localStorage.setItem('nfl_wins_mock_draft_active', String(next));
         } catch (e) {
             console.error('[Admin] Failed to save mock_draft_active', e);

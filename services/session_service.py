@@ -118,6 +118,13 @@ def decode_current_token(token: str) -> dict | None:
 _REVOKED_DETAIL = "Session is no longer valid. Please log in again."
 
 
+def _dead_session(detail: str, state: str) -> HTTPException:
+    """401 for a rejected session, with a stable X-Session-State header
+    (missing|invalid|expired|revoked) the client auth guard keys off instead of
+    matching the human-readable detail text."""
+    return HTTPException(status_code=401, detail=detail, headers={"X-Session-State": state})
+
+
 def _resolve_token(authorization: str | None, session_token: str | None) -> str:
     """Extract a raw JWT from either the Authorization header or the session cookie.
 
@@ -126,11 +133,11 @@ def _resolve_token(authorization: str | None, session_token: str | None) -> str:
     """
     if authorization:
         if not authorization.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Missing or invalid Authorization header.")
+            raise _dead_session("Missing or invalid Authorization header.", "missing")
         return authorization.removeprefix("Bearer ")
     if session_token:
         return session_token
-    raise HTTPException(status_code=401, detail="Missing or invalid Authorization header.")
+    raise _dead_session("Missing or invalid Authorization header.", "missing")
 
 
 _ACTIVITY_THROTTLE_SECONDS = 900  # persist last_active at most once per player per 15 minutes
@@ -191,11 +198,11 @@ def require_auth(
     try:
         payload = decode_token(token)
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+        raise _dead_session("Session expired. Please log in again.", "expired")
     except Exception:
-        raise HTTPException(status_code=401, detail="Invalid session token.")
+        raise _dead_session("Invalid session token.", "invalid")
     if not _payload_is_current(payload):
-        raise HTTPException(status_code=401, detail=_REVOKED_DETAIL)
+        raise _dead_session(_REVOKED_DETAIL, "revoked")
     _track_activity(payload)
     return payload
 
@@ -209,11 +216,11 @@ def require_admin(
     try:
         payload = decode_token(token)
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+        raise _dead_session("Session expired. Please log in again.", "expired")
     except Exception:
-        raise HTTPException(status_code=401, detail="Invalid session token.")
+        raise _dead_session("Invalid session token.", "invalid")
     if not _payload_is_current(payload):
-        raise HTTPException(status_code=401, detail=_REVOKED_DETAIL)
+        raise _dead_session(_REVOKED_DETAIL, "revoked")
     if payload.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin role required.")
     _track_activity(payload)

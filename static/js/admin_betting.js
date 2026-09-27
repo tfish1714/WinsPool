@@ -209,7 +209,7 @@ export class BettingScreener {
             const resp = await fetch(`/api/admin/betting/screen${qs ? `?${qs}` : ''}`, { headers });
             if (!resp.ok) {
                 const err = await resp.json().catch(() => ({}));
-                this._summaryEl.innerHTML = `<p style="color: var(--accent-red);">${err.error || 'Failed to load.'}</p>`;
+                this._summaryEl.innerHTML = `<p style="color: var(--accent-red);">${resp.status}: ${err.detail || err.error || 'Failed to load.'}</p>`;
                 return;
             }
             const data = await resp.json();

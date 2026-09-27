@@ -6,6 +6,10 @@
  * Each game row has a magnifying glass that opens a feature detail modal.
  */
 
+// Shared helper defined in admin_main.js (window.adminHttpError); resolves to an
+// Error reading "<status>: <server message>". Called only at error time.
+const _httpErr = (r) => (window.adminHttpError ? window.adminHttpError(r) : Promise.resolve(new Error(String(r.status))));
+
 let _accuracyData = null;
 let _forecastData = null;
 let _snapshotsData = null;
@@ -86,7 +90,7 @@ async function loadWeekGames(season, week, containerId) {
             `/api/admin/predictions/games?season=${season}&week=${week}`,
             { headers }
         );
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) throw await _httpErr(resp);
         const data = await resp.json();
         container.dataset.loaded = '1';
 
@@ -230,7 +234,7 @@ window._openGameFeatureModal = async function(season, week, away, home) {
                 </div>`;
             return;
         }
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) throw await _httpErr(resp);
         const g = await resp.json();
 
         const modelRows = [
@@ -392,7 +396,7 @@ async function loadForecastData() {
         const token   = localStorage.getItem('nfl_wins_token');
         const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
         const resp = await fetch('/api/admin/forecast', { headers });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) throw await _httpErr(resp);
         _forecastData = await resp.json();
         renderForecastCard(_forecastData);
     } catch (err) {
@@ -533,7 +537,7 @@ async function loadAccuracyData(season) {
         const seasonParam = (typeof season === 'string' || typeof season === 'number') && season !== ''
             ? `?season=${encodeURIComponent(season)}` : '';
         const resp = await fetch(`/api/predictions/accuracy${seasonParam}`, { headers });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) throw await _httpErr(resp);
         _accuracyData = await resp.json();
         _setupSeasonFilter(_accuracyData.available_seasons);
 
@@ -614,7 +618,7 @@ async function loadSnapshotsData() {
             wrap.innerHTML = '<p style="color:var(--text-secondary);">No weekly snapshots recorded yet. Run <code>weekly_model_eval.py --firestore</code> after a week completes.</p>';
             return;
         }
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) throw await _httpErr(resp);
         _snapshotsData = await resp.json();
         renderSnapshotsTable(_snapshotsData.seasons || {});
     } catch (err) {

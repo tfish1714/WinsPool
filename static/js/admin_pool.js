@@ -5,6 +5,10 @@
  * built with createElement/textContent; server data is never fed to innerHTML.
  */
 
+// Shared helper defined in admin_main.js (window.adminHttpError); resolves to an
+// Error reading "<status>: <server message>". Called only at error time.
+const _httpErr = (r) => (window.adminHttpError ? window.adminHttpError(r) : Promise.resolve(new Error(String(r.status))));
+
 const POOL_MAX_PAYOUTS = 10;
 let _poolReady = false;
 let _poolMembers = 0;
@@ -122,7 +126,7 @@ async function _poolLoad(season) {
     try {
         const res = await fetch('/api/admin/pool/config?season=' + encodeURIComponent(season),
             { headers: _poolHeaders(false), credentials: 'same-origin' });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
+        if (!res.ok) throw await _httpErr(res);
         const data = await res.json();
         if (token !== _poolLoadToken) return;
         _poolRender(data);
@@ -207,7 +211,7 @@ async function _poolInit() {
     const sel = _poolEl('pool-season-select');
     try {
         const res = await fetch('/api/admin/seasons', { headers: _poolHeaders(false), credentials: 'same-origin' });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
+        if (!res.ok) throw await _httpErr(res);
         const { seasons } = await res.json();
         sel.textContent = '';
         seasons.forEach(s => {

@@ -311,6 +311,8 @@ Password login (`POST /api/login`) issues a signed JWT (`session_service.create_
 
 There is no separate room-code/passcode mechanism — that (`ROOM_CODE`, WebSocket `verify_code`/`request_signin`) was removed as dead code, since the frontend never used it (see Real-Time Draft below for how the live draft's WebSocket authenticates instead — it does **not** yet reuse this JWT; known follow-up).
 
+**Client auth guard** (`static/js/auth_guard.js`, a classic script loaded from `base.html` before `main.js`): client-side "logged in" is otherwise only the saved `nfl_wins_my_player_id` in localStorage, while the JWT lives 7 days, so an expired/invalid/revoked token used to leave pages erroring until a manual sign-out. The guard wraps `window.fetch`; on a 401 from a same-origin `/api/` call (excluding `/api/login`, `/api/mfa/verify`, `/api/set_password`, `/api/check_player`, `/api/profile/update`, `/api/logout`) while a login is saved, it recognizes a dead session via the `X-Session-State` response header (`missing|invalid|expired|revoked`, set by `session_service._dead_session` on every session 401) or, for older responses, the detail text; then it runs `localStorage.clear()` (same as `AuthService.clearCredentials()`), best-effort `POST /api/logout` (the httpOnly cookie is only clearable server-side), and redirects to `/`, at most once per page load. `api.js` and the admin scripts now show `<status>: <server detail>` errors (`window.adminHttpError`). Contract + node behavioral tests: `tests/test_auth_guard.py`.
+
 ### Real-Time Draft
 
 - **Backend**: FastAPI WebSocket endpoint in `draft_routes.py`, state managed via `_CACHED_DRAFT_STATE` in `draft_service.py`

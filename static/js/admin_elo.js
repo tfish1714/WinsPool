@@ -68,7 +68,7 @@ class EloExplorer {
                 const err = await resp.json().catch(() => ({}));
                 this._teamGrid.innerHTML =
                     `<p style="color:var(--accent-gold);font-size:0.85rem;">
-                        ${err.error || 'Elo history unavailable.'}
+                        ${resp.status}: ${err.detail || err.error || 'Elo history unavailable.'}
                         ${resp.status === 404 ? '<br><span style="color:var(--text-secondary);font-size:0.78rem;">Run <code>python scripts/compute_elo.py</code> locally, then sync rawdata to GCS or bundle in the image.</span>' : ''}
                     </p>`;
                 return;

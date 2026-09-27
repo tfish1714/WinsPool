@@ -62,7 +62,7 @@ class PatternScanner {
             const resp = await fetch(`/api/admin/betting/scan?${params.toString()}`, { headers });
             if (!resp.ok) {
                 const err = await resp.json().catch(() => ({}));
-                this._baselineEl.innerHTML = `<p style="color: var(--accent-red);">${err.error || 'Failed to load.'}</p>`;
+                this._baselineEl.innerHTML = `<p style="color: var(--accent-red);">${resp.status}: ${err.detail || err.error || 'Failed to load.'}</p>`;
                 return;
             }
             const data = await resp.json();
