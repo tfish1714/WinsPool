@@ -138,7 +138,9 @@ def _history(team: str, current_season: int, data: dict):
         winner = runner_up = None
         if season != current_season:
             winner, runner_up = _cached_top_two(top_two, data, season)
-            completed += 1
+            # Only seasons with a determined winner count; a failed/empty
+            # standings computation must not feed a false "never won" marker.
+            completed += winner is not None
         is_winning_row = winner is not None and winner["playerId"] == pid
         is_runner_up_row = (not is_winning_row) and runner_up is not None and runner_up["playerId"] == pid
         winning += is_winning_row

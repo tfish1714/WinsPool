@@ -456,6 +456,15 @@ class TestPoolSummary:
         s = self._summary([2020, 2021, 2030], {2020: (2, 3), 2021: (2, 3), 2030: (2, 3)})
         assert s["seasons"] == 2 and s["never_top2"] is False
 
+    def test_failed_standings_seasons_not_counted(self):
+        d = _multi_season_data([2020, 2021, 2022, 2023])
+        def fake(data, season):
+            return (None, None) if season in (2020, 2021) else (_who(2), _who(3))
+        with patch.object(tps, "_pool_top_two", fake):
+            s = tps.build_team_page("KC", 2030, d, True)["pool_summary"]
+        assert s["seasons"] == 2
+        assert s["never_won"] is False and s["never_top2"] is False
+
     def test_no_history_summary_zero(self):
         s = _build("SEA")["pool_summary"]
         assert s == {"seasons": 0, "winning": 0, "runner_up": 0, "never_won": False, "never_top2": False}
