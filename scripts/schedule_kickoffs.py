@@ -156,6 +156,20 @@ def _run_url(job_name: str) -> str:
     )
 
 
+def resimulate_job_args(game_ids: list) -> list:
+    """Container args for the ESPN-aware resimulate override of
+    winspool-predict-daily.
+
+    Cloud Run Jobs' containerOverrides.args REPLACES the job's entire
+    configured args list -- it does not append to it. winspool-predict-daily
+    is configured as `python scripts/cache_builder.py`, so the override must
+    re-include the script path itself, not just the extra flag; omitting it
+    makes the container run `python --resimulate <ids>`, which Python
+    rejects as an unknown interpreter option (exit code 2) before
+    cache_builder.py ever runs."""
+    return ["scripts/cache_builder.py", "--resimulate", ",".join(str(g) for g in game_ids)]
+
+
 def enqueue_task(tasks_client, run_at: datetime, job_name: str, job_args: list = None) -> None:
     from google.api_core.exceptions import AlreadyExists
     from google.cloud import tasks_v2
@@ -347,7 +361,7 @@ def main():
             enqueue_task(client, kickoff - timedelta(minutes=PREDICT_LEAD_MINUTES), "winspool-predict-daily")
             enqueue_task(
                 client, kickoff - timedelta(minutes=RESIMULATE_LEAD_MINUTES), "winspool-predict-daily",
-                job_args=["--resimulate", ",".join(str(g) for g in game_ids)],
+                job_args=resimulate_job_args(game_ids),
             )
 
         print(f"Enqueued {len(clusters_with_games)} kickoff cluster(s) x 3 tasks for {season} week {week}.")

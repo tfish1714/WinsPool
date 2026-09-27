@@ -403,6 +403,25 @@ class TestComputeKickoffClustersWithGames:
         assert late == ["g3"]
 
 
+def test_resimulate_job_args_include_the_script_path():
+    """Regression: Cloud Run Jobs' containerOverrides.args REPLACES the
+    job's entire configured args list (it does not append), and
+    winspool-predict-daily's configured command/args is `python
+    scripts/cache_builder.py`. main() used to build job_args as just
+    ["--resimulate", "<game_ids>"], which drops the script path entirely --
+    the container then runs literally `python --resimulate <game_ids>`,
+    which Python rejects as an unknown interpreter option (exit code 2).
+    This was masked for weeks by an unrelated IAM permission error that
+    made the same task fail earlier (PERMISSION_DENIED), and only surfaced
+    once that was fixed and the task actually reached the container.
+    resimulate_job_args() must always prefix the real script path."""
+    from scripts.schedule_kickoffs import resimulate_job_args
+    args = resimulate_job_args(["2026_03_KC_WAS", "2026_03_LAC_BUF"])
+    assert args[0] == "scripts/cache_builder.py"
+    assert args[1] == "--resimulate"
+    assert args[2] == "2026_03_KC_WAS,2026_03_LAC_BUF"
+
+
 def test_resimulate_lead_minutes_fires_after_routine_predict():
     """RESIMULATE_LEAD_MINUTES must stay strictly less than PREDICT_LEAD_MINUTES
     (smaller lead = closer to kickoff = fires later in absolute time), or the
