@@ -14,6 +14,15 @@
 
 import { AuthService } from './auth_service.js';
 
+// "<status>: <server message>" for an error panel, HTML-escaped; a non-string
+// detail (422 arrays/objects) is JSON-formatted instead of "[object Object]".
+const _errHtml = (resp, err, fallback) => {
+    const raw = err && (err.detail || err.error);
+    const text = raw ? (typeof raw === 'string' ? raw : JSON.stringify(raw)) : fallback;
+    const esc = String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return `${resp.status}: ${esc}`;
+};
+
 const FEATURE_LABELS = {
     spread_line:          'Vegas Spread',
     elo_diff:              'Elo Diff',
@@ -209,7 +218,7 @@ export class BettingScreener {
             const resp = await fetch(`/api/admin/betting/screen${qs ? `?${qs}` : ''}`, { headers });
             if (!resp.ok) {
                 const err = await resp.json().catch(() => ({}));
-                this._summaryEl.innerHTML = `<p style="color: var(--accent-red);">${resp.status}: ${err.detail || err.error || 'Failed to load.'}</p>`;
+                this._summaryEl.innerHTML = `<p style="color: var(--accent-red);">${_errHtml(resp, err, 'Failed to load.')}</p>`;
                 return;
             }
             const data = await resp.json();

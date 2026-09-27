@@ -552,7 +552,7 @@ async function loadAccuracyData(season) {
 
         renderSeasonTable(_accuracyData.seasons);
     } catch (err) {
-        table.innerHTML = `<p style="color:var(--accent-red);">Failed to load accuracy data: ${err.message}</p>`;
+        table.innerHTML = `<p style="color:var(--accent-red);">Failed to load accuracy data: ${_esc(err.message)}</p>`;
     }
 }
 
@@ -622,7 +622,7 @@ async function loadSnapshotsData() {
         _snapshotsData = await resp.json();
         renderSnapshotsTable(_snapshotsData.seasons || {});
     } catch (err) {
-        wrap.innerHTML = `<p style="color:var(--accent-red);">Failed to load weekly snapshots: ${err.message}</p>`;
+        wrap.innerHTML = `<p style="color:var(--accent-red);">Failed to load weekly snapshots: ${_esc(err.message)}</p>`;
     }
 }
 

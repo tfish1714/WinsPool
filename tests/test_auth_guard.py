@@ -43,7 +43,7 @@ def test_guard_source_contract():
     for ep in ("/api/login", "/api/mfa/verify", "/api/set_password",
                "/api/check_player", "/api/profile/update", "/api/logout"):
         assert ep in src
-    for phrase in ("expired", "invalid session token", "no longer valid",
+    for phrase in ("session expired", "invalid session token", "no longer valid",
                    "missing or invalid authorization header"):
         assert phrase in src.lower()
     assert "X-Session-State" in src
@@ -257,3 +257,84 @@ def test_network_error_is_rethrown():
     r = _run({"storage": LOGGED_IN, "responses": {"*": {"reject": True}},
               "requests": ["/api/x"]})
     assert r["out"] == ["err:net"] and r["storage"] == LOGGED_IN and r["redirects"] == []
+
+
+@needs_node
+def test_unrelated_401_detail_mentioning_expired_is_not_a_dead_session():
+    r = _run({"storage": LOGGED_IN,
+              "responses": {"*": {"status": 401, "body": '{"detail":"MFA code expired or invalid."}'}},
+              "requests": ["/api/some/other"]})
+    assert r["storage"] == LOGGED_IN and r["redirects"] == []
+
+
+@needs_node
+def test_503_session_check_unavailable_never_signs_out():
+    r = _run({"storage": LOGGED_IN,
+              "responses": {"*": {"status": 503, "body": '{"detail":"Session check temporarily unavailable."}'}},
+              "requests": ["/api/admin/players"]})
+    assert r["out"] == [503] and r["storage"] == LOGGED_IN and r["redirects"] == []
+
+
+def test_guard_source_only_acts_on_401():
+    src = GUARD.read_text(encoding="utf-8")
+    assert "status !== 401" in src and "503" not in src.split("function inspect")[1].split("status !== 401")[0]
+
+
+def test_lookup_exception_gives_503_without_session_state(monkeypatch):
+    from services import session_service
+    from services.session_service import require_auth, require_admin
+
+    def boom(pid):
+        raise RuntimeError("firestore down")
+    monkeypatch.setattr(session_service, "_lookup_player", boom)
+    for dep, role in ((require_auth, "user"), (require_admin, "admin")):
+        tok = session_service.create_token(player_id=1, role=role)
+        with pytest.raises(HTTPException) as e:
+            dep(authorization=f"Bearer {tok}", session_token=None)
+        assert e.value.status_code == 503
+        assert e.value.detail == "Session check temporarily unavailable."
+        assert not (e.value.headers or {}).get("X-Session-State")
+    assert session_service.get_is_admin(
+        authorization=f"Bearer {session_service.create_token(1, 'admin')}", session_token=None) is False
+    assert session_service.decode_current_token(session_service.create_token(1, "user")) is None
+
+
+def test_unloaded_players_data_is_unavailable_not_revoked(monkeypatch):
+    import pandas as pd
+    from services import session_service, db_service
+    monkeypatch.setattr(session_service, "_lookup_player", session_service._load_player_from_db)
+    monkeypatch.setattr(db_service, "_get_players_df", lambda: pd.DataFrame())
+    with pytest.raises(HTTPException) as e:
+        session_service.require_auth(
+            authorization=f"Bearer {session_service.create_token(1, 'user')}", session_token=None)
+    assert e.value.status_code == 503
+
+
+def test_real_revocation_still_401_revoked(monkeypatch):
+    from services import session_service
+    tok = session_service.create_token(player_id=1, role="user", token_version=0)
+    monkeypatch.setattr(session_service, "_lookup_player", lambda pid: {"token_version": 3})
+    with pytest.raises(HTTPException) as e:
+        session_service.require_auth(authorization=f"Bearer {tok}", session_token=None)
+    assert e.value.status_code == 401
+    assert e.value.headers["X-Session-State"] == "revoked"
+    monkeypatch.setattr(session_service, "_lookup_player", lambda pid: None)
+    with pytest.raises(HTTPException) as e:
+        session_service.require_admin(
+            authorization=f"Bearer {session_service.create_token(1, 'admin')}", session_token=None)
+    assert e.value.status_code == 401
+
+
+@pytest.mark.parametrize("rel,needle", [
+    ("static/js/admin_accuracy.js", "accuracy data: ${_esc(err.message)}"),
+    ("static/js/admin_accuracy.js", "weekly snapshots: ${_esc(err.message)}"),
+    ("static/js/admin_betting.js", "_errHtml(resp, err,"),
+    ("static/js/admin_pattern_scanner.js", "_errHtml(resp, err,"),
+    ("static/js/admin_elo.js", "_errHtml(resp, err,"),
+])
+def test_admin_error_text_is_escaped(rel, needle):
+    src = _src(rel)
+    assert needle in src
+    assert "${err.detail" not in src and "${err.message}" not in src
+    if "_errHtml" in needle:
+        assert "JSON.stringify(raw)" in src and "&lt;" in src

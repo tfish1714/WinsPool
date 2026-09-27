@@ -121,7 +121,7 @@ def test_lookup_failure_fails_closed(monkeypatch):
     monkeypatch.setattr(session_service, "_lookup_player", boom)
     with pytest.raises(HTTPException) as e:
         require_auth(authorization=f"Bearer {create_token(1, 'user')}")
-    assert e.value.status_code == 401
+    assert e.value.status_code == 503
     assert get_is_admin(authorization=f"Bearer {create_token(1, 'admin')}") is False
 
 

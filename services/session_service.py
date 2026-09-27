@@ -83,7 +83,18 @@ def token_is_current(payload: dict, player: dict | None) -> bool:
     return _as_version(payload.get("tv")) == _as_version(player.get("token_version"))
 
 
+class SessionCheckUnavailable(Exception):
+    """The players data needed to validate a session could not be read
+    (lookup exception, or no players data loaded). This is an infrastructure
+    failure, distinct from a real revocation (data loaded, player missing or
+    token_version mismatch)."""
+
+
 def _load_player_from_db(player_id: int):
+    from services.db_service import _get_players_df
+    players_df = _get_players_df()
+    if players_df is None or players_df.empty or "playerId" not in players_df.columns:
+        raise SessionCheckUnavailable("players data unavailable")
     from services.db_service import get_player_by_id
     return get_player_by_id(player_id)
 
@@ -94,14 +105,36 @@ def _lookup_player(player_id: int):
 
 
 def _payload_is_current(payload: dict) -> bool:
-    """Look up the token's player and apply token_is_current. Fails closed:
-    a non-numeric `sub` or any lookup error means the token is not trusted."""
+    """Look up the token's player and apply token_is_current.
+
+    Returns False for a real revocation (player row missing, tv mismatch) or a
+    non-numeric `sub`. Raises SessionCheckUnavailable when the players data
+    cannot be read at all, so callers can answer 503 instead of treating a
+    backend blip as a dead session."""
     try:
-        player = _lookup_player(int(payload["sub"]))
+        player_id = int(payload["sub"])
     except Exception:
-        logger.warning("Token version check failed; rejecting token", exc_info=True)
         return False
+    try:
+        player = _lookup_player(player_id)
+    except Exception:
+        logger.warning("Token version check unavailable", exc_info=True)
+        raise SessionCheckUnavailable("players lookup failed")
     return token_is_current(payload, player)
+
+
+_UNAVAILABLE_DETAIL = "Session check temporarily unavailable."
+
+
+def _require_current(payload: dict) -> None:
+    """401 revoked if the token was revoked; 503 (no X-Session-State header, so
+    the client guard leaves the user signed in) if the check cannot be made."""
+    try:
+        current = _payload_is_current(payload)
+    except SessionCheckUnavailable:
+        raise HTTPException(status_code=503, detail=_UNAVAILABLE_DETAIL)
+    if not current:
+        raise _dead_session(_REVOKED_DETAIL, "revoked")
 
 
 def decode_current_token(token: str) -> dict | None:
@@ -112,7 +145,10 @@ def decode_current_token(token: str) -> dict | None:
         payload = decode_token(token)
     except Exception:
         return None
-    return payload if _payload_is_current(payload) else None
+    try:
+        return payload if _payload_is_current(payload) else None
+    except SessionCheckUnavailable:
+        return None
 
 
 _REVOKED_DETAIL = "Session is no longer valid. Please log in again."
@@ -201,8 +237,7 @@ def require_auth(
         raise _dead_session("Session expired. Please log in again.", "expired")
     except Exception:
         raise _dead_session("Invalid session token.", "invalid")
-    if not _payload_is_current(payload):
-        raise _dead_session(_REVOKED_DETAIL, "revoked")
+    _require_current(payload)
     _track_activity(payload)
     return payload
 
@@ -219,8 +254,7 @@ def require_admin(
         raise _dead_session("Session expired. Please log in again.", "expired")
     except Exception:
         raise _dead_session("Invalid session token.", "invalid")
-    if not _payload_is_current(payload):
-        raise _dead_session(_REVOKED_DETAIL, "revoked")
+    _require_current(payload)
     if payload.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin role required.")
     _track_activity(payload)
@@ -247,4 +281,9 @@ def get_is_admin(
         payload = decode_token(token)
     except Exception:
         return False
-    return payload.get("role") == "admin" and _payload_is_current(payload)
+    if payload.get("role") != "admin":
+        return False
+    try:
+        return _payload_is_current(payload)
+    except SessionCheckUnavailable:
+        return False

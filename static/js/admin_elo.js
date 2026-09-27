@@ -8,6 +8,15 @@
 
 import { AuthService } from './auth_service.js';
 
+// "<status>: <server message>" for an error panel, HTML-escaped; a non-string
+// detail (422 arrays/objects) is JSON-formatted instead of "[object Object]".
+const _errHtml = (resp, err, fallback) => {
+    const raw = err && (err.detail || err.error);
+    const text = raw ? (typeof raw === 'string' ? raw : JSON.stringify(raw)) : fallback;
+    const esc = String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return `${resp.status}: ${esc}`;
+};
+
 class EloExplorer {
     constructor() {
         this._data = null;          // raw API response
@@ -68,7 +77,7 @@ class EloExplorer {
                 const err = await resp.json().catch(() => ({}));
                 this._teamGrid.innerHTML =
                     `<p style="color:var(--accent-gold);font-size:0.85rem;">
-                        ${resp.status}: ${err.detail || err.error || 'Elo history unavailable.'}
+                        ${_errHtml(resp, err, 'Elo history unavailable.')}
                         ${resp.status === 404 ? '<br><span style="color:var(--text-secondary);font-size:0.78rem;">Run <code>python scripts/compute_elo.py</code> locally, then sync rawdata to GCS or bundle in the image.</span>' : ''}
                     </p>`;
                 return;

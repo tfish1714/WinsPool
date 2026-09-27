@@ -10,6 +10,15 @@
 import { AuthService } from './auth_service.js';
 import { getBettingScreener } from './admin_betting.js';
 
+// "<status>: <server message>" for an error panel, HTML-escaped; a non-string
+// detail (422 arrays/objects) is JSON-formatted instead of "[object Object]".
+const _errHtml = (resp, err, fallback) => {
+    const raw = err && (err.detail || err.error);
+    const text = raw ? (typeof raw === 'string' ? raw : JSON.stringify(raw)) : fallback;
+    const esc = String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return `${resp.status}: ${esc}`;
+};
+
 class PatternScanner {
     constructor() {
         this._minSample = document.getElementById('scanner-min-sample');
@@ -62,7 +71,7 @@ class PatternScanner {
             const resp = await fetch(`/api/admin/betting/scan?${params.toString()}`, { headers });
             if (!resp.ok) {
                 const err = await resp.json().catch(() => ({}));
-                this._baselineEl.innerHTML = `<p style="color: var(--accent-red);">${resp.status}: ${err.detail || err.error || 'Failed to load.'}</p>`;
+                this._baselineEl.innerHTML = `<p style="color: var(--accent-red);">${_errHtml(resp, err, 'Failed to load.')}</p>`;
                 return;
             }
             const data = await resp.json();

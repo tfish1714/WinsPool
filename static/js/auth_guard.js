@@ -34,7 +34,9 @@
     ];
 
     var DEAD_STATES = { expired: 1, invalid: 1, revoked: 1, missing: 1 };
-    var DEAD_DETAIL = /expired|invalid session token|missing or invalid authorization header|no longer valid/i;
+    // Anchored to the exact server strings (services/session_service.py) so an
+    // unrelated 401 such as "MFA code expired or invalid." never signs the user out.
+    var DEAD_DETAIL = /^\s*(session expired\. please log in again\.|invalid session token\.|missing or invalid authorization header\.|session is no longer valid\. please log in again\.)\s*$/i;
 
     var origFetch = window.fetch;
     var handled = false; // at most one sign-out per page load
