@@ -22,7 +22,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 client = TestClient(app, follow_redirects=False)
 
 
-def _data(games=None, predictions=None, projections=None):
+def _data(games=None, predictions=None, projections=None, preseason_projections=None,
+          current_projection=None):
     standings = pd.DataFrame([
         {"season": 2025, "team": "KC", "wins": 14, "losses": 3, "ties": 0},
         {"season": 2024, "team": "KC", "wins": 15, "losses": 2, "ties": 0},
@@ -69,7 +70,9 @@ def _data(games=None, predictions=None, projections=None):
         }
     return {"standings": standings, "games": games, "players": players, "draft_results": draft,
             "predictions": predictions,
-            "projections": projections if projections is not None else {"KC": {"projected_wins": 11.4}}}
+            "projections": projections if projections is not None else {"KC": {"projected_wins": 11.4}},
+            "preseason_projections": preseason_projections if preseason_projections is not None else {},
+            "current_projection": current_projection if current_projection is not None else {}}
 
 
 def _build(team="KC", include=True, **kw):
@@ -486,3 +489,93 @@ def test_team_page_header_labels_preseason_projection():
     src = (pathlib.Path(__file__).resolve().parent.parent / "static" / "js" / "team_page.js").read_text(encoding="utf-8")
     assert "Preseason projection: " in src
     assert "'Projected wins: '" not in src
+
+
+# ---- Task 2: preseason (frozen) vs current (results-aware) projection ----
+
+def _cur(**kw):
+    base = {"projected_wins": 12.3, "mean_wins": 12.3, "std_dev": 1.1, "floor": 10.0,
+            "p25": 11.0, "p75": 13.0, "ceiling": 14.0, "as_of_week": 3, "locked": False}
+    base.update(kw)
+    return {"KC": base}
+
+
+class TestCurrentVsPreseasonProjection:
+    def test_both_present(self):
+        p = _build("KC", preseason_projections={"KC": {"projected_wins": 10.5}},
+                   current_projection=_cur())
+        cur = p["current"]
+        assert cur["preseason_projection"] == 10.5
+        assert cur["current_projection"] == {"projected_wins": 12.3, "floor": 10.0,
+                                             "ceiling": 14.0, "as_of_week": 3}
+
+    def test_current_projection_none_when_no_data(self):
+        p = _build("KC", preseason_projections={"KC": {"projected_wins": 10.5}}, current_projection={})
+        assert p["current"]["current_projection"] is None
+        assert p["current"]["preseason_projection"] == 10.5
+
+    def test_preseason_falls_back_to_legacy_projection_when_no_frozen_value(self):
+        p = _build("KC", preseason_projections={})
+        assert p["current"]["preseason_projection"] == 11.4  # legacy-shape projections fixture
+
+    def test_gated_when_projections_excluded(self):
+        p = _build("KC", include=False, preseason_projections={"KC": {"projected_wins": 10.5}},
+                   current_projection=_cur())
+        assert p["current"]["preseason_projection"] is None
+        assert p["current"]["current_projection"] is None
+
+    def test_payload_json_has_no_nan(self):
+        p = _build("KC", current_projection=_cur(floor=float("nan")))
+        json.dumps(p, allow_nan=False)
+
+
+def _route_patches(frozen, preseason, current, draft_active=False):
+    return _patches(draft_active) + (
+        patch("routes.history_routes.get_draft_snapshot_predictions", return_value=frozen),
+        patch("routes.history_routes.get_preseason_predictions", return_value=preseason),
+        patch("routes.history_routes.get_season_projection_current", return_value=current),
+    )
+
+
+def _get_with(frozen, preseason, current, cookie=None, draft_active=False):
+    ps = _route_patches(frozen, preseason, current, draft_active)
+    for p in ps:
+        p.start()
+    try:
+        return client.get("/team/KC", cookies={"session_token": cookie} if cookie else None)
+    finally:
+        for p in ps:
+            p.stop()
+
+
+class TestProjectionRoute:
+    FROZEN = {"KC": {"projected_wins": 10.0}}
+    DAILY = {"KC": {"projected_wins": 13.0}}
+
+    def test_preseason_reads_frozen_snapshot_not_daily_doc(self):
+        p = _embedded(_get_with(self.FROZEN, self.DAILY, _cur()).text)
+        assert p["current"]["preseason_projection"] == 10.0
+        assert p["current"]["current_projection"]["as_of_week"] == 3
+
+    def test_falls_back_to_preseason_predictions_when_snapshot_missing(self):
+        p = _embedded(_get_with({}, self.DAILY, {}).text)
+        assert p["current"]["preseason_projection"] == 13.0
+        assert p["current"]["current_projection"] is None
+
+    def test_hidden_from_non_admin_during_draft(self):
+        tok = create_token(1, "player")
+        p = _embedded(_get_with(self.FROZEN, self.DAILY, _cur(), cookie=tok, draft_active=True).text)
+        assert p["current"]["preseason_projection"] is None
+        assert p["current"]["current_projection"] is None
+        admin = create_token(9, "admin")
+        p = _embedded(_get_with(self.FROZEN, self.DAILY, _cur(), cookie=admin, draft_active=True).text)
+        assert p["current"]["current_projection"]["projected_wins"] == 12.3
+
+
+def test_team_page_js_renders_both_projections_textcontent_only():
+    src = (ROOT / "static" / "js" / "team_page.js").read_text(encoding="utf-8")
+    assert "Preseason projection: " in src
+    assert "Current projection: " in src
+    assert "as of week " in src
+    assert "current_projection" in src and "preseason_projection" in src
+    assert "innerHTML" not in src

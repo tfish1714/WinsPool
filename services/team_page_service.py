@@ -8,6 +8,10 @@ Pure function over already-loaded data; no I/O. See build_team_page().
                 `pred_prob` is the HOME win probability
   projections   {team: {"projected_wins": float}} from
                 data_service.get_season_projection_legacy_shape()
+  preseason_projections   {team: {"projected_wins"}} frozen preseason numbers
+                (data_service.get_frozen_preseason_projection)
+  current_projection      {team: {projected_wins, floor, ceiling, as_of_week, ...}}
+                (data_service.get_season_projection_current)
 
 Bye weeks are emitted as rows (status "bye", no opponent) for every REG week in
 which the league plays but the team does not.
@@ -213,8 +217,22 @@ def _current(team: str, season: int, data: dict, include_projections: bool) -> d
 
     projected_wins = None
     projected_record = None
+    preseason_projection = None
+    current_projection = None
     if include_projections:
         projected_wins = _num(((data.get("projections") or {}).get(team) or {}).get("projected_wins"))
+        # "Preseason" is the frozen number; the legacy-shape value is only a last resort.
+        preseason_projection = _num(((data.get("preseason_projections") or {}).get(team) or {})
+                                    .get("projected_wins"))
+        if preseason_projection is None:
+            preseason_projection = projected_wins
+        cp = (data.get("current_projection") or {}).get(team)
+        if cp and _num(cp.get("projected_wins")) is not None:
+            as_of = _num(cp.get("as_of_week"))
+            current_projection = {"projected_wins": _num(cp.get("projected_wins")),
+                                  "floor": _num(cp.get("floor")),
+                                  "ceiling": _num(cp.get("ceiling")),
+                                  "as_of_week": None if as_of is None else int(as_of)}
         unplayed = [r for r in schedule if r["status"] == "unplayed"]
         # Only when every unplayed game has a projected side; otherwise the
         # wins+losses total would fall short of the season length.
@@ -224,6 +242,8 @@ def _current(team: str, season: int, data: dict, include_projections: bool) -> d
                 "losses": record["losses"] + sum(r["projected"] == "L" for r in unplayed),
             }
     return {"record": record, "projected_wins": projected_wins,
+            "preseason_projection": preseason_projection,
+            "current_projection": current_projection,
             "schedule": schedule, "projected_record": projected_record}
 
 

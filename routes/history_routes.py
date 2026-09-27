@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from services.data_service import load_data, get_available_years, get_active_season, get_season_projection_legacy_shape
+from services.data_service import load_data, get_available_years, get_active_season, get_season_projection_legacy_shape, get_draft_snapshot_predictions, get_preseason_predictions, get_season_projection_current
 from services.utils import abbreviate_player_name as _first_name, filter_season, normalize_team_abbr
 import services.analysis_service as analysis
 from services.cache_service import get_game_predictions
@@ -269,6 +269,10 @@ async def team_page(request: Request, abbr: str):
         "standings": standings, "games": games, "players": players, "draft_results": draft_results,
         "predictions": get_game_predictions(season) if include_projections else {},
         "projections": get_season_projection_legacy_shape(season) if include_projections else {},
+        # Frozen snapshot first (the "preseason" label must be the frozen number), then preseason_predictions.
+        "preseason_projections": (get_draft_snapshot_predictions(season) or get_preseason_predictions(season))
+                                 if include_projections else {},
+        "current_projection": get_season_projection_current(season) if include_projections else {},
     }
     payload = team_page_service.build_team_page(abbr, season, data, include_projections)
     if payload is None:

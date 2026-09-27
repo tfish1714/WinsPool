@@ -300,8 +300,10 @@
           body.appendChild(line('Chance at least one team makes playoffs', `${Math.round(p.playoff_prob_any * 100)}%`));
           p.teams.forEach(t => {
             const chance = Math.round(t.playoff_prob * 100);
+            const pre = typeof t.preseason_projected_wins === 'number'
+              ? ` (preseason ${t.preseason_projected_wins.toFixed(1)})` : '';
             body.appendChild(line(t.team, typeof t.wins_to_date === 'number'
-              ? `${t.wins_to_date} ${t.wins_to_date === 1 ? 'win' : 'wins'} so far, ${t.projected_wins.toFixed(1)} projected final, playoff chance ${chance}%`
+              ? `${t.wins_to_date} ${t.wins_to_date === 1 ? 'win' : 'wins'} so far, ${t.projected_wins.toFixed(1)} projected final${pre}, playoff chance ${chance}%`
               : `${t.projected_wins.toFixed(1)} wins, team playoff chance ${chance}%`));
           });
         } else {

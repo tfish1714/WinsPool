@@ -249,3 +249,50 @@ class TestRouteLiveOutlook:
             b = self._fetch(games, preds, _standings({"KC": 2}))
         assert b["available"] is True
         assert b["expected_wins"] == round(sum(PROJ[t]["projected_wins"] for t in ("KC", "NYJ", "CAR")), 2)
+
+
+class TestOutlookPreseasonFromFrozenSnapshot:
+    """Task 2: preseason_projected_wins is the frozen number, not the daily-rewritten doc."""
+
+    def _fetch(self, frozen):
+        games = _games([(5, "REG", "KC", "BUF", None)])
+        preds = {"W05_KC_BUF": {"pred_prob": 1.0}}
+        load = (_standings({"KC": 2}), None, games, None, pd.DataFrame(), _dr(), pd.DataFrame())
+        with patch("routes.api_routes.load_data", return_value=load), \
+             patch("services.data_service.get_active_season", return_value=2026), \
+             patch("routes.api_routes.get_season_projection_legacy_shape", return_value=PROJ), \
+             patch("routes.api_routes.get_frozen_preseason_projection", return_value=frozen), \
+             patch("routes.api_routes.get_config_settings", return_value={"draft_active": False}), \
+             patch("services.cache_service.get_game_predictions", return_value=preds):
+            return TestClient(app).get("/api/profile/portfolio").json()
+
+    def test_preseason_projected_wins_from_snapshot(self, auth_player):
+        b = self._fetch({"KC": {"projected_wins": 7.0}})
+        by_team = {t["team"]: t for t in b["teams"]}
+        assert by_team["KC"]["preseason_projected_wins"] == 7.0
+        assert by_team["KC"]["preseason_projected_wins"] != PROJ["KC"]["projected_wins"]
+        # simulation-based numbers unchanged
+        assert by_team["KC"]["wins_to_date"] == 2 and by_team["KC"]["projected_wins"] == 3.0
+
+    def test_team_missing_from_snapshot_falls_back_to_legacy_projection(self, auth_player):
+        b = self._fetch({})
+        by_team = {t["team"]: t for t in b["teams"]}
+        assert by_team["KC"]["preseason_projected_wins"] == PROJ["KC"]["projected_wins"]
+
+
+def test_player_profile_team_line_shows_preseason_projection():
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parent.parent / "templates" / "player_profile.html").read_text(encoding="utf-8")
+    assert "preseason_projected_wins" in src
+    assert "(preseason " in src
+
+
+class TestFrozenPreseasonHelper:
+    def test_snapshot_first_then_preseason_predictions(self):
+        from services import data_service as ds
+        with patch.object(ds, "get_draft_snapshot_predictions", return_value={"KC": {"projected_wins": 1.0}}), \
+             patch.object(ds, "get_preseason_predictions", return_value={"KC": {"projected_wins": 2.0}}):
+            assert ds.get_frozen_preseason_projection(2026)["KC"]["projected_wins"] == 1.0
+        with patch.object(ds, "get_draft_snapshot_predictions", return_value={}), \
+             patch.object(ds, "get_preseason_predictions", return_value={"KC": {"projected_wins": 2.0}}):
+            assert ds.get_frozen_preseason_projection(2026)["KC"]["projected_wins"] == 2.0

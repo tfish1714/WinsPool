@@ -9,7 +9,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import JSONResponse
 
-from services.data_service import load_data, get_latest_season_and_week, get_season_projection_legacy_shape
+from services.data_service import load_data, get_latest_season_and_week, get_season_projection_legacy_shape, get_frozen_preseason_projection
 from services.response_helpers import error_response, server_error, not_found, unauthorized
 from services.draft_service import sanitize_state
 from services.live_standings_service import build_live_standings_payload
@@ -587,7 +587,8 @@ def _remaining_games_with_probs(games, season: int):
     return out, n_stored
 
 
-def _live_outlook(mine: dict | None, teams: list, projections: dict) -> dict | None:
+def _live_outlook(mine: dict | None, teams: list, projections: dict,
+                  preseason: dict | None = None) -> dict | None:
     """Outlook numbers from the per-game simulation (wins to date + game probabilities).
 
     Same shape as compute_portfolio_projection plus wins_to_date and
@@ -601,7 +602,10 @@ def _live_outlook(mine: dict | None, teams: list, projections: dict) -> dict | N
         st = sim_teams.get(t)
         if st is None:
             continue
-        pre = (projections.get(t) or {}).get("projected_wins")
+        # Frozen preseason number when available; the legacy-shape value is only a fallback.
+        pre = ((preseason or {}).get(t) or {}).get("projected_wins")
+        if pre is None:
+            pre = (projections.get(t) or {}).get("projected_wins")
         rows.append({"team": t,
                      "projected_wins": round(st["expected_wins"], 2),
                      "std_dev": round(float(st.get("std_dev", 0.0)), 2),
@@ -665,7 +669,8 @@ def build_player_outlook(player_id: int, is_admin: bool) -> dict:
             base_wins = {t: r.get("wins") for t, r in records.items()}
             sim = analysis.simulate_pool_finish_odds_from_games(pool, base_wins, remaining)
             basis, n_remaining = "per_game", len(remaining)
-            live = _live_outlook(sim.get(player_id), teams, projections)
+            live = _live_outlook(sim.get(player_id), teams, projections,
+                                 get_frozen_preseason_projection(season))
         else:
             sim = analysis.simulate_pool_finish_odds(pool, projections, records)
             basis, n_remaining = "team_projection", None

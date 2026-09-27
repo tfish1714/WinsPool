@@ -16,8 +16,13 @@
         var box = document.getElementById('team-summary');
         var cur = data.current;
         box.appendChild(el('span', null, data.current_season + ' record: ' + fmtRecord(cur.record)));
-        if (cur.projected_wins !== null && cur.projected_wins !== undefined) {
-            box.appendChild(el('span', 'team-page__muted', 'Preseason projection: ' + cur.projected_wins.toFixed(1)));
+        if (cur.preseason_projection !== null && cur.preseason_projection !== undefined) {
+            box.appendChild(el('span', 'team-page__muted', 'Preseason projection: ' + cur.preseason_projection.toFixed(1)));
+        }
+        var cp = cur.current_projection;
+        if (cp && cp.projected_wins !== null && cp.projected_wins !== undefined) {
+            var wk = (cp.as_of_week !== null && cp.as_of_week !== undefined) ? ' (as of week ' + cp.as_of_week + ')' : '';
+            box.appendChild(el('span', 'team-page__muted', 'Current projection: ' + cp.projected_wins.toFixed(1) + wk));
         }
     }
 

@@ -504,6 +504,13 @@ def get_season_projection_history(season: int) -> Dict[int, Dict[str, dict]]:
         out.setdefault(int(wk), {})[row["team"]] = _projection_row_to_dict(row)
     return out
 
+def get_frozen_preseason_projection(season: int) -> Dict[str, dict]:
+    """The frozen "preseason projection" per team: the pre-draft snapshot when it
+    exists, else preseason_predictions (which the daily job stops rewriting once
+    the draft is complete). Used wherever a surface labels a number "preseason"."""
+    return get_draft_snapshot_predictions(season) or get_preseason_predictions(season)
+
+
 def get_consensus_projections(season: int) -> Dict[str, dict]:
     """Retrieve analyst consensus projections for a season, keyed by team."""
     entry = _get_predictions_bucket_entry(season)
