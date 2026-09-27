@@ -222,9 +222,10 @@ def _current(team: str, season: int, data: dict, include_projections: bool) -> d
     if include_projections:
         projected_wins = _num(((data.get("projections") or {}).get(team) or {}).get("projected_wins"))
         # "Preseason" is the frozen number; the legacy-shape value is only a last resort.
-        preseason_projection = _num(((data.get("preseason_projections") or {}).get(team) or {})
-                                    .get("projected_wins"))
-        if preseason_projection is None:
+        frozen = data.get("preseason_projections")
+        preseason_projection = _num(((frozen or {}).get(team) or {}).get("projected_wins"))
+        # frozen is None only when its read failed: show nothing rather than a non-frozen number.
+        if preseason_projection is None and frozen is not None:
             preseason_projection = projected_wins
         cp = (data.get("current_projection") or {}).get(team)
         if cp and _num(cp.get("projected_wins")) is not None:

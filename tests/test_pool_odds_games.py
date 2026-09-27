@@ -296,3 +296,20 @@ class TestFrozenPreseasonHelper:
         with patch.object(ds, "get_draft_snapshot_predictions", return_value={}), \
              patch.object(ds, "get_preseason_predictions", return_value={"KC": {"projected_wins": 2.0}}):
             assert ds.get_frozen_preseason_projection(2026)["KC"]["projected_wins"] == 2.0
+
+
+def test_frozen_preseason_read_failure_keeps_per_game_numbers(auth_player):
+    games = _games([(5, "REG", "KC", "BUF", None)])
+    preds = {"W05_KC_BUF": {"pred_prob": 1.0}}
+    load = (_standings({"KC": 2}), None, games, None, pd.DataFrame(), _dr(), pd.DataFrame())
+    with patch("routes.api_routes.load_data", return_value=load), \
+         patch("services.data_service.get_active_season", return_value=2026), \
+         patch("routes.api_routes.get_season_projection_legacy_shape", return_value=PROJ), \
+         patch("routes.api_routes.get_frozen_preseason_projection", side_effect=RuntimeError("boom")), \
+         patch("routes.api_routes.get_config_settings", return_value={"draft_active": False}), \
+         patch("services.cache_service.get_game_predictions", return_value=preds):
+        b = TestClient(app).get("/api/profile/portfolio").json()
+    assert b["odds_basis"] == "per_game"
+    by_team = {t["team"]: t for t in b["teams"]}
+    assert by_team["KC"]["wins_to_date"] == 2 and by_team["KC"]["projected_wins"] == 3.0
+    assert by_team["KC"]["preseason_projected_wins"] is None

@@ -1,4 +1,6 @@
 """routes/history_routes.py — Overall history and head-to-head routes."""
+import logging
+
 import pandas as pd
 
 from fastapi import APIRouter, HTTPException, Request
@@ -259,6 +261,15 @@ async def teams_redirect(request: Request):
     return RedirectResponse(f"/team/{target}", status_code=302)
 
 
+def _safe_read(reader, what: str):
+    """reader() or None if it raises (logged); the team page must render without it."""
+    try:
+        return reader()
+    except Exception:
+        logging.getLogger(__name__).warning("team page: %s read failed", what, exc_info=True)
+        return None
+
+
 @router.get("/team/{abbr}")
 async def team_page(request: Request, abbr: str):
     standings, _, games, players, _, draft_results, rules = load_data()
@@ -270,9 +281,11 @@ async def team_page(request: Request, abbr: str):
         "predictions": get_game_predictions(season) if include_projections else {},
         "projections": get_season_projection_legacy_shape(season) if include_projections else {},
         # Frozen snapshot first (the "preseason" label must be the frozen number), then preseason_predictions.
-        "preseason_projections": (get_draft_snapshot_predictions(season) or get_preseason_predictions(season))
-                                 if include_projections else {},
-        "current_projection": get_season_projection_current(season) if include_projections else {},
+        "preseason_projections": (_safe_read(lambda: get_draft_snapshot_predictions(season)
+                                                or get_preseason_predictions(season),
+                                             "preseason projection") if include_projections else {}),
+        "current_projection": (_safe_read(lambda: get_season_projection_current(season),
+                                          "current projection") if include_projections else {}),
     }
     payload = team_page_service.build_team_page(abbr, season, data, include_projections)
     if payload is None:

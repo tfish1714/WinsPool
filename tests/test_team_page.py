@@ -579,3 +579,35 @@ def test_team_page_js_renders_both_projections_textcontent_only():
     assert "as of week " in src
     assert "current_projection" in src and "preseason_projection" in src
     assert "innerHTML" not in src
+
+
+class TestProjectionReadFailure:
+    def _get_raising(self, which):
+        ps = list(_patches(False)) + [
+            patch("routes.history_routes.get_draft_snapshot_predictions",
+                  side_effect=RuntimeError("boom") if which == "snap" else None, return_value={"KC": {"projected_wins": 10.0}}),
+            patch("routes.history_routes.get_preseason_predictions", return_value={}),
+            patch("routes.history_routes.get_season_projection_current",
+                  side_effect=RuntimeError("boom") if which == "cur" else None, return_value=_cur()),
+        ]
+        for p in ps:
+            p.start()
+        try:
+            return client.get("/team/KC")
+        finally:
+            for p in ps:
+                p.stop()
+
+    def test_preseason_read_failure_still_renders(self):
+        r = self._get_raising("snap")
+        assert r.status_code == 200
+        cur = _embedded(r.text)["current"]
+        assert cur["preseason_projection"] is None
+        assert cur["current_projection"]["as_of_week"] == 3
+
+    def test_current_read_failure_still_renders(self):
+        r = self._get_raising("cur")
+        assert r.status_code == 200
+        cur = _embedded(r.text)["current"]
+        assert cur["current_projection"] is None
+        assert cur["preseason_projection"] == 10.0

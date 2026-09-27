@@ -604,7 +604,7 @@ def _live_outlook(mine: dict | None, teams: list, projections: dict,
             continue
         # Frozen preseason number when available; the legacy-shape value is only a fallback.
         pre = ((preseason or {}).get(t) or {}).get("projected_wins")
-        if pre is None:
+        if pre is None and preseason is not None:
             pre = (projections.get(t) or {}).get("projected_wins")
         rows.append({"team": t,
                      "projected_wins": round(st["expected_wins"], 2),
@@ -669,8 +669,13 @@ def build_player_outlook(player_id: int, is_admin: bool) -> dict:
             base_wins = {t: r.get("wins") for t, r in records.items()}
             sim = analysis.simulate_pool_finish_odds_from_games(pool, base_wins, remaining)
             basis, n_remaining = "per_game", len(remaining)
-            live = _live_outlook(sim.get(player_id), teams, projections,
-                                 get_frozen_preseason_projection(season))
+            try:
+                frozen_pre = get_frozen_preseason_projection(season)
+            except Exception:
+                logger.warning("frozen preseason projection read failed; omitting preseason_projected_wins",
+                               exc_info=True)
+                frozen_pre = None
+            live = _live_outlook(sim.get(player_id), teams, projections, frozen_pre)
         else:
             sim = analysis.simulate_pool_finish_odds(pool, projections, records)
             basis, n_remaining = "team_projection", None
