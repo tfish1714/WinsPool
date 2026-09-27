@@ -148,3 +148,31 @@ Full schedule table, alerting design, and the two job Docker images
 One-time GCP provisioning (APIs, IAM, the Cloud Tasks queue, the Scheduler
 triggers themselves) is `docs/superpowers/plans/completed/2026-08-19-scheduled-jobs.md`
 Task 9; `deploy.ps1` only rebuilds/redeploys the job *images* on each run.
+
+---
+
+## Kickoff queue safeguards (Cloud Tasks)
+
+`winspool-schedule-kickoffs` enqueues per-game tasks into the `winspool-kickoff-triggers`
+queue. Two safeguards (one-time, operator-run; not part of `deploy.ps1`):
+
+```powershell
+# Retry limits: the default is 100 attempts backing off up to an hour, which let one
+# permanently failing task (missing run.jobs.runWithOverrides) retry 64 times unnoticed.
+# A resimulate task is worthless after kickoff, so stop retrying after 30 minutes.
+gcloud tasks queues update winspool-kickoff-triggers --location=us-east1 --project=fishbone-wins-pool `
+  --max-attempts=5 --min-backoff=30s --max-backoff=300s --max-doublings=3 --max-retry-duration=1800s
+
+# Alert when queue dispatch attempts keep failing (uses the existing email channel).
+gcloud alpha monitoring policies create --project=fishbone-wins-pool `
+  --policy-from-file=deploy/alerts/kickoff-queue-attempt-failures.json `
+  --notification-channels=projects/fishbone-wins-pool/notificationChannels/3572266000520947858
+```
+
+IAM the scheduler account needs on the `winspool-predict-daily` job: `roles/run.invoker`
+plus `roles/run.jobsExecutorWithOverrides` (the resimulate task overrides container args;
+plain invoker returns 403 for that request).
+
+The alert metric label `response_code` should be checked once in Cloud Monitoring's
+Metrics Explorer (`cloudtasks.googleapis.com/queue/task_attempt_count`) to confirm the
+"OK" value matches the filter in the policy file.

@@ -1,0 +1,29 @@
+{
+  "displayName": "WinsPool kickoff queue task attempts failing",
+  "combiner": "OR",
+  "enabled": true,
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "Cloud Tasks is getting non-OK responses from the Cloud Run Jobs API while dispatching winspool-kickoff-triggers tasks (sync, predict, resimulate). The most likely causes are IAM (the winspool-scheduler account needs roles/run.invoker AND roles/run.jobsExecutorWithOverrides on winspool-predict-daily; the resimulate task overrides container args) or a deleted/renamed job. Inspect with: gcloud tasks list --queue=winspool-kickoff-triggers --location=us-east1 --project=fishbone-wins-pool"
+  },
+  "conditions": [
+    {
+      "displayName": "Kickoff queue task attempts returning non-OK",
+      "conditionThreshold": {
+        "filter": "resource.type=\"cloud_tasks_queue\" AND resource.labels.queue_id=\"winspool-kickoff-triggers\" AND metric.type=\"cloudtasks.googleapis.com/queue/task_attempt_count\" AND metric.labels.response_code!=\"OK\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_SUM",
+            "crossSeriesReducer": "REDUCE_SUM"
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 2,
+        "duration": "0s",
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "alertStrategy": { "autoClose": "3600s" }
+}
