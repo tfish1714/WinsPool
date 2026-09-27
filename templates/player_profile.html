@@ -108,9 +108,16 @@
         </thead>
         <tbody>
           {% for s in analytics.seasons | sort(attribute='year', reverse=True) %}
-          <tr>
+          <tr class="{{ 'season-row--first' if s.rank == 1 else ('season-row--second' if s.rank == 2 else '') }}">
             <td class="season-year" style="font-weight:700;">{{ s.year }}</td>
-            <td class="season-rank">#{{ s.rank }}</td>
+            <td class="season-rank">
+              #{{ s.rank }}
+              {% if s.rank == 1 %}
+              <span class="season-rank-badge season-rank-badge--first">1st Place</span>
+              {% elif s.rank == 2 %}
+              <span class="season-rank-badge season-rank-badge--second">2nd Place</span>
+              {% endif %}
+            </td>
             <td class="season-wins" style="color:var(--primary-color); font-weight:700;">{{ s.totalWins }}</td>
             {% for pick in s.picks %}
             <td class="pick-cell" style="font-size:0.82rem; line-height:1.6;">
@@ -229,6 +236,19 @@
       }
       #player-page .pick-cell__head { flex-wrap: wrap; }
     }
+    .season-rank-badge {
+        display: inline-block; margin-left: 0.4rem; padding: 0.15rem 0.55rem;
+        border-radius: 999px; font-size: 0.72rem; font-weight: 700;
+        letter-spacing: 0.02em; white-space: nowrap; vertical-align: middle;
+    }
+    .season-rank-badge--first {
+        background: var(--leader-soft); color: var(--leader); border: 1px solid var(--leader);
+    }
+    .season-rank-badge--second {
+        background: rgba(154,161,173,0.12); color: var(--ink-2); border: 1px solid var(--ink-2);
+    }
+    #player-page .seasons-table tr.season-row--first td.season-year { color: var(--leader); }
+    #player-page .seasons-table tr.season-row--second td.season-year { color: var(--ink-2); }
 </style>
 
 <style>

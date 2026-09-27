@@ -63,6 +63,35 @@ class TestPlayerPage:
     def test_unknown_player_404(self):
         assert _get("/player/999").status_code == 404
 
+    def test_first_place_season_gets_gold_badge_second_place_gets_muted_badge(self):
+        """Two completed seasons: player 1 finishes 1st in 2021, 2nd in 2022."""
+        standings = pd.DataFrame([
+            {"season": 2021, "team": "KC", "wins": 14, "losses": 3, "ties": 0},
+            {"season": 2021, "team": "BUF", "wins": 8, "losses": 9, "ties": 0},
+            {"season": 2022, "team": "KC", "wins": 8, "losses": 9, "ties": 0},
+            {"season": 2022, "team": "BUF", "wins": 14, "losses": 3, "ties": 0},
+        ])
+        players = pd.DataFrame([
+            {"playerId": 1, "fullName": "Alice Smith", "nickName": "Alice"},
+            {"playerId": 2, "fullName": "Bob Jones", "nickName": "Bob"},
+        ])
+        draft = pd.DataFrame([
+            {"playerId": 1, "season": 2021, "draftPick": 1, "team": "KC"},
+            {"playerId": 2, "season": 2021, "draftPick": 2, "team": "BUF"},
+            {"playerId": 1, "season": 2022, "draftPick": 1, "team": "KC"},
+            {"playerId": 2, "season": 2022, "draftPick": 2, "team": "BUF"},
+        ])
+        games = pd.DataFrame([{"season": 2021}, {"season": 2022}])
+        load = (standings, pd.DataFrame(), games, players, pd.DataFrame(), draft, pd.DataFrame())
+        with patch("routes.history_routes.load_data", return_value=load), \
+             patch("services.analysis_service.load_data", return_value=load), \
+             patch("services.analysis_service.get_season_projection_legacy_shape", return_value={}):
+            html = client.get("/player/1").text
+        assert 'season-row--first' in html
+        assert 'season-rank-badge--first">1st Place</span>' in html
+        assert 'season-row--second' in html
+        assert 'season-rank-badge--second">2nd Place</span>' in html
+
     def test_own_page_block_hidden_by_default_with_markers(self):
         r = _get("/player/2")
         html = r.text
