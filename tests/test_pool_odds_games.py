@@ -133,6 +133,8 @@ def _get(games, preds):
     with patch("routes.api_routes.load_data", return_value=load), \
          patch("services.data_service.get_active_season", return_value=2026), \
          patch("routes.api_routes.get_season_projection_legacy_shape", return_value=PROJ), \
+         patch("routes.api_routes.get_frozen_preseason_projection", return_value=PROJ), \
+         patch("routes.api_routes.is_draft_active_fail_closed", return_value=False), \
          patch("routes.api_routes.get_config_settings", return_value={"draft_active": False}), \
          patch("services.cache_service.get_game_predictions", return_value=preds):
         return TestClient(app).get("/api/profile/portfolio").json()
@@ -178,6 +180,8 @@ class TestRoutePerGame:
                 with patch("routes.api_routes.load_data", return_value=load), \
                      patch("services.data_service.get_active_season", return_value=2026), \
                      patch("routes.api_routes.get_season_projection_legacy_shape", return_value=PROJ), \
+                     patch("routes.api_routes.get_frozen_preseason_projection", return_value=PROJ), \
+                     patch("routes.api_routes.is_draft_active_fail_closed", return_value=False), \
                      patch("routes.api_routes.get_config_settings", return_value={"draft_active": False}), \
                      patch("services.cache_service.get_game_predictions", return_value=preds):
                     return TestClient(app).get("/api/profile/portfolio").json()
@@ -209,7 +213,7 @@ class TestRouteLiveOutlook:
 
     def _fetch(self, games, preds, standings):
         load = (standings, None, games, None, pd.DataFrame(), _dr(), pd.DataFrame())
-        with patch("routes.api_routes.load_data", return_value=load),              patch("services.data_service.get_active_season", return_value=2026),              patch("routes.api_routes.get_season_projection_legacy_shape", return_value=PROJ),              patch("routes.api_routes.get_config_settings", return_value={"draft_active": False}),              patch("services.cache_service.get_game_predictions", return_value=preds):
+        with patch("routes.api_routes.load_data", return_value=load),              patch("services.data_service.get_active_season", return_value=2026),              patch("routes.api_routes.get_season_projection_legacy_shape", return_value=PROJ), patch("routes.api_routes.get_frozen_preseason_projection", return_value=PROJ), patch("routes.api_routes.is_draft_active_fail_closed", return_value=False),              patch("routes.api_routes.get_config_settings", return_value={"draft_active": False}),              patch("services.cache_service.get_game_predictions", return_value=preds):
             return TestClient(app).get("/api/profile/portfolio").json()
 
     def test_per_game_uses_wins_to_date_not_preseason(self, auth_player):

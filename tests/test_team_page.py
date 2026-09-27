@@ -264,6 +264,9 @@ def _patches(draft_active=False):
         patch("routes.history_routes.get_season_projection_legacy_shape",
               return_value=_data()["projections"]),
         patch("routes.history_routes.is_draft_active_fail_closed", return_value=draft_active),
+        patch("routes.history_routes.get_draft_snapshot_predictions", return_value={}),
+        patch("routes.history_routes.get_preseason_predictions", return_value={}),
+        patch("routes.history_routes.get_season_projection_current", return_value={}),
     )
 
 
