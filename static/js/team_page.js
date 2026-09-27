@@ -41,8 +41,10 @@
             row.appendChild(drafter);
             row.appendChild(el('div', 'team-page__cell team-page__muted', h.pick ? 'Pick ' + h.pick : ''));
             if (h.pool_winner) {
-                row.appendChild(el('div', 'team-page__note',
-                    'Pool winner: ' + h.pool_winner.name + ' (' + h.pool_winner.wins + ' wins)'));
+                var combo = h.winning_combo && h.winning_combo.length
+                    ? ' (with ' + h.winning_combo.join(', ') + ')' : '';
+                row.appendChild(el('div', 'team-page__note team-page__combo',
+                    'Winning combo: ' + h.pool_winner.name + ', ' + h.pool_winner.wins + ' wins' + combo));
             }
             box.appendChild(row);
         });

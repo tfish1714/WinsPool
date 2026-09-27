@@ -28,6 +28,10 @@ def _data(games=None, predictions=None, projections=None):
         {"season": 2024, "team": "KC", "wins": 15, "losses": 2, "ties": 0},
         {"season": 2024, "team": "DEN", "wins": 10, "losses": 7, "ties": 0},
         {"season": 2025, "team": "DEN", "wins": 9, "losses": 8, "ties": 0},
+        {"season": 2025, "team": "LV", "wins": 1, "losses": 16, "ties": 0},
+        {"season": 2025, "team": "SF", "wins": 1, "losses": 16, "ties": 0},
+        {"season": 2024, "team": "ARI", "wins": 1, "losses": 16, "ties": 0},
+        {"season": 2024, "team": "NE", "wins": 1, "losses": 16, "ties": 0},
     ])
     players = pd.DataFrame([
         {"playerId": 1, "fullName": "Alice Smith", "nickName": "Alice"},
@@ -38,6 +42,10 @@ def _data(games=None, predictions=None, projections=None):
         {"playerId": 2, "season": 2025, "draftPick": 5, "team": "DEN"},
         {"playerId": 2, "season": 2024, "draftPick": 2, "team": "KC"},
         {"playerId": 1, "season": 2024, "draftPick": 3, "team": "DEN"},
+        {"playerId": 1, "season": 2025, "draftPick": 6, "team": "LV"},
+        {"playerId": 1, "season": 2025, "draftPick": 7, "team": "SF"},
+        {"playerId": 2, "season": 2024, "draftPick": 8, "team": "ARI"},
+        {"playerId": 2, "season": 2024, "draftPick": 9, "team": "NE"},
     ])
     if games is None:
         games = pd.DataFrame([
@@ -88,12 +96,33 @@ class TestBuildTeamPage:
         assert h25["drafter"] == {"playerId": 1, "name": "Alice Smith"} and h25["pick"] == 4
         assert h24["drafter"]["playerId"] == 2 and h24["pick"] == 2
 
-    def test_pool_winner_per_completed_season(self):
+    def test_pool_winner_only_on_rows_where_drafter_is_winner(self):
         p = _build("KC")
-        # 2025: Alice has KC (14), Bob has DEN (9) -> Alice wins
-        assert p["history"][0]["pool_winner"] == {"playerId": 1, "name": "Alice Smith", "wins": 14}
-        # 2024: Bob has KC (15), Alice DEN (10) -> Bob wins
-        assert p["history"][1]["pool_winner"] == {"playerId": 2, "name": "Bob Jones", "wins": 15}
+        # 2025: Alice has KC (14)+LV+SF (16 total) vs Bob DEN (9) -> Alice wins, and drafted KC
+        h25, h24 = p["history"]
+        assert h25["pool_winner"] == {"playerId": 1, "name": "Alice Smith", "wins": 16}
+        assert h25["winning_combo"] == ["LV", "SF"]
+        # 2024: Bob has KC+ARI+NE (17) vs Alice DEN (10) -> Bob wins, drafted KC
+        assert h24["pool_winner"] == {"playerId": 2, "name": "Bob Jones", "wins": 17}
+        assert h24["winning_combo"] == ["ARI", "NE"]
+
+    def test_no_callout_when_drafter_did_not_win(self):
+        p = _build("DEN")
+        # DEN: 2025 drafted by Bob (2nd), 2024 by Alice (2nd)
+        for h in p["history"]:
+            assert h["pool_winner"] is None
+            assert not h.get("winning_combo")
+
+    def test_callout_only_in_season_winner_drafted_team(self):
+        d = _data()
+        # 2024: Alice (drafter of DEN) now wins big; Bob drafted KC and loses
+        d["standings"].loc[(d["standings"]["season"] == 2024) & (d["standings"]["team"] == "DEN"), "wins"] = 17
+        d["standings"].loc[(d["standings"]["season"] == 2024) & (d["standings"]["team"] == "KC"), "wins"] = 0
+        p = tps.build_team_page("KC", 2026, d, True)
+        h25, h24 = p["history"]
+        assert h25["pool_winner"]["playerId"] == 1 and h25["winning_combo"] == ["LV", "SF"]
+        assert h24["drafter"]["playerId"] == 2
+        assert h24["pool_winner"] is None and not h24["winning_combo"]
 
     def test_never_drafted_team_has_empty_history(self):
         p = _build("SEA")
@@ -302,3 +331,10 @@ class TestTeamsNav:
         base = (ROOT / "templates" / "base.html").read_text(encoding="utf-8")
         assert "href: '/teams'" in js and "label: 'Teams'" in js
         assert 'href="/teams"' in base
+
+
+def test_team_page_js_renders_winning_combo_conditionally():
+    src = (ROOT / "static" / "js" / "team_page.js").read_text(encoding="utf-8")
+    assert "winning_combo" in src and "pool_winner" in src
+    assert re.search(r"if\s*\(\s*h\.pool_winner\s*\)", src)
+    assert "Pool winner:" not in src

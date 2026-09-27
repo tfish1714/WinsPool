@@ -112,12 +112,23 @@ def _history(team: str, current_season: int, data: dict) -> list:
         pick_row = mine[mine["season"] == season].sort_values("draftPick").iloc[0]
         pid = _int(pick_row["playerId"])
         rec = _standing(data.get("standings"), season, team)
+        # The in-progress season has no winner yet, only a leader.
+        winner = None if season == current_season else _cached_winner(winners, data, season)
+        is_winning_row = winner is not None and winner["playerId"] == pid
+        combo = None
+        if is_winning_row:
+            theirs = dr[(dr["season"] == season) & (dr["playerId"] == pid)].sort_values("draftPick")
+            combo = []
+            for t in theirs["team"].apply(normalize_team_abbr):
+                if t != team and t not in combo:
+                    combo.append(t)
         history.append({
             "season": season, **rec,
             "drafter": {"playerId": pid, "name": _player_name(data.get("players"), pid)},
             "pick": _int(pick_row.get("draftPick")) or None,
-            # The in-progress season has no winner yet, only a leader.
-            "pool_winner": None if season == current_season else _cached_winner(winners, data, season),
+            # Only set when this team's drafter won the pool that season.
+            "pool_winner": winner if is_winning_row else None,
+            "winning_combo": combo,
         })
     return history
 

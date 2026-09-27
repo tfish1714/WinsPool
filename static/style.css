@@ -4046,6 +4046,7 @@ a.pool-chip-mine:hover { text-decoration: underline; }
 .team-page__season, .team-page__week { font-weight: 600; }
 .team-page__link { display: inline-flex; align-items: center; min-height: 44px; color: var(--primary-color); text-decoration: none; }
 .team-page__note { font-size: 0.8rem; color: var(--text-secondary); margin: 0.25rem 0 0.5rem; }
+.team-page__combo { display: inline-block; justify-self: start; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid var(--primary-color); color: var(--primary-color); font-weight: 600; }
 .team-page__muted { color: var(--text-secondary); }
 .team-page__badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.85rem; border: 1px solid var(--glass-border); }
 .team-page__badge--w { color: var(--pos); border-color: var(--pos); }
