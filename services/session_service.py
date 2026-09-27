@@ -90,13 +90,91 @@ class SessionCheckUnavailable(Exception):
     token_version mismatch)."""
 
 
+_SESSION_CACHE_TTL_SECONDS = 30
+# player_id -> (token_version, exists, fetched_at). Entries are only replaced by
+# a fresher read or dropped, never re-stamped, so a cached value is at most
+# _SESSION_CACHE_TTL_SECONDS old.
+_SESSION_CACHE: dict[int, tuple[int, bool, float]] = {}
+_SESSION_CACHE_LOCK = threading.Lock()
+_SESSION_CACHE_EPOCH = 0  # bumped by every invalidation; see _fetch_player_remote
+
+
+def _now() -> float:
+    """Monotonic clock for the session cache (tests replace this)."""
+    return time.monotonic()
+
+
+def _reset_session_cache() -> None:
+    """Drop every cached entry (tests, and any caller that needs a clean slate)."""
+    with _SESSION_CACHE_LOCK:
+        _SESSION_CACHE.clear()
+
+
+def invalidate_session_cache(player_id) -> None:
+    """Forget a player's cached session state. Called by the password-change
+    write path so a revocation applies immediately in the process that made it;
+    other instances converge within _SESSION_CACHE_TTL_SECONDS. Also advances
+    the epoch so a read already in flight cannot store its now-stale result."""
+    global _SESSION_CACHE_EPOCH
+    try:
+        key = int(player_id)
+    except (TypeError, ValueError):
+        key = None
+    with _SESSION_CACHE_LOCK:
+        _SESSION_CACHE_EPOCH += 1
+        if key is None:
+            _SESSION_CACHE.clear()
+        else:
+            _SESSION_CACHE.pop(key, None)
+
+
+def _cached_player(player_id: int, entry) -> dict | None:
+    version, exists, _ = entry
+    return {"playerId": player_id, "token_version": version} if exists else None
+
+
+def _fetch_player_remote(player_id: int) -> dict | None:
+    """One single-document read (players/{id}); never streams the collection.
+    Raises SessionCheckUnavailable for no client, a read error, or a malformed
+    document -- none of which are cached."""
+    from services.db_service import get_db
+    db = get_db()
+    if db is None:
+        raise SessionCheckUnavailable("no database client")
+    with _SESSION_CACHE_LOCK:
+        epoch = _SESSION_CACHE_EPOCH
+    try:
+        snap = db.collection("players").document(str(player_id)).get()
+        if not snap.exists:
+            data = None
+        else:
+            data = snap.to_dict()
+            if not isinstance(data, dict):
+                raise ValueError("malformed player document")
+    except Exception as exc:
+        logger.warning("Session player read failed", exc_info=True)
+        raise SessionCheckUnavailable("players document read failed") from exc
+    entry = (_as_version(data.get("token_version")) if data is not None else 0,
+             data is not None, _now())
+    with _SESSION_CACHE_LOCK:
+        if _SESSION_CACHE_EPOCH == epoch:  # no invalidation raced this read
+            _SESSION_CACHE[player_id] = entry
+    return _cached_player(player_id, entry)
+
+
 def _load_player_from_db(player_id: int):
-    from services.db_service import _get_players_df
-    players_df = _get_players_df()
-    if players_df is None or players_df.empty or "playerId" not in players_df.columns:
-        raise SessionCheckUnavailable("players data unavailable")
-    from services.db_service import get_player_by_id
-    return get_player_by_id(player_id)
+    if os.environ.get("USE_LOCAL_DATA", "False").lower() == "true":
+        from services.db_service import _get_players_df
+        players_df = _get_players_df()
+        if players_df is None or players_df.empty or "playerId" not in players_df.columns:
+            raise SessionCheckUnavailable("players data unavailable")
+        from services.db_service import get_player_by_id
+        return get_player_by_id(player_id)
+    with _SESSION_CACHE_LOCK:
+        entry = _SESSION_CACHE.get(player_id)
+    if entry is not None and _now() - entry[2] < _SESSION_CACHE_TTL_SECONDS:
+        return _cached_player(player_id, entry)
+    return _fetch_player_remote(player_id)
 
 
 def _lookup_player(player_id: int):

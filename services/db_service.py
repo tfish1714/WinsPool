@@ -507,7 +507,12 @@ def update_player_profile(player_id: str, updates: dict, bump_token_version: boo
             from google.cloud.firestore_v1 import Increment
             payload["token_version"] = Increment(1)
         db.collection("players").document(str(player_id)).update(payload)
-    
+    if bump_token_version:
+        # Write-through for session revocation: drop this player's cached
+        # session state so the old token is rejected immediately in-process.
+        from services.session_service import invalidate_session_cache
+        invalidate_session_cache(player_id)
+
     # Update local
     players_df = get_collection_df("players")
     if not players_df.empty:
