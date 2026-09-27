@@ -62,3 +62,6 @@ WinsPool/
 # Local git worktrees used for isolated feature work -- scratch checkouts,
 # not source.
 .worktrees/
+
+# Browser-automation scratch output (Playwright MCP snapshots, console logs, screenshots)
+.playwright-mcp/
