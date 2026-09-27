@@ -73,9 +73,21 @@ class TestEvalSkipExisting:
         build2.assert_not_called()
 
 
+def _import_cache_builder():
+    """Import scripts.cache_builder without its import-time Firebase init.
+
+    The module calls initialize_firebase() (require_db -> sys.exit(1) without
+    credentials) at import, so fake an initialized app for the import only,
+    as tests/test_cache_builder.py does."""
+    import firebase_admin
+    with patch.object(firebase_admin, "_apps", {"__test__": object()}),          patch("firebase_admin.firestore.client"):
+        import scripts.cache_builder as cb
+    return cb
+
+
 def test_cache_builder_tuesday_step_passes_skip_existing():
     import pandas as pd
-    import scripts.cache_builder as cb
+    cb = _import_cache_builder()
     from datetime import datetime, timezone
     games = pd.DataFrame([{"season": 2026, "week": 1, "result": 3.0, "game_type": "REG"},
                           {"season": 2026, "week": 1, "result": -3.0, "game_type": "REG"}])
