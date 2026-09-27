@@ -24,7 +24,13 @@ def _live_games_by_team(games) -> dict:
     if games is None or games.empty or "is_live" not in games.columns:
         return out
     for _, g in games.iterrows():
-        if not bool(g.get("is_live")) or pd.notna(g.get("result")):
+        # is_live is NaN (float) for any game the live-scores job hasn't
+        # touched yet -- i.e. every unplayed game outside its own sync
+        # window. bool(float('nan')) is True in Python, so a plain
+        # `not bool(is_live)` treated an untouched/unplayed game as live.
+        # `is True` only matches the real overlay value; NaN/None/False
+        # all correctly fall through to `continue`.
+        if g.get("is_live") is not True or pd.notna(g.get("result")):
             continue
         home, away = g.get("home_team"), g.get("away_team")
         clock = g.get("clock")

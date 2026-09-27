@@ -73,6 +73,26 @@ def test_games_without_live_columns_are_tolerated():
     assert out["standings"][0]["teams"][0]["is_live"] is False
 
 
+def test_unsynced_future_game_is_not_live():
+    """Regression: is_live is NaN (float) for any game the live-scores job
+    hasn't touched yet -- every unplayed game outside its own sync window.
+    bool(float('nan')) is True in Python, so a naive `not bool(is_live)`
+    check was skipping the `continue` for NaN, and any unplayed game
+    (result also NaN) got miscounted as live. This bit production: every
+    drafted team showed a pulsing "live" dot outside game windows."""
+    games = _games(result=np.nan, is_live=np.nan)
+    out = build_live_standings_payload(_sorted_df(), games, 2026)
+    assert out["standings"][0]["teams"][0]["is_live"] is False
+
+
+def test_unsynced_future_game_with_no_result_column_is_not_live():
+    games = pd.DataFrame([{
+        "season": 2026, "home_team": "LAC", "away_team": "KC", "is_live": np.nan,
+    }])
+    out = build_live_standings_payload(_sorted_df(), games, 2026)
+    assert out["standings"][0]["teams"][0]["is_live"] is False
+
+
 def test_player_with_fewer_than_three_teams_mid_draft():
     df = _sorted_df()
     df.loc[0, "team3"] = ""
