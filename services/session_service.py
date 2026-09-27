@@ -106,7 +106,9 @@ def _now() -> float:
 
 def _reset_session_cache() -> None:
     """Drop every cached entry (tests, and any caller that needs a clean slate)."""
+    global _SESSION_CACHE_EPOCH
     with _SESSION_CACHE_LOCK:
+        _SESSION_CACHE_EPOCH += 1
         _SESSION_CACHE.clear()
 
 
@@ -198,6 +200,17 @@ def _payload_is_current(payload: dict) -> bool:
     except Exception:
         logger.warning("Token version check unavailable", exc_info=True)
         raise SessionCheckUnavailable("players lookup failed")
+    if (player is not None
+            and _as_version(payload.get("tv")) > _as_version(player.get("token_version"))):
+        # Tokens are server-signed, so a tv ahead of the stored version can only
+        # mean our cached value is stale. Re-read once and decide on that; a
+        # token still ahead of the fresh value is rejected (it cannot outrun it).
+        invalidate_session_cache(player_id)
+        try:
+            player = _lookup_player(player_id)
+        except Exception:
+            logger.warning("Token version re-check unavailable", exc_info=True)
+            raise SessionCheckUnavailable("players lookup failed")
     return token_is_current(payload, player)
 
 

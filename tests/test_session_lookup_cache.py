@@ -247,3 +247,45 @@ def test_local_mode_reads_local_frame_not_firestore(monkeypatch):
     monkeypatch.setattr(db_service, "_get_players_df", lambda: df)
     assert session_service._load_player_from_db(4)["token_version"] == 3
     assert session_service._load_player_from_db(5) is None
+
+
+# --- token ahead of cache (stale cache), reset epoch ------------------------
+
+def test_token_ahead_of_cache_rereads_and_accepts_when_fresh_matches(remote):
+    fake, _ = remote
+    fake.docs["1"]["token_version"] = 1
+    require_auth(authorization=_bearer(tv=1))              # cache version 1
+    fake.docs["1"]["token_version"] = 2                    # bump landed on another instance
+    assert require_auth(authorization=_bearer(tv=2))["sub"] == "1"
+    assert fake.gets == ["1", "1"]
+
+
+def test_token_cannot_outrun_stored_version(remote):
+    fake, _ = remote
+    fake.docs["1"]["token_version"] = 1
+    require_auth(authorization=_bearer(tv=1))
+    with pytest.raises(HTTPException) as e:
+        require_auth(authorization=_bearer(tv=2))          # fresh doc still says 1
+    assert e.value.status_code == 401
+    assert e.value.headers["X-Session-State"] == "revoked"
+    assert fake.gets == ["1", "1"]
+
+
+def test_token_equal_or_lower_than_cache_behaves_as_before(remote):
+    fake, _ = remote
+    fake.docs["1"]["token_version"] = 2
+    require_auth(authorization=_bearer(tv=2))
+    require_auth(authorization=_bearer(tv=2))
+    assert fake.gets == ["1"]
+    with pytest.raises(HTTPException):
+        require_auth(authorization=_bearer(tv=1))          # lower -> revoked, no re-read
+    assert fake.gets == ["1"]
+
+
+def test_reset_advances_epoch_so_inflight_read_is_not_stored(remote):
+    fake, _ = remote
+    fake.get_hook = session_service._reset_session_cache
+    require_auth(authorization=_bearer())
+    fake.get_hook = None
+    require_auth(authorization=_bearer())
+    assert fake.gets == ["1", "1"]
