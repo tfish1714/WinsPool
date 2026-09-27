@@ -40,13 +40,18 @@ import numpy as np
 import pandas as pd
 
 from services.data_service import load_data, get_available_years, get_latest_week_for_year
-from services.db_service import set_preseason_predictions
+from services.db_service import (
+    set_preseason_predictions, lock_preseason_predictions,
+    set_season_projections, set_season_projection_history,
+)
+from services.draft_state import draft_is_complete
 from services.cache_service import (
     write_game_predictions, get_game_predictions, merge_thin_game_predictions,
 )
 import services.analysis_service as analysis
 from services.nn_projection_engine import (
     NNProjectionEngine, build_mc_prediction_entry, derive_prediction_scalars,
+    build_completed_results,
 )
 from services.nn_prediction_service import NNPredictionService, build_ensemble_lookup
 from services.xgb_prediction_service import XGBPredictionService
@@ -73,18 +78,10 @@ RAWDATA_DIR = pathlib.Path(__file__).parent.parent / "rawdata"
 def _build_completed_results(games: pd.DataFrame, year: int) -> dict:
     """{game_key: margin} for every completed REG game in `year` -- the shape
     NNProjectionEngine.simulate_season() expects for its completed_results
-    parameter. Reused by the --resimulate mode (Task 6)."""
-    completed = {}
-    yr_games = games[games["season"] == year] if "season" in games.columns else games
-    for _, row in yr_games.iterrows():
-        res = row.get("result")
-        if pd.notna(res) and res != UNDRAFTED_SENTINEL and row.get("game_type") == "REG":
-            ht = normalize_team_abbr(str(row.get("home_team", "") or ""))
-            at = normalize_team_abbr(str(row.get("away_team", "") or ""))
-            wk = row.get("week")
-            if ht and at and wk is not None:
-                completed[f"W{int(wk):02d}_{ht}_{at}"] = float(res)
-    return completed
+    parameter. Kept as a thin wrapper over the shared
+    services.nn_projection_engine.build_completed_results (also imported by
+    walk_forward_validate.py and the --resimulate mode)."""
+    return build_completed_results(games, year)
 
 
 def _build_mc_entry(engine, gp: dict, year: int, spread_line, profile_dict: dict = None,
@@ -407,24 +404,86 @@ def build_year(standings, games, players, draft_order, draft_results,
     # corrupting the admin model-vs-consensus page, the draft recap, and
     # history views.
     if model_version and (year >= current_year or force):
+        # The season's DRAFT completing (not the first game) is what freezes
+        # preseason_predictions: from then on the daily results-aware
+        # projection goes to season_projections / season_projection_history
+        # instead, and the preseason docs are only ever locked (never
+        # rewritten). draft_is_complete deliberately ignores draft_active.
+        draft_done = draft_is_complete(year, draft_results, draft_order, draft_order_rules)
         try:
             engine = _get_engine()
             yr_games = full_games[full_games['season'] == year].copy() if not full_games.empty else pd.DataFrame()
             if not yr_games.empty:
                 yr_games = yr_games.drop_duplicates(subset=['week', 'home_team', 'away_team'])
-            full_projections = engine.get_team_win_projections(yr_games, n_sims=5000)
-            if full_projections:
-                n = set_preseason_predictions(
-                    year, full_projections, model_version=model_version,
-                    locked=final_flag, force=force,
-                )
-                if n > 0:
-                    print(f"  [ok]   preseason_predictions year={year} ({n} teams written)")
-                else:
-                    print(f"  [warn] preseason_predictions year={year}: 0 teams written "
-                          f"(check DB connection / all teams locked)")
+
+            if not draft_done:
+                # Pre-draft: unchanged behavior -- daily refresh of the
+                # preseason projection, a pure pre-results simulation.
+                full_projections = engine.get_team_win_projections(yr_games, n_sims=5000)
+                if full_projections:
+                    n = set_preseason_predictions(
+                        year, full_projections, model_version=model_version,
+                        locked=final_flag, force=force,
+                    )
+                    if n > 0:
+                        print(f"  [ok]   preseason_predictions year={year} ({n} teams written)")
+                    else:
+                        print(f"  [warn] preseason_predictions year={year}: 0 teams written "
+                              f"(check DB connection / all teams locked)")
+            else:
+                _write_live_projection(engine, yr_games, year, model_version,
+                                       is_past_season=is_past_season)
         except Exception as e:
             print(f"  [err]  preseason_predictions: {e}")
+
+
+def _latest_week_with_result(games, year: int) -> int:
+    """Highest REG week of `year` with at least one completed game, else 0."""
+    completed = build_completed_results(games, year)
+    weeks = [int(k[1:3]) for k in completed]
+    return max(weeks) if weeks else 0
+
+
+def _write_live_projection(engine, yr_games, year: int, model_version: str,
+                           is_past_season: bool) -> None:
+    """Results-aware projection for a season whose draft is complete.
+
+    ONE simulation (completed games applied, ratings updated, remainder
+    simulated) feeds season_projections (overwritten daily) and, for weeks >= 1,
+    season_projection_history/{season}_w{week}_{team}. preseason_predictions is
+    only locked, never rewritten. Each write is isolated: a failure in one
+    collection is logged and does not stop the others.
+    """
+    completed = build_completed_results(yr_games, year)
+    as_of_week = _latest_week_with_result(yr_games, year)
+    season_done = bool(is_past_season or week_is_complete(yr_games, year, 18))
+
+    projections = engine.get_team_win_projections(
+        yr_games, n_sims=SIMULATE_SEASON_N_SIMS, completed_results=completed)
+    if not projections:
+        print(f"  [warn] live projection year={year}: engine returned no projections")
+        return
+
+    try:
+        n = lock_preseason_predictions(year)
+        print(f"  [ok]   preseason_predictions year={year} locked ({n} docs newly locked)")
+    except Exception as e:
+        print(f"  [err]  preseason_predictions lock: {e}")
+
+    try:
+        n = set_season_projections(year, projections, model_version=model_version,
+                                   as_of_week=as_of_week, locked=season_done)
+        print(f"  [ok]   season_projections year={year} as_of_week={as_of_week} ({n} teams written)")
+    except Exception as e:
+        print(f"  [err]  season_projections: {e}")
+
+    if as_of_week >= 1:
+        try:
+            n = set_season_projection_history(year, as_of_week, projections,
+                                              model_version=model_version)
+            print(f"  [ok]   season_projection_history year={year} week={as_of_week} ({n} teams written)")
+        except Exception as e:
+            print(f"  [err]  season_projection_history: {e}")
 
 
 SCRIPTS_DIR = pathlib.Path(__file__).parent

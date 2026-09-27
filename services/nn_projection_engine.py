@@ -35,6 +35,40 @@ from services.utils import derive_prediction_scalars, prob_to_model_spread
 logger = logging.getLogger(__name__)
 
 
+def _credit_completed_game(win_matrix, h_idx: int, a_idx: int, margin: float) -> None:
+    """Credit a completed game's win across every trial. margin is the home
+    margin: > 0 home win, < 0 away win, == 0 a tie that credits NEITHER team
+    (the pool counts wins only)."""
+    if margin > 0:
+        win_matrix[:, h_idx] += 1.0
+    elif margin < 0:
+        win_matrix[:, a_idx] += 1.0
+
+
+def build_completed_results(games_df, year: int) -> Dict[str, float]:
+    """{"W{week:02d}_{home}_{away}": home_margin} for every completed REG game
+    of `year` in the games table (the `result` column = home margin).
+
+    A game is completed only when `result` is non-null and not the -1000
+    sentinel. Team codes are normalized exactly as simulate_season() does, so
+    the keys match. A 0.0 margin (tie) is kept."""
+    completed: Dict[str, float] = {}
+    if games_df is None or not isinstance(games_df, pd.DataFrame) or games_df.empty:
+        return completed
+    if not {"result", "week", "home_team", "away_team"} <= set(games_df.columns):
+        return completed
+    yr = games_df[games_df["season"] == year] if "season" in games_df.columns else games_df
+    for _, row in yr.iterrows():
+        res = row.get("result")
+        if pd.notna(res) and res != UNDRAFTED_SENTINEL and row.get("game_type") == "REG":
+            ht = normalize_team_abbr(str(row.get("home_team", "") or ""))
+            at = normalize_team_abbr(str(row.get("away_team", "") or ""))
+            wk = row.get("week")
+            if ht and at and pd.notna(wk):
+                completed[f"W{int(wk):02d}_{ht}_{at}"] = float(res)
+    return completed
+
+
 class NNProjectionEngine:
     """Wrapper that leverages the trained NN+XGB+LR ensemble and Monte Carlo engine for caching."""
 
@@ -804,9 +838,7 @@ class NNProjectionEngine:
                     # Apply real result deterministically across all trials
                     real_margin = float(completed_results[key])
                     margins = np.full(n_sims, real_margin, dtype=np.float32)
-                    home_won = real_margin > 0
-                    win_matrix[:, h_idx] += float(home_won)
-                    win_matrix[:, a_idx] += float(not home_won)
+                    _credit_completed_game(win_matrix, h_idx, a_idx, real_margin)
                     self._vectorized_elo_update(state, h_idx, a_idx, margins)
                     self._vectorized_epa_update(state, h_idx, a_idx, margins)
                 else:
@@ -918,7 +950,8 @@ class NNProjectionEngine:
             for team, stats in result.get("team_stats", {}).items()
         }
 
-    def get_team_win_projections(self, schedule_df: pd.DataFrame, n_sims: int = 5000) -> Dict[str, dict]:
+    def get_team_win_projections(self, schedule_df: pd.DataFrame, n_sims: int = 5000,
+                                 completed_results: dict = None) -> Dict[str, dict]:
         """Full-stats sibling of get_team_projected_wins() -- same simulate_season()
         call, but preserves mean/std_dev/percentiles instead of collapsing to
         median only. Used to populate preseason_predictions
@@ -928,10 +961,19 @@ class NNProjectionEngine:
         Returns {team: {projected_wins, mean_wins, std_dev, floor, p25, p75,
         ceiling}}, field names matching scripts/predict_season.py's existing
         mapping exactly (projected_wins=median, floor=p5, ceiling=p95).
+
+        completed_results ({game_key: home_margin}, see build_completed_results)
+        makes the projection results-aware: real games are applied
+        deterministically (wins to date, ratings updated) and only the rest of
+        the season is simulated. None (default) = pure pre-results simulation.
         """
         if schedule_df.empty:
             return {}
-        result = self.simulate_season(schedule_df, n_sims=n_sims)
+        if completed_results:
+            result = self.simulate_season(schedule_df, n_sims=n_sims,
+                                          completed_results=completed_results)
+        else:
+            result = self.simulate_season(schedule_df, n_sims=n_sims)
         out = {}
         for team, stats in result.get("team_stats", {}).items():
             out[team] = {

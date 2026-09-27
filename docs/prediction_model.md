@@ -599,3 +599,27 @@ Features with limited historical coverage default to 0 for out-of-range seasons.
 6. If metrics improve: `python scripts/backfill_schedule_predictions.py --force --firestore`
 
 Removing a feature follows the same steps. The models are always retrained from scratch on the full feature set — there is no fine-tuning.
+
+
+## Current (Results-Aware) Season Projection
+
+`preseason_predictions` is the projection made before the season and is frozen
+once the pool draft is complete. During the season the daily job
+(`scripts/cache_builder.py`) produces a separate CURRENT projection:
+
+1. `nn_projection_engine.build_completed_results()` collects every completed
+   regular-season game (non-null `result`, not the -1000 sentinel) as
+   `{"W{week:02d}_{home}_{away}": home_margin}` with normalized team codes.
+2. `NNProjectionEngine.get_team_win_projections(schedule, completed_results=...)`
+   passes them to `simulate_season()`, which applies each real margin
+   deterministically in all trials (wins to date; Elo/EPA state updated by the
+   real result) and Monte-Carlo simulates only the games not yet played, with
+   ratings carried forward. A completed tie credits neither team a win.
+3. So `projected_wins` = wins to date + simulated remainder; a team with all
+   games played has `projected_wins` equal to its actual wins and `std_dev` 0.
+4. The simulation uses a fixed seed (42), so two runs with identical inputs give
+   identical output; the projection only moves when a new result arrives.
+
+Results go to `season_projections` (current, overwritten daily) and
+`season_projection_history` (kept per week with a completed game). One
+simulation feeds both; no second run is added to the job.

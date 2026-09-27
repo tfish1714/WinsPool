@@ -904,6 +904,107 @@ def set_draft_snapshot_predictions(season: int, projections: dict, model_version
     return written
 
 
+def _signal_predictions_for_season(season: int) -> None:
+    from services.cache_service import DOMAIN_PREDICTIONS_ACTIVE, DOMAIN_PREDICTIONS_HISTORICAL
+    from services.data_service import _get_active_bucket
+    domain = DOMAIN_PREDICTIONS_ACTIVE if season == _get_active_bucket()["season"] else DOMAIN_PREDICTIONS_HISTORICAL
+    signal_data_update(domain)
+
+
+def _commit_docs(db, docs: list) -> int:
+    """Batch-set [(ref, payload)] (plain overwrite), committing every 400."""
+    batch = db.batch()
+    written = 0
+    for ref, payload in docs:
+        batch.set(ref, payload)
+        written += 1
+        if written % 400 == 0:
+            batch.commit()
+            batch = db.batch()
+    if written % 400 != 0:
+        batch.commit()
+    return written
+
+
+def set_season_projections(season: int, projections: dict, model_version: str,
+                           as_of_week: int, locked: bool = False) -> int:
+    """Overwrite season_projections/{season}_{team} with the results-aware
+    current projection (wins to date + simulated remainder). Always a plain
+    overwrite -- the daily job rewrites the same docs; `locked` only marks a
+    completed season. Never touches preseason_predictions or
+    draft_snapshot_predictions. Returns docs written."""
+    db = get_db()
+    if db is None:
+        logger.warning("No database connection; season projections not written.")
+        return 0
+    now = time.time()
+    docs = [
+        (db.collection("season_projections").document(f"{season}_{team}"), {
+            "season": int(season), "team": team, **stats,
+            "as_of_week": int(as_of_week), "generated_at": now,
+            "model_version": model_version, "locked": bool(locked),
+        })
+        for team, stats in projections.items()
+    ]
+    written = _commit_docs(db, docs)
+    if written:
+        _signal_predictions_for_season(season)
+    return written
+
+
+def set_season_projection_history(season: int, week: int, projections: dict,
+                                  model_version: str) -> int:
+    """Write season_projection_history/{season}_w{week:02d}_{team}: the
+    projection as of `week`. Keyed by week so reruns overwrite the same doc."""
+    db = get_db()
+    if db is None:
+        logger.warning("No database connection; season projection history not written.")
+        return 0
+    now = time.time()
+    docs = [
+        (db.collection("season_projection_history").document(f"{season}_w{int(week):02d}_{team}"), {
+            "season": int(season), "week": int(week), "team": team, **stats,
+            "generated_at": now, "model_version": model_version,
+        })
+        for team, stats in projections.items()
+    ]
+    written = _commit_docs(db, docs)
+    if written:
+        _signal_predictions_for_season(season)
+    return written
+
+
+def lock_preseason_predictions(season: int) -> int:
+    """Set locked=True on the season's existing preseason_predictions docs,
+    changing no other field. Already-locked docs are skipped. Returns the
+    number of docs updated."""
+    db = get_db()
+    if db is None:
+        logger.warning("No database connection; preseason predictions not locked.")
+        return 0
+    from google.cloud.firestore_v1.base_query import FieldFilter
+    to_lock = [
+        doc.reference
+        for doc in db.collection("preseason_predictions").where(
+            filter=FieldFilter("season", "==", season)).stream()
+        if not (doc.to_dict() or {}).get("locked")
+    ]
+    if not to_lock:
+        return 0
+    batch = db.batch()
+    count = 0
+    for ref in to_lock:
+        batch.update(ref, {"locked": True})
+        count += 1
+        if count % 400 == 0:
+            batch.commit()
+            batch = db.batch()
+    if count % 400 != 0:
+        batch.commit()
+    _signal_predictions_for_season(season)
+    return count
+
+
 _DRAFT_SNAPSHOT_FIELDS = ["projected_wins", "mean_wins", "std_dev", "floor", "p25", "p75", "ceiling"]
 
 

@@ -453,6 +453,57 @@ def get_draft_snapshot_predictions(season: int) -> Dict[str, dict]:
         }
     return res
 
+def _f(v, default=None):
+    return float(v) if v is not None and pd.notna(v) else default
+
+
+def _projection_row_to_dict(row) -> dict:
+    as_of = row.get("as_of_week")
+    return {
+        "projected_wins": _f(row.get("projected_wins"), 0.0),
+        "mean_wins": _f(row.get("mean_wins"), _f(row.get("projected_wins"), 0.0)),
+        "std_dev": _f(row.get("std_dev"), 0.0),
+        "floor": _f(row.get("floor")),
+        "p25": _f(row.get("p25")),
+        "p75": _f(row.get("p75")),
+        "ceiling": _f(row.get("ceiling")),
+        "as_of_week": int(as_of) if as_of is not None and pd.notna(as_of) else None,
+        "locked": bool(row.get("locked")) if pd.notna(row.get("locked", False)) else False,
+    }
+
+
+def get_season_projection_current(season: int) -> Dict[str, dict]:
+    """Results-aware current projection per team (season_projections), or {}.
+
+    Same 3-tier cache / predictions-domain pattern as get_preseason_predictions().
+    Distinct from the frozen preseason numbers: this one moves daily."""
+    entry = _get_predictions_bucket_entry(season)
+    if "season_projection_df" not in entry:
+        entry["season_projection_df"] = get_collection_df(
+            "season_projections", filters=[("season", "==", season)])
+    df = entry["season_projection_df"]
+    if df.empty:
+        return {}
+    return {row["team"]: _projection_row_to_dict(row) for _, row in df.iterrows()}
+
+
+def get_season_projection_history(season: int) -> Dict[int, Dict[str, dict]]:
+    """{week: {team: projection}} from season_projection_history, or {}."""
+    entry = _get_predictions_bucket_entry(season)
+    if "season_projection_history_df" not in entry:
+        entry["season_projection_history_df"] = get_collection_df(
+            "season_projection_history", filters=[("season", "==", season)])
+    df = entry["season_projection_history_df"]
+    if df.empty:
+        return {}
+    out: Dict[int, Dict[str, dict]] = {}
+    for _, row in df.iterrows():
+        wk = row.get("week")
+        if wk is None or pd.isna(wk):
+            continue
+        out.setdefault(int(wk), {})[row["team"]] = _projection_row_to_dict(row)
+    return out
+
 def get_consensus_projections(season: int) -> Dict[str, dict]:
     """Retrieve analyst consensus projections for a season, keyed by team."""
     entry = _get_predictions_bucket_entry(season)
