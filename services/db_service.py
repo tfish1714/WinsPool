@@ -926,12 +926,73 @@ def _commit_docs(db, docs: list) -> int:
     return written
 
 
+def _stream_season_docs(db, collection: str, season: int):
+    from google.cloud.firestore_v1.base_query import FieldFilter
+    return list(db.collection(collection).where(
+        filter=FieldFilter("season", "==", season)).stream())
+
+
+def unlock_preseason_predictions(season: int) -> int:
+    """Inverse of lock_preseason_predictions: set locked=False on the season's
+    locked preseason_predictions docs, changing no other field. Idempotent.
+    Manual recovery only (scripts/unlock_preseason.py), for a draft reset after
+    completion. Returns the number of docs updated."""
+    db = get_db()
+    if db is None:
+        logger.warning("No database connection; preseason predictions not unlocked.")
+        return 0
+    to_unlock = [d.reference for d in _stream_season_docs(db, "preseason_predictions", season)
+                 if (d.to_dict() or {}).get("locked") is True]
+    if not to_unlock:
+        return 0
+    batch = db.batch()
+    count = 0
+    for ref in to_unlock:
+        batch.update(ref, {"locked": False})
+        count += 1
+        if count % 400 == 0:
+            batch.commit()
+            batch = db.batch()
+    if count % 400 != 0:
+        batch.commit()
+    _signal_predictions_for_season(season)
+    return count
+
+
+def delete_season_projections(season: int) -> int:
+    """Delete the season's season_projections and season_projection_history
+    docs (nothing else). Manual recovery only. Returns docs deleted."""
+    db = get_db()
+    if db is None:
+        logger.warning("No database connection; season projections not deleted.")
+        return 0
+    refs = []
+    for name in ("season_projections", "season_projection_history"):
+        refs.extend(d.reference for d in _stream_season_docs(db, name, season))
+    if not refs:
+        return 0
+    batch = db.batch()
+    count = 0
+    for ref in refs:
+        batch.delete(ref)
+        count += 1
+        if count % 400 == 0:
+            batch.commit()
+            batch = db.batch()
+    if count % 400 != 0:
+        batch.commit()
+    _signal_predictions_for_season(season)
+    return count
+
+
 def set_season_projections(season: int, projections: dict, model_version: str,
                            as_of_week: int, locked: bool = False) -> int:
     """Overwrite season_projections/{season}_{team} with the results-aware
     current projection (wins to date + simulated remainder). Always a plain
-    overwrite -- the daily job rewrites the same docs; `locked` only marks a
-    completed season. Never touches preseason_predictions or
+    overwrite -- the daily job rewrites the same docs; `locked` is a LABEL only
+    (it marks a completed season and is never checked before writing; the
+    rewrite is harmless because once the season is complete the values equal
+    the actual final wins). Never touches preseason_predictions or
     draft_snapshot_predictions. Returns docs written."""
     db = get_db()
     if db is None:

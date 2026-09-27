@@ -704,7 +704,9 @@ class NNProjectionEngine:
             np.log(abs_margin + 1.0) / 2.5, ELO_SIM_MOV_MIN, ELO_SIM_MOV_MAX
         )
 
-        actual_home = home_wins.astype(np.float32)
+        # A tie (margin 0) is half a win for each side, as in
+        # scripts/compute_elo.py, not a home loss.
+        actual_home = np.where(margins == 0, 0.5, home_wins).astype(np.float32)
         delta = ELO_SIM_K * mov_mult * (actual_home - expected_home)
 
         state[:, h_idx, 0] = h_elo + delta
