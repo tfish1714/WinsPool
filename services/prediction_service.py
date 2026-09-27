@@ -1032,9 +1032,9 @@ def get_candidate_seasons() -> List[int]:
     such files): the Firestore `game_predictions` collection's document ids.
     Unparseable names/ids are skipped; a Firestore failure yields [].
     """
-    import pathlib
+    from services.local_paths import local_db_dir
 
-    local_db = pathlib.Path('.local_db')
+    local_db = local_db_dir()
     pred_files = sorted(local_db.glob('game_predictions_*.json')) if local_db.exists() else []
     seasons: List[int] = []
     if pred_files:

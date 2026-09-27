@@ -23,7 +23,11 @@ def test_static_url_hashes_file_contents(tmp_path, monkeypatch):
     assert sa.static_url("missing.js") == "/static/missing.js"
 
 
-def test_import_map_covers_modules_and_is_served_immutable(client):
+def test_import_map_covers_modules_and_is_served_immutable(client, monkeypatch):
+    # /mock-draft is gated on the mock_draft_active config flag; set it up here
+    # instead of depending on another test having written it into .local_db.
+    monkeypatch.setattr("routes.mock_draft_routes.get_config_settings",
+                        lambda: {"draft_active": False, "mock_draft_active": True})
     html = client.get("/mock-draft").text
     imports = json.loads(re.search(r'<script type="importmap">(.*?)</script>', html).group(1))["imports"]
     assert "/static/js/api.js" in imports

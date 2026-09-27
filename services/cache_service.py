@@ -10,6 +10,7 @@ import os
 import json
 import pathlib
 import pandas as pd
+from services.local_paths import local_db_dir
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ def clear_data_cache(domain: str = None) -> None:
 # (keyed by season int) and one JSON file per season locally.
 # Each value: {pred_prob, pred_winner, pred_su_conf, pred_ats_pick}
 
-_GAME_PRED_DIR = pathlib.Path('.local_db')
+_GAME_PRED_DIR = local_db_dir()
 
 
 def _fetch_game_predictions(season: int) -> dict:

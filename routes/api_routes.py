@@ -100,10 +100,11 @@ def get_prediction_accuracy(season: Optional[int] = Query(None), _auth: dict = D
         from services.utils import normalize_team_abbr
         from services.prediction_service import build_result_lookup, get_candidate_seasons
         import pathlib, json, numpy as np
+        from services.local_paths import local_db_dir
 
         _, _, all_games, _, _, _, _ = load_data()
 
-        local_db = pathlib.Path('.local_db')
+        local_db = local_db_dir()
         seasons_data = {}
         overall_correct = overall_total = 0
         candidate_seasons = get_candidate_seasons()

@@ -27,9 +27,9 @@ import pandas as pd
 from services.db_service import get_collection_df, get_db
 
 LOCAL_DB = pathlib.Path(".local_db")
-LOCAL_DB.mkdir(parents=True, exist_ok=True)
 ANALYTICS_DIR = LOCAL_DB / "analytics"
-ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
+# Directories are created lazily (see main()/dump_analytics_cache) so merely
+# importing this module (e.g. from tests) never creates a .local_db folder.
 
 # Collections and their optional season filter column
 COLLECTIONS = [
@@ -75,6 +75,7 @@ def dump_analytics_cache():
     """Pull all analytics_cache docs from Firestore → .local_db/analytics/*.json."""
     log.info("  Fetching 'analytics_cache' from Firestore...")
     try:
+        ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
         db = get_db()
         docs = list(db.collection("analytics_cache").stream())
         if not docs:
@@ -277,6 +278,8 @@ def main():
     log.info("=" * 60)
     log.info("Refreshing local .pkl cache from Firestore")
     log.info("=" * 60)
+
+    LOCAL_DB.mkdir(parents=True, exist_ok=True)
 
     log.info("\n-- Raw collections --")
     for collection, season_col in COLLECTIONS:

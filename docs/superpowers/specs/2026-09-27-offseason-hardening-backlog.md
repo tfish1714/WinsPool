@@ -61,7 +61,9 @@ Work is grouped into phases by "must land before" milestones. Each item lists: p
 * **Required change:** extract the guard into one shared helper in `services/cache_service.py` and apply it to every domain fill; no public signature changes.
 * **Tests:** a deterministic interleaving test per domain mirroring the existing static one.
 
-### B3. Tests must not write into a developer's `.local_db/` (M)
+### B3. Tests must not write into a developer's `.local_db/` (M) -- DONE 2026-09-27
+
+* **Status:** done. Implemented as a per-run copy plus a guard rather than per-test tmp dirs: `services/local_paths.py::local_db_dir()`, a session-level copy/redirect and fingerprint guard in `tests/conftest.py`, `tests/test_local_db_isolation.py`. See CLAUDE.md (Tests) and `docs/superpowers/plans/2026-09-27-test-isolation.md`.
 
 * **Problem:** when `.local_db/` exists in the working directory, some tests write to it (observed: a test overwrote a pick in `.local_db/draft_results.pkl`, corrupting local demo data and skewing results). Tests also create an empty `.local_db/` in fresh checkouts.
 * **Required change:** an autouse fixture in `tests/conftest.py` that runs each test in a temp working directory or monkeypatches the local-db path resolution (`pathlib.Path(".local_db")` usages in `services/db_service.py`, `services/cache_service.py`, `services/data_service.py`) to a per-test `tmp_path`; a guard test that fails if a test run modifies a sentinel file placed in a real `.local_db/`. Coordinate with the 34 currently environment-dependent tests: after this change they should either skip cleanly without local data or build minimal fixtures in `tmp_path` (consolidated spec section 0, item 5).

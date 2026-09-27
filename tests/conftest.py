@@ -14,6 +14,80 @@ os.environ.setdefault("JWT_SECRET", "test-jwt-secret-for-winspool-tests-only")
 
 # Ensure the workspace root is injected into the Python path dynamically
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+
+# ---------------------------------------------------------------------------
+# .local_db isolation
+#
+# Tests must never modify the developer's real <repo>/.local_db. Each test
+# process (the single process, or each xdist worker) works on a per-session
+# COPY of it: pytest_configure copies the real folder (or makes an empty dir
+# when there is none) and sets WINSPOOL_LOCAL_DB_REDIRECT, which
+# services/local_paths.py::local_db_dir() honors only while the cwd-relative
+# ".local_db" resolves to the real folder (tests that chdir(tmp_path) and build
+# their own .local_db are unaffected). The session controller fingerprints the
+# real folder at start and fails the run at the end if it changed anyway.
+# WINSPOOL_ALLOW_LOCAL_DB_WRITES=1 downgrades that failure to a warning.
+# pytest_configure runs before any test module (and so any service module) is
+# imported, which is what makes the import-time _GAME_PRED_DIR pick the copy.
+# ---------------------------------------------------------------------------
+import tempfile  # noqa: E402
+import time  # noqa: E402
+
+import _local_db_guard  # noqa: E402
+
+_REAL_LOCAL_DB = pathlib.Path(__file__).resolve().parent.parent / ".local_db"
+_LOCAL_DB_STATE = {"copy_dir": None, "copy_seconds": None, "fingerprint": None}
+
+
+def _is_xdist_controller(config) -> bool:
+    if hasattr(config, "workerinput"):
+        return False
+    return bool(getattr(config.option, "numprocesses", 0))
+
+
+def pytest_configure(config):
+    if not hasattr(config, "workerinput"):
+        # Controller (or a plain single-process run): remember the real folder.
+        _LOCAL_DB_STATE["fingerprint"] = _local_db_guard.fingerprint(_REAL_LOCAL_DB)
+    if _is_xdist_controller(config):
+        return  # the controller runs no tests; its workers make their own copies
+    copy_dir = pathlib.Path(tempfile.mkdtemp(prefix="winspool_local_db_"))
+    start = time.perf_counter()
+    if _REAL_LOCAL_DB.is_dir():
+        _local_db_guard.copy_tree(_REAL_LOCAL_DB, copy_dir)
+    _LOCAL_DB_STATE["copy_dir"] = copy_dir
+    _LOCAL_DB_STATE["copy_seconds"] = time.perf_counter() - start
+    os.environ["WINSPOOL_LOCAL_DB_REDIRECT"] = str(copy_dir)
+
+
+def pytest_report_header(config):
+    if _LOCAL_DB_STATE["copy_dir"] is None:
+        return None
+    return (f"local_db isolation: per-session copy at {_LOCAL_DB_STATE['copy_dir']} "
+            f"(copied in {_LOCAL_DB_STATE['copy_seconds']:.2f}s)")
+
+
+def pytest_sessionfinish(session, exitstatus):
+    config = session.config
+    before = _LOCAL_DB_STATE["fingerprint"]
+    if hasattr(config, "workerinput") or before is None:
+        return
+    problems = _local_db_guard.diff(before, _local_db_guard.fingerprint(_REAL_LOCAL_DB))
+    if not problems:
+        return
+    fail = _local_db_guard.should_fail(problems)
+    msg = _local_db_guard.report(problems, allow=not fail)
+    sys.stderr.write("\n" + msg + "\n")
+    if fail and not session.exitstatus:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def pytest_unconfigure(config):
+    copy_dir = _LOCAL_DB_STATE.get("copy_dir")
+    if copy_dir is not None:
+        _local_db_guard.remove_tree(copy_dir)
+        _LOCAL_DB_STATE["copy_dir"] = None
 
 @pytest.fixture(autouse=True)
 def mock_env_vars(monkeypatch):

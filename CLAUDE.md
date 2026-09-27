@@ -80,6 +80,22 @@ pytest tests/ --cov=services --cov=routes
 pytest tests_e2e/ -v                       # Playwright browser e2e suite (explicit path required — not collected by a bare `pytest`)
 ```
 
+**Tests never touch your real `.local_db/`.** `tests/conftest.py` copies
+`<repo>/.local_db` (or makes an empty directory if there is none) into a
+per-session temp dir (one per xdist worker) and sets
+`WINSPOOL_LOCAL_DB_REDIRECT` to it; every service/route write path resolves the
+folder through `services/local_paths.py::local_db_dir()`, which honors the
+redirect only while the cwd-relative `.local_db` is the real repo folder
+(tests that `chdir(tmp_path)` and build their own `.local_db` are unaffected;
+with no redirect set it is exactly `pathlib.Path(".local_db")`). The copy is
+deleted at session end, and the session controller fingerprints the real folder
+(path/size/mtime of every file, plus whether the directory exists) before and
+after the run and **fails the run** if anything changed, listing the paths.
+Set `WINSPOOL_ALLOW_LOCAL_DB_WRITES=1` to downgrade that to a warning for an
+intentional dev flow. You no longer need to re-run `refresh_local_pkls.py`
+after running the suite. New code that writes under `.local_db` must use
+`local_db_dir()`, not the literal `pathlib.Path(".local_db")`.
+
 `pytest tests_e2e/ -v` needs `requirements-dev.txt` installed plus a one-time
 `playwright install chromium`, and the `E2E_TEST_PLAYER_IDS` /
 `E2E_TEST_PLAYER_PASSWORD` env vars seeded by

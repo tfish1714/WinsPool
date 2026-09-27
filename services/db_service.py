@@ -9,6 +9,7 @@ import time
 import threading
 import bcrypt
 from services.cache_service import clear_data_cache, DOMAIN_STATIC
+from services.local_paths import local_db_dir
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,7 @@ def get_collection_df(collection_name: str, filters: list = None) -> pd.DataFram
     """
     use_local = os.environ.get("USE_LOCAL_DATA", "False").lower() == "true"
     if use_local:
-        pkl_path = pathlib.Path(".local_db") / f"{collection_name}.pkl"
+        pkl_path = local_db_dir() / f"{collection_name}.pkl"
         if pkl_path.exists():
             try:
                 df = pd.read_pickle(pkl_path)
@@ -284,7 +285,7 @@ def increment_failed_setup_attempts(player_id: str, new_count: int, lockout_unti
 def _save_df_to_local(collection_name: str, df: pd.DataFrame):
     if os.environ.get("USE_LOCAL_DATA", "False").lower() != "true":
         return
-    pkl_path = pathlib.Path(".local_db") / f"{collection_name}.pkl"
+    pkl_path = local_db_dir() / f"{collection_name}.pkl"
     pkl_path.parent.mkdir(exist_ok=True)
     df.to_pickle(pkl_path)
 
@@ -583,7 +584,7 @@ def save_weekly_recap(year: int, week: int, summary: str):
     
     # Update local cache if in local mode
     if os.environ.get("USE_LOCAL_DATA", "False").lower() == "true":
-        local_path = pathlib.Path(".local_db") / "weekly_recaps.pkl"
+        local_path = local_db_dir() / "weekly_recaps.pkl"
         try:
             if local_path.exists():
                 df = pd.read_pickle(local_path)
@@ -602,7 +603,7 @@ def get_weekly_recap(year: int, week: int):
     db = get_db()
     if not db:
         # We are offline / local data mode
-        local_path = pathlib.Path(".local_db") / "weekly_recaps.pkl"
+        local_path = local_db_dir() / "weekly_recaps.pkl"
         if local_path.exists():
             try:
                 recaps_df = pd.read_pickle(local_path)
@@ -623,7 +624,7 @@ def save_metadata(doc_id: str, data: dict):
         db.collection("metadata").document(doc_id).set(data)
     
     if os.environ.get("USE_LOCAL_DATA", "False").lower() == "true":
-        local_path = pathlib.Path(".local_db") / "metadata.pkl"
+        local_path = local_db_dir() / "metadata.pkl"
         try:
             if local_path.exists():
                 df = pd.read_pickle(local_path)
@@ -640,7 +641,7 @@ def get_metadata(doc_id: str):
     """Retrieves arbitrary metadata from Firestore or local cache."""
     db = get_db()
     if not db:
-        local_path = pathlib.Path(".local_db") / "metadata.pkl"
+        local_path = local_db_dir() / "metadata.pkl"
         if local_path.exists():
             try:
                 df = pd.read_pickle(local_path)
@@ -663,7 +664,7 @@ def get_config_settings() -> dict:
     use_local = os.environ.get("USE_LOCAL_DATA", "False").lower() == "true"
 
     if use_local:
-        local_path = pathlib.Path(".local_db") / "config_settings.json"
+        local_path = local_db_dir() / "config_settings.json"
         if local_path.exists():
             try:
                 with open(local_path) as f:
@@ -710,7 +711,7 @@ def set_config_settings(data: dict):
     if db:
         db.collection("config").document("settings").set(data, merge=True)
 
-    local_path = pathlib.Path(".local_db") / "config_settings.json"
+    local_path = local_db_dir() / "config_settings.json"
     try:
         local_path.parent.mkdir(parents=True, exist_ok=True)
         existing = {}

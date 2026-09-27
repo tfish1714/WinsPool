@@ -333,7 +333,8 @@ def main():
 
         if write_local:
             # Write directly to local JSON (bypasses USE_LOCAL_DATA routing in cache_service)
-            _local_dir = pathlib.Path(".local_db")
+            from services.local_paths import local_db_dir
+            _local_dir = local_db_dir()
             _local_dir.mkdir(parents=True, exist_ok=True)
             _local_path = _local_dir / f"game_predictions_{year}.json"
             import json as _json
