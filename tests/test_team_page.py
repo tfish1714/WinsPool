@@ -338,3 +338,134 @@ def test_team_page_js_renders_winning_combo_conditionally():
     assert "winning_combo" in src and "pool_winner" in src
     assert re.search(r"if\s*\(\s*h\.pool_winner\s*\)", src)
     assert "Pool winner:" not in src
+
+
+# ---- runner-up callout + never-winner marker --------------------------------
+
+def _who(pid, name="X", wins=0):
+    return {"playerId": pid, "name": name, "wins": wins}
+
+
+def _multi_season_data(seasons, drafter_of_kc=1):
+    """KC drafted by `drafter_of_kc` in every season in `seasons`."""
+    rows = [{"playerId": drafter_of_kc, "season": s, "draftPick": 1, "team": "KC"} for s in seasons]
+    d = _data()
+    d["draft_results"] = pd.DataFrame(rows)
+    return d
+
+
+class TestRunnerUp:
+    def test_runner_up_row_only_where_drafter_was_second(self):
+        # fixture: 2025 Alice wins / Bob (DEN) 2nd; 2024 Bob wins / Alice (DEN) 2nd
+        p = _build("DEN")
+        h25, h24 = p["history"]
+        assert h25["runner_up"] == {"playerId": 2, "name": "Bob Jones", "wins": 9}
+        assert h25["pool_winner"] is None
+        assert h24["runner_up"] == {"playerId": 1, "name": "Alice Smith", "wins": 10}
+        assert h24["pool_winner"] is None
+
+    def test_never_on_winner_rows_or_other_rows(self):
+        p = _build("KC")  # KC drafters won both seasons
+        for h in p["history"]:
+            assert h["pool_winner"] is not None
+            assert h["runner_up"] is None and h["runner_up_combo"] is None
+
+    def test_combo_lists_other_two_teams(self):
+        d = _data()
+        # give Bob (2nd in 2025 with DEN 9) two more teams, one legacy code and a duplicate
+        extra = pd.DataFrame([
+            {"playerId": 2, "season": 2025, "draftPick": 10, "team": "MIA"},
+            {"playerId": 2, "season": 2025, "draftPick": 11, "team": "OAK"},
+            {"playerId": 2, "season": 2025, "draftPick": 12, "team": "MIA"},
+        ])
+        d["draft_results"] = pd.concat([d["draft_results"], extra], ignore_index=True)
+        d["standings"] = pd.concat([d["standings"], pd.DataFrame([
+            {"season": 2025, "team": "MIA", "wins": 0, "losses": 17, "ties": 0},
+            {"season": 2025, "team": "LV", "wins": 1, "losses": 16, "ties": 0},
+        ])], ignore_index=True)
+        p = tps.build_team_page("DEN", 2026, d, True)
+        h25 = p["history"][0]
+        assert h25["runner_up"]["playerId"] == 2
+        assert h25["runner_up_combo"] == ["MIA", "LV"]
+
+    def test_runner_up_one_season_winner_another(self):
+        d = _data()
+        # Alice drafts KC in 2025 (wins) ; make Alice also KC drafter in 2024 as runner-up
+        d["draft_results"] = pd.DataFrame([
+            {"playerId": 1, "season": 2025, "draftPick": 4, "team": "KC"},
+            {"playerId": 2, "season": 2025, "draftPick": 5, "team": "DEN"},
+            {"playerId": 1, "season": 2024, "draftPick": 3, "team": "KC"},
+            {"playerId": 2, "season": 2024, "draftPick": 2, "team": "ARI"},
+            {"playerId": 2, "season": 2024, "draftPick": 8, "team": "NE"},
+        ])
+        d["standings"].loc[(d["standings"]["season"] == 2024) & (d["standings"]["team"] == "KC"), "wins"] = 0
+        p = tps.build_team_page("KC", 2026, d, True)
+        h25, h24 = p["history"]
+        assert h25["pool_winner"]["playerId"] == 1 and h25["runner_up"] is None
+        assert h24["runner_up"]["playerId"] == 1 and h24["pool_winner"] is None
+        assert h24["runner_up_combo"] == []
+
+    def test_in_progress_season_has_no_runner_up(self):
+        d = _multi_season_data([2026])
+        d["standings"] = pd.concat([d["standings"], pd.DataFrame(
+            [{"season": 2026, "team": "KC", "wins": 5, "losses": 0, "ties": 0}])], ignore_index=True)
+        p = tps.build_team_page("KC", 2026, d, True)
+        assert p["history"][0]["runner_up"] is None and p["history"][0]["runner_up_combo"] is None
+
+    def test_standings_still_computed_once_per_season_with_runner_up(self):
+        import services.analysis_service as analysis
+        calls = []
+        real = analysis.calculate_wins_pool_standings
+        def spy(*a, **k):
+            calls.append(a[3])
+            return real(*a, **k)
+        with patch.object(analysis, "calculate_wins_pool_standings", spy):
+            tps.build_team_page("DEN", 2026, _data(), True)
+        assert sorted(calls) == [2024, 2025]
+
+
+class TestPoolSummary:
+    def _summary(self, seasons, tops, current=2030):
+        """tops: {season: (winner_pid, runner_pid)}"""
+        d = _multi_season_data(seasons)
+        def fake(data, season):
+            w, r = tops[season]
+            return _who(w), _who(r)
+        with patch.object(tps, "_pool_top_two", fake):
+            return tps.build_team_page("KC", current, d, True)["pool_summary"]
+
+    def test_counts_and_flags(self):
+        s = self._summary([2020, 2021, 2022, 2023],
+                          {2020: (1, 2), 2021: (2, 1), 2022: (2, 3), 2023: (3, 2)})
+        assert s == {"seasons": 4, "winning": 1, "runner_up": 1, "never_won": False, "never_top2": False}
+
+    def test_never_won_but_runner_up(self):
+        s = self._summary([2020, 2021, 2022], {2020: (2, 1), 2021: (2, 3), 2022: (3, 2)})
+        assert s["never_won"] is True and s["never_top2"] is False and s["runner_up"] == 1
+
+    def test_never_top2_at_threshold(self):
+        s = self._summary([2020, 2021, 2022], {y: (2, 3) for y in (2020, 2021, 2022)})
+        assert s["seasons"] == tps.MIN_SEASONS_FOR_MARKER == 3
+        assert s["never_won"] is True and s["never_top2"] is True
+
+    def test_below_threshold_no_marker(self):
+        s = self._summary([2020, 2021], {y: (2, 3) for y in (2020, 2021)})
+        assert s["seasons"] == 2 and s["never_won"] is False and s["never_top2"] is False
+
+    def test_in_progress_season_excluded(self):
+        s = self._summary([2020, 2021, 2030], {2020: (2, 3), 2021: (2, 3), 2030: (2, 3)})
+        assert s["seasons"] == 2 and s["never_top2"] is False
+
+    def test_no_history_summary_zero(self):
+        s = _build("SEA")["pool_summary"]
+        assert s == {"seasons": 0, "winning": 0, "runner_up": 0, "never_won": False, "never_top2": False}
+
+
+def test_team_page_js_renders_runner_up_and_summary_conditionally():
+    src = (ROOT / "static" / "js" / "team_page.js").read_text(encoding="utf-8")
+    assert "runner_up_combo" in src and "pool_summary" in src
+    assert re.search(r"if\s*\(\s*h\.runner_up\s*\)", src)
+    assert "never_top2" in src and "never_won" in src
+    assert re.search(r"if\s*\(\s*s\.never_top2\s*\)", src)
+    assert "team-page__combo--runnerup" in src
+    assert ".team-page__combo--runnerup" in (ROOT / "static" / "style.css").read_text(encoding="utf-8")

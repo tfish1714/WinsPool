@@ -80,57 +80,85 @@ def _player_name(players, player_id) -> str:
     return str(name)
 
 
-def _pool_winner(data: dict, season: int):
-    """Rank 1 of the season's pool standings (the app's own tiebreaker cascade)."""
+MIN_SEASONS_FOR_MARKER = 3  # fewer completed pool seasons than this never get a "never won" label
+
+
+def _row_to_entry(row) -> dict:
+    return {"playerId": _int(row["playerId"]), "name": str(row["fullName"]),
+            "wins": _int(row["TotalWins"])}
+
+
+def _pool_top_two(data: dict, season: int):
+    """(winner, runner_up) = ranks 1 and 2 of the season's pool standings
+    (the app's own tiebreaker cascade), from a single standings computation.
+    Either may be None."""
     import services.analysis_service as analysis
     try:
         table = analysis.calculate_wins_pool_standings(
             data["standings"], data["draft_results"], data["players"], season)
     except Exception:
-        return None
+        return None, None
     if table is None or table.empty:
-        return None
-    top = table.iloc[0]
-    return {"playerId": _int(top["playerId"]), "name": str(top["fullName"]),
-            "wins": _int(top["TotalWins"])}
+        return None, None
+    winner = _row_to_entry(table.iloc[0])
+    runner_up = _row_to_entry(table.iloc[1]) if len(table) > 1 else None
+    return winner, runner_up
 
 
-def _cached_winner(cache: dict, data: dict, season: int):
+def _cached_top_two(cache: dict, data: dict, season: int):
     if season not in cache:
-        cache[season] = _pool_winner(data, season)
+        cache[season] = _pool_top_two(data, season)
     return cache[season]
 
 
-def _history(team: str, current_season: int, data: dict) -> list:
+def _other_teams(dr, season: int, pid: int, team: str) -> list:
+    theirs = dr[(dr["season"] == season) & (dr["playerId"] == pid)].sort_values("draftPick")
+    out = []
+    for t in theirs["team"].apply(normalize_team_abbr):
+        if t != team and t not in out:
+            out.append(t)
+    return out
+
+
+def _history(team: str, current_season: int, data: dict):
+    """(history rows, pool_summary)."""
+    empty_summary = {"seasons": 0, "winning": 0, "runner_up": 0, "never_won": False, "never_top2": False}
     dr = data.get("draft_results")
     if _empty(dr) or "season" not in dr.columns or "team" not in dr.columns:
-        return []
+        return [], empty_summary
     mine = dr[dr["team"].apply(normalize_team_abbr) == team]
     history = []
-    winners = {}  # season -> pool winner, so each season is computed at most once
+    top_two = {}  # season -> (winner, runner_up), so each season is computed at most once
+    completed = winning = second = 0
     for season in sorted({int(s) for s in mine["season"].dropna()}, reverse=True):
         pick_row = mine[mine["season"] == season].sort_values("draftPick").iloc[0]
         pid = _int(pick_row["playerId"])
         rec = _standing(data.get("standings"), season, team)
         # The in-progress season has no winner yet, only a leader.
-        winner = None if season == current_season else _cached_winner(winners, data, season)
+        winner = runner_up = None
+        if season != current_season:
+            winner, runner_up = _cached_top_two(top_two, data, season)
+            completed += 1
         is_winning_row = winner is not None and winner["playerId"] == pid
-        combo = None
-        if is_winning_row:
-            theirs = dr[(dr["season"] == season) & (dr["playerId"] == pid)].sort_values("draftPick")
-            combo = []
-            for t in theirs["team"].apply(normalize_team_abbr):
-                if t != team and t not in combo:
-                    combo.append(t)
+        is_runner_up_row = (not is_winning_row) and runner_up is not None and runner_up["playerId"] == pid
+        winning += is_winning_row
+        second += is_runner_up_row
         history.append({
             "season": season, **rec,
             "drafter": {"playerId": pid, "name": _player_name(data.get("players"), pid)},
             "pick": _int(pick_row.get("draftPick")) or None,
             # Only set when this team's drafter won the pool that season.
             "pool_winner": winner if is_winning_row else None,
-            "winning_combo": combo,
+            "winning_combo": _other_teams(dr, season, pid, team) if is_winning_row else None,
+            # Only set when this team's drafter finished 2nd that season.
+            "runner_up": runner_up if is_runner_up_row else None,
+            "runner_up_combo": _other_teams(dr, season, pid, team) if is_runner_up_row else None,
         })
-    return history
+    enough = completed >= MIN_SEASONS_FOR_MARKER
+    summary = {"seasons": completed, "winning": winning, "runner_up": second,
+               "never_won": enough and winning == 0,
+               "never_top2": enough and winning + second == 0}
+    return history, summary
 
 
 def _current(team: str, season: int, data: dict, include_projections: bool) -> dict:
@@ -212,12 +240,14 @@ def build_team_page(team: str, season_hint, data: dict, include_projections: boo
         games = data.get("games")
         season = int(games["season"].max()) if not _empty(games) and "season" in games.columns else 0
     season = int(season)
+    history, pool_summary = _history(abbr, season, data)
     return {
         "team": abbr,
         "name": TEAM_NAMES[abbr],
         "logo": get_team_logo_url(abbr),
         "current_season": season,
         "teams": team_list(),
-        "history": _history(abbr, season, data),
+        "history": history,
+        "pool_summary": pool_summary,
         "current": _current(abbr, season, data, include_projections),
     }

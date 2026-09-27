@@ -27,6 +27,21 @@
             box.appendChild(el('p', 'team-page__muted', 'This team has not been drafted in any pool season.'));
             return;
         }
+        var s = data.pool_summary;
+        if (s && s.seasons > 0) {
+            var line = el('p', 'team-page__note');
+            line.appendChild(document.createTextNode('Drafted in ' + s.seasons + ' pool season' +
+                (s.seasons === 1 ? '' : 's') + ': ' + s.winning + ' winning roster' +
+                (s.winning === 1 ? '' : 's') + ', ' + s.runner_up + ' runner-up. '));
+            if (s.never_top2) {
+                line.appendChild(el('span', 'team-page__combo team-page__combo--runnerup',
+                    'Never on a winning or runner-up roster'));
+            } else if (s.never_won) {
+                line.appendChild(el('span', 'team-page__combo team-page__combo--runnerup',
+                    'Never on a winning roster'));
+            }
+            box.appendChild(line);
+        }
         data.history.forEach(function (h) {
             var row = el('div', 'team-page__hrow');
             row.appendChild(el('div', 'team-page__season', String(h.season)));
@@ -45,6 +60,12 @@
                     ? ' (with ' + h.winning_combo.join(', ') + ')' : '';
                 row.appendChild(el('div', 'team-page__note team-page__combo',
                     'Winning combo: ' + h.pool_winner.name + ', ' + h.pool_winner.wins + ' wins' + combo));
+            }
+            if (h.runner_up) {
+                var rcombo = h.runner_up_combo && h.runner_up_combo.length
+                    ? ' (with ' + h.runner_up_combo.join(', ') + ')' : '';
+                row.appendChild(el('div', 'team-page__note team-page__combo team-page__combo--runnerup',
+                    'Runner-up combo: ' + h.runner_up.name + ', ' + h.runner_up.wins + ' wins' + rcombo));
             }
             box.appendChild(row);
         });
