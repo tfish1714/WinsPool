@@ -10,7 +10,7 @@
     {
       "displayName": "Kickoff queue task attempts returning non-OK",
       "conditionThreshold": {
-        "filter": "resource.type=\"cloud_tasks_queue\" AND resource.labels.queue_id=\"winspool-kickoff-triggers\" AND metric.type=\"cloudtasks.googleapis.com/queue/task_attempt_count\" AND metric.labels.response_code!=\"OK\"",
+        "filter": "resource.type=\"cloud_tasks_queue\" AND resource.labels.queue_id=\"winspool-kickoff-triggers\" AND metric.type=\"cloudtasks.googleapis.com/queue/task_attempt_count\" AND metric.labels.response_code!=\"ok\"",
         "aggregations": [
           {
             "alignmentPeriod": "300s",

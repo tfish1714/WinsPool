@@ -173,6 +173,8 @@ IAM the scheduler account needs on the `winspool-predict-daily` job: `roles/run.
 plus `roles/run.jobsExecutorWithOverrides` (the resimulate task overrides container args;
 plain invoker returns 403 for that request).
 
-The alert metric label `response_code` should be checked once in Cloud Monitoring's
-Metrics Explorer (`cloudtasks.googleapis.com/queue/task_attempt_count`) to confirm the
-"OK" value matches the filter in the policy file.
+The alert metric label `response_code` was checked in Cloud Monitoring's Metrics Explorer
+(`cloudtasks.googleapis.com/queue/task_attempt_count`, grouped by `response_code`): the values
+are lowercase (`ok`, `unavailable`), so the policy filter is `response_code != "ok"`. If a policy
+was created from an earlier copy of the file that said `"OK"`, update it in place:
+`gcloud alpha monitoring policies update <POLICY_ID> --project=fishbone-wins-pool --policy-from-file=deploy/alerts/kickoff-queue-attempt-failures.json`.
