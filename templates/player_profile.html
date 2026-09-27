@@ -295,11 +295,14 @@
             note.textContent = basisText;
             body.appendChild(note);
           }
-          body.appendChild(line('Expected wins', p.expected_wins.toFixed(1)));
+          body.appendChild(line(p.odds_basis === 'per_game' ? 'Expected final wins' : 'Expected wins', p.expected_wins.toFixed(1)));
           body.appendChild(line('Likely range (5th-95th)', `${p.floor.toFixed(1)} - ${p.ceiling.toFixed(1)}`));
           body.appendChild(line('Chance at least one team makes playoffs', `${Math.round(p.playoff_prob_any * 100)}%`));
           p.teams.forEach(t => {
-            body.appendChild(line(t.team, `${t.projected_wins.toFixed(1)} wins, team playoff chance ${Math.round(t.playoff_prob * 100)}%`));
+            const chance = Math.round(t.playoff_prob * 100);
+            body.appendChild(line(t.team, typeof t.wins_to_date === 'number'
+              ? `${t.wins_to_date} ${t.wins_to_date === 1 ? 'win' : 'wins'} so far, ${t.projected_wins.toFixed(1)} projected final, playoff chance ${chance}%`
+              : `${t.projected_wins.toFixed(1)} wins, team playoff chance ${chance}%`));
           });
         } else {
           const msg = document.createElement('p');

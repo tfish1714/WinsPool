@@ -17,7 +17,7 @@
         var cur = data.current;
         box.appendChild(el('span', null, data.current_season + ' record: ' + fmtRecord(cur.record)));
         if (cur.projected_wins !== null && cur.projected_wins !== undefined) {
-            box.appendChild(el('span', 'team-page__muted', 'Projected wins: ' + cur.projected_wins.toFixed(1)));
+            box.appendChild(el('span', 'team-page__muted', 'Preseason projection: ' + cur.projected_wins.toFixed(1)));
         }
     }
 

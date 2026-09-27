@@ -544,7 +544,9 @@ re-deriving the math by hand each time:
 
 ## Player Portfolio Projection
 
-`analysis.compute_portfolio_projection()` (`services/analysis_service.py`) backs `GET /api/profile/portfolio`. It summarises a player's drafted teams from the per-team Monte Carlo output (`projected_wins`, `std_dev`) — it does not re-simulate.
+`GET /api/profile/portfolio` (and `/api/players/{id}/portfolio`) returns the outlook numbers from one of two sources. When `odds_basis == "per_game"` (stored per-game predictions exist) every outlook number (`expected_wins`, `std_dev`, `floor`/`ceiling`, `playoff_prob_any`, `expected_playoff_teams`, and each team's `projected_wins` = projected FINAL wins, `std_dev`, `playoff_prob`) is derived from the same simulated `team_wins` matrix as the pool odds (see "Per-game method" below): actual wins to date plus the stored per-game win probabilities for the remaining schedule, so they update every week. `floor`/`ceiling` are the empirical 5th/95th percentiles of the player's simulated total, team playoff probability is the share of trials with final wins >= 9.5, and each team also carries `wins_to_date` and `preseason_projected_wins`. Only the fallback (`odds_basis == "team_projection"`, no stored per-game predictions) uses the preseason-based method described in the rest of this bullet list. If the simulation fails the route falls back to it too.
+
+`analysis.compute_portfolio_projection()` (`services/analysis_service.py`) is that fallback. It summarises a player's drafted teams from the per-team Monte Carlo output (`projected_wins`, `std_dev`) — it does not re-simulate.
 
 - **Per-team playoff probability**: `P(wins >= 9.5)` under `Normal(projected_wins, sd)`, with `sd` floored at 0.5. The 9.5-win threshold (`playoff_wins_threshold`) is a rough proxy for making the playoffs, not a seeding/tiebreak model.
 - **Portfolio expected wins**: sum of the teams' projected wins.

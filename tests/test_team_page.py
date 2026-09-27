@@ -478,3 +478,11 @@ def test_team_page_js_renders_runner_up_and_summary_conditionally():
     assert re.search(r"if\s*\(\s*s\.never_top2\s*\)", src)
     assert "team-page__combo--runnerup" in src
     assert ".team-page__combo--runnerup" in (ROOT / "static" / "style.css").read_text(encoding="utf-8")
+
+
+def test_team_page_header_labels_preseason_projection():
+    """The header value is the preseason projection, and must be labelled as such."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parent.parent / "static" / "js" / "team_page.js").read_text(encoding="utf-8")
+    assert "Preseason projection: " in src
+    assert "'Projected wins: '" not in src

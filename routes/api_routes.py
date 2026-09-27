@@ -587,6 +587,38 @@ def _remaining_games_with_probs(games, season: int):
     return out, n_stored
 
 
+def _live_outlook(mine: dict | None, teams: list, projections: dict) -> dict | None:
+    """Outlook numbers from the per-game simulation (wins to date + game probabilities).
+
+    Same shape as compute_portfolio_projection plus wins_to_date and
+    preseason_projected_wins per team.  Returns None if the simulation carries no stats.
+    """
+    if not mine or "expected_wins" not in mine:
+        return None
+    sim_teams = mine.get("teams") or {}
+    rows = []
+    for t in teams:
+        st = sim_teams.get(t)
+        if st is None:
+            continue
+        pre = (projections.get(t) or {}).get("projected_wins")
+        rows.append({"team": t,
+                     "projected_wins": round(st["expected_wins"], 2),
+                     "std_dev": round(float(st.get("std_dev", 0.0)), 2),
+                     "playoff_prob": round(st["playoff_prob"], 4),
+                     "wins_to_date": st["wins_to_date"],
+                     "preseason_projected_wins": None if pre is None else float(pre)})
+    rows.sort(key=lambda r: r["projected_wins"], reverse=True)
+    return {"teams": rows,
+            "expected_wins": round(mine["expected_wins"], 2),
+            "std_dev": round(mine["std_dev"], 2),
+            "floor": round(mine["p5"], 2),
+            "ceiling": round(mine["p95"], 2),
+            "playoff_prob_any": round(mine["playoff_prob_any"], 4),
+            "expected_playoff_teams": round(mine["expected_playoff_teams"], 2),
+            "team_count": len(rows)}
+
+
 def build_player_outlook(player_id: int, is_admin: bool) -> dict:
     """Season outlook for one player (shared by the own and any-player endpoints).
 
@@ -613,6 +645,7 @@ def build_player_outlook(player_id: int, is_admin: bool) -> dict:
         return {**base, "reason": "no_projections"}
     result = analysis.compute_portfolio_projection(projections, teams)
     odds = {}
+    live = None
     try:
         season_dr = draft_results[draft_results["season"] == season]
         pool = {int(pid): [str(t) for t in grp["team"].dropna().tolist()]
@@ -632,6 +665,7 @@ def build_player_outlook(player_id: int, is_admin: bool) -> dict:
             base_wins = {t: r.get("wins") for t, r in records.items()}
             sim = analysis.simulate_pool_finish_odds_from_games(pool, base_wins, remaining)
             basis, n_remaining = "per_game", len(remaining)
+            live = _live_outlook(sim.get(player_id), teams, projections)
         else:
             sim = analysis.simulate_pool_finish_odds(pool, projections, records)
             basis, n_remaining = "team_projection", None
@@ -643,6 +677,8 @@ def build_player_outlook(player_id: int, is_admin: bool) -> dict:
                     "pool_size": len(pool),
                     "odds_basis": basis,
                     "games_remaining": n_remaining}
+            if live:
+                result = live
     except Exception:
         logger.exception("pool finish odds failed; returning portfolio without them")
     return {**base, "available": True, **result, **odds}

@@ -56,6 +56,54 @@ class TestSimulateFromGames:
         assert sim({}, {}, []) == {}
 
 
+class TestSimulateStats:
+    def test_certain_wins_are_deterministic(self):
+        # A at 2 wins with 3 certain remaining wins -> exactly 5 every sim.
+        games = [("A", "X", 1.0), ("A", "Y", 1.0), ("Z", "A", 0.0)]
+        r = sim({1: ["A"]}, {"A": 2}, games, n_sims=500)[1]
+        assert r["expected_wins"] == 5.0
+        assert r["p5"] == r["p95"] == 5.0
+        assert r["std_dev"] == 0.0
+        assert r["teams"]["A"] == {"wins_to_date": 2.0, "expected_wins": 5.0,
+                                 "std_dev": 0.0, "playoff_prob": 0.0}
+
+    def test_team_with_no_remaining_games_keeps_base(self):
+        r = sim({1: ["A", "B"]}, {"A": 4}, [("B", "X", 1.0)], n_sims=100)[1]
+        assert r["teams"]["A"]["expected_wins"] == 4.0
+        assert r["teams"]["A"]["wins_to_date"] == 4.0
+        assert r["teams"]["B"]["wins_to_date"] == 0.0  # missing from base_wins
+        assert r["teams"]["B"]["expected_wins"] == 1.0
+        assert r["expected_wins"] == 5.0
+
+    def test_playoff_prob_extremes(self):
+        r = sim({1: ["A", "B"]}, {"A": 10, "B": 1}, [("B", "X", 1.0)], n_sims=100)[1]
+        assert r["teams"]["A"]["playoff_prob"] == 1.0
+        assert r["teams"]["B"]["playoff_prob"] == 0.0
+
+    def test_playoff_threshold_parameter(self):
+        r = sim({1: ["A"]}, {"A": 3}, [], n_sims=50, playoff_wins_threshold=3)[1]
+        assert r["teams"]["A"]["playoff_prob"] == 1.0
+
+    def test_any_and_expected_playoff_teams(self):
+        # A is at 10 (always in); B needs its coin flip to reach 10.
+        r = sim({1: ["A", "B"]}, {"A": 10, "B": 9.0}, [("B", "X", 0.5)],
+                n_sims=20000, seed=4, playoff_wins_threshold=10)[1]
+        assert r["playoff_prob_any"] == 1.0
+        assert abs(r["expected_playoff_teams"] - 1.5) < 0.02
+        assert abs(r["teams"]["B"]["playoff_prob"] - 0.5) < 0.02
+
+    def test_none_when_no_team_can_qualify(self):
+        r = sim({1: ["A", "B"]}, {}, [], n_sims=10)[1]
+        assert r["playoff_prob_any"] == 0.0 and r["expected_playoff_teams"] == 0.0
+
+    def test_stats_reproducible_and_existing_keys_intact(self):
+        args = ({1: ["A"], 2: ["B"]}, {}, [("A", "B", 0.6)])
+        a, b = sim(*args, n_sims=500, seed=5), sim(*args, n_sims=500, seed=5)
+        assert a == b
+        assert {"top_n_prob", "win_prob", "expected_rank"} <= set(a[1])
+        assert abs(a[1]["win_prob"] - 0.6) < 0.08
+
+
 @pytest.fixture
 def auth_player():
     app.dependency_overrides[require_auth] = lambda: {"sub": "3", "role": "player"}
@@ -149,3 +197,55 @@ class TestRoutePerGame:
              patch("routes.api_routes.get_config_settings", return_value={"draft_active": False}):
             b = TestClient(app).get("/api/profile/portfolio").json()
         assert b["odds_basis"] is None and b["games_remaining"] is None
+
+
+def _standings(wins):
+    return pd.DataFrame([{"season": 2026, "team": t, "wins": w, "losses": 0, "ties": 0}
+                         for t, w in wins.items()])
+
+
+class TestRouteLiveOutlook:
+    """per_game basis: outlook numbers come from wins to date + per-game probabilities."""
+
+    def _fetch(self, games, preds, standings):
+        load = (standings, None, games, None, pd.DataFrame(), _dr(), pd.DataFrame())
+        with patch("routes.api_routes.load_data", return_value=load),              patch("services.data_service.get_active_season", return_value=2026),              patch("routes.api_routes.get_season_projection_legacy_shape", return_value=PROJ),              patch("routes.api_routes.get_config_settings", return_value={"draft_active": False}),              patch("services.cache_service.get_game_predictions", return_value=preds):
+            return TestClient(app).get("/api/profile/portfolio").json()
+
+    def test_per_game_uses_wins_to_date_not_preseason(self, auth_player):
+        # Player 3 owns KC (2 wins, 1 certain win left), NYJ (1 win, 1 certain win left), CAR (0, none left).
+        games = _games([(5, "REG", "KC", "BUF", None), (5, "REG", "NYJ", "DAL", None)])
+        preds = {"W05_KC_BUF": {"pred_prob": 1.0}, "W05_NYJ_DAL": {"pred_prob": 1.0}}
+        b = self._fetch(games, preds, _standings({"KC": 2, "NYJ": 1, "CAR": 0}))
+        preseason_sum = sum(PROJ[t]["projected_wins"] for t in ("KC", "NYJ", "CAR"))
+        assert b["odds_basis"] == "per_game"
+        assert b["expected_wins"] == 5.0
+        assert b["expected_wins"] != round(preseason_sum, 2)
+        assert b["floor"] == 5.0 and b["ceiling"] == 5.0 and b["std_dev"] == 0.0
+        assert b["team_count"] == 3
+        by_team = {t["team"]: t for t in b["teams"]}
+        assert by_team["KC"]["wins_to_date"] == 2
+        assert by_team["KC"]["projected_wins"] == 3.0
+        assert by_team["KC"]["preseason_projected_wins"] == PROJ["KC"]["projected_wins"]
+        assert by_team["CAR"]["projected_wins"] == 0.0
+        assert set(by_team["KC"]) >= {"team", "projected_wins", "std_dev", "playoff_prob",
+                                      "wins_to_date", "preseason_projected_wins"}
+        assert b["playoff_prob_any"] == 0.0 and b["expected_playoff_teams"] == 0.0
+        # existing top-level keys are still present
+        assert b["games_remaining"] == 2 and b["pool_size"] == 3 and "top2_prob" in b
+
+    def test_fallback_keeps_preseason_numbers(self, auth_player):
+        games = _games([(5, "REG", "KC", "BUF", None)])
+        b = self._fetch(games, {}, _standings({"KC": 2}))
+        assert b["odds_basis"] == "team_projection"
+        assert b["expected_wins"] == round(sum(PROJ[t]["projected_wins"] for t in ("KC", "NYJ", "CAR")), 2)
+        assert all("wins_to_date" not in t for t in b["teams"])
+
+    def test_simulation_failure_falls_back_to_preseason(self, auth_player):
+        games = _games([(5, "REG", "KC", "BUF", None)])
+        preds = {"W05_KC_BUF": {"pred_prob": 1.0}}
+        with patch("routes.api_routes.analysis.simulate_pool_finish_odds_from_games",
+                   side_effect=RuntimeError("boom")):
+            b = self._fetch(games, preds, _standings({"KC": 2}))
+        assert b["available"] is True
+        assert b["expected_wins"] == round(sum(PROJ[t]["projected_wins"] for t in ("KC", "NYJ", "CAR")), 2)

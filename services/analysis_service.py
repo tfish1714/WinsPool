@@ -1016,14 +1016,21 @@ def simulate_pool_finish_odds(player_teams: dict, team_projections: dict, team_r
 
 def simulate_pool_finish_odds_from_games(player_teams: dict, base_wins: dict,
                                          remaining_games: list, n_sims: int = 10000,
-                                         seed: int = 0, top_n: int = 2) -> dict:
+                                         seed: int = 0, top_n: int = 2,
+                                         playoff_wins_threshold: float = 9.5) -> dict:
     """Monte Carlo of every player's pool finish from per-game win probabilities.
 
     remaining_games: [(home_team, away_team, home_win_prob)], each unplayed game
     sampled ONCE per simulation (home wins with the given probability, else away)
     so a player holding both sides gets exactly one win from it.  base_wins maps
     team -> actual wins to date (missing -> 0).  Ranking uses a random tie-break.
-    Returns {player_id: {"top_n_prob", "win_prob", "expected_rank"}}.
+    Returns {player_id: {"top_n_prob", "win_prob", "expected_rank"} plus stats
+    from the same simulated team_wins matrix: "expected_wins", "std_dev", "p5",
+    "p95" (of the player's total), "teams" ({team: {"wins_to_date",
+    "expected_wins", "playoff_prob"}}), "playoff_prob_any" and
+    "expected_playoff_teams"}.  A team makes the playoffs in a simulation when
+    its final wins >= playoff_wins_threshold (the same proxy as
+    compute_portfolio_projection).
     """
     player_ids = list(player_teams.keys())
     n_players = len(player_ids)
@@ -1065,6 +1072,23 @@ def simulate_pool_finish_odds_from_games(player_teams: dict, base_wins: dict,
             "win_prob": float((r == 1).mean()),
             "expected_rank": float(r.mean()),
         }
+        my_teams = list(dict.fromkeys(player_teams[pid]))
+        cols = [idx[t] for t in my_teams]
+        made = team_wins[:, cols] >= playoff_wins_threshold if cols else np.zeros((n_sims, 0), dtype=bool)
+        total = totals[:, j]
+        out[pid].update({
+            "expected_wins": float(total.mean()),
+            "std_dev": float(total.std()),
+            "p5": float(np.percentile(total, 5)),
+            "p95": float(np.percentile(total, 95)),
+            "teams": {t: {"wins_to_date": float(base[idx[t]]),
+                          "expected_wins": float(team_wins[:, idx[t]].mean()),
+                          "std_dev": float(team_wins[:, idx[t]].std()),
+                          "playoff_prob": float(made[:, k].mean())}
+                      for k, t in enumerate(my_teams)},
+            "playoff_prob_any": float(made.any(axis=1).mean()) if cols else 0.0,
+            "expected_playoff_teams": float(made.sum(axis=1).mean()) if cols else 0.0,
+        })
     return out
 
 
