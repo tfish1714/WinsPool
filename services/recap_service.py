@@ -1,3 +1,4 @@
+import concurrent.futures
 import logging
 import math
 import re
@@ -14,15 +15,39 @@ from services.utils import normalize_team_abbr
 logger = logging.getLogger(__name__)
 
 
+def _clean_text(text: str | None) -> str | None:
+    """Normalize curly quotes, unicode hyphens, and strip replacement characters."""
+    if not text:
+        return None
+    return (
+        text
+        .replace("\u2019", "'")
+        .replace("\u2018", "'")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2014", "-")
+        .replace("\u2013", "-")
+        .replace("\ufffd", "")
+        .strip()
+    )
+
+
 def fetch_weekly_espn_data(year: int, week: int) -> dict[tuple[str, str], dict]:
-    """Fetch stat leaders and storylines for all games in a specific week from ESPN scoreboard API.
+    """Fetch stat leaders, storylines, team statistics, and decisive plays for all games in a week from ESPN.
+
+    First calls ESPN scoreboard API to get the matchups, headlines, and event IDs.
+    Then concurrently fetches game summary endpoints for detailed team-by-team offensive leaders,
+    boxscore stats (turnovers, total yards, red zone efficiency), and decisive scoring plays.
 
     Returns mapping of (home_team, away_team) -> {
-        "leaders": [str],  # e.g. ["Josh Allen: 240 YDS, 2 TD", ...]
         "headline": str | None,
+        "leaders": [str],  # Scoreboard fallback combined leaders e.g. ["Josh Allen (BUF): 240 YDS, 2 TD"]
+        "leaders_by_team": dict[str, list[str]],  # e.g. {"BUF": ["Josh Allen: 18/23, 232 YDS, 2 TD", ...], "MIA": [...]}
+        "team_stats": dict[str, dict[str, str | int]],  # e.g. {"BUF": {"turnovers": 0, "totalYards": "352", "redZoneAttempts": "3-4"}}
+        "decisive_play": str | None,  # e.g. "Tyler Bass 36 Yd Field Goal (OT 8:12)"
     }
     Team abbreviations are normalized to match nflverse canonical codes.
-    Fails open (returns {}) on any network error, timeout, or missing data.
+    Fails open (returns {} or degrades to scoreboard data) on any network error, timeout, or missing data.
     """
     url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates={year}&seasontype=2&week={week}"
     try:
@@ -34,8 +59,32 @@ def fetch_weekly_espn_data(year: int, week: int) -> dict[tuple[str, str], dict]:
         logger.warning("Failed to fetch ESPN weekly data for %s week %s: %s", year, week, e)
         return {}
 
+    events = data.get("events", [])
+    if not events:
+        return {}
+
+    # Concurrently fetch summary data for each event ID
+    event_ids = [str(e["id"]) for e in events if e.get("id")]
+    summaries: dict[str, dict] = {}
+
+    def _fetch_summary(eid: str) -> tuple[str, dict | None]:
+        summary_url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event={eid}"
+        try:
+            r = requests.get(summary_url, timeout=5)
+            if r.ok:
+                return eid, r.json()
+        except Exception as err:
+            logger.debug("Failed to fetch ESPN summary for event %s: %s", eid, err)
+        return eid, None
+
+    if event_ids:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(event_ids), 8)) as executor:
+            for eid, s_json in executor.map(_fetch_summary, event_ids):
+                if s_json:
+                    summaries[eid] = s_json
+
     out = {}
-    for event in data.get("events", []):
+    for event in events:
         competitions = event.get("competitions", [{}])[0]
         competitors = competitions.get("competitors", [])
 
@@ -58,7 +107,7 @@ def fetch_weekly_espn_data(year: int, week: int) -> dict[tuple[str, str], dict]:
         if not home_abbr or not away_abbr:
             continue
 
-        leaders_list = []
+        scoreboard_leaders = []
         for l in competitions.get("leaders", []):
             for athlete in l.get("leaders", []):
                 name = athlete.get("athlete", {}).get("displayName")
@@ -67,31 +116,79 @@ def fetch_weekly_espn_data(year: int, week: int) -> dict[tuple[str, str], dict]:
                     team_id = str(athlete.get("team", {}).get("id") or athlete.get("athlete", {}).get("team", {}).get("id") or "")
                     team_abbr = team_id_to_abbr.get(team_id)
                     team_tag = f" ({team_abbr})" if team_abbr else ""
-                    leaders_list.append(f"{name}{team_tag}: {stat}")
+                    scoreboard_leaders.append(f"{name}{team_tag}: {stat}")
 
         headlines = competitions.get("headlines", [])
         headline_desc = headlines[0].get("description") if headlines else None
         if headline_desc:
-            headline_desc = (
-                headline_desc
-                .replace("\u2019", "'")
-                .replace("\u2018", "'")
-                .replace("\u201c", '"')
-                .replace("\u201d", '"')
-                .replace("\u2014", "-")
-                .replace("\u2013", "-")
-                .replace("\ufffd", "")
-                .strip()
-                .lstrip("- ")
-                .strip()
-            )
+            headline_desc = _clean_text(headline_desc)
+            if headline_desc:
+                headline_desc = headline_desc.lstrip("- ").strip()
+
+        eid = str(event.get("id") or "")
+        summary = summaries.get(eid)
+
+        leaders_by_team: dict[str, list[str]] = {}
+        team_stats: dict[str, dict[str, str | int]] = {}
+        decisive_play: str | None = None
+
+        if summary:
+            # 1. Team-by-team stat leaders (passing, rushing, receiving)
+            for tl in summary.get("leaders", []):
+                t_raw = tl.get("team", {}).get("abbreviation")
+                if not t_raw:
+                    continue
+                t_norm = normalize_team_abbr(t_raw)
+                t_lead_list = []
+                for cat in tl.get("leaders", []):
+                    cat_name = cat.get("name")
+                    if cat_name in ("passingYards", "rushingYards", "receivingYards"):
+                        l_list = cat.get("leaders", [])
+                        if l_list:
+                            ath = l_list[0].get("athlete", {}).get("displayName")
+                            val = l_list[0].get("displayValue")
+                            if ath and val:
+                                t_lead_list.append(f"{ath}: {val}")
+                if t_lead_list:
+                    leaders_by_team[t_norm] = t_lead_list
+
+            # 2. Team statistics from boxscore (turnovers, total yards, red zone)
+            for t_box in summary.get("boxscore", {}).get("teams", []):
+                t_raw = t_box.get("team", {}).get("abbreviation")
+                if not t_raw:
+                    continue
+                t_norm = normalize_team_abbr(t_raw)
+                stat_dict = {}
+                for s in t_box.get("statistics", []):
+                    s_name = s.get("name")
+                    val = s.get("displayValue")
+                    if s_name in ("turnovers", "totalYards", "redZoneAttempts") and val is not None:
+                        stat_dict[s_name] = val
+                if stat_dict:
+                    team_stats[t_norm] = stat_dict
+
+            # 3. Decisive play from scoringPlays
+            scoring_plays = summary.get("scoringPlays", [])
+            if scoring_plays:
+                last_play = scoring_plays[-1]
+                p_text = _clean_text(last_play.get("text"))
+                p_num = last_play.get("period", {}).get("number", 4)
+                clock = last_play.get("clock", {}).get("displayValue", "")
+                p_str = "OT" if p_num >= 5 else f"Q{p_num}"
+                if p_text:
+                    clock_part = f" ({p_str} {clock})" if clock else f" ({p_str})"
+                    decisive_play = f"{p_text}{clock_part}"
 
         out[(home_abbr, away_abbr)] = {
-            "leaders": leaders_list,
             "headline": headline_desc or None,
+            "leaders": scoreboard_leaders,
+            "leaders_by_team": leaders_by_team,
+            "team_stats": team_stats,
+            "decisive_play": decisive_play,
         }
 
     return out
+
 
 # Checkpoint labels for the comeback-win narrative line, keyed by which
 # cumulative quarter checkpoint produced the winner's largest deficit.
@@ -345,23 +442,49 @@ def extract_weekly_data(year, week):
     data_summary = f"NFL WEEK {week} RESULTS ({year})\n"
     data_summary += "---------------------------------\n\n"
 
-    # Ranked standings up front -- the system prompt already asks Gemini to
-    # always note overall standings, but this recap is sent standalone (no
-    # separate standings page in context), so making the ranking explicit
-    # here removes any need for it to infer rank order from the per-player
-    # CUMULATIVE SEASON WINS lines below.
+    # Ranked standings up front -- include movement context when week > 1
+    prior_ranks = {}
+    prior_wins = {}
+    if week > 1:
+        prior_to_date = schedule[
+            (schedule['week'] < week) & 
+            (schedule['result'] != UNDRAFTED_SENTINEL) & 
+            (schedule['result'].notna())
+        ]
+        for _, row in prior_to_date.iterrows():
+            win_pid = row['playerId_home_draft'] if row['result'] > 0 else row['playerId']
+            if pd.notna(win_pid) and win_pid != UNDRAFTED_SENTINEL:
+                prior_wins[win_pid] = prior_wins.get(win_pid, 0) + 1
+
+        prior_sorted = sorted(
+            included_pids,
+            key=lambda pid: (-prior_wins.get(pid, 0), pid_to_name.get(pid, "")),
+        )
+        prior_ranks = {pid: r for r, pid in enumerate(prior_sorted, start=1)}
+
     if included_pids:
         standings_entries = sorted(
-            ((pid_to_name[pid], overall_wins.get(pid, 0)) for pid in included_pids),
-            key=lambda entry: (-entry[1], entry[0]),
+            ((pid, pid_to_name[pid], overall_wins.get(pid, 0)) for pid in included_pids),
+            key=lambda entry: (-entry[2], entry[1]),
         )
         data_summary += f"SEASON STANDINGS (THROUGH WEEK {week}):\n"
-        for rank, (name, wins) in enumerate(standings_entries, start=1):
-            data_summary += f" {rank}. {name} - {wins} wins\n"
+        for rank, (pid, name, wins) in enumerate(standings_entries, start=1):
+            movement_note = ""
+            if week > 1 and pid in prior_ranks:
+                p_rank = prior_ranks[pid]
+                p_wins = prior_wins.get(pid, 0)
+                wk_wins = wins - p_wins
+                if rank < p_rank:
+                    movement_note = f" (+{wk_wins} this week, climbed from #{p_rank})"
+                elif rank > p_rank:
+                    movement_note = f" (+{wk_wins} this week, slipped from #{p_rank})"
+                else:
+                    movement_note = f" (+{wk_wins} this week, held #{p_rank})"
+            data_summary += f" {rank}. {name} - {wins} wins{movement_note}\n"
         data_summary += "\n"
 
     # Weekly Game Highlights & Key Context (scores, upsets, rivalry tags, stat leaders, storylines)
-    # Provides Gemini rich narrative context to explain game outcomes beyond just final scores.
+    # Focuses explicitly on Wins Pool players, head-to-head clashes, and team stats.
     game_highlights = []
     seen_games = set()
     espn_data = fetch_weekly_espn_data(year, week)
@@ -378,16 +501,35 @@ def extract_weekly_data(year, week):
         h_score = int(row['home_score']) if pd.notna(row.get('home_score')) else 0
         a_score = int(row['away_score']) if pd.notna(row.get('away_score')) else 0
         result = row['result']
+        margin = abs(h_score - a_score)
+
+        a_pid = row['playerId']
+        h_pid = row['playerId_home_draft']
+        a_drafted = pd.notna(a_pid) and a_pid != UNDRAFTED_SENTINEL
+        h_drafted = pd.notna(h_pid) and h_pid != UNDRAFTED_SENTINEL
+
+        # Only include games where at least one team was drafted by a pool player
+        if not a_drafted and not h_drafted:
+            continue
+
+        h_player = pid_to_name.get(h_pid) or row.get('fullName_home') or f"Player {h_pid}"
+        a_player = pid_to_name.get(a_pid) or row.get('fullName_away') or f"Player {a_pid}"
 
         if result > 0:
             score_text = f"{h_team} {h_score}, {a_team} {a_score}"
-            winner, loser = h_team, a_team
+            winner_team, loser_team = h_team, a_team
+            winner_player, loser_player = h_player, a_player
+            winner_drafted, loser_drafted = h_drafted, a_drafted
         elif result < 0:
             score_text = f"{a_team} {a_score}, {h_team} {h_score}"
-            winner, loser = a_team, h_team
+            winner_team, loser_team = a_team, h_team
+            winner_player, loser_player = a_player, h_player
+            winner_drafted, loser_drafted = a_drafted, h_drafted
         else:
             score_text = f"{h_team} {h_score}, {a_team} {a_score} (Tie)"
-            winner, loser = None, None
+            winner_team, loser_team = h_team, a_team
+            winner_player, loser_player = h_player, a_player
+            winner_drafted, loser_drafted = h_drafted, a_drafted
 
         tags = []
         if bool(row.get('div_game')):
@@ -398,14 +540,32 @@ def extract_weekly_data(year, week):
         spread = row.get('spread_line')
         if pd.notna(spread) and spread != 0:
             favored = h_team if spread > 0 else a_team
-            margin = abs(spread)
-            if winner and winner != favored:
-                tags.append(f"UPSET ({favored} favored by {margin})")
+            spread_mag = abs(spread)
+            if winner_team and winner_team != favored:
+                tags.append(f"UPSET ({favored} favored by {spread_mag})")
             else:
-                tags.append(f"Spread: {favored} -{margin}")
+                tags.append(f"Spread: {favored} -{spread_mag}")
+
+        # Check for bad beat against undrafted team
+        if loser_drafted and not winner_drafted:
+            tags.append("BAD BEAT - Lost to Undrafted Team")
 
         tag_str = f" [{', '.join(tags)}]" if tags else ""
-        highlight_entry = f"* {score_text}{tag_str}\n"
+
+        # Format matchup header focusing on Wins Pool players
+        if h_drafted and a_drafted:
+            if result != 0:
+                header = f"* HEAD-TO-HEAD: {winner_player} ({winner_team}) def. {loser_player} ({loser_team}) -- {score_text}{tag_str}\n"
+            else:
+                header = f"* HEAD-TO-HEAD: {h_player} ({h_team}) tied {a_player} ({a_team}) -- {score_text}{tag_str}\n"
+        elif winner_drafted and not loser_drafted:
+            header = f"* MATCHUP: {winner_player} ({winner_team}) def. Undrafted ({loser_team}) -- {score_text}{tag_str}\n"
+        elif loser_drafted and not winner_drafted:
+            header = f"* MATCHUP: Undrafted ({winner_team}) def. {loser_player} ({loser_team}) -- {score_text}{tag_str}\n"
+        else:
+            header = f"* {score_text}{tag_str}\n"
+
+        highlight_entry = header
 
         h_norm = normalize_team_abbr(h_team)
         a_norm = normalize_team_abbr(a_team)
@@ -415,9 +575,53 @@ def extract_weekly_data(year, week):
         if headline:
             highlight_entry += f"  - Storyline: {headline}\n"
 
-        leaders = espn_game.get("leaders", [])
-        if leaders:
-            highlight_entry += f"  - Stat Leaders: {', '.join(leaders)}\n"
+        # Key stats (turnovers, total yards, red zone)
+        team_stats = espn_game.get("team_stats", {})
+        if team_stats:
+            stat_parts = []
+            to_parts = []
+            for t in (winner_team, loser_team):
+                t_n = normalize_team_abbr(t)
+                if t_n in team_stats and "turnovers" in team_stats[t_n]:
+                    to_parts.append(f"{t} {team_stats[t_n]['turnovers']}")
+            if to_parts:
+                stat_parts.append(f"Turnovers: {', '.join(to_parts)}")
+
+            yd_parts = []
+            for t in (winner_team, loser_team):
+                t_n = normalize_team_abbr(t)
+                if t_n in team_stats and "totalYards" in team_stats[t_n]:
+                    yd_parts.append(f"{t} {team_stats[t_n]['totalYards']}")
+            if yd_parts:
+                stat_parts.append(f"Total Yards: {', '.join(yd_parts)}")
+
+            rz_parts = []
+            for t in (winner_team, loser_team):
+                t_n = normalize_team_abbr(t)
+                if t_n in team_stats and "redZoneAttempts" in team_stats[t_n]:
+                    rz_parts.append(f"{t} {team_stats[t_n]['redZoneAttempts']}")
+            if rz_parts:
+                stat_parts.append(f"Red Zone: {', '.join(rz_parts)}")
+
+            if stat_parts:
+                highlight_entry += f"  - Key Stats: {' | '.join(stat_parts)}\n"
+
+        # Decisive play for close games (margin <= 8 or overtime)
+        decisive_play = espn_game.get("decisive_play")
+        if decisive_play and (margin <= 8 or bool(row.get('overtime'))):
+            highlight_entry += f"  - Decisive Play: {decisive_play}\n"
+
+        # Leaders: prefer team-by-team leaders; fallback to scoreboard combined leaders
+        leaders_by_team = espn_game.get("leaders_by_team", {})
+        if leaders_by_team:
+            for t in (winner_team, loser_team):
+                t_n = normalize_team_abbr(t)
+                if t_n in leaders_by_team and leaders_by_team[t_n]:
+                    highlight_entry += f"  - {t} Leaders: {', '.join(leaders_by_team[t_n])}\n"
+        else:
+            leaders = espn_game.get("leaders", [])
+            if leaders:
+                highlight_entry += f"  - Stat Leaders: {', '.join(leaders)}\n"
 
         game_highlights.append(highlight_entry)
 
@@ -425,6 +629,7 @@ def extract_weekly_data(year, week):
         data_summary += f"WEEK {week} GAME HIGHLIGHTS & KEY CONTEXT:\n"
         data_summary += "".join(game_highlights)
         data_summary += "\n"
+
 
     for pid in included_pids:
         name = pid_to_name[pid]

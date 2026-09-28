@@ -548,3 +548,223 @@ def test_extract_weekly_data_highlights_non_upset_and_no_espn(mock_load_data, sa
         assert "Division Rivalry" not in data_summary
         assert "Overtime" not in data_summary
 
+
+def test_fetch_weekly_espn_data_parses_summaries_and_stats():
+    from services.recap_service import fetch_weekly_espn_data
+    fake_scoreboard = {
+        "events": [
+            {
+                "id": "12345",
+                "competitions": [
+                    {
+                        "competitors": [
+                            {"id": "2", "homeAway": "home", "team": {"id": "2", "abbreviation": "BUF"}},
+                            {"id": "12", "homeAway": "away", "team": {"id": "12", "abbreviation": "KC"}},
+                        ],
+                        "leaders": [],
+                        "headlines": [{"description": "Bills outlast Chiefs in thriller."}],
+                    }
+                ]
+            }
+        ]
+    }
+
+    fake_summary = {
+        "leaders": [
+            {
+                "team": {"abbreviation": "BUF"},
+                "leaders": [
+                    {"name": "passingYards", "leaders": [{"athlete": {"displayName": "Josh Allen"}, "displayValue": "260 YDS, 2 TD"}]},
+                    {"name": "rushingYards", "leaders": [{"athlete": {"displayName": "James Cook"}, "displayValue": "18 CAR, 85 YDS"}]},
+                ]
+            },
+            {
+                "team": {"abbreviation": "KC"},
+                "leaders": [
+                    {"name": "passingYards", "leaders": [{"athlete": {"displayName": "Patrick Mahomes"}, "displayValue": "275 YDS, 1 TD"}]},
+                    {"name": "receivingYards", "leaders": [{"athlete": {"displayName": "Travis Kelce"}, "displayValue": "8 REC, 90 YDS"}]},
+                ]
+            }
+        ],
+        "boxscore": {
+            "teams": [
+                {
+                    "team": {"abbreviation": "BUF"},
+                    "statistics": [
+                        {"name": "turnovers", "displayValue": "0"},
+                        {"name": "totalYards", "displayValue": "385"},
+                        {"name": "redZoneAttempts", "displayValue": "3-4"},
+                    ]
+                },
+                {
+                    "team": {"abbreviation": "KC"},
+                    "statistics": [
+                        {"name": "turnovers", "displayValue": "2"},
+                        {"name": "totalYards", "displayValue": "340"},
+                        {"name": "redZoneAttempts", "displayValue": "1-3"},
+                    ]
+                }
+            ]
+        },
+        "scoringPlays": [
+            {
+                "text": "Tyler Bass 32 Yd Field Goal",
+                "period": {"number": 4},
+                "clock": {"displayValue": "0:02"}
+            }
+        ]
+    }
+
+    def mock_get(url, timeout=5):
+        class MockResp:
+            ok = True
+            def json(self):
+                if "summary?event=" in url:
+                    return fake_summary
+                return fake_scoreboard
+        return MockResp()
+
+    with patch("requests.get", side_effect=mock_get):
+        res = fetch_weekly_espn_data(2024, 1)
+
+        assert ("BUF", "KC") in res
+        game = res[("BUF", "KC")]
+        assert game["headline"] == "Bills outlast Chiefs in thriller."
+        assert "BUF" in game["leaders_by_team"]
+        assert "KC" in game["leaders_by_team"]
+        assert "Josh Allen: 260 YDS, 2 TD" in game["leaders_by_team"]["BUF"]
+        assert "Travis Kelce: 8 REC, 90 YDS" in game["leaders_by_team"]["KC"]
+        assert game["team_stats"]["BUF"]["turnovers"] == "0"
+        assert game["team_stats"]["KC"]["turnovers"] == "2"
+        assert game["team_stats"]["BUF"]["totalYards"] == "385"
+        assert game["team_stats"]["KC"]["redZoneAttempts"] == "1-3"
+        assert game["decisive_play"] == "Tyler Bass 32 Yd Field Goal (Q4 0:02)"
+
+
+@patch("services.recap_service.load_data")
+def test_extract_weekly_data_head_to_head_clash_and_enriched_stats(mock_load_data, sample_games_df):
+    mock_load_data.return_value = (
+        pd.DataFrame(), pd.DataFrame(), sample_games_df,
+        pd.DataFrame([
+            {"playerId": 1, "fullName": "Alice", "nickName": "Alice", "email": "a@x.com"},
+            {"playerId": 2, "fullName": "Bob", "nickName": "Bob", "email": "b@x.com"},
+        ]),
+        pd.DataFrame(),
+        pd.DataFrame([
+            {"season": 2024, "team": "BUF", "playerId": 1},
+            {"season": 2024, "team": "MIA", "playerId": 2},
+        ]),
+        pd.DataFrame()
+    )
+
+    fake_espn = {
+        ("BUF", "MIA"): {
+            "headline": "Bills edge Dolphins in fourth-quarter shootout.",
+            "leaders": [],
+            "leaders_by_team": {
+                "BUF": ["Josh Allen: 250 YDS, 2 TD", "James Cook: 18 CAR, 80 YDS"],
+                "MIA": ["Tua Tagovailoa: 230 YDS, 1 TD", "Tyreek Hill: 7 REC, 95 YDS"],
+            },
+            "team_stats": {
+                "BUF": {"turnovers": 1, "totalYards": "370", "redZoneAttempts": "3-4"},
+                "MIA": {"turnovers": 2, "totalYards": "320", "redZoneAttempts": "2-3"},
+            },
+            "decisive_play": "Josh Allen 5 Yd run (Q4 1:15)"
+        }
+    }
+
+    with patch("services.recap_service.get_enriched_schedule") as mock_enriched, \
+         patch("services.recap_service.fetch_weekly_espn_data", return_value=fake_espn), \
+         patch("services.recap_service.get_quarter_scores_season", return_value=[]):
+
+        mock_enriched.return_value = pd.DataFrame([
+            {
+                "week": 1,
+                "home_team": "BUF", "away_team": "MIA",
+                "home_score": 28, "away_score": 24, "result": 4,
+                "playerId": 2, "playerId_home_draft": 1,
+                "fullName_home": "Alice", "fullName_away": "Bob",
+                "div_game": 1,
+                "spread_line": -2.5,
+                "overtime": 0,
+            }
+        ])
+
+        data_summary, emails = extract_weekly_data(2024, 1)
+
+        # Check Head-to-Head framing with pool members
+        assert "* HEAD-TO-HEAD: Alice (BUF) def. Bob (MIA) -- BUF 28, MIA 24" in data_summary
+        # Check Storyline
+        assert "Bills edge Dolphins in fourth-quarter shootout." in data_summary
+        # Check Key Stats line
+        assert "Turnovers: BUF 1, MIA 2" in data_summary
+        assert "Total Yards: BUF 370, MIA 320" in data_summary
+        assert "Red Zone: BUF 3-4, MIA 2-3" in data_summary
+        # Check Decisive Play
+        assert "Decisive Play: Josh Allen 5 Yd run (Q4 1:15)" in data_summary
+        # Check Team-by-team Leaders
+        assert "BUF Leaders: Josh Allen: 250 YDS, 2 TD, James Cook: 18 CAR, 80 YDS" in data_summary
+        assert "MIA Leaders: Tua Tagovailoa: 230 YDS, 1 TD, Tyreek Hill: 7 REC, 95 YDS" in data_summary
+
+
+@patch("services.recap_service.load_data")
+def test_extract_weekly_data_standings_movement_in_week_two(mock_load_data, sample_games_df):
+    mock_load_data.return_value = (
+        pd.DataFrame(), pd.DataFrame(), sample_games_df,
+        pd.DataFrame([
+            {"playerId": 1, "fullName": "Alice", "nickName": "Alice", "email": "a@x.com"},
+            {"playerId": 2, "fullName": "Bob", "nickName": "Bob", "email": "b@x.com"},
+        ]),
+        pd.DataFrame(),
+        pd.DataFrame([
+            {"season": 2024, "team": "BUF", "playerId": 1},
+            {"season": 2024, "team": "MIA", "playerId": 2},
+        ]),
+        pd.DataFrame()
+    )
+
+    with patch("services.recap_service.get_enriched_schedule") as mock_enriched, \
+         patch("services.recap_service.fetch_weekly_espn_data", return_value={}), \
+         patch("services.recap_service.get_quarter_scores_season", return_value=[]):
+
+        # Week 1: Bob won (MIA), Alice lost (BUF) -> Bob was #1 (1 win), Alice #2 (0 wins)
+        # Week 2: Alice wins (BUF) twice, Bob loses (MIA) -> Alice has 2 wins, Bob has 1 win
+        mock_enriched.return_value = pd.DataFrame([
+            {
+                "week": 1,
+                "home_team": "MIA", "away_team": "JAX",
+                "home_score": 20, "away_score": 17, "result": 3,
+                "playerId": None, "playerId_home_draft": 2,
+                "fullName_home": "Bob", "fullName_away": None,
+            },
+            {
+                "week": 1,
+                "home_team": "BUF", "away_team": "ARI",
+                "home_score": 17, "away_score": 24, "result": -7,
+                "playerId": None, "playerId_home_draft": 1,
+                "fullName_home": "Alice", "fullName_away": None,
+            },
+            {
+                "week": 2,
+                "home_team": "BUF", "away_team": "MIA",
+                "home_score": 31, "away_score": 10, "result": 21,
+                "playerId": 2, "playerId_home_draft": 1,
+                "fullName_home": "Alice", "fullName_away": "Bob",
+            },
+            {
+                "week": 2,
+                "home_team": "BUF", "away_team": "TEN",
+                "home_score": 24, "away_score": 13, "result": 11,
+                "playerId": None, "playerId_home_draft": 1,
+                "fullName_home": "Alice", "fullName_away": None,
+            },
+        ])
+
+        data_summary, emails = extract_weekly_data(2024, 2)
+
+        # Alice climbed from #2 to #1 (+2 this week)
+        assert "1. Alice - 2 wins (+2 this week, climbed from #2)" in data_summary
+        # Bob slipped from #1 to #2 (+0 this week)
+        assert "2. Bob - 1 wins (+0 this week, slipped from #1)" in data_summary
+
+
