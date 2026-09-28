@@ -1,5 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{{ analytics.player.fullName }} — Player Profile — WinsPool{% endblock %}
+{% block head %}
+<meta property="og:site_name" content="WinsPool">
+<meta property="og:type" content="profile">
+<meta property="og:title" content="{{ analytics.player.fullName }} — Player Profile — WinsPool">
+<meta property="og:description" content="{{ analytics.career.totalWins }} Total Wins · {{ analytics.career.seasons }} Seasons · {% if analytics.career.championships > 0 %}{{ analytics.career.championships }}x Champion · {% endif %}{% if analytics.career.bestFinish %}Best Finish #{{ analytics.career.bestFinish.rank }} ({{ analytics.career.bestFinish.year }}){% else %}Career Stats{% endif %}">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="{{ analytics.player.fullName }} — Player Profile — WinsPool">
+<meta name="twitter:description" content="{{ analytics.career.totalWins }} Total Wins · {{ analytics.career.seasons }} Seasons · {% if analytics.career.championships > 0 %}{{ analytics.career.championships }}x Champion · {% endif %}{% if analytics.career.bestFinish %}Best Finish #{{ analytics.career.bestFinish.rank }} ({{ analytics.career.bestFinish.year }}){% else %}Career Stats{% endif %}">
+{% endblock %}
 {% block content %}
 
 {# Inline analytics data for player_profile.js #}
@@ -20,6 +29,12 @@
       <div>
         <div class="eyebrow">Player Profile</div>
         <h1 class="wp-h1">{{ analytics.player.fullName }}</h1>
+      </div>
+      <div class="wp-top-right">
+        <button type="button" id="share-card-btn" class="share-card-btn" title="Share player card" aria-label="Share player card">
+          <i data-lucide="share-2" style="width:15px; height:15px;"></i>
+          <span id="share-card-btn-text">Share Card</span>
+        </button>
       </div>
     </header>
 
@@ -268,6 +283,29 @@
     input:checked+.slider:before { transform: translateX(26px); }
     .slider.round { border-radius: 24px; }
     .slider.round:before { border-radius: 50%; }
+
+    .share-card-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      border: 1px solid var(--glass-border);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 150ms ease, border-color 150ms ease;
+    }
+    .share-card-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.28);
+    }
+    .share-card-btn:active {
+      transform: scale(0.98);
+    }
 </style>
 
 <script src="{{ static_url('js/player_profile.js') }}"></script>
@@ -276,6 +314,40 @@
     const pagePlayerId = document.getElementById('player-page').dataset.playerId;
     const myPlayerId = localStorage.getItem('nfl_wins_my_player_id');
     const isOwnPage = !!myPlayerId && myPlayerId !== 'null' && String(myPlayerId) === String(pagePlayerId);
+
+    // Share Card button: uses Web Share API when supported, clipboard fallback otherwise.
+    const shareBtn = document.getElementById('share-card-btn');
+    if (shareBtn) {
+      shareBtn.addEventListener('click', async () => {
+        const shareData = {
+          title: document.title,
+          text: '{{ analytics.player.fullName }} WinsPool Career Card ({{ analytics.career.totalWins }} Wins)',
+          url: window.location.href,
+        };
+        const textSpan = document.getElementById('share-card-btn-text');
+        try {
+          if (navigator.share && navigator.canShare && navigator.canShare(shareData)) {
+            await navigator.share(shareData);
+            return;
+          }
+        } catch (err) {
+          if (err.name === 'AbortError') return; // User cancelled share dialog
+        }
+
+        try {
+          await navigator.clipboard.writeText(window.location.href);
+          if (textSpan) {
+            const originalText = textSpan.textContent;
+            textSpan.textContent = 'Link Copied!';
+            setTimeout(() => {
+              textSpan.textContent = originalText;
+            }, 2000);
+          }
+        } catch (err) {
+          window.prompt('Copy this link to share:', window.location.href);
+        }
+      });
+    }
 
     // Season Outlook card: isolated so a failure never affects the rest of the page.
     (async () => { try {

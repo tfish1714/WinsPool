@@ -63,6 +63,26 @@ class TestPlayerPage:
     def test_unknown_player_404(self):
         assert _get("/player/999").status_code == 404
 
+    def test_opengraph_meta_tags_rendered_with_player_stats(self):
+        html = _get("/player/1").text
+        assert '<meta property="og:site_name" content="WinsPool">' in html
+        assert '<meta property="og:type" content="profile">' in html
+        assert '<meta property="og:title" content="Alice Smith — Player Profile — WinsPool">' in html
+        assert 'property="og:description"' in html
+        assert 'Total Wins' in html
+        assert '<meta name="twitter:card" content="summary">' in html
+
+        # Also test zeroed career edge case
+        html_zero = _get("/player/2").text
+        assert '<meta property="og:title" content="Bob Jones — Player Profile — WinsPool">' in html_zero
+        assert '0 Total Wins · 0 Seasons' in html_zero
+
+    def test_share_card_button_rendered(self):
+        html = _get("/player/1").text
+        assert 'id="share-card-btn"' in html
+        assert 'Share Card' in html
+        assert 'data-lucide="share-2"' in html
+
     def test_first_place_season_gets_gold_badge_second_place_gets_muted_badge(self):
         """Two completed seasons: player 1 finishes 1st in 2021, 2nd in 2022."""
         standings = pd.DataFrame([
