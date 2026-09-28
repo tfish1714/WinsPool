@@ -3008,6 +3008,14 @@ table.wp-data-table tbody td:last-child {
     padding-left: 1.5rem;
     border-left: 1px solid var(--glass-border);
     min-width: 80px;
+    /* Fixed width (not content-sized) so the score column, which sits at the
+       right edge of .game-teams, lands at the same x on every card. */
+    flex: 0 0 13.75rem;
+    box-sizing: border-box;
+}
+
+.game-info-aside .game-odds {
+    align-self: stretch;
 }
 
 .game-status-label {
@@ -3148,6 +3156,7 @@ table.wp-data-table tbody td:last-child {
     .game-info-aside {
         min-width: 60px;
         padding-left: 1rem;
+        flex-basis: 9.5rem;
     }
 }
 
@@ -3656,6 +3665,7 @@ table.wp-data-table tbody td:last-child {
     .game-info-aside {
         min-width: 56px;
         padding-left: 0.75rem;
+        flex-basis: 7.75rem;
     }
 
     /* Recap */
