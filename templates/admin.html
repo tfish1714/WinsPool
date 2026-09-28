@@ -314,13 +314,13 @@
                     <label
                         style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">Season
                         Year</label>
-                    <input type="number" id="recap-year" class="admin-input" value="2025" min="2024" max="2100">
+                    <input type="number" id="recap-year" class="admin-input" value="{{ default_year or 2026 }}" min="2024" max="2100">
                 </div>
                 <div style="flex: 1;">
                     <label
                         style="display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px;">NFL
                         Week</label>
-                    <input type="number" id="recap-week" class="admin-input" placeholder="Week #" min="1" max="22">
+                    <input type="number" id="recap-week" class="admin-input" placeholder="Week #" value="{{ default_week or '' }}" min="1" max="22">
                 </div>
             </div>
 

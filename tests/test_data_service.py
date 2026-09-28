@@ -537,3 +537,40 @@ def test_static_bucket_does_not_refetch_purely_because_an_hour_passed(monkeypatc
         data_service._get_static_bucket()
         mock_fetch.assert_not_called()
     cs.clear_data_cache()
+
+
+def test_get_most_recent_completed_week():
+    from services.data_service import get_most_recent_completed_week
+
+    # 1. Multiple fully completed weeks -> returns highest fully completed
+    df_full = pd.DataFrame([
+        {"season": 2024, "week": 1, "game_type": "REG", "result": 7},
+        {"season": 2024, "week": 1, "game_type": "REG", "result": -3},
+        {"season": 2024, "week": 2, "game_type": "REG", "result": 14},
+        {"season": 2024, "week": 2, "game_type": "REG", "result": 3},
+    ])
+    assert get_most_recent_completed_week(df_full, 2024) == 2
+
+    # 2. Week 1 fully completed, Week 2 partially completed (live/in-progress)
+    df_partial = pd.DataFrame([
+        {"season": 2024, "week": 1, "game_type": "REG", "result": 7},
+        {"season": 2024, "week": 1, "game_type": "REG", "result": -3},
+        {"season": 2024, "week": 2, "game_type": "REG", "result": 14},
+        {"season": 2024, "week": 2, "game_type": "REG", "result": None},
+    ])
+    assert get_most_recent_completed_week(df_partial, 2024) == 1
+
+    # 3. Only week 1 partially completed (season just kicked off, Thursday game done)
+    df_week1_partial = pd.DataFrame([
+        {"season": 2024, "week": 1, "game_type": "REG", "result": 7},
+        {"season": 2024, "week": 1, "game_type": "REG", "result": None},
+    ])
+    assert get_most_recent_completed_week(df_week1_partial, 2024) == 1
+
+    # 4. No games completed yet
+    df_unplayed = pd.DataFrame([
+        {"season": 2024, "week": 1, "game_type": "REG", "result": None},
+    ])
+    assert get_most_recent_completed_week(df_unplayed, 2024) is None
+    assert get_most_recent_completed_week(pd.DataFrame(), 2024) is None
+

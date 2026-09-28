@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 
 from services.data_service import (
     load_data, get_available_years, get_draft_years, get_active_season,
+    get_most_recent_completed_week,
 )
 from services.draft_service import load_draft_state, save_pick, undo_pick, reset_pick, strip_admin_only_fields
 from services.db_service import get_collection_df, add_draft_order, add_draft_rule, get_config_settings, get_player_by_id
@@ -111,7 +112,13 @@ async def draft_results_redirect():
 
 @router.get("/admin")
 async def serve_admin(request: Request):
-    return templates.TemplateResponse(request, "admin.html")
+    _, _, games, _, _, draft_results, rules = load_data()
+    default_year = get_active_season(games, draft_results, rules)
+    default_week = get_most_recent_completed_week(games, default_year)
+    return templates.TemplateResponse(request, "admin.html", {
+        "default_year": default_year,
+        "default_week": default_week,
+    })
 
 
 # ─── Draft History ────────────────────────────────────────────────────────────

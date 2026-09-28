@@ -409,6 +409,42 @@ def get_latest_week_for_year(games: pd.DataFrame, year: int) -> int:
     # All weeks are fully complete — return highest completed week
     return int(week_stats['week'].max())
 
+def get_most_recent_completed_week(games: pd.DataFrame, year: int) -> int | None:
+    """Return the most recent completed NFL week for a given year.
+
+    Prefers the highest week where all regular season games are completed.
+    If games are in progress and no week has fully completed yet, falls back
+    to the highest week with any completed game.
+    Returns None if no games have completed in the season.
+    """
+    if games.empty or 'week' not in games.columns:
+        return None
+    reg_games = games[(games['season'] == year) & (games.get('game_type', 'REG') == 'REG')] if 'game_type' in games.columns else games[games['season'] == year]
+    if reg_games.empty:
+        return None
+
+    def completed(r):
+        return r.notna() & (r != UNDRAFTED_SENTINEL)
+
+    week_stats = (
+        reg_games.groupby('week')
+        .apply(lambda g: pd.Series({
+            'total': len(g),
+            'done': completed(g['result']).sum()
+        }), include_groups=False)
+        .reset_index()
+    )
+
+    fully_done = week_stats[(week_stats['done'] > 0) & (week_stats['done'] == week_stats['total'])]
+    if not fully_done.empty:
+        return int(fully_done['week'].max())
+
+    partially_done = week_stats[week_stats['done'] > 0]
+    if not partially_done.empty:
+        return int(partially_done['week'].max())
+
+    return None
+
 def get_latest_season_and_week(games: pd.DataFrame) -> Tuple[int, int]:
     """Determines the latest regular season week available in the data."""
     if games.empty:

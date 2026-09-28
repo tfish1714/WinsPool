@@ -1,4 +1,6 @@
+import logging
 import math
+import requests
 import pandas as pd
 from services.constants import UNDRAFTED_SENTINEL
 from services.data_service import load_data, get_season_projection_blended
@@ -6,6 +8,69 @@ from services.analysis_service import get_enriched_schedule, compute_team_record
 from services.ai_service import generate_weekly_summary, get_recap_prompt
 from services.db_service import save_weekly_recap
 from services.cache_service import get_quarter_scores_season
+from services.utils import normalize_team_abbr
+
+logger = logging.getLogger(__name__)
+
+
+def fetch_weekly_espn_data(year: int, week: int) -> dict[tuple[str, str], dict]:
+    """Fetch stat leaders and storylines for all games in a specific week from ESPN scoreboard API.
+
+    Returns mapping of (home_team, away_team) -> {
+        "leaders": [str],  # e.g. ["Josh Allen: 240 YDS, 2 TD", ...]
+        "headline": str | None,
+    }
+    Team abbreviations are normalized to match nflverse canonical codes.
+    Fails open (returns {}) on any network error, timeout, or missing data.
+    """
+    url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates={year}&seasontype=2&week={week}"
+    try:
+        resp = requests.get(url, timeout=10)
+        if not resp.ok:
+            return {}
+        data = resp.json()
+    except Exception as e:
+        logger.warning("Failed to fetch ESPN weekly data for %s week %s: %s", year, week, e)
+        return {}
+
+    out = {}
+    for event in data.get("events", []):
+        competitions = event.get("competitions", [{}])[0]
+        competitors = competitions.get("competitors", [])
+
+        home_abbr, away_abbr = None, None
+        for c in competitors:
+            raw_abbr = c.get("team", {}).get("abbreviation")
+            if not raw_abbr:
+                continue
+            normalized = normalize_team_abbr(raw_abbr)
+            if c.get("homeAway") == "home":
+                home_abbr = normalized
+            elif c.get("homeAway") == "away":
+                away_abbr = normalized
+
+        if not home_abbr or not away_abbr:
+            continue
+
+        leaders_list = []
+        for l in competitions.get("leaders", []):
+            for athlete in l.get("leaders", []):
+                name = athlete.get("athlete", {}).get("displayName")
+                stat = athlete.get("displayValue")
+                if name and stat:
+                    leaders_list.append(f"{name}: {stat}")
+
+        headlines = competitions.get("headlines", [])
+        headline_desc = headlines[0].get("description") if headlines else None
+        if headline_desc:
+            headline_desc = headline_desc.replace("\ufffd", "").strip()
+
+        out[(home_abbr, away_abbr)] = {
+            "leaders": leaders_list,
+            "headline": headline_desc or None,
+        }
+
+    return out
 
 # Checkpoint labels for the comeback-win narrative line, keyed by which
 # cumulative quarter checkpoint produced the winner's largest deficit.
@@ -272,6 +337,66 @@ def extract_weekly_data(year, week):
         data_summary += f"SEASON STANDINGS (THROUGH WEEK {week}):\n"
         for rank, (name, wins) in enumerate(standings_entries, start=1):
             data_summary += f" {rank}. {name} - {wins} wins\n"
+        data_summary += "\n"
+
+    # Weekly Game Highlights & Key Context (scores, upsets, rivalry tags, stat leaders, storylines)
+    # Provides Gemini rich narrative context to explain game outcomes beyond just final scores.
+    game_highlights = []
+    espn_data = fetch_weekly_espn_data(year, week)
+    for _, row in weekly_games.iterrows():
+        if row['result'] == UNDRAFTED_SENTINEL or pd.isna(row['result']):
+            continue
+        h_team = row['home_team']
+        a_team = row['away_team']
+        h_score = int(row['home_score']) if pd.notna(row.get('home_score')) else 0
+        a_score = int(row['away_score']) if pd.notna(row.get('away_score')) else 0
+        result = row['result']
+
+        if result > 0:
+            score_text = f"{h_team} {h_score}, {a_team} {a_score}"
+            winner, loser = h_team, a_team
+        elif result < 0:
+            score_text = f"{a_team} {a_score}, {h_team} {h_score}"
+            winner, loser = a_team, h_team
+        else:
+            score_text = f"{h_team} {h_score}, {a_team} {a_score} (Tie)"
+            winner, loser = None, None
+
+        tags = []
+        if bool(row.get('div_game')):
+            tags.append("Division Rivalry")
+        if bool(row.get('overtime')):
+            tags.append("Overtime")
+
+        spread = row.get('spread_line')
+        if pd.notna(spread) and spread != 0:
+            favored = h_team if spread > 0 else a_team
+            margin = abs(spread)
+            if winner and winner != favored:
+                tags.append(f"UPSET ({favored} favored by {margin})")
+            else:
+                tags.append(f"Spread: {favored} -{margin}")
+
+        tag_str = f" [{', '.join(tags)}]" if tags else ""
+        highlight_entry = f"* {score_text}{tag_str}\n"
+
+        h_norm = normalize_team_abbr(h_team)
+        a_norm = normalize_team_abbr(a_team)
+        espn_game = espn_data.get((h_norm, a_norm)) or espn_data.get((h_team, a_team)) or {}
+
+        headline = espn_game.get("headline")
+        if headline:
+            highlight_entry += f"  - Storyline: {headline}\n"
+
+        leaders = espn_game.get("leaders", [])
+        if leaders:
+            highlight_entry += f"  - Stat Leaders: {', '.join(leaders)}\n"
+
+        game_highlights.append(highlight_entry)
+
+    if game_highlights:
+        data_summary += f"WEEK {week} GAME HIGHLIGHTS & KEY CONTEXT:\n"
+        data_summary += "".join(game_highlights)
         data_summary += "\n"
 
     for pid in included_pids:

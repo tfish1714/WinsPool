@@ -1080,3 +1080,26 @@ def test_predictions_games_route_has_no_iterrows():
     import inspect
     import routes.admin_routes as admin_routes
     assert "iterrows" not in inspect.getsource(admin_routes.get_predictions_games)
+
+
+def test_serve_admin_defaults_recap_year_and_week(monkeypatch):
+    import routes.draft_routes as draft_routes
+    games = pd.DataFrame([
+        {"season": 2024, "week": 1, "game_type": "REG", "result": 7},
+        {"season": 2024, "week": 2, "game_type": "REG", "result": 10},
+    ])
+    draft_results = pd.DataFrame([{"season": 2024, "team": "KC", "playerId": 1}])
+    rules = pd.DataFrame([{"season": 2024, "playerId": 1}])
+
+    monkeypatch.setattr(draft_routes, "load_data", lambda *a, **k: (None, None, games, None, None, draft_results, rules))
+    monkeypatch.setattr(draft_routes, "get_active_season", lambda *a, **k: 2024)
+    monkeypatch.setattr(draft_routes, "get_most_recent_completed_week", lambda g, y: 2)
+
+    resp = client.get("/admin")
+    assert resp.status_code == 200
+    html = resp.text
+    assert 'id="recap-year"' in html
+    assert 'value="2024"' in html
+    assert 'id="recap-week"' in html
+    assert 'value="2"' in html
+

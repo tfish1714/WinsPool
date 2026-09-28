@@ -410,3 +410,141 @@ def test_extract_weekly_data_handles_future_weeks():
             data_summary, emails = extract_weekly_data(2024, 18)
             assert data_summary is None
             assert len(emails) == 0
+
+
+def test_fetch_weekly_espn_data_parses_leaders_and_headlines():
+    from services.recap_service import fetch_weekly_espn_data
+    fake_espn_json = {
+        "events": [
+            {
+                "competitions": [
+                    {
+                        "competitors": [
+                            {"homeAway": "home", "team": {"abbreviation": "BUF"}, "score": "31"},
+                            {"homeAway": "away", "team": {"abbreviation": "LAR"}, "score": "10"},
+                        ],
+                        "leaders": [
+                            {
+                                "displayName": "Passing Leader",
+                                "leaders": [
+                                    {"athlete": {"displayName": "Josh Allen"}, "displayValue": "240 YDS, 2 TD"}
+                                ]
+                            },
+                            {
+                                "displayName": "Rushing Leader",
+                                "leaders": [
+                                    {"athlete": {"displayName": "James Cook"}, "displayValue": "15 CAR, 110 YDS"}
+                                ]
+                            }
+                        ],
+                        "headlines": [
+                            {"description": "Bills dominate Rams in home opener with balanced attack."}
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+
+    with patch("requests.get") as mock_get:
+        mock_get.return_value.ok = True
+        mock_get.return_value.json.return_value = fake_espn_json
+
+        res = fetch_weekly_espn_data(2024, 1)
+
+        # LAR normalized to LA, home team BUF
+        assert ("BUF", "LA") in res
+        entry = res[("BUF", "LA")]
+        assert len(entry["leaders"]) == 2
+        assert "Josh Allen: 240 YDS, 2 TD" in entry["leaders"][0]
+        assert "Bills dominate Rams" in entry["headline"]
+
+
+def test_fetch_weekly_espn_data_handles_error():
+    from services.recap_service import fetch_weekly_espn_data
+    with patch("requests.get", side_effect=Exception("ESPN API down")):
+        res = fetch_weekly_espn_data(2024, 1)
+        assert res == {}
+
+
+@patch("services.recap_service.load_data")
+def test_extract_weekly_data_includes_game_highlights_and_context(mock_load_data, sample_games_df):
+    mock_load_data.return_value = (
+        pd.DataFrame(), pd.DataFrame(), sample_games_df,
+        pd.DataFrame([{"playerId": 1, "fullName": "Alice", "nickName": "Alice", "email": "a@x.com"}]),
+        pd.DataFrame(),
+        pd.DataFrame([{"season": 2024, "team": "BUF", "playerId": 1}]),
+        pd.DataFrame()
+    )
+
+    with patch("services.recap_service.get_enriched_schedule") as mock_enriched, \
+         patch("services.recap_service.fetch_weekly_espn_data") as mock_espn, \
+         patch("services.recap_service.get_quarter_scores_season", return_value=[]):
+
+        mock_enriched.return_value = pd.DataFrame([
+            {
+                "week": 1,
+                "home_team": "BUF", "away_team": "MIA",
+                "home_score": 24, "away_score": 21, "result": 3,
+                "playerId": None, "playerId_home_draft": 1,
+                "fullName_home": "Alice", "fullName_away": None,
+                "div_game": 1,
+                "spread_line": -3.5, # MIA favored by 3.5, but BUF won -> UPSET
+                "overtime": 1,
+            }
+        ])
+
+        mock_espn.return_value = {
+            ("BUF", "MIA"): {
+                "leaders": ["Josh Allen: 280 YDS, 2 TD", "Tua Tagovailoa: 240 YDS, 1 TD, 2 INT"],
+                "headline": "Bills top Dolphins in overtime thriller."
+            }
+        }
+
+        data_summary, emails = extract_weekly_data(2024, 1)
+
+        assert "GAME HIGHLIGHTS & KEY CONTEXT:" in data_summary
+        assert "BUF 24, MIA 21" in data_summary
+        assert "Division Rivalry" in data_summary
+        assert "Overtime" in data_summary
+        assert "UPSET" in data_summary
+        assert "Josh Allen: 280 YDS, 2 TD" in data_summary
+        assert "Bills top Dolphins in overtime thriller." in data_summary
+
+
+@patch("services.recap_service.load_data")
+def test_extract_weekly_data_highlights_non_upset_and_no_espn(mock_load_data, sample_games_df):
+    mock_load_data.return_value = (
+        pd.DataFrame(), pd.DataFrame(), sample_games_df,
+        pd.DataFrame([{"playerId": 1, "fullName": "Alice", "nickName": "Alice", "email": "a@x.com"}]),
+        pd.DataFrame(),
+        pd.DataFrame([{"season": 2024, "team": "BUF", "playerId": 1}]),
+        pd.DataFrame()
+    )
+
+    with patch("services.recap_service.get_enriched_schedule") as mock_enriched, \
+         patch("services.recap_service.fetch_weekly_espn_data", return_value={}), \
+         patch("services.recap_service.get_quarter_scores_season", return_value=[]):
+
+        mock_enriched.return_value = pd.DataFrame([
+            {
+                "week": 1,
+                "home_team": "BUF", "away_team": "NYJ",
+                "home_score": 30, "away_score": 10, "result": 20,
+                "playerId": None, "playerId_home_draft": 1,
+                "fullName_home": "Alice", "fullName_away": None,
+                "div_game": 0,
+                "spread_line": 6.5,
+                "overtime": 0,
+            }
+        ])
+
+        data_summary, emails = extract_weekly_data(2024, 1)
+
+        assert "GAME HIGHLIGHTS & KEY CONTEXT:" in data_summary
+        assert "BUF 30, NYJ 10" in data_summary
+        assert "Spread: BUF -6.5" in data_summary
+        assert "UPSET" not in data_summary
+        assert "Division Rivalry" not in data_summary
+        assert "Overtime" not in data_summary
+
