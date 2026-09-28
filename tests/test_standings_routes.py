@@ -89,7 +89,7 @@ def _real_season_frames():
     return standings, empty, games, players, empty, draft, empty
 
 
-def _render_wins_pool(monkeypatch, real_analysis=False):
+def _render_wins_pool(monkeypatch, real_analysis=False, games_df=None):
     import routes.standings_routes as sr
     empty = pd.DataFrame()
     if real_analysis:
@@ -99,7 +99,7 @@ def _render_wins_pool(monkeypatch, real_analysis=False):
         monkeypatch.setattr(sr, "get_active_season", lambda *a, **k: YEAR)
         monkeypatch.setattr(sr.db, "get_weekly_recap", lambda *a, **k: None)
         return client.get(f"/wins-pool/{YEAR}")
-    games = pd.DataFrame([{"season": YEAR, "week": 5, "result": 1}])
+    games = games_df if games_df is not None else pd.DataFrame([{"season": YEAR, "week": 5, "result": 1}])
     monkeypatch.setattr(sr, "load_data", lambda *a, **k: (empty, empty, games, empty, empty, empty, empty))
     monkeypatch.setattr(sr, "filter_season", lambda df, year: df)
     monkeypatch.setattr(sr.analysis, "get_draft_progress", lambda *a, **k: (0, 0))
@@ -155,6 +155,28 @@ def test_completed_season_three_way_tie_renders_tied_not_eliminated(monkeypatch)
     assert resp.text.count("Tied (tiebreakers)") >= 3
     assert "Magic #: <strong>Eliminated</strong>" not in resp.text
     assert "Podium #: <strong>Eliminated</strong>" not in resp.text
+
+
+def test_wins_pool_page_hydrates_live_dot_server_side(monkeypatch):
+    """A team in an active live game must render with a visible dot in the raw
+    HTML (before any client-side poll runs), while a team not in a live game
+    keeps the `hidden` attribute -- across all three .live-dot renderings
+    (leader card, desktop rows, mobile stacked cards)."""
+    games = pd.DataFrame([
+        {"season": YEAR, "week": 6, "home_team": "BAL", "away_team": "NYJ",
+         "is_live": True, "result": None},
+    ])
+    html = _render_wins_pool(monkeypatch, games_df=games).text
+    # BAL (live): the dot for BAL's data-team block is not hidden.
+    assert '<span class="live-dot" data-role="live" ></span>' in html
+    # KC and SF (not live): their dots stay hidden.
+    assert html.count('<span class="live-dot" data-role="live" hidden></span>') >= 4
+
+
+def test_wins_pool_page_all_dots_hidden_with_no_live_games(monkeypatch):
+    html = _render_wins_pool(monkeypatch).text
+    assert '<span class="live-dot" data-role="live" ></span>' not in html
+    assert html.count('<span class="live-dot" data-role="live" hidden></span>') >= 6
 
 
 def test_wins_pool_by_year_computes_team_records_exactly_once(monkeypatch):
