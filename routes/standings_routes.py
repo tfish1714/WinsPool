@@ -16,6 +16,7 @@ from services.utils import abbreviate_player_name as _first_name, filter_season
 import services.db_service as db
 from services.session_service import decode_current_token
 import services.analysis_service as analysis
+from services.live_standings_service import _live_games_by_team
 
 logger = logging.getLogger(__name__)
 
@@ -101,9 +102,11 @@ async def wins_pool_by_year(request: Request, year: int):
         h2h_df = analysis.player_winlossmatrix(schedule_enriched)
 
         recap = db.get_weekly_recap(year, latest_week)
+        live_team_abbrs = set(_live_games_by_team(games).keys())
 
         return templates.TemplateResponse(request, "wins_pool.html", {
             "data": sorted_df.to_dict(orient="records"),
+            "live_team_abbrs": live_team_abbrs,
             "refreshTime": sorted_df["refreshTime"].iloc[0] if not sorted_df.empty and "refreshTime" in sorted_df.columns else "",
             "current_year": current_year,
             "year": year,

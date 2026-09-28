@@ -57,21 +57,21 @@
                     <div class="wp-leader-team" data-team="{{ leader['team1'] }}">
                         <img src="{{ get_team_logo(leader['team1']) }}" alt="{{ leader['team1'] }}">
                         <div class="wp-leader-team-info">
-                            <div class="wp-leader-team-name">{{ leader['team1'] }}<span class="live-dot" data-role="live" hidden></span></div>
+                            <div class="wp-leader-team-name">{{ leader['team1'] }}<span class="live-dot" data-role="live" {{ 'hidden' if leader['team1'] not in live_team_abbrs else '' }}></span></div>
                             <div class="wp-leader-team-stats"><span data-role="team-wins">{{ leader['wins1'] }}W</span> &nbsp;<span data-role="team-pd" class="{{ 'pos' if leader['ptDiff1'] >= 0 else 'neg' }}">{{ '+' if leader['ptDiff1'] >= 0 else '' }}{{ leader['ptDiff1'] }}</span></div>
                         </div>
                     </div>
                     <div class="wp-leader-team" data-team="{{ leader['team2'] }}">
                         <img src="{{ get_team_logo(leader['team2']) }}" alt="{{ leader['team2'] }}">
                         <div class="wp-leader-team-info">
-                            <div class="wp-leader-team-name">{{ leader['team2'] }}<span class="live-dot" data-role="live" hidden></span></div>
+                            <div class="wp-leader-team-name">{{ leader['team2'] }}<span class="live-dot" data-role="live" {{ 'hidden' if leader['team2'] not in live_team_abbrs else '' }}></span></div>
                             <div class="wp-leader-team-stats"><span data-role="team-wins">{{ leader['wins2'] }}W</span> &nbsp;<span data-role="team-pd" class="{{ 'pos' if leader['ptDiff2'] >= 0 else 'neg' }}">{{ '+' if leader['ptDiff2'] >= 0 else '' }}{{ leader['ptDiff2'] }}</span></div>
                         </div>
                     </div>
                     <div class="wp-leader-team" data-team="{{ leader['team3'] }}">
                         <img src="{{ get_team_logo(leader['team3']) }}" alt="{{ leader['team3'] }}">
                         <div class="wp-leader-team-info">
-                            <div class="wp-leader-team-name">{{ leader['team3'] }}<span class="live-dot" data-role="live" hidden></span></div>
+                            <div class="wp-leader-team-name">{{ leader['team3'] }}<span class="live-dot" data-role="live" {{ 'hidden' if leader['team3'] not in live_team_abbrs else '' }}></span></div>
                             <div class="wp-leader-team-stats"><span data-role="team-wins">{{ leader['wins3'] }}W</span> &nbsp;<span data-role="team-pd" class="{{ 'pos' if leader['ptDiff3'] >= 0 else 'neg' }}">{{ '+' if leader['ptDiff3'] >= 0 else '' }}{{ leader['ptDiff3'] }}</span></div>
                         </div>
                     </div>
@@ -111,21 +111,21 @@
                     <div class="wp-row-team" data-team="{{ row['team1'] }}">
                         <img src="{{ get_team_logo(row['team1']) }}" alt="{{ row['team1'] }}">
                         <div class="wp-row-team-info">
-                            <span class="wp-row-team-abbr">{{ row['team1'] }}<span class="live-dot" data-role="live" hidden></span></span>
+                            <span class="wp-row-team-abbr">{{ row['team1'] }}<span class="live-dot" data-role="live" {{ 'hidden' if row['team1'] not in live_team_abbrs else '' }}></span></span>
                             <span class="wp-row-team-stats"><span data-role="team-wins">{{ row['wins1'] }}W</span> · <span data-role="team-pd" class="{{ 'pos' if pd1 >= 0 else 'neg' }}">{{ '+' if pd1 >= 0 else '' }}{{ pd1 }}</span></span>
                         </div>
                     </div>
                     <div class="wp-row-team" data-team="{{ row['team2'] }}">
                         <img src="{{ get_team_logo(row['team2']) }}" alt="{{ row['team2'] }}">
                         <div class="wp-row-team-info">
-                            <span class="wp-row-team-abbr">{{ row['team2'] }}<span class="live-dot" data-role="live" hidden></span></span>
+                            <span class="wp-row-team-abbr">{{ row['team2'] }}<span class="live-dot" data-role="live" {{ 'hidden' if row['team2'] not in live_team_abbrs else '' }}></span></span>
                             <span class="wp-row-team-stats"><span data-role="team-wins">{{ row['wins2'] }}W</span> · <span data-role="team-pd" class="{{ 'pos' if pd2 >= 0 else 'neg' }}">{{ '+' if pd2 >= 0 else '' }}{{ pd2 }}</span></span>
                         </div>
                     </div>
                     <div class="wp-row-team" data-team="{{ row['team3'] }}">
                         <img src="{{ get_team_logo(row['team3']) }}" alt="{{ row['team3'] }}">
                         <div class="wp-row-team-info">
-                            <span class="wp-row-team-abbr">{{ row['team3'] }}<span class="live-dot" data-role="live" hidden></span></span>
+                            <span class="wp-row-team-abbr">{{ row['team3'] }}<span class="live-dot" data-role="live" {{ 'hidden' if row['team3'] not in live_team_abbrs else '' }}></span></span>
                             <span class="wp-row-team-stats"><span data-role="team-wins">{{ row['wins3'] }}W</span> · <span data-role="team-pd" class="{{ 'pos' if pd3 >= 0 else 'neg' }}">{{ '+' if pd3 >= 0 else '' }}{{ pd3 }}</span></span>
                         </div>
                     </div>
@@ -155,21 +155,21 @@
                     <div class="standings-stacked-card__team" data-team="{{ row['team1'] }}">
                         <img src="{{ get_team_logo(row['team1']) }}" alt="">
                         <div class="standings-stacked-card__team-info">
-                            <div class="standings-stacked-card__team-name">{{ row['team1'] }}<span class="live-dot" data-role="live" hidden></span></div>
+                            <div class="standings-stacked-card__team-name">{{ row['team1'] }}<span class="live-dot" data-role="live" {{ 'hidden' if row['team1'] not in live_team_abbrs else '' }}></span></div>
                             <div class="standings-stacked-card__team-stats"><span data-role="team-wins">{{ row['wins1'] }}W</span> · <span data-role="team-pd" class="{{ 'pos' if pd1 >= 0 else 'neg' }}">{{ '+' if pd1 >= 0 else '' }}{{ pd1 }}</span></div>
                         </div>
                     </div>
                     <div class="standings-stacked-card__team" data-team="{{ row['team2'] }}">
                         <img src="{{ get_team_logo(row['team2']) }}" alt="">
                         <div class="standings-stacked-card__team-info">
-                            <div class="standings-stacked-card__team-name">{{ row['team2'] }}<span class="live-dot" data-role="live" hidden></span></div>
+                            <div class="standings-stacked-card__team-name">{{ row['team2'] }}<span class="live-dot" data-role="live" {{ 'hidden' if row['team2'] not in live_team_abbrs else '' }}></span></div>
                             <div class="standings-stacked-card__team-stats"><span data-role="team-wins">{{ row['wins2'] }}W</span> · <span data-role="team-pd" class="{{ 'pos' if pd2 >= 0 else 'neg' }}">{{ '+' if pd2 >= 0 else '' }}{{ pd2 }}</span></div>
                         </div>
                     </div>
                     <div class="standings-stacked-card__team" data-team="{{ row['team3'] }}">
                         <img src="{{ get_team_logo(row['team3']) }}" alt="">
                         <div class="standings-stacked-card__team-info">
-                            <div class="standings-stacked-card__team-name">{{ row['team3'] }}<span class="live-dot" data-role="live" hidden></span></div>
+                            <div class="standings-stacked-card__team-name">{{ row['team3'] }}<span class="live-dot" data-role="live" {{ 'hidden' if row['team3'] not in live_team_abbrs else '' }}></span></div>
                             <div class="standings-stacked-card__team-stats"><span data-role="team-wins">{{ row['wins3'] }}W</span> · <span data-role="team-pd" class="{{ 'pos' if pd3 >= 0 else 'neg' }}">{{ '+' if pd3 >= 0 else '' }}{{ pd3 }}</span></div>
                         </div>
                     </div>
