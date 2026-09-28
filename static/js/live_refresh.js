@@ -70,6 +70,11 @@
     document.addEventListener('DOMContentLoaded', () => {
         const cfg = window.SCHEDULE_CONFIG;
         if (!cfg || !cfg.year) return;
+        poll(cfg.year); // don't wait a full interval for the first update
         setInterval(() => poll(cfg.year), POLL_INTERVAL_MS);
+        // Catch up right away when the tab becomes visible again.
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) poll(cfg.year);
+        });
     });
 }());

@@ -114,6 +114,7 @@
     document.addEventListener('DOMContentLoaded', function () {
         const cfg = window.STANDINGS_CONFIG;
         if (!cfg || !cfg.year) return;
+        poll(cfg.year); // don't wait a full interval for the first update
         setInterval(function () { poll(cfg.year); }, POLL_INTERVAL_MS);
         // Catch up right away when the tab becomes visible again.
         document.addEventListener('visibilitychange', function () {
