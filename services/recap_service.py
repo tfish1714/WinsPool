@@ -1,5 +1,6 @@
 import logging
 import math
+import re
 import requests
 import pandas as pd
 from services.constants import UNDRAFTED_SENTINEL
@@ -63,7 +64,19 @@ def fetch_weekly_espn_data(year: int, week: int) -> dict[tuple[str, str], dict]:
         headlines = competitions.get("headlines", [])
         headline_desc = headlines[0].get("description") if headlines else None
         if headline_desc:
-            headline_desc = headline_desc.replace("\ufffd", "").strip()
+            headline_desc = (
+                headline_desc
+                .replace("\u2019", "'")
+                .replace("\u2018", "'")
+                .replace("\u201c", '"')
+                .replace("\u201d", '"')
+                .replace("\u2014", "-")
+                .replace("\u2013", "-")
+                .replace("\ufffd", "")
+                .strip()
+                .lstrip("- ")
+                .strip()
+            )
 
         out[(home_abbr, away_abbr)] = {
             "leaders": leaders_list,
@@ -342,10 +355,16 @@ def extract_weekly_data(year, week):
     # Weekly Game Highlights & Key Context (scores, upsets, rivalry tags, stat leaders, storylines)
     # Provides Gemini rich narrative context to explain game outcomes beyond just final scores.
     game_highlights = []
+    seen_games = set()
     espn_data = fetch_weekly_espn_data(year, week)
     for _, row in weekly_games.iterrows():
         if row['result'] == UNDRAFTED_SENTINEL or pd.isna(row['result']):
             continue
+        game_key = (row['home_team'], row['away_team'])
+        if game_key in seen_games:
+            continue
+        seen_games.add(game_key)
+
         h_team = row['home_team']
         a_team = row['away_team']
         h_score = int(row['home_score']) if pd.notna(row.get('home_score')) else 0
