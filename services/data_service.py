@@ -28,8 +28,33 @@ def get_team_logo(team_code: str) -> str:
 
 from services.cache_service import clear_data_cache
 
+def _active_check_interval() -> float:
+    """How long check_remote_signals() should wait between remote-signal polls.
+
+    Tightens to cs._LIVE_REMOTE_CHECK_INTERVAL (10s) only while the currently
+    cached DOMAIN_ACTIVE bucket's own games say an NFL game window is open --
+    the two live-polling endpoints (/api/live-scores, /api/live-standings)
+    share this same bucket, and the normal 60s bound was up to a 3-minute
+    end-to-end staleness during a live game (see
+    docs/superpowers/specs/2026-09-27-live-score-cache-freshness-design.md).
+    A cold or empty cache has no window information yet, so it falls back to
+    the normal interval rather than polling tightly for no reason.
+    """
+    import services.cache_service as cs
+    cached = cs.get_domain(cs.DOMAIN_ACTIVE)
+    games = cached.get("games") if isinstance(cached, dict) else None
+    if games is None or games.empty:
+        return cs._REMOTE_CHECK_INTERVAL
+    from services.live_window_service import is_within_live_window
+    return (
+        cs._LIVE_REMOTE_CHECK_INTERVAL
+        if is_within_live_window(games)
+        else cs._REMOTE_CHECK_INTERVAL
+    )
+
+
 def check_remote_signals(use_local: bool) -> None:
-    """Poll metadata/cache_control (at most once per _REMOTE_CHECK_INTERVAL)
+    """Poll metadata/cache_control (at most once per _active_check_interval())
     and clear any cache domain whose remote signal is newer than what this
     process has cached -- the only channel by which a separate process
     (winspool-predict-daily, or another web-service instance) can tell this
@@ -37,7 +62,7 @@ def check_remote_signals(use_local: bool) -> None:
     """
     import services.cache_service as cs
     current_time = time.time()
-    if use_local or (current_time - cs._LAST_REMOTE_CHECK) <= cs._REMOTE_CHECK_INTERVAL:
+    if use_local or (current_time - cs._LAST_REMOTE_CHECK) <= _active_check_interval():
         return
     cs._LAST_REMOTE_CHECK = current_time
     try:
