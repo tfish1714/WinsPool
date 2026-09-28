@@ -28,6 +28,9 @@ def get_team_logo(team_code: str) -> str:
 
 from services.cache_service import clear_data_cache
 
+_INTERVAL_CACHE = {"value": None, "computed_at": 0.0, "generation": None}
+
+
 def _active_check_interval() -> float:
     """How long check_remote_signals() should wait between remote-signal polls.
 
@@ -39,18 +42,37 @@ def _active_check_interval() -> float:
     docs/superpowers/specs/2026-09-27-live-score-cache-freshness-design.md).
     A cold or empty cache has no window information yet, so it falls back to
     the normal interval rather than polling tightly for no reason.
+
+    Memoized for up to cs._LIVE_REMOTE_CHECK_INTERVAL seconds (and busted
+    immediately by a real DOMAIN_ACTIVE invalidation, via its generation
+    counter): is_within_live_window() parses every row of the cached games
+    frame, and load_data() calls this on every page/API request -- without
+    memoizing, that cost would run on every single request instead of at most
+    once per poll cycle.
     """
     import services.cache_service as cs
+    now = time.time()
+    generation = cs.get_domain_generation(cs.DOMAIN_ACTIVE)
+    cache = _INTERVAL_CACHE
+    if (
+        cache["value"] is not None
+        and cache["generation"] == generation
+        and (now - cache["computed_at"]) < cs._LIVE_REMOTE_CHECK_INTERVAL
+    ):
+        return cache["value"]
+
     cached = cs.get_domain(cs.DOMAIN_ACTIVE)
     games = cached.get("games") if isinstance(cached, dict) else None
     if games is None or games.empty:
-        return cs._REMOTE_CHECK_INTERVAL
-    from services.live_window_service import is_within_live_window
-    return (
-        cs._LIVE_REMOTE_CHECK_INTERVAL
-        if is_within_live_window(games)
-        else cs._REMOTE_CHECK_INTERVAL
-    )
+        value = cs._REMOTE_CHECK_INTERVAL
+    else:
+        from services.live_window_service import is_within_live_window
+        value = cs._LIVE_REMOTE_CHECK_INTERVAL if is_within_live_window(games) else cs._REMOTE_CHECK_INTERVAL
+
+    cache["value"] = value
+    cache["computed_at"] = now
+    cache["generation"] = generation
+    return value
 
 
 def check_remote_signals(use_local: bool) -> None:
@@ -59,10 +81,23 @@ def check_remote_signals(use_local: bool) -> None:
     process has cached -- the only channel by which a separate process
     (winspool-predict-daily, or another web-service instance) can tell this
     process its cached data is stale.
+
+    The elapsed-time gate is checked against cs._LIVE_REMOTE_CHECK_INTERVAL
+    and cs._REMOTE_CHECK_INTERVAL directly before ever calling
+    _active_check_interval(): whichever interval actually applies, it can
+    only be one of those two values, so elapsed <= the tighter bound or
+    elapsed > the looser bound both already answer the question -- only the
+    ambiguous band between them needs to know which one is currently in
+    effect.
     """
     import services.cache_service as cs
+    if use_local:
+        return
     current_time = time.time()
-    if use_local or (current_time - cs._LAST_REMOTE_CHECK) <= _active_check_interval():
+    elapsed = current_time - cs._LAST_REMOTE_CHECK
+    if elapsed <= cs._LIVE_REMOTE_CHECK_INTERVAL:
+        return
+    if elapsed <= cs._REMOTE_CHECK_INTERVAL and elapsed <= _active_check_interval():
         return
     cs._LAST_REMOTE_CHECK = current_time
     try:
