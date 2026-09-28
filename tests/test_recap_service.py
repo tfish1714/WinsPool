@@ -420,20 +420,20 @@ def test_fetch_weekly_espn_data_parses_leaders_and_headlines():
                 "competitions": [
                     {
                         "competitors": [
-                            {"homeAway": "home", "team": {"abbreviation": "BUF"}, "score": "31"},
-                            {"homeAway": "away", "team": {"abbreviation": "LAR"}, "score": "10"},
+                            {"id": "2", "homeAway": "home", "team": {"id": "2", "abbreviation": "BUF"}, "score": "31"},
+                            {"id": "14", "homeAway": "away", "team": {"id": "14", "abbreviation": "LAR"}, "score": "10"},
                         ],
                         "leaders": [
                             {
                                 "displayName": "Passing Leader",
                                 "leaders": [
-                                    {"athlete": {"displayName": "Josh Allen"}, "displayValue": "240 YDS, 2 TD"}
+                                    {"team": {"id": "2"}, "athlete": {"displayName": "Josh Allen"}, "displayValue": "240 YDS, 2 TD"}
                                 ]
                             },
                             {
                                 "displayName": "Rushing Leader",
                                 "leaders": [
-                                    {"athlete": {"displayName": "James Cook"}, "displayValue": "15 CAR, 110 YDS"}
+                                    {"team": {"id": "2"}, "athlete": {"displayName": "James Cook"}, "displayValue": "15 CAR, 110 YDS"}
                                 ]
                             }
                         ],
@@ -456,7 +456,7 @@ def test_fetch_weekly_espn_data_parses_leaders_and_headlines():
         assert ("BUF", "LA") in res
         entry = res[("BUF", "LA")]
         assert len(entry["leaders"]) == 2
-        assert "Josh Allen: 240 YDS, 2 TD" in entry["leaders"][0]
+        assert "Josh Allen (BUF): 240 YDS, 2 TD" in entry["leaders"][0]
         assert "Bills dominate Rams" in entry["headline"]
 
 

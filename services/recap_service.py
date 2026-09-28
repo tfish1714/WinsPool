@@ -40,11 +40,16 @@ def fetch_weekly_espn_data(year: int, week: int) -> dict[tuple[str, str], dict]:
         competitors = competitions.get("competitors", [])
 
         home_abbr, away_abbr = None, None
+        team_id_to_abbr = {}
         for c in competitors:
             raw_abbr = c.get("team", {}).get("abbreviation")
             if not raw_abbr:
                 continue
             normalized = normalize_team_abbr(raw_abbr)
+            if c.get("id"):
+                team_id_to_abbr[str(c["id"])] = normalized
+            if c.get("team", {}).get("id"):
+                team_id_to_abbr[str(c["team"]["id"])] = normalized
             if c.get("homeAway") == "home":
                 home_abbr = normalized
             elif c.get("homeAway") == "away":
@@ -59,7 +64,10 @@ def fetch_weekly_espn_data(year: int, week: int) -> dict[tuple[str, str], dict]:
                 name = athlete.get("athlete", {}).get("displayName")
                 stat = athlete.get("displayValue")
                 if name and stat:
-                    leaders_list.append(f"{name}: {stat}")
+                    team_id = str(athlete.get("team", {}).get("id") or athlete.get("athlete", {}).get("team", {}).get("id") or "")
+                    team_abbr = team_id_to_abbr.get(team_id)
+                    team_tag = f" ({team_abbr})" if team_abbr else ""
+                    leaders_list.append(f"{name}{team_tag}: {stat}")
 
         headlines = competitions.get("headlines", [])
         headline_desc = headlines[0].get("description") if headlines else None
