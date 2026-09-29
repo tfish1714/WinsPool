@@ -17,26 +17,25 @@
           <div class="team-page__summary" id="team-summary"></div>
         </div>
       </div>
-      <label class="team-page__picker">
-        <span class="team-page__picker-label">Jump to team</span>
-        <select id="team-select" class="team-page__select" aria-label="Jump to team">
-          {% for t in payload.teams %}
-          <option value="{{ t.abbr }}"{% if t.abbr == payload.team %} selected{% endif %}>{{ t.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
+      <select id="team-select" class="season-select" aria-label="Jump to team">
+        {% for t in payload.teams %}
+        <option value="{{ t.abbr }}"{% if t.abbr == payload.team %} selected{% endif %}>{{ t.name }}</option>
+        {% endfor %}
+      </select>
     </header>
 
-    <section class="team-page__section">
-      <h2 class="team-page__h2">History</h2>
-      <div id="team-history" class="team-page__history"></div>
-    </section>
+    <div class="team-page__cols">
+      <section class="team-page__section">
+        <h2 class="team-page__h2">This Season</h2>
+        <div id="team-projected-record" class="team-page__note"></div>
+        <div id="team-schedule" class="team-page__schedule"></div>
+      </section>
 
-    <section class="team-page__section">
-      <h2 class="team-page__h2">This Season</h2>
-      <div id="team-projected-record" class="team-page__note"></div>
-      <div id="team-schedule" class="team-page__schedule"></div>
-    </section>
+      <section class="team-page__section">
+        <h2 class="team-page__h2">History</h2>
+        <div id="team-history" class="team-page__history"></div>
+      </section>
+    </div>
 
   </div>
 </main>
