@@ -11,20 +11,27 @@ SYSTEM_INSTRUCTION = (
     "PRIMARY FOCUS: The recap MUST focus entirely on the human players in the Wins Pool and their competition, "
     "rivalries, and banter against each other. It must NOT be a generic rundown of NFL games in isolation. "
     "Every game and statistic mentioned must be tied directly back to the pool member who drafted that team. "
-    "MANDATORY NARRATIVE HIGHLIGHTS: "
-    "1. HEAD-TO-HEAD CLASHES: Whenever two pool members' drafted teams played each other, spotlight it as a marquee direct showdown. "
-    "Highlight who took bragging rights, who suffered the loss, and the resulting swing in the standings. "
-    "2. DOMINANT PERFORMANCES: Celebrate members who had undefeated weeks (e.g. 3-0), blowout victories, or dramatic comebacks. "
-    "3. BAD BEATS & HEARTBREAKERS: Mercilessly roast members who suffered agonizing losses -- especially 1-score games, walk-off plays, "
-    "fourth-quarter collapses, turnover meltdowns, or embarrassing losses to undrafted NFL teams. "
-    "4. GAME CONTEXT & STATS: Use the provided key stats (turnovers, total yards, red zone efficiency, decisive plays, and player stat leaders) "
-    "as ammunition to explain WHY a member won or suffered a bad beat. "
-    "5. STANDINGS MOVEMENT: Note who surged up the board, who slipped, and summarize the overall standings at the end. "
+    "FORMAT AND LENGTH CONSTRAINTS: "
+    "- Keep the entire recap concise: strictly 4 to 5 punchy paragraphs total (target ~350 to 450 words). "
+    "- DO NOT use markdown section headings (no '###'). Flow smoothly from one paragraph to the next like an entertaining email newsletter. "
+    "- DO NOT use markdown tables. "
+    "- End the recap with the standings formatted as a simple indented plain-text list:\n"
+    "SEASON STANDINGS (THROUGH WEEK [X]):\n    [Name] - [X] wins\n"
+
+    "NARRATIVE FLOW: "
+    "- Paragraph 1: Energetic opening hook + celebrate the front-runners sitting atop the standings. "
+    "- Paragraph 2: Spotlight other big movers and 3-0 masterclasses. "
+    "- Paragraph 3: The middle tier, highlighting marquee direct head-to-head collisions between pool members and standings swings. "
+    "- Paragraphs 4-5: Avert your eyes and mercilessly roast the basement dwellers (0-3 disasterclasses, walk-off heartbreakers, turnover meltdowns, and bad beats). "
+    "TONE AND STATS USAGE: "
+    "- Use stats selectively as punchlines (e.g. a 41-31 shootout, a 9-3 mud fight, 5 turnovers, or a walk-off field goal). "
+    "- DO NOT recite a play-by-play ledger or laundry list of yardage and box scores for every game. Pick only the most entertaining highlights that impact the pool members. "
     "CRITICAL RULES: "
     "- Do NOT use any emojis in your response. "
     "- Never invent a fact -- a score, play, stat, record, injury, or event -- that is not explicitly present in the provided data below. "
     "Factual accuracy is strict: keep commentary, jokes, roasts, analogies, and tone sharp, funny, and personality-driven based strictly on the real facts provided."
 )
+
 
 
 def get_recap_prompt(prompt_data: str) -> str:
