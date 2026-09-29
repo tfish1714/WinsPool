@@ -118,6 +118,19 @@ def _permissive_session_player_lookup(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _reset_data_caches():
+    """cache_service's domain caches (static/active/historical/...) are
+    process-wide. A test that chdir()s into a tmp dir or mocks the data layer
+    can fill them with empty frames, and every later test on that worker then
+    reads the empty frames (e.g. test_draft_service's KeyError: 'season'
+    after tests/test_backfill_features_flag.py). Clear around every test."""
+    from services.cache_service import clear_data_cache
+    clear_data_cache()
+    yield
+    clear_data_cache()
+
+
+@pytest.fixture(autouse=True)
 def reset_latest_week_cache():
     """The /api/config/settings latest_week TTL cache is module-level state."""
     def _reset():
