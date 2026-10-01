@@ -546,3 +546,98 @@ class TestLiveTicks:
         from datetime import datetime, timezone
         from scripts.schedule_kickoffs import live_ticks
         assert live_ticks([], now=datetime(2026, 1, 1, tzinfo=timezone.utc)) == []
+
+
+class TestEnqueueLiveTicks:
+    def _games(self):
+        rows = [("2026-09-20", "13:00"), ("2026-09-20", "16:25")]
+        return pd.DataFrame([
+            {"season": 2026, "week": 2, "game_type": "REG", "gameday": d, "gametime": t}
+            for d, t in rows
+        ])
+
+    def _gcp_env(self, monkeypatch):
+        import scripts.schedule_kickoffs as sk
+        monkeypatch.setattr(sk, "GCP_PROJECT", "test-project")
+        monkeypatch.setattr(sk, "GCP_REGION", "us-east1")
+        monkeypatch.setattr(sk, "GCP_TASKS_QUEUE", "test-queue")
+        monkeypatch.setattr(sk, "GCP_SCHEDULER_SERVICE_ACCOUNT", "sa@test.iam.gserviceaccount.com")
+
+    def test_enqueues_one_task_per_tick_for_live_scores_job(self, monkeypatch):
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock
+        import scripts.schedule_kickoffs as sk
+
+        calls = []
+        monkeypatch.setattr(sk, "enqueue_task",
+                            lambda client, run_at, job_name, job_args=None: calls.append((run_at, job_name, job_args)))
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+        count = sk.enqueue_live_ticks(MagicMock(), self._games(), 2026, 2, now=now)
+
+        assert count == len(calls) > 0
+        assert all(job == "winspool-live-scores" and args is None for _, job, args in calls)
+        assert [c[0] for c in calls] == sorted(c[0] for c in calls)
+
+    def test_mid_week_run_enqueues_no_past_ticks(self, monkeypatch):
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock
+        import scripts.schedule_kickoffs as sk
+
+        calls = []
+        monkeypatch.setattr(sk, "enqueue_task",
+                            lambda client, run_at, job_name, job_args=None: calls.append(run_at))
+        now = datetime(2026, 9, 20, 18, 0, tzinfo=timezone.utc)  # Sunday, mid-window
+
+        sk.enqueue_live_ticks(MagicMock(), self._games(), 2026, 2, now=now)
+
+        assert calls and all(t > now for t in calls)
+
+    def test_no_games_enqueues_nothing(self, monkeypatch):
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock
+        import scripts.schedule_kickoffs as sk
+
+        monkeypatch.setattr(sk, "enqueue_task", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not enqueue")))
+        count = sk.enqueue_live_ticks(MagicMock(), self._games(), 2026, 3,
+                                      now=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        assert count == 0
+
+    def test_rerun_hits_already_exists_without_raising(self, monkeypatch, capsys):
+        """Same week enqueued twice (Scheduler retry / manual rerun): the real
+        enqueue_task swallows AlreadyExists, so the helper must complete."""
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock
+        from google.api_core.exceptions import AlreadyExists
+        import scripts.schedule_kickoffs as sk
+
+        self._gcp_env(monkeypatch)
+        client = MagicMock()
+        client.queue_path.return_value = "projects/test-project/locations/us-east1/queues/test-queue"
+        client.create_task.side_effect = AlreadyExists("duplicate task")
+
+        count = sk.enqueue_live_ticks(client, self._games(), 2026, 2,
+                                      now=datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+        assert count > 0
+        assert "already enqueued" in capsys.readouterr().out
+
+    def test_task_ids_are_deterministic_per_tick(self, monkeypatch):
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock
+        import scripts.schedule_kickoffs as sk
+
+        self._gcp_env(monkeypatch)
+        client = MagicMock()
+        client.queue_path.return_value = "projects/test-project/locations/us-east1/queues/test-queue"
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+        sk.enqueue_live_ticks(client, self._games(), 2026, 2, now=now)
+        first_names = [c.kwargs["request"]["task"]["name"] for c in client.create_task.call_args_list]
+        client.create_task.reset_mock()
+        sk.enqueue_live_ticks(client, self._games(), 2026, 2, now=now)
+        second_names = [c.kwargs["request"]["task"]["name"] for c in client.create_task.call_args_list]
+
+        assert first_names == second_names
+        assert first_names[0].endswith("/tasks/winspool-live-scores-20260920T1700")
+        assert len(set(first_names)) == len(first_names)

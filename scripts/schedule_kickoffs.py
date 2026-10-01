@@ -12,6 +12,11 @@ clusters, and enqueues 3 Cloud Tasks per cluster:
     AFTER the routine predict run above so it is the last word before
     kickoff, not overwritten by it.
 
+Also enqueues one winspool-live-scores task every LIVE_TICK_MINUTES inside each
+merged game window (kickoff - 5 min to kickoff + 4 h) -- see
+enqueue_live_ticks(). The standing Cloud Scheduler trigger for that job is only
+a slow */30 backstop.
+
 Cloud Tasks (not Cloud Scheduler) is used because it supports a specific
 one-off future execution timestamp per task, whereas Cloud Scheduler is
 built for recurring cron patterns. Each task's HTTP target hits the Cloud
@@ -286,6 +291,19 @@ def enqueue_task(tasks_client, run_at: datetime, job_name: str, job_args: list =
         print(f"[skip] task already enqueued: {task_id}")
 
 
+def enqueue_live_ticks(tasks_client, games: pd.DataFrame, season: int, week: int,
+                       now: datetime = None) -> int:
+    """Enqueue one winspool-live-scores Cloud Task per live-score tick for
+    (season, week). Returns the number of ticks handed to enqueue_task()
+    (already-enqueued duplicates are skipped inside enqueue_task and still
+    counted). `now` defaults to the current UTC time."""
+    now = now or datetime.now(timezone.utc)
+    ticks = live_ticks(compute_live_windows(games, season, week), now)
+    for tick in ticks:
+        enqueue_task(tasks_client, tick, LIVE_JOB_NAME)
+    return len(ticks)
+
+
 def _sync_schedule_data() -> None:
     """Re-pull rawdata/schedules/games.csv before reading it. In the actual
     Cloud Run Job container (ephemeral, no baked-in rawdata), games.csv won't
@@ -419,6 +437,9 @@ def main():
             )
 
         print(f"Enqueued {len(clusters_with_games)} kickoff cluster(s) x 3 tasks for {season} week {week}.")
+
+        live_count = enqueue_live_ticks(client, games, season, week)
+        print(f"Enqueued {live_count} live-score tick(s) for {season} week {week}.")
 
         _run_quarter_scores_scrape(season, week)
         _run_betting_alert()
