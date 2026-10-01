@@ -274,8 +274,7 @@ class TestRunBettingAlert:
         monkeypatch.setattr(sk, "_sync_schedule_data", lambda: None)
         monkeypatch.setattr(sk, "load_games", lambda: pd.DataFrame())
         monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
-        monkeypatch.setattr(sk, "compute_kickoff_clusters_with_games", lambda games, s, w: [])
-        monkeypatch.setattr(sk, "enqueue_live_ticks", lambda client, games, s, w: 0)
+        monkeypatch.setattr(sk, "upcoming_clusters", lambda games, now: [])
         monkeypatch.setattr(
             sk, "_run_quarter_scores_scrape",
             lambda season, week: order.append("quarter_scores"),
@@ -298,8 +297,7 @@ class TestRunBettingAlert:
         monkeypatch.setattr(sk, "_sync_schedule_data", lambda: None)
         monkeypatch.setattr(sk, "load_games", lambda: pd.DataFrame())
         monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
-        monkeypatch.setattr(sk, "compute_kickoff_clusters_with_games", lambda games, s, w: [])
-        monkeypatch.setattr(sk, "enqueue_live_ticks", lambda client, games, s, w: 0)
+        monkeypatch.setattr(sk, "upcoming_clusters", lambda games, now: [])
         with patch.object(sk.subprocess, "run", side_effect=OSError("no interpreter")), \
              patch("google.cloud.tasks_v2.CloudTasksClient"), \
              patch.object(sk, "send_alert_email") as mock_alert:
@@ -362,8 +360,7 @@ class TestRunQuarterScoresScrape:
         monkeypatch.setattr(sk, "_sync_schedule_data", lambda: None)
         monkeypatch.setattr(sk, "load_games", lambda: pd.DataFrame())
         monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
-        monkeypatch.setattr(sk, "compute_kickoff_clusters_with_games", lambda games, s, w: [])
-        monkeypatch.setattr(sk, "enqueue_live_ticks", lambda client, games, s, w: 0)
+        monkeypatch.setattr(sk, "upcoming_clusters", lambda games, now: [])
         monkeypatch.setattr(
             sk, "_run_quarter_scores_scrape",
             lambda season, week: order.append(("quarter_scores", season, week)),
@@ -379,8 +376,7 @@ class TestRunQuarterScoresScrape:
         monkeypatch.setattr(sk, "_sync_schedule_data", lambda: None)
         monkeypatch.setattr(sk, "load_games", lambda: pd.DataFrame())
         monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
-        monkeypatch.setattr(sk, "compute_kickoff_clusters_with_games", lambda games, s, w: [])
-        monkeypatch.setattr(sk, "enqueue_live_ticks", lambda client, games, s, w: 0)
+        monkeypatch.setattr(sk, "upcoming_clusters", lambda games, now: [])
         with patch.object(sk.subprocess, "run", side_effect=OSError("no interpreter")), \
              patch("google.cloud.tasks_v2.CloudTasksClient"), \
              patch.object(sk, "send_alert_email") as mock_alert:
@@ -437,33 +433,140 @@ def test_resimulate_lead_minutes_fires_after_routine_predict():
     assert RESIMULATE_LEAD_MINUTES < PREDICT_LEAD_MINUTES
 
 
-class TestComputeLiveWindows:
-    def _game(self, day, time, week=2, season=2026, game_type="REG"):
-        return {"season": season, "week": week, "game_type": game_type,
-                "gameday": day, "gametime": time}
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
+_ET = ZoneInfo("America/New_York")
+
+
+def _ko(day, time):
+    """ET-aware kickoff, e.g. _ko("2026-09-20", "13:00")."""
+    return datetime.strptime(f"{day} {time}", "%Y-%m-%d %H:%M").replace(tzinfo=_ET)
+
+
+def _game(day, time, gid, game_type="REG", season=2026, week=2):
+    return {"season": season, "week": week, "game_type": game_type,
+            "gameday": day, "gametime": time, "game_id": gid}
+
+
+_NOW = datetime(2026, 9, 15, 10, 0, tzinfo=timezone.utc)  # a Tuesday, 10:00 UTC
+
+
+class TestUpcomingClusters:
+    def test_groups_games_by_kickoff_with_game_ids_sorted(self):
+        from scripts.schedule_kickoffs import upcoming_clusters
+        games = pd.DataFrame([
+            _game("2026-09-20", "13:00", "b"), _game("2026-09-20", "13:00", "c"),
+            _game("2026-09-17", "20:15", "a"), _game("2026-09-20", "16:25", "d"),
+        ])
+        result = upcoming_clusters(games, _NOW)
+        assert [(k, ids) for k, ids in result] == [
+            (_ko("2026-09-17", "20:15"), ["a"]),
+            (_ko("2026-09-20", "13:00"), ["b", "c"]),
+            (_ko("2026-09-20", "16:25"), ["d"]),
+        ]
+        assert all(k.tzinfo is not None for k, _ in result)
+
+    def test_selection_ignores_season_and_week_columns(self):
+        """Last week's late Monday result must not matter: games are picked by
+        kickoff time alone, across week boundaries."""
+        from scripts.schedule_kickoffs import upcoming_clusters
+        games = pd.DataFrame([
+            _game("2026-09-17", "20:15", "w2", week=2),
+            _game("2026-09-22", "20:15", "w3", week=3),  # Tue-night postponement, next week's number
+        ])
+        assert [ids for _, ids in upcoming_clusters(games, _NOW)] == [["w2"], ["w3"]]
+
+    def test_excludes_past_beyond_horizon_and_non_reg(self):
+        from scripts.schedule_kickoffs import upcoming_clusters
+        games = pd.DataFrame([
+            _game("2026-09-14", "20:15", "played_mnf"),            # 9.75h before _NOW
+            _game("2026-09-24", "20:15", "beyond_horizon"),        # 2026-09-25T00:15Z > _NOW + 8d
+            _game("2026-09-20", "13:00", "post", game_type="POST"),
+            _game("2026-09-20", "13:00", "keep"),
+        ])
+        assert [ids for _, ids in upcoming_clusters(games, _NOW)] == [["keep"]]
+
+    def test_keeps_in_progress_game_within_lookback(self):
+        from scripts.schedule_kickoffs import upcoming_clusters
+        games = pd.DataFrame([_game("2026-09-20", "13:00", "g")])  # kickoff 17:00Z
+        now = datetime(2026, 9, 20, 19, 0, tzinfo=timezone.utc)    # 2h into the game
+        assert [ids for _, ids in upcoming_clusters(games, now)] == [["g"]]
+        later = datetime(2026, 9, 20, 21, 30, tzinfo=timezone.utc)  # 4.5h after kickoff
+        assert upcoming_clusters(games, later) == []
+
+    def test_skips_rows_with_missing_or_malformed_time(self):
+        from scripts.schedule_kickoffs import upcoming_clusters
+        games = pd.DataFrame([
+            _game("2026-09-20", "13:00", "ok"),
+            _game("2026-09-20", None, "no_time"),
+            _game("2026-09-20", "TBD", "bad_time"),
+            _game(None, "13:00", "no_day"),
+        ])
+        assert [ids for _, ids in upcoming_clusters(games, _NOW)] == [["ok"]]
+
+    def test_empty_frame_returns_empty(self):
+        from scripts.schedule_kickoffs import upcoming_clusters
+        assert upcoming_clusters(pd.DataFrame(), _NOW) == []
+
+
+class TestEnqueueKickoffTasks:
+    def _record(self, monkeypatch):
+        import scripts.schedule_kickoffs as sk
+        calls = []
+        monkeypatch.setattr(sk, "enqueue_task",
+                            lambda client, run_at, job_name, job_args=None: calls.append((run_at, job_name, job_args)))
+        return sk, calls
+
+    def test_future_cluster_gets_sync_predict_and_resimulate(self, monkeypatch):
+        from datetime import timedelta
+        from unittest.mock import MagicMock
+        sk, calls = self._record(monkeypatch)
+        kickoff = _ko("2026-09-20", "13:00")
+        count = sk.enqueue_kickoff_tasks(MagicMock(), [(kickoff, ["b", "c"])], _NOW)
+        assert count == 3
+        assert calls == [
+            (kickoff - timedelta(minutes=75), "winspool-sync-daily", None),
+            (kickoff - timedelta(minutes=60), "winspool-predict-daily", None),
+            (kickoff - timedelta(minutes=30), "winspool-predict-daily",
+             ["scripts/cache_builder.py", "--resimulate", "b,c"]),
+        ]
+
+    def test_tasks_whose_run_time_has_passed_are_skipped(self, monkeypatch):
+        """A past-dated Cloud Task would dispatch immediately -- kickoff 45 min
+        out leaves only the -30 min resimulate in the future."""
+        from datetime import timedelta
+        from unittest.mock import MagicMock
+        sk, calls = self._record(monkeypatch)
+        kickoff = (_NOW + timedelta(minutes=45)).astimezone(_ET)
+        count = sk.enqueue_kickoff_tasks(MagicMock(), [(kickoff, ["g"])], _NOW)
+        assert count == 1
+        assert [(c[1], c[2] is not None) for c in calls] == [("winspool-predict-daily", True)]
+
+    def test_in_progress_cluster_enqueues_nothing(self, monkeypatch):
+        from datetime import timedelta
+        from unittest.mock import MagicMock
+        sk, calls = self._record(monkeypatch)
+        kickoff = (_NOW - timedelta(hours=1)).astimezone(_ET)
+        assert sk.enqueue_kickoff_tasks(MagicMock(), [(kickoff, ["g"])], _NOW) == 0
+        assert calls == []
+
+
+class TestComputeLiveWindows:
     def test_single_game_window_is_lead_to_tail_in_utc(self):
-        from datetime import datetime, timezone
         from scripts.schedule_kickoffs import compute_live_windows
-        games = pd.DataFrame([self._game("2026-09-17", "20:15")])  # Thu 20:15 EDT = 00:15Z Fri
-        windows = compute_live_windows(games, 2026, 2)
+        windows = compute_live_windows([_ko("2026-09-17", "20:15")])  # = 00:15Z Fri
         assert windows == [(
             datetime(2026, 9, 18, 0, 10, tzinfo=timezone.utc),
             datetime(2026, 9, 18, 4, 15, tzinfo=timezone.utc),
         )]
 
     def test_week_merges_overlapping_sunday_games_but_keeps_thu_and_mon_separate(self):
-        from datetime import datetime, timezone
         from scripts.schedule_kickoffs import compute_live_windows
-        games = pd.DataFrame([
-            self._game("2026-09-17", "20:15"),   # Thu night
-            self._game("2026-09-20", "13:00"),   # Sun early
-            self._game("2026-09-20", "13:00"),   # same cluster
-            self._game("2026-09-20", "16:25"),   # Sun late
-            self._game("2026-09-20", "20:20"),   # Sun night
-            self._game("2026-09-21", "20:15"),   # Mon night
+        windows = compute_live_windows([
+            _ko("2026-09-17", "20:15"), _ko("2026-09-20", "13:00"), _ko("2026-09-20", "16:25"),
+            _ko("2026-09-20", "20:20"), _ko("2026-09-21", "20:15"),
         ])
-        windows = compute_live_windows(games, 2026, 2)
         assert windows == [
             (datetime(2026, 9, 18, 0, 10, tzinfo=timezone.utc), datetime(2026, 9, 18, 4, 15, tzinfo=timezone.utc)),
             (datetime(2026, 9, 20, 16, 55, tzinfo=timezone.utc), datetime(2026, 9, 21, 4, 20, tzinfo=timezone.utc)),
@@ -472,46 +575,32 @@ class TestComputeLiveWindows:
 
     def test_windows_that_exactly_touch_are_merged(self):
         from scripts.schedule_kickoffs import compute_live_windows
-        # Kickoff A ends at A+4h; kickoff B starts at B-5min. B = A+4h+5min makes them touch.
-        games = pd.DataFrame([self._game("2026-09-20", "13:00"), self._game("2026-09-20", "17:05")])
-        assert len(compute_live_windows(games, 2026, 2)) == 1
+        # A ends at A+4h; B starts at B-5min. B = A+4h+5min makes them touch.
+        assert len(compute_live_windows([_ko("2026-09-20", "13:00"), _ko("2026-09-20", "17:05")])) == 1
 
     def test_clock_change_night_uses_utc_arithmetic(self):
-        from datetime import datetime, timezone
         from scripts.schedule_kickoffs import compute_live_windows
         # Sat 2026-10-31 22:00 EDT = 02:00Z 11-01; +4h = 06:00Z. Wall-clock ET math
         # would cross the 2 AM fall-back and be off by an hour.
-        games = pd.DataFrame([self._game("2026-10-31", "22:00", week=9)])
-        windows = compute_live_windows(games, 2026, 9)
-        assert windows == [(
+        assert compute_live_windows([_ko("2026-10-31", "22:00")]) == [(
             datetime(2026, 11, 1, 1, 55, tzinfo=timezone.utc),
             datetime(2026, 11, 1, 6, 0, tzinfo=timezone.utc),
         )]
 
-    def test_week_with_no_reg_games_returns_empty(self):
+    def test_no_kickoffs_returns_empty(self):
         from scripts.schedule_kickoffs import compute_live_windows
-        games = pd.DataFrame([self._game("2026-09-20", "13:00")])
-        assert compute_live_windows(games, 2026, 3) == []
-
-    def test_ignores_non_reg_games(self):
-        from scripts.schedule_kickoffs import compute_live_windows
-        games = pd.DataFrame([self._game("2026-09-20", "13:00", game_type="POST")])
-        assert compute_live_windows(games, 2026, 2) == []
+        assert compute_live_windows([]) == []
 
 
 class TestLiveTicks:
     def _week_windows(self):
         from scripts.schedule_kickoffs import compute_live_windows
-        rows = [("2026-09-17", "20:15"), ("2026-09-20", "13:00"), ("2026-09-20", "16:25"),
-                ("2026-09-20", "20:20"), ("2026-09-21", "20:15")]
-        games = pd.DataFrame([
-            {"season": 2026, "week": 2, "game_type": "REG", "gameday": d, "gametime": t}
-            for d, t in rows
+        return compute_live_windows([
+            _ko("2026-09-17", "20:15"), _ko("2026-09-20", "13:00"), _ko("2026-09-20", "16:25"),
+            _ko("2026-09-20", "20:20"), _ko("2026-09-21", "20:15"),
         ])
-        return compute_live_windows(games, 2026, 2)
 
     def test_full_week_tick_count_and_bounds(self):
-        from datetime import datetime, timezone
         from scripts.schedule_kickoffs import live_ticks
         ticks = live_ticks(self._week_windows(), now=datetime(2026, 1, 1, tzinfo=timezone.utc))
         # Thu 00:10-04:10 = 25, Sun 17:00-04:20 = 69, Mon 00:10-04:10 = 25
@@ -522,15 +611,12 @@ class TestLiveTicks:
         assert len(set(ticks)) == len(ticks)
 
     def test_ticks_fall_on_interval_marks(self):
-        from datetime import datetime, timezone
         from scripts.schedule_kickoffs import live_ticks, LIVE_TICK_MINUTES
         ticks = live_ticks(self._week_windows(), now=datetime(2026, 1, 1, tzinfo=timezone.utc))
         assert all(t.minute % LIVE_TICK_MINUTES == 0 and t.second == 0 for t in ticks)
 
     def test_first_tick_is_first_mark_at_or_after_window_start(self):
-        from datetime import datetime, timezone
         from scripts.schedule_kickoffs import live_ticks
-        # Window 16:55-21:00Z: first mark at/after 16:55 is 17:00.
         window = [(datetime(2026, 9, 20, 16, 55, tzinfo=timezone.utc),
                    datetime(2026, 9, 20, 21, 0, tzinfo=timezone.utc))]
         ticks = live_ticks(window, now=datetime(2026, 1, 1, tzinfo=timezone.utc))
@@ -538,27 +624,20 @@ class TestLiveTicks:
         assert ticks[-1] == datetime(2026, 9, 20, 21, 0, tzinfo=timezone.utc)  # end is inclusive
 
     def test_skips_ticks_not_strictly_after_now(self):
-        from datetime import datetime, timezone
         from scripts.schedule_kickoffs import live_ticks
         now = datetime(2026, 9, 20, 23, 0, tzinfo=timezone.utc)  # mid Sunday window
         ticks = live_ticks(self._week_windows(), now=now)
         assert all(t > now for t in ticks)
-        assert datetime(2026, 9, 20, 23, 0, tzinfo=timezone.utc) not in ticks
+        assert now not in ticks
         assert len(ticks) == 57
 
     def test_no_windows_means_no_ticks(self):
-        from datetime import datetime, timezone
         from scripts.schedule_kickoffs import live_ticks
         assert live_ticks([], now=datetime(2026, 1, 1, tzinfo=timezone.utc)) == []
 
 
 class TestEnqueueLiveTicks:
-    def _games(self):
-        rows = [("2026-09-20", "13:00"), ("2026-09-20", "16:25")]
-        return pd.DataFrame([
-            {"season": 2026, "week": 2, "game_type": "REG", "gameday": d, "gametime": t}
-            for d, t in rows
-        ])
+    _CLUSTERS = [(_ko("2026-09-20", "13:00"), ["a"]), (_ko("2026-09-20", "16:25"), ["b"])]
 
     def _gcp_env(self, monkeypatch):
         import scripts.schedule_kickoffs as sk
@@ -568,97 +647,76 @@ class TestEnqueueLiveTicks:
         monkeypatch.setattr(sk, "GCP_SCHEDULER_SERVICE_ACCOUNT", "sa@test.iam.gserviceaccount.com")
 
     def test_enqueues_one_task_per_tick_for_live_scores_job(self, monkeypatch):
-        from datetime import datetime, timezone
         from unittest.mock import MagicMock
         import scripts.schedule_kickoffs as sk
-
         calls = []
         monkeypatch.setattr(sk, "enqueue_task",
                             lambda client, run_at, job_name, job_args=None: calls.append((run_at, job_name, job_args)))
-        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-        count = sk.enqueue_live_ticks(MagicMock(), self._games(), 2026, 2, now=now)
-
+        count = sk.enqueue_live_ticks(MagicMock(), self._CLUSTERS, now=datetime(2026, 1, 1, tzinfo=timezone.utc))
         assert count == len(calls) > 0
         assert all(job == "winspool-live-scores" and args is None for _, job, args in calls)
         assert [c[0] for c in calls] == sorted(c[0] for c in calls)
 
-    def test_mid_week_run_enqueues_no_past_ticks(self, monkeypatch):
-        from datetime import datetime, timezone
+    def test_mid_window_run_enqueues_no_past_ticks(self, monkeypatch):
         from unittest.mock import MagicMock
         import scripts.schedule_kickoffs as sk
-
         calls = []
         monkeypatch.setattr(sk, "enqueue_task",
                             lambda client, run_at, job_name, job_args=None: calls.append(run_at))
-        now = datetime(2026, 9, 20, 18, 0, tzinfo=timezone.utc)  # Sunday, mid-window
-
-        sk.enqueue_live_ticks(MagicMock(), self._games(), 2026, 2, now=now)
-
+        now = datetime(2026, 9, 20, 18, 0, tzinfo=timezone.utc)
+        sk.enqueue_live_ticks(MagicMock(), self._CLUSTERS, now=now)
         assert calls and all(t > now for t in calls)
 
-    def test_no_games_enqueues_nothing(self, monkeypatch):
-        from datetime import datetime, timezone
+    def test_no_clusters_enqueues_nothing(self, monkeypatch):
         from unittest.mock import MagicMock
         import scripts.schedule_kickoffs as sk
-
         monkeypatch.setattr(sk, "enqueue_task", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not enqueue")))
-        count = sk.enqueue_live_ticks(MagicMock(), self._games(), 2026, 3,
-                                      now=datetime(2026, 1, 1, tzinfo=timezone.utc))
-        assert count == 0
+        assert sk.enqueue_live_ticks(MagicMock(), [], now=datetime(2026, 1, 1, tzinfo=timezone.utc)) == 0
 
     def test_rerun_hits_already_exists_without_raising(self, monkeypatch, capsys):
-        """Same week enqueued twice (Scheduler retry / manual rerun): the real
-        enqueue_task swallows AlreadyExists, so the helper must complete."""
-        from datetime import datetime, timezone
         from unittest.mock import MagicMock
         from google.api_core.exceptions import AlreadyExists
         import scripts.schedule_kickoffs as sk
-
         self._gcp_env(monkeypatch)
         client = MagicMock()
         client.queue_path.return_value = "projects/test-project/locations/us-east1/queues/test-queue"
         client.create_task.side_effect = AlreadyExists("duplicate task")
-
-        count = sk.enqueue_live_ticks(client, self._games(), 2026, 2,
-                                      now=datetime(2026, 1, 1, tzinfo=timezone.utc))
-
+        count = sk.enqueue_live_ticks(client, self._CLUSTERS, now=datetime(2026, 1, 1, tzinfo=timezone.utc))
         assert count > 0
         assert "already enqueued" in capsys.readouterr().out
 
     def test_task_ids_are_deterministic_per_tick(self, monkeypatch):
-        from datetime import datetime, timezone
         from unittest.mock import MagicMock
         import scripts.schedule_kickoffs as sk
-
         self._gcp_env(monkeypatch)
         client = MagicMock()
         client.queue_path.return_value = "projects/test-project/locations/us-east1/queues/test-queue"
         now = datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-        sk.enqueue_live_ticks(client, self._games(), 2026, 2, now=now)
-        first_names = [c.kwargs["request"]["task"]["name"] for c in client.create_task.call_args_list]
+        sk.enqueue_live_ticks(client, self._CLUSTERS, now=now)
+        first = [c.kwargs["request"]["task"]["name"] for c in client.create_task.call_args_list]
         client.create_task.reset_mock()
-        sk.enqueue_live_ticks(client, self._games(), 2026, 2, now=now)
-        second_names = [c.kwargs["request"]["task"]["name"] for c in client.create_task.call_args_list]
+        sk.enqueue_live_ticks(client, self._CLUSTERS, now=now)
+        second = [c.kwargs["request"]["task"]["name"] for c in client.create_task.call_args_list]
+        assert first == second
+        assert first[0].endswith("/tasks/winspool-live-scores-20260920T1700")
+        assert len(set(first)) == len(first)
 
-        assert first_names == second_names
-        assert first_names[0].endswith("/tasks/winspool-live-scores-20260920T1700")
-        assert len(set(first_names)) == len(first_names)
 
-
-def test_main_enqueues_live_ticks_before_the_non_fatal_steps(monkeypatch):
+def test_main_enqueues_kickoff_tasks_then_live_ticks_before_the_non_fatal_steps(monkeypatch):
     from unittest.mock import patch
     import scripts.schedule_kickoffs as sk
     order = []
+    clusters = [("sentinel-cluster", ["g"])]
     monkeypatch.setattr(sk, "_sync_schedule_data", lambda: None)
     monkeypatch.setattr(sk, "load_games", lambda: pd.DataFrame())
-    monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
-    monkeypatch.setattr(sk, "compute_kickoff_clusters_with_games", lambda games, s, w: [])
+    monkeypatch.setattr(sk, "upcoming_clusters", lambda games, now: clusters)
+    monkeypatch.setattr(sk, "enqueue_kickoff_tasks",
+                        lambda client, cl, now: order.append(("kickoff_tasks", cl)) or 3)
     monkeypatch.setattr(sk, "enqueue_live_ticks",
-                        lambda client, games, s, w: order.append(("live_ticks", s, w)) or 7)
+                        lambda client, cl, now: order.append(("live_ticks", cl)) or 7)
+    monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
     monkeypatch.setattr(sk, "_run_quarter_scores_scrape", lambda season, week: order.append("quarter_scores"))
     monkeypatch.setattr(sk, "_run_betting_alert", lambda: order.append("betting_alert"))
     with patch("google.cloud.tasks_v2.CloudTasksClient"):
         sk.main()
-    assert order == [("live_ticks", 2026, 3), "quarter_scores", "betting_alert"]
+    assert order == [("kickoff_tasks", clusters), ("live_ticks", clusters), "quarter_scores", "betting_alert"]

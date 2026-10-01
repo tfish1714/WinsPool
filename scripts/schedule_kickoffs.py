@@ -1,8 +1,10 @@
 """scripts/schedule_kickoffs.py -- winspool-schedule-kickoffs Cloud Run Job entrypoint.
 
 Runs weekly (Tue ~10am UTC), in-season only (Sept 1 - Feb 10). Reads the
-upcoming week's actual gameday/gametime, computes distinct kickoff-time
-clusters, and enqueues 3 Cloud Tasks per cluster:
+schedule's actual gameday/gametime, computes distinct kickoff-time clusters for
+every REG game kicking off in the next TASK_HORIZON_DAYS (selected by date, not
+by week or result -- see upcoming_clusters()), and enqueues up to 3 Cloud Tasks
+per cluster (a task whose run time has already passed is skipped):
   - winspool-sync-daily    at (kickoff - 75 min)
   - winspool-predict-daily at (kickoff - 60 min)
   - winspool-predict-daily at (kickoff - 30 min), with its container args
@@ -104,6 +106,13 @@ LIVE_TICK_MINUTES = 10
 LIVE_LEAD_MINUTES = 5
 LIVE_TAIL_HOURS = 4
 
+# Kickoff-task selection is by date, not by "the earliest week with no result":
+# every REG game kicking off in (now - LIVE_TAIL_HOURS, now + TASK_HORIZON_DAYS]
+# is scheduled. A late Monday result or a postponed game can therefore never
+# make this job pick the wrong week. 8 days > the weekly cadence, so
+# consecutive runs overlap on purpose; deterministic task ids dedupe.
+TASK_HORIZON_DAYS = 8
+
 # NFL gametime is published in US/Eastern per nflverse convention. Use a
 # proper DST-aware zone -- clocks fall back to EST (UTC-5) the first Sunday
 # of November, which is squarely inside this job's Sept 1 - Feb 10 window
@@ -147,15 +156,46 @@ def compute_kickoff_clusters_with_games(games: pd.DataFrame, season: int, week: 
     return sorted(clusters.items())
 
 
-def compute_live_windows(games: pd.DataFrame, season: int, week: int) -> list[tuple[datetime, datetime]]:
-    """Merged UTC (start, end) live-score windows for (season, week) REG games.
+def upcoming_clusters(
+    games: pd.DataFrame,
+    now: datetime,
+    horizon_days: int = TASK_HORIZON_DAYS,
+    lookback: timedelta = timedelta(hours=LIVE_TAIL_HOURS),
+) -> list[tuple[datetime, list]]:
+    """REG kickoff clusters as (kickoff_et, [game_ids]), sorted, for games whose
+    kickoff is in (now - lookback, now + horizon_days].
 
-    Each distinct kickoff yields [kickoff - LIVE_LEAD_MINUTES, kickoff +
+    Selection is by kickoff time alone -- never by season/week or result -- so
+    last week's late Monday result, or a postponed game, cannot affect it. The
+    lookback keeps in-progress games so a mid-game run still schedules the rest
+    of their live-score window. Rows with a missing or malformed gameday/gametime
+    cannot be scheduled and are skipped rather than failing the whole run."""
+    if games.empty:
+        return []
+    reg = games[games["game_type"] == "REG"].dropna(subset=["gameday", "gametime"])
+    clusters: dict = {}
+    for _, row in reg.iterrows():
+        try:
+            kickoff = datetime.strptime(
+                f"{row['gameday']} {row['gametime']}", "%Y-%m-%d %H:%M"
+            ).replace(tzinfo=_EASTERN)
+        except ValueError:
+            continue
+        kickoff_utc = kickoff.astimezone(timezone.utc)
+        if now - lookback < kickoff_utc <= now + timedelta(days=horizon_days):
+            clusters.setdefault(kickoff, []).append(row["game_id"])
+    return sorted(clusters.items())
+
+
+def compute_live_windows(kickoffs: list[datetime]) -> list[tuple[datetime, datetime]]:
+    """Merged UTC (start, end) live-score windows for the given kickoffs.
+
+    Each kickoff yields [kickoff - LIVE_LEAD_MINUTES, kickoff +
     LIVE_TAIL_HOURS]; windows that overlap or touch are merged. All arithmetic
     is done in UTC: adding a timedelta to a ZoneInfo-aware datetime is
     wall-clock math, which is wrong across the November fall-back."""
     windows: list[tuple[datetime, datetime]] = []
-    for kickoff in compute_kickoff_clusters(games, season, week):
+    for kickoff in sorted(kickoffs):
         k = kickoff.astimezone(timezone.utc)
         start = k - timedelta(minutes=LIVE_LEAD_MINUTES)
         end = k + timedelta(hours=LIVE_TAIL_HOURS)
@@ -291,14 +331,36 @@ def enqueue_task(tasks_client, run_at: datetime, job_name: str, job_args: list =
         print(f"[skip] task already enqueued: {task_id}")
 
 
-def enqueue_live_ticks(tasks_client, games: pd.DataFrame, season: int, week: int,
-                       now: datetime = None) -> int:
-    """Enqueue one winspool-live-scores Cloud Task per live-score tick for
-    (season, week). Returns the number of ticks handed to enqueue_task()
-    (already-enqueued duplicates are skipped inside enqueue_task and still
-    counted). `now` defaults to the current UTC time."""
+def enqueue_kickoff_tasks(tasks_client, clusters: list[tuple[datetime, list]], now: datetime) -> int:
+    """Enqueue the per-cluster sync (-SYNC_LEAD_MINUTES), routine predict
+    (-PREDICT_LEAD_MINUTES) and ESPN-aware resimulate (-RESIMULATE_LEAD_MINUTES)
+    tasks. A task whose run time is not strictly after `now` is skipped: a
+    Cloud Task with a past schedule_time dispatches immediately. Returns the
+    number of tasks handed to enqueue_task() (duplicates are skipped inside it
+    and still counted)."""
+    count = 0
+    for kickoff, game_ids in clusters:
+        plan = (
+            (SYNC_LEAD_MINUTES, "winspool-sync-daily", None),
+            (PREDICT_LEAD_MINUTES, "winspool-predict-daily", None),
+            (RESIMULATE_LEAD_MINUTES, "winspool-predict-daily", resimulate_job_args(game_ids)),
+        )
+        for lead, job_name, job_args in plan:
+            run_at = kickoff - timedelta(minutes=lead)
+            if run_at.astimezone(timezone.utc) <= now:
+                continue
+            enqueue_task(tasks_client, run_at, job_name, job_args=job_args)
+            count += 1
+    return count
+
+
+def enqueue_live_ticks(tasks_client, clusters: list[tuple[datetime, list]], now: datetime = None) -> int:
+    """Enqueue one winspool-live-scores Cloud Task per live-score tick for the
+    given kickoff clusters. Returns the number of ticks handed to
+    enqueue_task() (already-enqueued duplicates are skipped inside enqueue_task
+    and still counted). `now` defaults to the current UTC time."""
     now = now or datetime.now(timezone.utc)
-    ticks = live_ticks(compute_live_windows(games, season, week), now)
+    ticks = live_ticks(compute_live_windows([kickoff for kickoff, _ in clusters]), now)
     for tick in ticks:
         enqueue_task(tasks_client, tick, LIVE_JOB_NAME)
     return len(ticks)
@@ -424,24 +486,19 @@ def main():
 
         _sync_schedule_data()
         games = load_games()
-        season, week = _current_season_week(games)
 
         client = tasks_v2.CloudTasksClient()
-        clusters_with_games = compute_kickoff_clusters_with_games(games, season, week)
-        for kickoff, game_ids in clusters_with_games:
-            enqueue_task(client, kickoff - timedelta(minutes=SYNC_LEAD_MINUTES), "winspool-sync-daily")
-            enqueue_task(client, kickoff - timedelta(minutes=PREDICT_LEAD_MINUTES), "winspool-predict-daily")
-            enqueue_task(
-                client, kickoff - timedelta(minutes=RESIMULATE_LEAD_MINUTES), "winspool-predict-daily",
-                job_args=resimulate_job_args(game_ids),
-            )
+        now = datetime.now(timezone.utc)
+        clusters = upcoming_clusters(games, now)
+        task_count = enqueue_kickoff_tasks(client, clusters, now)
+        print(f"Enqueued {task_count} kickoff task(s) for {len(clusters)} cluster(s) "
+              f"in the next {TASK_HORIZON_DAYS} days.")
 
-        print(f"Enqueued {len(clusters_with_games)} kickoff cluster(s) x 3 tasks for {season} week {week}.")
-
-        live_count = enqueue_live_ticks(client, games, season, week)
-        print(f"Processed {live_count} live-score tick(s) for {season} week {week} "
+        live_count = enqueue_live_ticks(client, clusters, now)
+        print(f"Processed {live_count} live-score tick(s) "
               f"(ticks already queued by an earlier run are skipped, not duplicated).")
 
+        season, week = _current_season_week(games)
         _run_quarter_scores_scrape(season, week)
         _run_betting_alert()
     except (Exception, SystemExit):
