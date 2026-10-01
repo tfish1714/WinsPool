@@ -275,6 +275,7 @@ class TestRunBettingAlert:
         monkeypatch.setattr(sk, "load_games", lambda: pd.DataFrame())
         monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
         monkeypatch.setattr(sk, "compute_kickoff_clusters_with_games", lambda games, s, w: [])
+        monkeypatch.setattr(sk, "enqueue_live_ticks", lambda client, games, s, w: 0)
         monkeypatch.setattr(
             sk, "_run_quarter_scores_scrape",
             lambda season, week: order.append("quarter_scores"),
@@ -298,6 +299,7 @@ class TestRunBettingAlert:
         monkeypatch.setattr(sk, "load_games", lambda: pd.DataFrame())
         monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
         monkeypatch.setattr(sk, "compute_kickoff_clusters_with_games", lambda games, s, w: [])
+        monkeypatch.setattr(sk, "enqueue_live_ticks", lambda client, games, s, w: 0)
         with patch.object(sk.subprocess, "run", side_effect=OSError("no interpreter")), \
              patch("google.cloud.tasks_v2.CloudTasksClient"), \
              patch.object(sk, "send_alert_email") as mock_alert:
@@ -361,6 +363,7 @@ class TestRunQuarterScoresScrape:
         monkeypatch.setattr(sk, "load_games", lambda: pd.DataFrame())
         monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
         monkeypatch.setattr(sk, "compute_kickoff_clusters_with_games", lambda games, s, w: [])
+        monkeypatch.setattr(sk, "enqueue_live_ticks", lambda client, games, s, w: 0)
         monkeypatch.setattr(
             sk, "_run_quarter_scores_scrape",
             lambda season, week: order.append(("quarter_scores", season, week)),
@@ -377,6 +380,7 @@ class TestRunQuarterScoresScrape:
         monkeypatch.setattr(sk, "load_games", lambda: pd.DataFrame())
         monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
         monkeypatch.setattr(sk, "compute_kickoff_clusters_with_games", lambda games, s, w: [])
+        monkeypatch.setattr(sk, "enqueue_live_ticks", lambda client, games, s, w: 0)
         with patch.object(sk.subprocess, "run", side_effect=OSError("no interpreter")), \
              patch("google.cloud.tasks_v2.CloudTasksClient"), \
              patch.object(sk, "send_alert_email") as mock_alert:
@@ -641,3 +645,20 @@ class TestEnqueueLiveTicks:
         assert first_names == second_names
         assert first_names[0].endswith("/tasks/winspool-live-scores-20260920T1700")
         assert len(set(first_names)) == len(first_names)
+
+
+def test_main_enqueues_live_ticks_before_the_non_fatal_steps(monkeypatch):
+    from unittest.mock import patch
+    import scripts.schedule_kickoffs as sk
+    order = []
+    monkeypatch.setattr(sk, "_sync_schedule_data", lambda: None)
+    monkeypatch.setattr(sk, "load_games", lambda: pd.DataFrame())
+    monkeypatch.setattr(sk, "_current_season_week", lambda games: (2026, 3))
+    monkeypatch.setattr(sk, "compute_kickoff_clusters_with_games", lambda games, s, w: [])
+    monkeypatch.setattr(sk, "enqueue_live_ticks",
+                        lambda client, games, s, w: order.append(("live_ticks", s, w)) or 7)
+    monkeypatch.setattr(sk, "_run_quarter_scores_scrape", lambda season, week: order.append("quarter_scores"))
+    monkeypatch.setattr(sk, "_run_betting_alert", lambda: order.append("betting_alert"))
+    with patch("google.cloud.tasks_v2.CloudTasksClient"):
+        sk.main()
+    assert order == [("live_ticks", 2026, 3), "quarter_scores", "betting_alert"]
