@@ -5,7 +5,7 @@ upcoming week's actual gameday/gametime, computes distinct kickoff-time
 clusters, and enqueues 3 Cloud Tasks per cluster:
   - winspool-sync-daily    at (kickoff - 75 min)
   - winspool-predict-daily at (kickoff - 60 min)
-  - winspool-predict-daily at (kickoff - 20 min), with its container args
+  - winspool-predict-daily at (kickoff - 30 min), with its container args
     overridden to `--resimulate <game_ids>` (Task 6) -- a scoped ESPN
     injury check + re-simulate for just that cluster's games, reusing the
     existing winspool-predict-daily job/image rather than a new one. Runs
@@ -15,7 +15,7 @@ clusters, and enqueues 3 Cloud Tasks per cluster:
 Also enqueues one winspool-live-scores task every LIVE_TICK_MINUTES inside each
 merged game window (kickoff - 5 min to kickoff + 4 h) -- see
 enqueue_live_ticks(). The standing Cloud Scheduler trigger for that job is only
-a slow */30 backstop.
+a slow every-30-minute (5,35) backstop.
 
 Cloud Tasks (not Cloud Scheduler) is used because it supports a specific
 one-off future execution timestamp per task, whereas Cloud Scheduler is
@@ -439,7 +439,8 @@ def main():
         print(f"Enqueued {len(clusters_with_games)} kickoff cluster(s) x 3 tasks for {season} week {week}.")
 
         live_count = enqueue_live_ticks(client, games, season, week)
-        print(f"Enqueued {live_count} live-score tick(s) for {season} week {week}.")
+        print(f"Processed {live_count} live-score tick(s) for {season} week {week} "
+              f"(ticks already queued by an earlier run are skipped, not duplicated).")
 
         _run_quarter_scores_scrape(season, week)
         _run_betting_alert()
