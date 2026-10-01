@@ -431,3 +431,65 @@ def test_resimulate_lead_minutes_fires_after_routine_predict():
     from scripts.schedule_kickoffs import RESIMULATE_LEAD_MINUTES, PREDICT_LEAD_MINUTES
     assert RESIMULATE_LEAD_MINUTES == 30
     assert RESIMULATE_LEAD_MINUTES < PREDICT_LEAD_MINUTES
+
+
+class TestComputeLiveWindows:
+    def _game(self, day, time, week=2, season=2026, game_type="REG"):
+        return {"season": season, "week": week, "game_type": game_type,
+                "gameday": day, "gametime": time}
+
+    def test_single_game_window_is_lead_to_tail_in_utc(self):
+        from datetime import datetime, timezone
+        from scripts.schedule_kickoffs import compute_live_windows
+        games = pd.DataFrame([self._game("2026-09-17", "20:15")])  # Thu 20:15 EDT = 00:15Z Fri
+        windows = compute_live_windows(games, 2026, 2)
+        assert windows == [(
+            datetime(2026, 9, 18, 0, 10, tzinfo=timezone.utc),
+            datetime(2026, 9, 18, 4, 15, tzinfo=timezone.utc),
+        )]
+
+    def test_week_merges_overlapping_sunday_games_but_keeps_thu_and_mon_separate(self):
+        from datetime import datetime, timezone
+        from scripts.schedule_kickoffs import compute_live_windows
+        games = pd.DataFrame([
+            self._game("2026-09-17", "20:15"),   # Thu night
+            self._game("2026-09-20", "13:00"),   # Sun early
+            self._game("2026-09-20", "13:00"),   # same cluster
+            self._game("2026-09-20", "16:25"),   # Sun late
+            self._game("2026-09-20", "20:20"),   # Sun night
+            self._game("2026-09-21", "20:15"),   # Mon night
+        ])
+        windows = compute_live_windows(games, 2026, 2)
+        assert windows == [
+            (datetime(2026, 9, 18, 0, 10, tzinfo=timezone.utc), datetime(2026, 9, 18, 4, 15, tzinfo=timezone.utc)),
+            (datetime(2026, 9, 20, 16, 55, tzinfo=timezone.utc), datetime(2026, 9, 21, 4, 20, tzinfo=timezone.utc)),
+            (datetime(2026, 9, 22, 0, 10, tzinfo=timezone.utc), datetime(2026, 9, 22, 4, 15, tzinfo=timezone.utc)),
+        ]
+
+    def test_windows_that_exactly_touch_are_merged(self):
+        from scripts.schedule_kickoffs import compute_live_windows
+        # Kickoff A ends at A+4h; kickoff B starts at B-5min. B = A+4h+5min makes them touch.
+        games = pd.DataFrame([self._game("2026-09-20", "13:00"), self._game("2026-09-20", "17:05")])
+        assert len(compute_live_windows(games, 2026, 2)) == 1
+
+    def test_clock_change_night_uses_utc_arithmetic(self):
+        from datetime import datetime, timezone
+        from scripts.schedule_kickoffs import compute_live_windows
+        # Sat 2026-10-31 22:00 EDT = 02:00Z 11-01; +4h = 06:00Z. Wall-clock ET math
+        # would cross the 2 AM fall-back and be off by an hour.
+        games = pd.DataFrame([self._game("2026-10-31", "22:00", week=9)])
+        windows = compute_live_windows(games, 2026, 9)
+        assert windows == [(
+            datetime(2026, 11, 1, 1, 55, tzinfo=timezone.utc),
+            datetime(2026, 11, 1, 6, 0, tzinfo=timezone.utc),
+        )]
+
+    def test_week_with_no_reg_games_returns_empty(self):
+        from scripts.schedule_kickoffs import compute_live_windows
+        games = pd.DataFrame([self._game("2026-09-20", "13:00")])
+        assert compute_live_windows(games, 2026, 3) == []
+
+    def test_ignores_non_reg_games(self):
+        from scripts.schedule_kickoffs import compute_live_windows
+        games = pd.DataFrame([self._game("2026-09-20", "13:00", game_type="POST")])
+        assert compute_live_windows(games, 2026, 2) == []

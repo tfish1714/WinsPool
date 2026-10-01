@@ -90,6 +90,15 @@ PREDICT_LEAD_MINUTES = 60
 # after the routine predict run, not before it.
 RESIMULATE_LEAD_MINUTES = 30
 
+# Live-score ticks (winspool-live-scores): one Cloud Task every
+# LIVE_TICK_MINUTES inside each game window. A game contributes
+# [kickoff - LIVE_LEAD_MINUTES, kickoff + LIVE_TAIL_HOURS]; overlapping windows
+# merge. See docs/superpowers/specs/2026-09-30-live-scores-kickoff-tasks-design.md.
+LIVE_JOB_NAME = "winspool-live-scores"
+LIVE_TICK_MINUTES = 10
+LIVE_LEAD_MINUTES = 5
+LIVE_TAIL_HOURS = 4
+
 # NFL gametime is published in US/Eastern per nflverse convention. Use a
 # proper DST-aware zone -- clocks fall back to EST (UTC-5) the first Sunday
 # of November, which is squarely inside this job's Sept 1 - Feb 10 window
@@ -131,6 +140,25 @@ def compute_kickoff_clusters_with_games(games: pd.DataFrame, season: int, week: 
         ).replace(tzinfo=_EASTERN)
         clusters.setdefault(key_dt, []).append(row["game_id"])
     return sorted(clusters.items())
+
+
+def compute_live_windows(games: pd.DataFrame, season: int, week: int) -> list[tuple[datetime, datetime]]:
+    """Merged UTC (start, end) live-score windows for (season, week) REG games.
+
+    Each distinct kickoff yields [kickoff - LIVE_LEAD_MINUTES, kickoff +
+    LIVE_TAIL_HOURS]; windows that overlap or touch are merged. All arithmetic
+    is done in UTC: adding a timedelta to a ZoneInfo-aware datetime is
+    wall-clock math, which is wrong across the November fall-back."""
+    windows: list[tuple[datetime, datetime]] = []
+    for kickoff in compute_kickoff_clusters(games, season, week):
+        k = kickoff.astimezone(timezone.utc)
+        start = k - timedelta(minutes=LIVE_LEAD_MINUTES)
+        end = k + timedelta(hours=LIVE_TAIL_HOURS)
+        if windows and start <= windows[-1][1]:
+            windows[-1] = (windows[-1][0], max(windows[-1][1], end))
+        else:
+            windows.append((start, end))
+    return windows
 
 
 def _current_season_week(games: pd.DataFrame) -> tuple[int, int]:
