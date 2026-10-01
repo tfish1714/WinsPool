@@ -161,6 +161,32 @@ def compute_live_windows(games: pd.DataFrame, season: int, week: int) -> list[tu
     return windows
 
 
+def _ceil_to_tick(dt: datetime, minutes: int) -> datetime:
+    """Smallest datetime >= dt whose minute is divisible by `minutes` and whose
+    seconds/microseconds are zero."""
+    base = dt.replace(second=0, microsecond=0)
+    if base < dt:
+        base += timedelta(minutes=1)
+    remainder = base.minute % minutes
+    return base if remainder == 0 else base + timedelta(minutes=minutes - remainder)
+
+
+def live_ticks(windows: list[tuple[datetime, datetime]], now: datetime) -> list[datetime]:
+    """Tick times (every LIVE_TICK_MINUTES, on interval marks, window end
+    inclusive) strictly after `now`. Past ticks are dropped: a Cloud Task with
+    a past schedule_time dispatches immediately, so a mid-week manual run would
+    otherwise fire a burst of stale live-score runs."""
+    ticks: list[datetime] = []
+    step = timedelta(minutes=LIVE_TICK_MINUTES)
+    for start, end in windows:
+        tick = _ceil_to_tick(start, LIVE_TICK_MINUTES)
+        while tick <= end:
+            if tick > now:
+                ticks.append(tick)
+            tick += step
+    return ticks
+
+
 def _current_season_week(games: pd.DataFrame) -> tuple[int, int]:
     """The next upcoming REG-season week: the (season, week) of the earliest
     not-yet-played REG game (result is null). Deliberately NOT

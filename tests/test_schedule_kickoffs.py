@@ -493,3 +493,56 @@ class TestComputeLiveWindows:
         from scripts.schedule_kickoffs import compute_live_windows
         games = pd.DataFrame([self._game("2026-09-20", "13:00", game_type="POST")])
         assert compute_live_windows(games, 2026, 2) == []
+
+
+class TestLiveTicks:
+    def _week_windows(self):
+        from scripts.schedule_kickoffs import compute_live_windows
+        rows = [("2026-09-17", "20:15"), ("2026-09-20", "13:00"), ("2026-09-20", "16:25"),
+                ("2026-09-20", "20:20"), ("2026-09-21", "20:15")]
+        games = pd.DataFrame([
+            {"season": 2026, "week": 2, "game_type": "REG", "gameday": d, "gametime": t}
+            for d, t in rows
+        ])
+        return compute_live_windows(games, 2026, 2)
+
+    def test_full_week_tick_count_and_bounds(self):
+        from datetime import datetime, timezone
+        from scripts.schedule_kickoffs import live_ticks
+        ticks = live_ticks(self._week_windows(), now=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        # Thu 00:10-04:10 = 25, Sun 17:00-04:20 = 69, Mon 00:10-04:10 = 25
+        assert len(ticks) == 119
+        assert ticks[0] == datetime(2026, 9, 18, 0, 10, tzinfo=timezone.utc)
+        assert ticks[-1] == datetime(2026, 9, 22, 4, 10, tzinfo=timezone.utc)
+        assert ticks == sorted(ticks)
+        assert len(set(ticks)) == len(ticks)
+
+    def test_ticks_fall_on_interval_marks(self):
+        from datetime import datetime, timezone
+        from scripts.schedule_kickoffs import live_ticks, LIVE_TICK_MINUTES
+        ticks = live_ticks(self._week_windows(), now=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        assert all(t.minute % LIVE_TICK_MINUTES == 0 and t.second == 0 for t in ticks)
+
+    def test_first_tick_is_first_mark_at_or_after_window_start(self):
+        from datetime import datetime, timezone
+        from scripts.schedule_kickoffs import live_ticks
+        # Window 16:55-21:00Z: first mark at/after 16:55 is 17:00.
+        window = [(datetime(2026, 9, 20, 16, 55, tzinfo=timezone.utc),
+                   datetime(2026, 9, 20, 21, 0, tzinfo=timezone.utc))]
+        ticks = live_ticks(window, now=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        assert ticks[0] == datetime(2026, 9, 20, 17, 0, tzinfo=timezone.utc)
+        assert ticks[-1] == datetime(2026, 9, 20, 21, 0, tzinfo=timezone.utc)  # end is inclusive
+
+    def test_skips_ticks_not_strictly_after_now(self):
+        from datetime import datetime, timezone
+        from scripts.schedule_kickoffs import live_ticks
+        now = datetime(2026, 9, 20, 23, 0, tzinfo=timezone.utc)  # mid Sunday window
+        ticks = live_ticks(self._week_windows(), now=now)
+        assert all(t > now for t in ticks)
+        assert datetime(2026, 9, 20, 23, 0, tzinfo=timezone.utc) not in ticks
+        assert len(ticks) == 57
+
+    def test_no_windows_means_no_ticks(self):
+        from datetime import datetime, timezone
+        from scripts.schedule_kickoffs import live_ticks
+        assert live_ticks([], now=datetime(2026, 1, 1, tzinfo=timezone.utc)) == []
