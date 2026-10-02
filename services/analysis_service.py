@@ -708,15 +708,18 @@ def get_player_analytics(
     # League-wide avg wins per draft slot across all players/seasons
     slot_avgs: dict[int, float | None] = {}
     max_pick = max(hi for _, hi in DRAFT_ROUNDS.values())
+    slot_means: dict[int, float] = {}
+    if not standings_master.empty and {"season", "team", "wins"} <= set(standings_master.columns):
+        # One row per (season, team) so the join cannot fan out a pick into several rows.
+        team_wins = standings_master[["season", "team", "wins"]].drop_duplicates(["season", "team"])
+        joined = all_draft_results[["season", "team", "draftPick"]].merge(
+            team_wins, on=["season", "team"], how="inner"
+        )
+        joined["wins"] = joined["wins"].fillna(0).astype(int)
+        slot_means = joined.groupby("draftPick")["wins"].mean().to_dict()
     for pick_num in range(1, max_pick + 1):
-        slot_picks = all_draft_results[all_draft_results["draftPick"] == pick_num]
-        wins_list = []
-        for _, row in slot_picks.iterrows():
-            yr_st = filter_season(standings_master, row["season"])
-            team_row = yr_st[yr_st["team"] == row["team"]]
-            if not team_row.empty:
-                wins_list.append(int(team_row.iloc[0].get("wins", 0)))
-        slot_avgs[pick_num] = round(sum(wins_list) / len(wins_list), 1) if wins_list else None
+        mean = slot_means.get(pick_num)
+        slot_avgs[pick_num] = round(float(mean), 1) if mean is not None else None
 
     available_seasons = sorted(int(s) for s in player_draft["season"].unique())
     seasons_data = []

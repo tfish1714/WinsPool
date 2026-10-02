@@ -204,3 +204,32 @@ def test_api_player_analytics_returns_200(mock_data):
     assert resp.status_code == 200
     body = resp.json()
     assert body["player"]["playerId"] == 1
+
+
+def test_slot_averages_partial_standings():
+    """Picks whose team has no standings row are skipped; slots with no data are None."""
+    standings = _standings()
+    standings = standings[standings["team"] != "SF"]
+    sa = get_player_analytics(1, _draft(), standings, _players(), _preds())["slotAverages"]
+    assert sa["1"] == 14.0
+    assert sa["11"] is None
+    assert sa["21"] == 12.0
+    assert sa["30"] is None
+
+
+def test_slot_averages_empty_standings():
+    sa = get_player_analytics(1, _draft(), pd.DataFrame(), _players(), _preds())["slotAverages"]
+    assert all(v is None for v in sa.values())
+
+
+def test_slot_averages_mean_across_seasons_and_rounding():
+    draft = pd.concat([_draft(), pd.DataFrame([
+        {"playerId": 2, "season": 2023, "draftPick": 1, "team": "MIA"},
+        {"playerId": 1, "season": 2023, "draftPick": 1, "team": "BUF"},
+    ])], ignore_index=True)
+    standings = pd.concat([_standings(), pd.DataFrame([
+        {"season": 2023, "team": "MIA", "wins": 8, "scored": 1, "allowed": 1},
+        {"season": 2023, "team": "BUF", "wins": 9, "scored": 1, "allowed": 1},
+    ])], ignore_index=True)
+    sa = get_player_analytics(1, draft, standings, _players(), _preds())["slotAverages"]
+    assert sa["1"] == 10.3  # (14 + 8 + 9) / 3
