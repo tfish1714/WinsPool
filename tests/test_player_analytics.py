@@ -218,7 +218,7 @@ def test_slot_averages_partial_standings():
 
 
 def test_slot_averages_empty_standings():
-    sa = get_player_analytics(1, _draft(), pd.DataFrame(), _players(), _preds())["slotAverages"]
+    sa = get_player_analytics(1, _draft(), _standings().iloc[0:0], _players(), _preds())["slotAverages"]
     assert all(v is None for v in sa.values())
 
 
