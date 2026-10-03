@@ -316,3 +316,45 @@ def test_admin_pool_unpaid_preview_and_validation():
     assert got[0] == "Nudge from week 8, names shown from week 10, list from week 13"
     assert got[1] == "Unpaid visibility is off."
     assert got[2] is None and got[3] and got[4] and got[5]
+
+
+# ---------------------------------------------------------------------------
+# Standings and player page UI (source contracts)
+# ---------------------------------------------------------------------------
+
+def test_unpaid_script_contract():
+    js = _read("static/js/unpaid_notice.js")
+    assert "/api/pool/unpaid" in js
+    assert ".innerHTML" not in js
+    assert "createElement('span')" in js and "unpaid-pill" in js
+    assert "createElement('a')" not in js          # pills are never links
+    assert "querySelector('.unpaid-pill')" in js    # idempotent: skip when already present
+    assert "MutationObserver" in js                 # re-applied after the 30s refresh
+    assert "getAuthHeaders" in js
+    assert "sessionStorage" in js                   # dismissible per session, in try/catch
+    for container in (".wp-leader-name", ".wp-row-name", ".standings-stacked-card__name"):
+        assert container in js
+
+
+def test_wins_pool_loads_unpaid_script_as_module():
+    html = _read("templates/wins_pool.html")
+    assert re.search(r'<script type="module" src="\{\{ static_url\(\'js/unpaid_notice\.js\'\) \}\}"></script>', html)
+    # nothing server-rendered by default
+    assert "unpaid-pill" not in html and "Still owed" not in html
+
+
+def test_unpaid_styles_exist_and_are_not_tap_targets():
+    css = _read("static/style.css")
+    assert ".unpaid-pill" in css and ".unpaid-notice" in css
+    block = re.search(r"\.unpaid-pill\s*\{[^}]*\}", css).group(0)
+    assert "pointer-events: none" in block and "margin-left" in block
+
+
+def test_player_profile_shows_amount_owed_and_note_safely():
+    html = _read("templates/player_profile.html")
+    assert "/api/pool/unpaid" in html
+    assert "payment_note" in html
+    gate = html.index("own-page-only")
+    start = html.index("/api/pool/unpaid")
+    assert start > gate
+    assert ".innerHTML" not in html[start: start + 1500]

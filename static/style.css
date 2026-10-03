@@ -4114,3 +4114,46 @@ a.pool-chip-mine:hover { text-decoration: underline; }
         border-bottom-color: color-mix(in srgb, currentColor 35%, transparent);
     }
 }
+
+/* Unpaid entry visibility (pills are text only, never tap targets) */
+.unpaid-pill {
+    display: inline-block;
+    margin-left: 0.75rem;
+    padding: 0.1rem 0.5rem;
+    font: 500 11px/1.4 'JetBrains Mono', monospace;
+    color: var(--warn);
+    border: 1px solid var(--warn);
+    border-radius: 999px;
+    vertical-align: middle;
+    pointer-events: none;
+    user-select: none;
+}
+
+.unpaid-notice {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: 0 0 1rem;
+    padding: 0.6rem 0.9rem;
+    color: var(--warn);
+    background: var(--bg-elev);
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    font-size: 0.9rem;
+}
+
+.unpaid-notice__close {
+    min-height: 44px;
+    min-width: 44px;
+    color: var(--ink-2);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+}
+
+.unpaid-owed-line {
+    margin-top: 0.5rem;
+    color: var(--warn);
+    font-size: 0.9rem;
+}

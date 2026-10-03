@@ -443,6 +443,16 @@
         add(card, 'div', 'pool-status-mine' + (d.my_paid ? ' is-paid' : ''), 'Your entry: ' + (d.my_paid ? 'Paid' : 'Not yet paid'));
       }
       card.style.display = 'block';
+      try {
+        const ur = await fetch('/api/pool/unpaid', { headers, credentials: 'same-origin' });
+        if (ur.ok) {
+          const u = await ur.json();
+          if (u && u.stage !== 'off' && u.me_unpaid) {
+            add(card, 'div', 'unpaid-owed-line', 'Amount owed: ' + money(u.amount));
+            if (u.payment_note) add(card, 'div', 'unpaid-owed-line', u.payment_note);
+          }
+        }
+      } catch (e) { /* optional block */ }
     } catch (err) {
       console.error('Failed to load pool status:', err);
     } })();
