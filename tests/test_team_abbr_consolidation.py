@@ -1,4 +1,5 @@
 """One canonical team-abbreviation map (GitHub #101)."""
+import ast
 import pathlib
 import pytest
 
@@ -39,6 +40,23 @@ def test_nn_feature_engine_reuses_canonical_map_and_function():
     assert nfe._normalize_team(nan) is nan
 
 
+def _has_abbr_dict_literal(source: str) -> bool:
+    """True if any dict literal in source has both "WSH" and "JAC" string keys."""
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Dict):
+            keys = {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+            if {"WSH", "JAC"} <= keys:
+                return True
+    return False
+
+
+def test_abbr_dict_detector():
+    assert _has_abbr_dict_literal('M = {"WSH": "WAS", "JAC": "JAX"}')
+    assert _has_abbr_dict_literal("M = {'JAC': 'JAX', 'X': 1, 'WSH': 'WAS'}")
+    assert not _has_abbr_dict_literal('M = {"JAC": "JAX"}')
+    assert not _has_abbr_dict_literal('s = "JAC"; t = "WSH"')
+
+
 def test_no_second_abbreviation_dict_outside_constants():
     offenders = []
     for folder in ("services", "routes", "scripts"):
@@ -46,7 +64,7 @@ def test_no_second_abbreviation_dict_outside_constants():
             if path.name == "constants.py":
                 continue
             text = path.read_text(encoding="utf-8", errors="ignore")
-            if '"JAC": "JAX"' in text or "'JAC': 'JAX'" in text:
+            if _has_abbr_dict_literal(text):
                 offenders.append(str(path.relative_to(ROOT)))
     assert offenders == []
 
