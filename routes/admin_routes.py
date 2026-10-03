@@ -201,13 +201,21 @@ async def update_member_paid(body: MemberPaidRequest, _: dict = Depends(require_
 async def fetch_admin_seasons(_: dict = Depends(require_admin)):
     """Retrieve all years that have at least some draft data."""
     try:
-        _, _, _, _, draft_order_df, draft_results_df, _ = load_data()
+        _, _, games_df, _, draft_order_df, draft_results_df, rules_df = load_data()
         seasons = set()
         if not draft_order_df.empty and "season" in draft_order_df.columns:
             seasons.update(draft_order_df["season"].unique().tolist())
         if not draft_results_df.empty and "season" in draft_results_df.columns:
             seasons.update(draft_results_df["season"].unique().tolist())
-        return JSONResponse(content={"seasons": sorted([int(s) for s in seasons], reverse=True)})
+        try:
+            active = int(get_active_season(games_df, draft_results_df, rules_df))
+        except Exception:
+            logger.warning("fetch_admin_seasons: active season lookup failed", exc_info=True)
+            active = None
+        return JSONResponse(content={
+            "seasons": sorted([int(s) for s in seasons], reverse=True),
+            "active_season": active,
+        })
     except Exception as e:
         logger.exception("Unhandled error in admin endpoint")
         return server_error()

@@ -1103,3 +1103,54 @@ def test_serve_admin_defaults_recap_year_and_week(monkeypatch):
     assert 'id="recap-week"' in html
     assert 'value="2"' in html
 
+
+
+# ── /api/admin/seasons active_season (admin Pool tab default) ────────────────
+
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+
+class TestAdminSeasonsActive:
+    def _frames(self):
+        games = pd.DataFrame({"season": [2026], "week": [1], "game_type": ["REG"], "result": [3.0]})
+        order = pd.DataFrame({"season": [2026, 2025], "playerId": [1, 1], "draftOrder": [1, 1]})
+        results = pd.DataFrame({"season": [2026, 2025], "draftPick": [1, 1], "team": ["KC", "BUF"], "playerId": [1, 1]})
+        rules = pd.DataFrame({"season": [2026]})
+        return (None, None, games, None, order, results, rules)
+
+    def test_response_includes_active_season(self, admin_token):
+        with patch("routes.admin_routes.load_data", return_value=self._frames()):
+            r = client.get("/api/admin/seasons", headers={"Authorization": admin_token})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["seasons"] == [2026, 2025]
+        assert body["active_season"] == 2026
+
+    def test_active_season_null_when_lookup_fails(self, admin_token):
+        with patch("routes.admin_routes.load_data", return_value=self._frames()), \
+             patch("routes.admin_routes.get_active_season", side_effect=RuntimeError("boom")):
+            r = client.get("/api/admin/seasons", headers={"Authorization": admin_token})
+        assert r.status_code == 200
+        assert r.json()["active_season"] is None
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_admin_pool_prefers_active_season():
+    src = (Path(__file__).resolve().parent.parent / "static/js/admin_pool.js").read_text(encoding="utf-8")
+    m = re.search(r"function _poolPickInitialSeason\(.*?\n\}\n", src, re.S)
+    assert m, "_poolPickInitialSeason must exist"
+    script = m.group(0) + """
+    const out = [
+      _poolPickInitialSeason([2026, 2025], 2025),
+      _poolPickInitialSeason([2026, 2025], 2031),
+      _poolPickInitialSeason([2026, 2025], null),
+      _poolPickInitialSeason([2026, 2025], undefined),
+    ];
+    console.log(JSON.stringify(out));
+    """
+    res = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True)
+    assert res.stdout.strip() == "[2025,2026,2026,2026]"
+    assert "_poolPickInitialSeason(seasons, active_season)" in src

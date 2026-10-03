@@ -203,6 +203,12 @@ async function _poolSave() {
     }
 }
 
+function _poolPickInitialSeason(seasons, active) {
+    const n = Number(active);
+    if (active !== null && active !== undefined && seasons.includes(n)) return n;
+    return seasons[0];
+}
+
 async function _poolInit() {
     if (_poolReady) return;
     _poolReady = true;
@@ -210,7 +216,7 @@ async function _poolInit() {
     try {
         const res = await fetch('/api/admin/seasons', { headers: _poolHeaders(false), credentials: 'same-origin' });
         if (!res.ok) throw await _httpErr(res);
-        const { seasons } = await res.json();
+        const { seasons, active_season } = await res.json();
         sel.textContent = '';
         seasons.forEach(s => {
             const opt = document.createElement('option');
@@ -218,8 +224,11 @@ async function _poolInit() {
             opt.textContent = s + ' Season';
             sel.appendChild(opt);
         });
-        if (seasons.length) _poolLoad(seasons[0]);
-        else _poolStatus('No seasons found.', true);
+        if (seasons.length) {
+            const initial = _poolPickInitialSeason(seasons, active_season);
+            sel.value = String(initial);
+            _poolLoad(initial);
+        } else _poolStatus('No seasons found.', true);
     } catch (e) {
         _poolReady = false;
         _poolStatus('Could not load seasons.', true);
