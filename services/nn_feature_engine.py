@@ -1324,6 +1324,12 @@ def compute_preseason_player_profiles(target_season: int, rawdata_dir, week: int
 
     roster = shared_inputs["roster"]
     if week is not None:
+        if "week" not in roster.columns:
+            logger.warning(
+                "compute_preseason_player_profiles: weekly roster for season=%s has no "
+                "'week' column; returning no profiles", target_season,
+            )
+            return {}
         roster = roster[pd.to_numeric(roster["week"], errors="coerce") == week].copy()
         if roster.empty:
             return {}
