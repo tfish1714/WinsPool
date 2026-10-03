@@ -5,25 +5,48 @@ from pydantic import BaseModel, Field, StringConstraints, field_validator, model
 
 # --- Auth ---
 
+# Lenient email shape check (surrounding whitespace is tolerated because the routes
+# strip and lowercase). A regex rather than pydantic's EmailStr, which would add the
+# email-validator dependency.
+EMAIL_PATTERN = r"^\s*[^@\s]+@[^@\s]+\.[^@\s]+\s*$"
+# Optional-email variant for profile updates, where "" means "leave unchanged".
+OPTIONAL_EMAIL_PATTERN = r"^(\s*|\s*[^@\s]+@[^@\s]+\.[^@\s]+\s*)$"
+
+# Password length/complexity (12+ chars, mixed classes) is deliberately enforced by the
+# routes, not by a min_length here: a 422 would bypass their lockout accounting (weak
+# set_password attempts count toward the setup lockout, failed logins toward the login
+# lockout) and legacy accounts may hold passwords shorter than the current rules, which
+# must fail login as 401. Only an upper bound is declared here.
+MAX_PASSWORD_LENGTH = 256
+
+
 class SetPasswordRequest(BaseModel):
-    email: str
-    password: str
-    confirm_password: str
+    email: str = Field(..., pattern=EMAIL_PATTERN, max_length=254,
+                       description="Account email the password is being set for.")
+    password: str = Field(..., max_length=MAX_PASSWORD_LENGTH,
+                          description="New password (the route enforces length and complexity and counts weak attempts toward lockout).")
+    confirm_password: str = Field(..., max_length=MAX_PASSWORD_LENGTH,
+                                  description="Must match password.")
 
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: str = Field(..., pattern=EMAIL_PATTERN, max_length=254,
+                       description="Account email address.")
+    password: str = Field(..., max_length=MAX_PASSWORD_LENGTH, description="Account password.")
 
 
 class UpdateProfileRequest(BaseModel):
-    playerId: str
-    fullName: str = ""
-    nickName: str = ""
-    email: str = ""
-    currentPassword: str
-    newPassword: Optional[str] = None
-    mfaEnabled: bool = False
+    playerId: str = Field(..., description="ID of the player whose profile is updated; must match the session.")
+    fullName: str = Field("", max_length=100, description="Display full name; empty leaves it unchanged.")
+    nickName: str = Field("", max_length=50, description="Short display name; empty leaves it unchanged.")
+    email: str = Field("", pattern=OPTIONAL_EMAIL_PATTERN, max_length=254,
+                       description="New email address; empty leaves it unchanged.")
+    currentPassword: str = Field(..., max_length=MAX_PASSWORD_LENGTH,
+                                 description="Current password, required to authorize any change.")
+    newPassword: Optional[str] = Field(None, max_length=MAX_PASSWORD_LENGTH,
+                                       description="New password (the route enforces complexity); omit or send empty to keep the current one.")
+    mfaEnabled: bool = Field(False, description="Whether email-code MFA is required at login.")
+
 
 
 class MfaVerifyRequest(BaseModel):
@@ -34,8 +57,8 @@ class MfaVerifyRequest(BaseModel):
 # --- Admin ---
 
 class NewSeasonRequest(BaseModel):
-    season: int
-    playerIds: List[int] = []
+    season: int = Field(..., ge=2000, le=2100, description="Season year to create.")
+    playerIds: List[int] = Field([], description="Players entered in the new season's pool.")
 
 
 class MemberPaidRequest(BaseModel):
@@ -97,10 +120,10 @@ class SaveBroadcastRecapRequest(BaseModel):
 # --- Mock Draft ---
 
 class MockDraftPickRequest(BaseModel):
-    season: int
-    availableTeams: List[str]
-    wildcardsSoFar: int = 0
-    botPicksRemaining: int = 1
+    season: int = Field(..., ge=2000, le=2100, description="Season whose projections drive the bot pick.")
+    availableTeams: List[str] = Field(..., description="Team abbreviations still undrafted.")
+    wildcardsSoFar: int = Field(0, ge=0, description="Wildcard (uniform-random) bot picks made so far.")
+    botPicksRemaining: int = Field(1, ge=0, description="Bot picks left in the whole draft, including this one.")
 
 
 class MockDraftResultsRequest(BaseModel):
