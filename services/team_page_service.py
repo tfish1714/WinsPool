@@ -20,7 +20,7 @@ import math
 
 import pandas as pd
 
-from services.constants import UNDRAFTED_SENTINEL
+from services.constants import UNDRAFTED_SENTINEL, make_game_key
 from services.utils import get_team_logo_url, normalize_team_abbr
 
 TEAM_NAMES = {
@@ -207,7 +207,7 @@ def _current(team: str, season: int, data: dict, include_projections: bool) -> d
                     mine_s, theirs = (hs, aws) if home else (aws, hs)
                     entry["score"] = f"{int(mine_s)}-{int(theirs)}"
             elif include_projections:
-                prob = _num((preds.get(f"W{wk:02d}_{row['_home']}_{row['_away']}") or {}).get("pred_prob"))
+                prob = _num((preds.get(make_game_key(wk, row['_home'], row['_away'])) or {}).get("pred_prob"))
                 if prob is not None:
                     win_prob = prob if home else 1.0 - prob
                     entry["win_prob"] = round(win_prob, 4)

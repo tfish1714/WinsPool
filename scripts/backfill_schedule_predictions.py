@@ -51,7 +51,7 @@ from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
 from services.nn_projection_engine import NNProjectionEngine, build_mc_prediction_entry
 from services.cache_service import get_game_predictions, write_game_predictions, write_prediction_features
-from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
+from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, make_game_key
 from services.feature_audit_service import compute_feature_audit
 from services.db_service import get_db, require_db
 from services.model_version import get_feature_version, build_ensemble_version_string
@@ -84,7 +84,7 @@ def _build_predictions_map(year: int, ft_lookup: dict,
     played_keys = {}
     for (s, wk, ht, at), pred in ft_lookup.items():
         if s == year:
-            played_keys[f"W{wk:02d}_{ht}_{at}"] = pred
+            played_keys[make_game_key(wk, ht, at)] = pred
     result = {k: {**v, "locked": True} for k, v in played_keys.items()}
 
     # Build completed_results from actual nfl_games scores
@@ -97,7 +97,7 @@ def _build_predictions_map(year: int, ft_lookup: dict,
                 at = normalize_team_abbr(str(row.get("away_team", "") or ""))
                 wk = row.get("week")
                 if ht and at and wk is not None:
-                    key = f"W{int(wk):02d}_{ht}_{at}"
+                    key = make_game_key(wk, ht, at)
                     completed_results[key] = float(row["result"])
 
     # Skip the MC simulation entirely when every scheduled game for this year
@@ -119,7 +119,7 @@ def _build_predictions_map(year: int, ft_lookup: dict,
             at = normalize_team_abbr(str(row.get("away_team", "") or ""))
             if not ht or not at:
                 continue
-            if f"W{int(wk):02d}_{ht}_{at}" not in played_keys:
+            if make_game_key(wk, ht, at) not in played_keys:
                 needs_simulation = True
                 break
 

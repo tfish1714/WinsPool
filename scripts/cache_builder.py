@@ -60,7 +60,7 @@ from services.nn_feature_engine import (
     build_master_feature_table, FEATURE_COLUMNS,
 )
 from services.utils import normalize_team_abbr
-from services.constants import UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT
+from services.constants import UNDRAFTED_SENTINEL, NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, make_game_key
 import services.live_score_service as live_scores
 from services.email_service import send_alert_email
 from services.model_version import get_feature_version, build_ensemble_version_string
@@ -150,7 +150,7 @@ def _publish_game_probs(game_ids: list, games: pd.DataFrame, year: int, game_pro
         wk = row.get('week')
         if not (ht and at and wk is not None):
             continue
-        key = f"W{int(wk):02d}_{ht}_{at}"
+        key = make_game_key(wk, ht, at)
         gp = game_probs.get(key)
         if not gp:
             continue
@@ -247,7 +247,7 @@ def _apply_predictions(schedule_df: pd.DataFrame, year: int, pred_lookup: dict,
             wk = row.get('week')
             if not (ht and at and wk is not None):
                 continue
-            key = f"W{int(wk):02d}_{ht}_{at}"
+            key = make_game_key(wk, ht, at)
             gp = game_probs.get(key)
             if not gp:
                 continue
@@ -379,7 +379,7 @@ def build_year(standings, games, players, draft_order, draft_results,
                             entry['ensemble_version'] = model_version
                         if feature_version:
                             entry['feature_version'] = feature_version
-                        pmap[f"W{int(wk):02d}_{ht}_{at}"] = entry
+                        pmap[make_game_key(wk, ht, at)] = entry
                 if pmap:
                     existing = get_game_predictions(year)
                     merged = merge_thin_game_predictions(existing, pmap)

@@ -120,3 +120,15 @@ PODIUM_SIZE = 3
 TEAM_ABBR_MAP = {
     "LAR": "LA", "WSH": "WAS", "JAC": "JAX", "OAK": "LV", "SD": "LAC", "STL": "LA",
 }
+
+
+def make_game_key(week: "int | str", home_team: str, away_team: str) -> str:
+    """Canonical per-game key "W{week:02d}_{HOME}_{AWAY}" used by game_predictions,
+    the prediction caches and the projection engine.
+
+    Teams are normalized to the repo's canonical abbreviations, so legacy codes
+    (OAK, WSH, ...) and stray case/whitespace resolve to the same key. The week
+    may be an int, a numeric string or an integral float.
+    """
+    from services.utils import normalize_team_abbr  # local import: utils imports this module
+    return f"W{int(float(week)):02d}_{normalize_team_abbr(home_team)}_{normalize_team_abbr(away_team)}"

@@ -29,6 +29,7 @@ import pandas as pd
 
 from services.nn_feature_engine import build_master_feature_table, RAWDATA_DIR
 from services.nn_prediction_service import NNPredictionService
+from services.constants import make_game_key
 
 MODEL_DIR = pathlib.Path(__file__).parent.parent / "models"
 ARTIFACTS_DIR = MODEL_DIR / "walkforward"
@@ -257,7 +258,7 @@ def _project_fold_in_season(fold_year, nn_svc, xgb_svc, lr_svc, n_sims: int = 20
             res = row.get("result")
             if pd.isna(res):
                 continue  # game not actually played (bye week padding, cancellation)
-            key = f"W{week:02d}_{row['home_team']}_{row['away_team']}"
+            key = make_game_key(week, row['home_team'], row['away_team'])
             gp = game_probs.get(key)
             if not gp:
                 continue

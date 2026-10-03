@@ -30,7 +30,7 @@ except ImportError:
 
 from services.nn_feature_engine import FEATURE_COLUMNS
 from services.utils import normalize_team_abbr
-from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, PROB_CLIP_MIN, PROB_CLIP_MAX
+from services.constants import NN_WEIGHT, XGB_WEIGHT, LR_WEIGHT, PROB_CLIP_MIN, PROB_CLIP_MAX, make_game_key
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +141,7 @@ def compute_feature_audit(
         week   = int(getattr(row, "week", 0))
         ht     = normalize_team_abbr(str(getattr(row, "home_team", "") or ""))
         at     = normalize_team_abbr(str(getattr(row, "away_team", "") or ""))
-        game_key = f"W{week:02d}_{ht}_{at}"
+        game_key = make_game_key(week, ht, at)
 
         raw_features    = {col: round(_safe_float(getattr(row, col, 0.0)), 4)
                            for col in FEATURE_COLUMNS}

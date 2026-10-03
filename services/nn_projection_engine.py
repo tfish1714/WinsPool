@@ -31,6 +31,7 @@ from services.nn_prediction_service import (
 from services.xgb_prediction_service import XGBPredictionService
 from services.lr_prediction_service import LRPredictionService
 from services.utils import derive_prediction_scalars, prob_to_model_spread
+from services.constants import make_game_key
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def build_completed_results(games_df, year: int) -> Dict[str, float]:
             at = normalize_team_abbr(str(row.get("away_team", "") or ""))
             wk = row.get("week")
             if ht and at and pd.notna(wk):
-                completed[f"W{int(wk):02d}_{ht}_{at}"] = float(res)
+                completed[make_game_key(wk, ht, at)] = float(res)
     return completed
 
 
@@ -376,7 +377,7 @@ class NNProjectionEngine:
             if not ht or not at or wk is None:
                 continue
 
-            key = f"W{int(wk):02d}_{ht}_{at}"
+            key = make_game_key(wk, ht, at)
             hp = profile_dict.get(ht, {})
             ap = profile_dict.get(at, {})
 
@@ -834,7 +835,7 @@ class NNProjectionEngine:
                     continue
                 h_idx = team_idx[ht]
                 a_idx = team_idx[at]
-                key = f"W{int(week):02d}_{ht}_{at}"
+                key = make_game_key(week, ht, at)
 
                 if key in completed_results:
                     # Apply real result deterministically across all trials

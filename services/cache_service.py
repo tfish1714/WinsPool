@@ -19,6 +19,7 @@ _USE_LOCAL = os.environ.get('USE_LOCAL_DATA', 'False').lower() == 'true'
 # --- Data Cache: domain-keyed, not year-keyed (see docs/superpowers/specs/
 # 2026-09-14-cache-mutability-redesign-design.md) ---
 import time
+from services.constants import make_game_key
 
 DOMAIN_ACTIVE = "active"
 DOMAIN_HISTORICAL = "historical"
@@ -168,7 +169,7 @@ def merge_game_predictions(df: pd.DataFrame, season: int) -> pd.DataFrame:
         at = normalize_team_abbr(str(row.get('away_team', '') or ''))
         if wk is None or not ht or not at:
             return None
-        return f"W{int(wk):02d}_{ht}_{at}"
+        return make_game_key(wk, ht, at)
 
     keys = df.apply(_key, axis=1)
     for col in ('pred_winner', 'pred_su_conf', 'pred_ats_pick', 'pred_prob', 'edge_vs_vegas', 'model_spread'):

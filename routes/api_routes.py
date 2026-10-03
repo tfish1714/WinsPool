@@ -21,6 +21,7 @@ import services.analysis_service as analysis
 from services.analysis_service import get_season_progress
 from services.cache_service import get_prediction_features
 from services.analysis_service import get_player_analytics_data
+from services.constants import make_game_key
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +219,7 @@ def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: 
         import pandas as pd
         ht = normalize_team_abbr(home)
         at = normalize_team_abbr(away)
-        key = f"W{week:02d}_{ht}_{at}"
+        key = make_game_key(week, ht, at)
         preds = get_game_predictions(season)
         pred = preds.get(key)
         if not pred:
@@ -431,7 +432,7 @@ def get_game_prediction_features(
         from services.utils import normalize_team_abbr
         ht = normalize_team_abbr(home_team)   # home team first in game_key
         at = normalize_team_abbr(away_team)   # away team second
-        game_key = f"W{int(week):02d}_{ht}_{at}"
+        game_key = make_game_key(week, ht, at)
 
         doc = get_prediction_features(season)
         if doc is None:
@@ -593,7 +594,7 @@ def _remaining_games_with_probs(games, season: int):
         week = pd.to_numeric(row.get("week"), errors="coerce")
         if not isinstance(home, str) or not isinstance(away, str) or pd.isna(week) or not home or not away:
             continue
-        prob = (preds.get(f"W{int(week):02d}_{home}_{away}") or {}).get("pred_prob")
+        prob = (preds.get(make_game_key(week, home, away)) or {}).get("pred_prob")
         if prob is None or pd.isna(prob):
             prob = 0.5
         else:
