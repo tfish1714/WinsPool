@@ -171,6 +171,12 @@ def signal_data_update(domain: str = "static") -> None:
     )
 
 
+def _invalidate_static() -> None:
+    """Drop this process's static cache and tell every other instance to refresh."""
+    clear_data_cache(DOMAIN_STATIC)
+    signal_data_update(DOMAIN_STATIC)
+
+
 def get_collection_df(collection_name: str, filters: list = None) -> pd.DataFrame:
     """
     Fetch a Firestore collection into a DataFrame.
@@ -386,7 +392,7 @@ def delete_draft_results_for_season(season: int):
         results_df = results_df[results_df["season"] != season]
         _save_df_to_local("draft_results", results_df)
 
-    clear_data_cache(DOMAIN_STATIC)
+    _invalidate_static()
 
 def delete_season_data(season: int):
     """Wipes draft_order, draft_order_rules, draft_results, and the persisted
@@ -437,7 +443,7 @@ def add_draft_order(season: int, draft_order: int, player_id: int):
     order_df = pd.concat([order_df, pd.DataFrame([data])], ignore_index=True)
     _save_df_to_local("draft_order", order_df)
 
-    clear_data_cache(DOMAIN_STATIC)
+    _invalidate_static()
 
 
 def add_draft_rule(season: int, draft_order: int, pick_one: int, pick_two: int, pick_three: int):
@@ -482,8 +488,7 @@ def set_member_paid(season: int, player_id: int, paid: bool) -> bool:
 
     # load_data()'s static bucket holds its own copy of draft_order; drop it
     # (and signal other processes) so /api/pool/status sees the new flag.
-    clear_data_cache(DOMAIN_STATIC)
-    signal_data_update(DOMAIN_STATIC)
+    _invalidate_static()
     return True
 
 
