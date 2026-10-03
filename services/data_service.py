@@ -796,5 +796,8 @@ if __name__ == "__main__":
     st, tm, gm, pl, do, dr, drr = load_data()
     s, w = get_latest_season_and_week(gm)
     print(f"Latest: Season {s} Week {w}")
-    res = get_season_progress(s, w)
+    res = get_season_progress(
+        s, w,
+        games_df=gm, standings_df=st, draft_results_df=dr, teams_df=tm, players_df=pl,
+    )
     print(json.dumps(res)[:500])

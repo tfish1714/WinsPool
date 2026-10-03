@@ -40,10 +40,14 @@ def fetch_progress(
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_route = time.time()
     try:
-        _, _, games, _, _, _, _ = load_data()
+        standings, teams, games, players, _, draft_results, _ = load_data()
         if games.empty or "season" not in games.columns:
             return JSONResponse(content={"labels": [], "datasets": []})
-        res = get_season_progress(season, week)
+        res = get_season_progress(
+            season, week,
+            games_df=games, standings_df=standings, draft_results_df=draft_results,
+            teams_df=teams, players_df=players,
+        )
         if is_debug:
             logger.debug("/api/progress route total took %.3fs", time.time() - start_route)
         return JSONResponse(content=res)
@@ -56,9 +60,13 @@ def fetch_progress(
 def fetch_draft_summary(_auth: dict = Depends(require_auth)):
     """Best-picks summary for the current season (used by draft board tab)."""
     try:
-        _, _, games, _, _, _, _ = load_data()
+        standings, teams, games, players, _, draft_results, _ = load_data()
         s, w = get_latest_season_and_week(games)
-        data = get_season_progress(s, w)
+        data = get_season_progress(
+            s, w,
+            games_df=games, standings_df=standings, draft_results_df=draft_results,
+            teams_df=teams, players_df=players,
+        )
         return JSONResponse(content={
             "season": s, "week": w,
             "best_overall": data.get("best_overall"),

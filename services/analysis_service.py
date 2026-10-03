@@ -834,16 +834,36 @@ def process_games_data(games: pd.DataFrame) -> pd.DataFrame:
 # Season progress computation (moved from data_service.py)
 # ---------------------------------------------------------------------------
 
-def get_season_progress(season: int, week: int) -> Dict[str, Any]:
+def get_season_progress(
+    season: int,
+    week: int,
+    *,
+    games_df: Optional[pd.DataFrame] = None,
+    standings_df: Optional[pd.DataFrame] = None,
+    draft_results_df: Optional[pd.DataFrame] = None,
+    teams_df: Optional[pd.DataFrame] = None,
+    players_df: Optional[pd.DataFrame] = None,
+) -> Dict[str, Any]:
     """Compute player and team wins for a season up to a given week.
 
     Returns a dict suitable for JSON serialization and Chart.js consumption.
+    Pre-loaded frames may be injected; any frame left as None is filled from
+    load_data(year=season), so existing callers keep working unchanged.
     """
-    from services.data_service import load_data  # local import avoids circular dep
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_op = time.time()
 
-    standings, teams, games, players, draft_order, draft_results, draft_order_rules = load_data(year=season)
+    standings, teams, games, players, draft_results = (
+        standings_df, teams_df, games_df, players_df, draft_results_df
+    )
+    if any(df is None for df in (standings, teams, games, players, draft_results)):
+        from services.data_service import load_data  # local import avoids circular dep
+        l_standings, l_teams, l_games, l_players, _, l_draft_results, _ = load_data(year=season)
+        standings = l_standings if standings is None else standings
+        teams = l_teams if teams is None else teams
+        games = l_games if games is None else games
+        players = l_players if players is None else players
+        draft_results = l_draft_results if draft_results is None else draft_results
     games = process_games_data(games)
 
     today_teams = teams[teams['season'] == season].copy()

@@ -45,6 +45,35 @@ def test_get_season_progress():
     assert isinstance(res["team_chart"]["datasets"], list)
     assert len(res["standings"]) > 0
 
+def test_get_season_progress_injected_matches_fallback():
+    """Injecting pre-loaded frames yields the same payload as the lazy-load fallback."""
+    fallback = get_season_progress(2023, 10)
+    st, tm, gm, pl, _, dr, _ = load_data(year=2023)
+    injected = get_season_progress(
+        2023, 10,
+        games_df=gm, standings_df=st, draft_results_df=dr, teams_df=tm, players_df=pl,
+    )
+    assert injected == fallback
+
+
+def test_get_season_progress_partial_injection_loads_rest():
+    """Supplying only some frames loads the remainder lazily."""
+    _, _, gm, _, _, _, _ = load_data(year=2023)
+    assert get_season_progress(2023, 10, games_df=gm) == get_season_progress(2023, 10)
+
+
+def test_get_season_progress_injection_skips_load_data(monkeypatch):
+    """With all five frames injected, load_data is never called."""
+    st, tm, gm, pl, _, dr, _ = load_data(year=2023)
+    import services.data_service as ds
+    monkeypatch.setattr(ds, "load_data", lambda *a, **k: (_ for _ in ()).throw(AssertionError("load_data called")))
+    res = get_season_progress(
+        2023, 10,
+        games_df=gm, standings_df=st, draft_results_df=dr, teams_df=tm, players_df=pl,
+    )
+    assert "player_chart" in res
+
+
 def test_load_data_with_debug_flag(monkeypatch):
     """Verify load_data() still succeeds and returns all dataframes with debug flag enabled."""
     monkeypatch.setenv("DEBUG_PAGE_LOAD", "True")
