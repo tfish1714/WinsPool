@@ -112,7 +112,9 @@ Sets or resets a player's password. Enforces rate limiting (5 failed attempts tr
 { "playerId": "string", "password": "string", "confirm_password": "string" }
 ```
 
-**Response**: `{ success, message }` or `{ error }` with status 400/429.
+**Validation**: `email` must look like an address and each password is capped at 256 characters; violations return 422. Password length and complexity are deliberately enforced by the route (not a schema `min_length`) so weak attempts keep counting toward the lockout.
+
+**Response**: `{ success, message }` or `{ error }` with status 400/429 (422 for a malformed body).
 
 ---
 
@@ -124,6 +126,8 @@ Authenticates a player using email and password. Returns MFA challenge if MFA is
 ```json
 { "email": "string", "password": "string" }
 ```
+
+**Validation**: a malformed `email` or a password over 256 characters returns 422. There is no minimum password length on login: legacy accounts may hold shorter passwords and a bad login must stay a 401 that counts toward lockout.
 
 **Response**: `{ success, playerId, fullName, nickName, role }` or `{ mfa_required, playerId }`.
 
@@ -432,3 +436,18 @@ Real-time draft board synchronization.
   }
 }
 ```
+
+---
+
+## Request Validation Contracts
+
+Request bodies are Pydantic models in `routes/models.py`; a body that fails validation returns HTTP 422 before the handler runs.
+
+| Model | Constraints |
+|---|---|
+| `LoginRequest`, `SetPasswordRequest` | `email` matches `EMAIL_PATTERN` (a lenient regex; surrounding whitespace allowed since routes strip/lowercase), max 254 chars; passwords max 256 chars |
+| `UpdateProfileRequest` | `email` matches `OPTIONAL_EMAIL_PATTERN` (empty means unchanged); `fullName` max 100, `nickName` max 50; passwords max 256 chars; `newPassword` empty or omitted means no change |
+| `NewSeasonRequest` | `season` in 2000..2100 |
+| `MockDraftPickRequest` | `season` in 2000..2100; `wildcardsSoFar` and `botPicksRemaining` >= 0 |
+
+`EmailStr` is not used because it would add the `email-validator` dependency. Every field carries a `description` that shows up in the OpenAPI schema (`/docs`).

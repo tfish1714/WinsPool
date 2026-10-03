@@ -186,7 +186,7 @@ routes/
 services/
   data_service.py        # 3-tier cache: memory → pickle → Firestore
   db_service.py          # Firestore/pickle persistence + auth (bcrypt)
-  analysis_service.py    # Standings calc, win matrices, schedules
+  analysis_service.py    # Standings calc, win matrices, schedules; get_season_progress() accepts injected games_df/standings_df/draft_results_df/teams_df/players_df (lazy load_data(year=season) fallback for any left None)
   draft_service.py       # Draft state, pick validation, WebSocket sync
   mock_draft_service.py  # Mock draft: pick sequencing, bot picks, end-of-draft ranking (stateless, no DB writes)
   prediction_service.py  # Win projections (calls NN model)
@@ -208,7 +208,7 @@ static/
     api.js               # Fetch wrapper
     websocket_service.js # WebSocket client for live draft
     admin_main.js        # Admin dashboard
-    auth_service.js      # Client-side auth
+    auth_service.js      # Client-side auth; also exports STORAGE_KEYS ({TOKEN, PLAYER_ID, ROLE, DRAFT_ACTIVE}) and getAuthHeaders() -- use these, never inline localStorage key literals or hand-built Bearer headers
     responsive.js        # Mobile drawer controller (non-module IIFE, loaded after main.js)
     chat.js              # Draft room chat overlay
     mock_draft.js        # Standalone mock draft page logic — does NOT import main.js/websocket_service.js/auth_service.js
@@ -220,6 +220,12 @@ rawdata/                 # NFL raw data (NOT committed)
 docs/                    # Architecture and model documentation (prediction_model.md, etc.)
 .local_db/               # Local pickle cache (NOT committed)
 ```
+
+### Shared helpers
+
+- `services/constants.py::make_game_key(week, home, away)` is the single builder for the per-game key `W{week:02d}_{HOME}_{AWAY}` (game_predictions, prediction caches, projection engine); it normalizes both teams via `normalize_team_abbr` and coerces the week from int/str/float. Never hand-format that string.
+- `templates/_macros.html::year_picker(available_years, current_year, base_url, url_suffix='')` is the season dropdown for the six per-year pages.
+- `routes/models.py` request models carry field descriptions and bounds (`EMAIL_PATTERN`, season 2000..2100). Password length/complexity stays in the routes on purpose (a 422 would bypass lockout counting); see `docs/api_endpoints.md`.
 
 ### Team page
 
