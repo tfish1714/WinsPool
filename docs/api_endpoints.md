@@ -447,7 +447,7 @@ Request bodies are Pydantic models in `routes/models.py`; a body that fails vali
 |---|---|
 | `LoginRequest`, `SetPasswordRequest` | `email` matches `EMAIL_PATTERN` (a lenient regex; surrounding whitespace allowed since routes strip/lowercase), max 254 chars; passwords max 256 chars |
 | `UpdateProfileRequest` | `email` matches `OPTIONAL_EMAIL_PATTERN` (empty means unchanged); `fullName` max 100, `nickName` max 50; passwords max 256 chars; `newPassword` empty or omitted means no change |
-| `NewSeasonRequest` | `season` in 2000..2100 |
+| `NewSeasonRequest` | `season` in 2000..3000 (the e2e suite uses sentinel season 3000) |
 | `MockDraftPickRequest` | `season` in 2000..2100; `wildcardsSoFar` and `botPicksRemaining` >= 0 |
 
 `EmailStr` is not used because it would add the `email-validator` dependency. Every field carries a `description` that shows up in the OpenAPI schema (`/docs`).

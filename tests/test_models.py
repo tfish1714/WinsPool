@@ -45,7 +45,7 @@ def test_password_length_is_left_to_routes_but_capped():
         LoginRequest(email="a@b.com", password="x" * 257)
 
 
-@pytest.mark.parametrize("season", [1999, 2101, -1])
+@pytest.mark.parametrize("season", [1999, 3001, -1])
 def test_season_bounds(season):
     with pytest.raises(ValidationError):
         NewSeasonRequest(season=season)

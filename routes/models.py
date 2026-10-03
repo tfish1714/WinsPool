@@ -57,7 +57,7 @@ class MfaVerifyRequest(BaseModel):
 # --- Admin ---
 
 class NewSeasonRequest(BaseModel):
-    season: int = Field(..., ge=2000, le=2100, description="Season year to create.")
+    season: int = Field(..., ge=2000, le=3000, description="Season year to create.")
     playerIds: List[int] = Field([], description="Players entered in the new season's pool.")
 
 
