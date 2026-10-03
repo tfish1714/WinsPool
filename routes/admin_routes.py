@@ -870,6 +870,8 @@ def _pool_config_response(season: int) -> dict:
         "member_count": member_count,
         **pot,
         "is_default": not pool_service.has_pool_config(settings, season),
+        "unpaid_visibility": pool_service.get_unpaid_visibility(settings, season),
+        "payment_note": pool_service.get_payment_note(settings, season),
     }
 
 
@@ -890,6 +892,8 @@ async def set_pool_config(body: PoolConfigRequest, _: dict = Depends(require_adm
         pool_service.set_pool_config(
             body.season, body.entryFee,
             [{"place": p.place, "amount": p.amount} for p in body.payouts],
+            unpaid_visibility=body.unpaidVisibility.model_dump() if body.unpaidVisibility else None,
+            payment_note=body.paymentNote,
         )
         return JSONResponse(content=_pool_config_response(body.season))
     except Exception:

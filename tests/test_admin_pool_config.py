@@ -5,6 +5,7 @@ from unittest.mock import patch
 from starlette.testclient import TestClient
 
 from main import app
+from services.pool_service import DEFAULT_UNPAID_VISIBILITY
 from services.session_service import create_token
 
 
@@ -104,4 +105,60 @@ class TestAdminPoolConfig:
         assert c.get("/api/admin/pool/config?season=2026", headers=h).status_code == 403
         r = c.post("/api/admin/pool/config", headers=h,
                    json={"season": 2026, "entryFee": 10, "payouts": [{"place": 1, "amount": 10}]})
+        assert r.status_code == 403
+
+
+_VIS = {"enabled": True, "nudge_week": 8, "public_week": 10, "banner_week": 13}
+_BASE = {"season": 2026, "entryFee": 200, "payouts": [{"place": 1, "amount": 1400}]}
+
+
+class TestAdminPoolConfigUnpaid:
+    def test_post_and_get_round_trip_with_season_isolation(self, admin_token, store):
+        c = TestClient(app)
+        r = c.post("/api/admin/pool/config", headers=_h(admin_token),
+                   json={**_BASE, "unpaidVisibility": _VIS, "paymentNote": "venmo @x"})
+        assert r.status_code == 200
+        assert r.json()["unpaid_visibility"] == _VIS and r.json()["payment_note"] == "venmo @x"
+        g = c.get("/api/admin/pool/config?season=2026", headers=_h(admin_token)).json()
+        assert g["unpaid_visibility"] == _VIS and g["payment_note"] == "venmo @x"
+        g27 = c.get("/api/admin/pool/config?season=2027", headers=_h(admin_token)).json()
+        assert g27["unpaid_visibility"] == DEFAULT_UNPAID_VISIBILITY and g27["payment_note"] == ""
+
+    def test_get_defaults_to_disabled(self, admin_token, store):
+        g = TestClient(app).get("/api/admin/pool/config?season=2026", headers=_h(admin_token)).json()
+        assert g["unpaid_visibility"] == DEFAULT_UNPAID_VISIBILITY
+        assert g["unpaid_visibility"]["enabled"] is False
+
+    def test_post_without_new_fields_keeps_stored_values(self, admin_token, store):
+        c = TestClient(app)
+        c.post("/api/admin/pool/config", headers=_h(admin_token),
+               json={**_BASE, "unpaidVisibility": _VIS, "paymentNote": "venmo @x"})
+        r = c.post("/api/admin/pool/config", headers=_h(admin_token), json={**_BASE, "entryFee": 250})
+        assert r.json()["entry_fee"] == 250
+        assert r.json()["unpaid_visibility"] == _VIS and r.json()["payment_note"] == "venmo @x"
+
+    @pytest.mark.parametrize("vis", [
+        {**_VIS, "nudge_week": 0},
+        {**_VIS, "banner_week": 23},
+        {**_VIS, "nudge_week": 12, "public_week": 10},
+        {**_VIS, "public_week": "x"},
+    ])
+    def test_invalid_weeks_rejected(self, admin_token, store, vis):
+        with patch("services.pool_service.set_config_settings") as m:
+            r = TestClient(app).post("/api/admin/pool/config", headers=_h(admin_token),
+                                     json={**_BASE, "unpaidVisibility": vis})
+        assert r.status_code == 422
+        m.assert_not_called()
+
+    def test_payment_note_over_200_chars_rejected(self, admin_token, store):
+        with patch("services.pool_service.set_config_settings") as m:
+            r = TestClient(app).post("/api/admin/pool/config", headers=_h(admin_token),
+                                     json={**_BASE, "paymentNote": "x" * 201})
+        assert r.status_code == 422
+        m.assert_not_called()
+
+    def test_non_admin_cannot_set_visibility(self, store):
+        tok = create_token(player_id=2, role="player")
+        r = TestClient(app).post("/api/admin/pool/config", headers={"Authorization": f"Bearer {tok}"},
+                                 json={**_BASE, "unpaidVisibility": _VIS})
         assert r.status_code == 403

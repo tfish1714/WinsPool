@@ -148,10 +148,27 @@ class PoolPayoutItem(BaseModel):
         return v
 
 
+class UnpaidVisibilityItem(BaseModel):
+    enabled: bool = Field(False, description="Master switch for showing unpaid entries to members.")
+    nudge_week: int = Field(8, ge=1, le=22, description="First week the unpaid player is nudged privately.")
+    public_week: int = Field(10, ge=1, le=22, description="First week unpaid names are shown on the standings.")
+    banner_week: int = Field(13, ge=1, le=22, description="First week the 'Still owed' line is shown.")
+
+    @model_validator(mode="after")
+    def _ordered_weeks(self):
+        if not (self.nudge_week <= self.public_week <= self.banner_week):
+            raise ValueError("weeks must satisfy nudge_week <= public_week <= banner_week")
+        return self
+
+
 class PoolConfigRequest(BaseModel):
     season: int = Field(ge=2000, le=2100)
     entryFee: float = Field(ge=0, le=1_000_000)
     payouts: List[PoolPayoutItem] = Field(min_length=1, max_length=10)
+    unpaidVisibility: Optional[UnpaidVisibilityItem] = Field(
+        None, description="Per-season unpaid visibility settings; omit to keep the stored value.")
+    paymentNote: Optional[str] = Field(
+        None, max_length=200, description="Plain-text payment instructions shown to unpaid players.")
 
     @model_validator(mode="after")
     def _no_duplicate_places(self):

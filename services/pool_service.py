@@ -5,6 +5,10 @@ Config is per season, stored in the config/settings doc under
 Payouts are dollar amounts (source of truth); ``place`` is a positive int or the
 string "last" (last-place money back). Only aggregate counts and the caller's own
 paid flag are ever returned; no other player's paid state leaves this module.
+
+A season entry may also carry ``unpaid_visibility`` (see DEFAULT_UNPAID_VISIBILITY) and a
+plain-text ``payment_note``; both are optional and read through their own getters so
+``get_pool_config`` (which feeds ``/api/pool/status``) is unchanged.
 """
 import math
 
@@ -12,6 +16,8 @@ from services.db_service import get_config_settings, set_config_settings
 
 DEFAULT_ENTRY_FEE = 200
 DEFAULT_PAYOUTS = [{"place": 1, "amount": 1400}, {"place": 2, "amount": 600}]
+DEFAULT_UNPAID_VISIBILITY = {"enabled": False, "nudge_week": 8, "public_week": 10, "banner_week": 13}
+MAX_PAYMENT_NOTE_LEN = 200
 
 
 def _default_payouts() -> list:
@@ -81,20 +87,72 @@ def get_pool_config(settings: dict, season: int) -> dict:
     }
 
 
+def _default_unpaid_visibility() -> dict:
+    return dict(DEFAULT_UNPAID_VISIBILITY)
+
+
+def _clean_week(raw):
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return None
+    return raw if 1 <= raw <= 22 else None
+
+
+def clean_unpaid_visibility(raw) -> dict:
+    """Valid unpaid_visibility dict; anything invalid -> defaults with enabled False. Never raises."""
+    if not isinstance(raw, dict):
+        return _default_unpaid_visibility()
+    nudge, public, banner = (_clean_week(raw.get(k)) for k in ("nudge_week", "public_week", "banner_week"))
+    if None in (nudge, public, banner) or not (nudge <= public <= banner):
+        return _default_unpaid_visibility()
+    return {"enabled": raw.get("enabled") is True, "nudge_week": nudge,
+            "public_week": public, "banner_week": banner}
+
+
+def _season_entry(settings: dict, season: int) -> dict:
+    try:
+        cfg_map = (settings or {}).get("pool_config")
+        entry = cfg_map.get(str(season)) if isinstance(cfg_map, dict) else None
+    except Exception:
+        entry = None
+    return entry if isinstance(entry, dict) else {}
+
+
+def get_unpaid_visibility(settings: dict, season: int) -> dict:
+    return clean_unpaid_visibility(_season_entry(settings, season).get("unpaid_visibility"))
+
+
+def get_payment_note(settings: dict, season: int) -> str:
+    note = _season_entry(settings, season).get("payment_note")
+    return note.strip()[:MAX_PAYMENT_NOTE_LEN] if isinstance(note, str) else ""
+
+
 def has_pool_config(settings: dict, season: int) -> bool:
     cfg_map = (settings or {}).get("pool_config")
     return isinstance(cfg_map, dict) and isinstance(cfg_map.get(str(season)), dict)
 
 
-def set_pool_config(season: int, entry_fee: float, payouts: list) -> dict:
-    """Read-modify-write the whole pool_config map so other seasons are preserved."""
+def set_pool_config(season: int, entry_fee: float, payouts: list,
+                    unpaid_visibility=None, payment_note=None) -> dict:
+    """Read-modify-write the whole pool_config map so other seasons are preserved.
+
+    unpaid_visibility / payment_note default to None, meaning "keep what is stored for this season".
+    """
+    current = get_config_settings() or {}
+    existing = current.get("pool_config")
+    merged = dict(existing) if isinstance(existing, dict) else {}
+    prev = merged.get(str(season)) if isinstance(merged.get(str(season)), dict) else {}
     saved = {
         "entry_fee": float(entry_fee),
         "payouts": _sort_payouts([{"place": p["place"], "amount": float(p["amount"])} for p in payouts]),
     }
-    current = get_config_settings() or {}
-    existing = current.get("pool_config")
-    merged = dict(existing) if isinstance(existing, dict) else {}
+    if unpaid_visibility is not None:
+        saved["unpaid_visibility"] = clean_unpaid_visibility(unpaid_visibility)
+    elif "unpaid_visibility" in prev:
+        saved["unpaid_visibility"] = prev["unpaid_visibility"]
+    if payment_note is not None:
+        saved["payment_note"] = payment_note.strip()[:MAX_PAYMENT_NOTE_LEN]
+    elif "payment_note" in prev:
+        saved["payment_note"] = prev["payment_note"]
     merged[str(season)] = saved
     set_config_settings({"pool_config": merged})
     return saved
