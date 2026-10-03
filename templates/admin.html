@@ -130,6 +130,19 @@
         <div id="pool-payout-rows"></div>
         <button type="button" id="pool-add-payout" class="admin-tab-btn">Add payout</button>
         <div id="pool-summary" class="pool-summary"></div>
+        <h4 class="pool-label" style="margin-top: 1rem;">Unpaid entry visibility</h4>
+        <label class="pool-label"><input type="checkbox" id="pool-unpaid-enabled"> Show unpaid entries to members</label>
+        <div class="pool-config-grid">
+            <div><label for="pool-unpaid-nudge" class="pool-label">Nudge from week</label>
+                <input id="pool-unpaid-nudge" type="number" min="1" max="22" step="1" class="admin-input"></div>
+            <div><label for="pool-unpaid-public" class="pool-label">Show names from week</label>
+                <input id="pool-unpaid-public" type="number" min="1" max="22" step="1" class="admin-input"></div>
+            <div><label for="pool-unpaid-banner" class="pool-label">Still-owed list from week</label>
+                <input id="pool-unpaid-banner" type="number" min="1" max="22" step="1" class="admin-input"></div>
+        </div>
+        <div id="pool-unpaid-preview" class="pool-note"></div>
+        <label for="pool-payment-note" class="pool-label" style="margin-top: 0.75rem;">Payment note (shown to unpaid players, max 200 characters)</label>
+        <input id="pool-payment-note" type="text" maxlength="200" class="admin-input" placeholder="For example: Venmo @handle">
         <div style="margin-top: 1rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
             <button type="button" id="pool-save-btn" class="btn-primary">Save</button>
             <span id="pool-status" role="status"></span>

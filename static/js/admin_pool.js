@@ -106,6 +106,37 @@ function _poolUpdateSummary() {
         ' | Payouts: ' + _poolMoney(total) + ' | ' + bal;
 }
 
+function _poolUnpaidPreview(vis) {
+    if (!vis.enabled) return 'Unpaid visibility is off.';
+    return 'Nudge from week ' + vis.nudge_week + ', names shown from week ' + vis.public_week +
+        ', list from week ' + vis.banner_week;
+}
+
+function _poolUnpaidValidate(vis) {
+    const weeks = [vis.nudge_week, vis.public_week, vis.banner_week];
+    if (!weeks.every(w => Number.isInteger(w) && w >= 1 && w <= 22)) return 'Weeks must be whole numbers from 1 to 22.';
+    if (!(vis.nudge_week <= vis.public_week && vis.public_week <= vis.banner_week)) {
+        return 'Weeks must satisfy nudge <= names <= list.';
+    }
+    return null;
+}
+
+function _poolUnpaidCollect() {
+    return {
+        enabled: _poolEl('pool-unpaid-enabled').checked,
+        nudge_week: parseInt(_poolEl('pool-unpaid-nudge').value, 10),
+        public_week: parseInt(_poolEl('pool-unpaid-public').value, 10),
+        banner_week: parseInt(_poolEl('pool-unpaid-banner').value, 10),
+    };
+}
+
+function _poolUnpaidRefreshPreview() {
+    const el = _poolEl('pool-unpaid-preview');
+    if (!el) return;
+    const vis = _poolUnpaidCollect();
+    el.textContent = _poolUnpaidValidate(vis) || _poolUnpaidPreview(vis);
+}
+
 function _poolRender(cfg) {
     _poolMembers = cfg.member_count || 0;
     _poolEl('pool-entry-fee').value = String(cfg.entry_fee);
@@ -113,6 +144,13 @@ function _poolRender(cfg) {
     (cfg.payouts || []).forEach(p => _poolAddRow(p.place, p.amount));
     const note = _poolEl('pool-default-note');
     if (note) note.textContent = cfg.is_default ? 'Using default settings (not yet saved for this season).' : '';
+    const vis = cfg.unpaid_visibility || {};
+    _poolEl('pool-unpaid-enabled').checked = vis.enabled === true;
+    _poolEl('pool-unpaid-nudge').value = String(vis.nudge_week === undefined ? 8 : vis.nudge_week);
+    _poolEl('pool-unpaid-public').value = String(vis.public_week === undefined ? 10 : vis.public_week);
+    _poolEl('pool-unpaid-banner').value = String(vis.banner_week === undefined ? 13 : vis.banner_week);
+    _poolEl('pool-payment-note').value = cfg.payment_note || '';
+    _poolUnpaidRefreshPreview();
     _poolUpdateSummary();
 }
 
@@ -177,6 +215,9 @@ async function _poolSave() {
             (dup === 'last' ? 'Last place' : 'Place ' + dup) + ').', true);
         return;
     }
+    const vis = _poolUnpaidCollect();
+    const visErr = _poolUnpaidValidate(vis);
+    if (visErr) { _poolStatus(visErr, true); return; }
     const btn = _poolEl('pool-save-btn');
     btn.disabled = true;
     _poolStatus('Saving...');
@@ -185,7 +226,8 @@ async function _poolSave() {
             method: 'POST',
             headers: _poolHeaders(true),
             credentials: 'same-origin',
-            body: JSON.stringify({ season, entryFee: fee, payouts }),
+            body: JSON.stringify({ season, entryFee: fee, payouts, unpaidVisibility: vis,
+                                  paymentNote: _poolEl('pool-payment-note').value }),
         });
         if (!res.ok) {
             _poolStatus(res.status === 422 || res.status === 400
@@ -246,6 +288,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (rows >= POOL_MAX_PAYOUTS) { _poolStatus('At most ' + POOL_MAX_PAYOUTS + ' payouts.', true); return; }
         _poolAddRow(_poolFirstUnusedPlace(), '');
         _poolUpdateSummary();
+    });
+    ['pool-unpaid-enabled', 'pool-unpaid-nudge', 'pool-unpaid-public', 'pool-unpaid-banner'].forEach(id => {
+        _poolEl(id).addEventListener('input', _poolUnpaidRefreshPreview);
+        _poolEl(id).addEventListener('change', _poolUnpaidRefreshPreview);
     });
     _poolEl('pool-save-btn').addEventListener('click', _poolSave);
 });

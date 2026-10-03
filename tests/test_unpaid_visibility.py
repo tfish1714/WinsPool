@@ -258,3 +258,61 @@ class TestUnpaidRoute:
              patch("routes.api_routes.get_config_settings", return_value=_settings(_vis())):
             second = TestClient(app).get("/api/pool/unpaid?season=2026").json()
         assert {u["playerId"] for u in second["unpaid"]} == {3}
+
+
+# ---------------------------------------------------------------------------
+# Admin Pool tab controls (source contracts + node behavior)
+# ---------------------------------------------------------------------------
+import json
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def _read(rel):
+    return (ROOT / rel).read_text(encoding="utf-8")
+
+
+def test_admin_pool_markup_has_unpaid_controls():
+    html = _read("templates/admin.html")
+    for el_id in ("pool-unpaid-enabled", "pool-unpaid-nudge", "pool-unpaid-public",
+                  "pool-unpaid-banner", "pool-unpaid-preview", "pool-payment-note"):
+        assert f'id="{el_id}"' in html
+    assert "Show unpaid entries to members" in html
+    assert re.search(r'id="pool-unpaid-nudge"[^>]*min="1"[^>]*max="22"', html)
+
+
+def test_admin_pool_js_contract():
+    js = _read("static/js/admin_pool.js")
+    assert "unpaidVisibility" in js and "paymentNote" in js
+    assert ".innerHTML" not in js  # the file header comment mentions the word; check property use
+    assert "textContent" in js
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_admin_pool_unpaid_preview_and_validation():
+    js = _read("static/js/admin_pool.js")
+    fns = []
+    for name in ("_poolUnpaidPreview", "_poolUnpaidValidate"):
+        m = re.search(rf"function {name}\(.*?\n\}}\n", js, re.S)
+        assert m, f"{name} missing"
+        fns.append(m.group(0))
+    script = "\n".join(fns) + """
+    const ok = {enabled: true, nudge_week: 8, public_week: 10, banner_week: 13};
+    console.log(JSON.stringify([
+      _poolUnpaidPreview(ok),
+      _poolUnpaidPreview({...ok, enabled: false}),
+      _poolUnpaidValidate(ok),
+      _poolUnpaidValidate({...ok, nudge_week: 11}) !== null,
+      _poolUnpaidValidate({...ok, banner_week: 23}) !== null,
+      _poolUnpaidValidate({...ok, public_week: NaN}) !== null,
+    ]));
+    """
+    out = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True).stdout
+    got = json.loads(out)
+    assert got[0] == "Nudge from week 8, names shown from week 10, list from week 13"
+    assert got[1] == "Unpaid visibility is off."
+    assert got[2] is None and got[3] and got[4] and got[5]
