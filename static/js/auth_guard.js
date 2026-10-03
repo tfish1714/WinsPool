@@ -78,7 +78,13 @@
         if (handled) return;
         handled = true;
         // Same effect as AuthService.clearCredentials() / the Logout buttons.
+        // The theme is a device preference, not a credential: keep it across sign-out.
+        var theme = null;
+        try { theme = window.localStorage.getItem('nfl_wins_theme'); } catch (e) { /* ignore */ }
         try { window.localStorage.clear(); } catch (e) { /* ignore */ }
+        if (theme) {
+            try { window.localStorage.setItem('nfl_wins_theme', theme); } catch (e) { /* ignore */ }
+        }
 
         var redirected = false;
         function go() {

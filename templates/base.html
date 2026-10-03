@@ -9,6 +9,7 @@
     <link rel="icon" href="/static/fishbone.png" type="image/png">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@500;700&family=Newsreader:ital,opsz,wght@1,12,500;0,12,500&display=swap" rel="stylesheet">
     {{ js_import_map() }}
+    <script src="{{ static_url('js/theme_init.js') }}"></script>
     <link rel="stylesheet" href="{{ static_url('style.css') }}">
     {% block head %}{% endblock %}
     <!-- Early Auth Detection to prevent flicker -->
@@ -144,6 +145,7 @@
                 <a href="/admin" id="admin-nav-link-drawer" class="admin-link admin-hidden"><i
                         data-lucide="settings"></i> Admin Portal</a>
             </nav>
+            <button type="button" class="nav-drawer__theme" data-theme-toggle>Switch theme</button>
             <div class="nav-drawer__footer" id="drawer-user-identity"></div>
         </aside>
 

@@ -32,6 +32,28 @@
     --warn: #d9a86c;
 }
 
+/* Light theme: overrides the base tokens; the alias tokens above resolve through them. */
+:root[data-theme="light"] {
+    color-scheme: light;
+    --bg:            #f4f5f7;
+    --bg-elev:       #ffffff;
+    --bg-elev-2:     #eceef2;
+    --line:          rgba(15,23,42,0.10);
+    --line-strong:   rgba(15,23,42,0.20);
+    --ink:           #14171c;
+    --ink-2:         #414854;
+    --ink-3:         #5a616c;
+    --leader:        #7d5f14;
+    --leader-soft:   rgba(125,95,20,0.12);
+    --pos:           #2b6f31;
+    --neg:           #a83232;
+    --link:          #1f4fc0;
+    --primary-hover: #163f9e;
+    --warn:          #86540f;
+    --active-pulse:  rgba(31,79,192,0.35);
+    --glass-bg:      rgba(255,255,255,0.88);
+}
+
 /* ── New design-system atoms ──────────────────────── */
 
 /* Newsreader italic numerals */
@@ -4156,4 +4178,15 @@ a.pool-chip-mine:hover { text-decoration: underline; }
     margin-top: 0.5rem;
     color: var(--warn);
     font-size: 0.9rem;
+}
+
+.nav-drawer__theme {
+    min-height: 44px;
+    margin: 0.5rem 1rem;
+    padding: 0 0.75rem;
+    color: var(--ink-2);
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    cursor: pointer;
 }

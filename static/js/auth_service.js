@@ -8,6 +8,7 @@ export const STORAGE_KEYS = {
     PLAYER_ID: 'nfl_wins_my_player_id',
     ROLE: 'nfl_wins_role',
     DRAFT_ACTIVE: 'nfl_wins_draft_active',
+    THEME: 'nfl_wins_theme',
 };
 
 /**
@@ -55,7 +56,13 @@ export const AuthService = {
     },
 
     clearCredentials() {
+        // The theme is a device preference, not a credential: keep it across sign-out.
+        let theme = null;
+        try { theme = localStorage.getItem(STORAGE_KEYS.THEME); } catch (e) { /* storage unavailable */ }
         localStorage.clear();
+        if (theme) {
+            try { localStorage.setItem(STORAGE_KEYS.THEME, theme); } catch (e) { /* storage unavailable */ }
+        }
     },
 
     async checkAccount(email) {

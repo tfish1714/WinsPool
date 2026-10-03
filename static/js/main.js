@@ -1025,6 +1025,28 @@ document.querySelectorAll('table.wp-data-table').forEach(table => {
 });
 window.App.init();
 
+function wireThemeToggles() {
+    const theme = window.WinsPoolTheme;
+    if (!theme) return;
+    const buttons = document.querySelectorAll('[data-theme-toggle]');
+    const label = () => {
+        const next = theme.get() === 'light' ? 'dark' : 'light';
+        buttons.forEach(b => {
+            b.textContent = 'Switch to ' + next + ' mode';
+            b.setAttribute('aria-pressed', String(theme.get() === 'light'));
+        });
+    };
+    buttons.forEach(b => b.addEventListener('click', () => { theme.toggle(); label(); }));
+    window.addEventListener('storage', e => {
+        if (e.key === STORAGE_KEYS.THEME && (e.newValue === 'light' || e.newValue === 'dark')) {
+            theme.init();
+            label();
+        }
+    });
+    label();
+}
+wireThemeToggles();
+
 function _urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - base64String.length % 4) % 4);
     const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
