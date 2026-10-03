@@ -358,3 +358,27 @@ def test_player_profile_shows_amount_owed_and_note_safely():
     start = html.index("/api/pool/unpaid")
     assert start > gate
     assert ".innerHTML" not in html[start: start + 1500]
+
+
+class TestStageUsesTheWeekShownOnStandings:
+    """The stage must track the same "current week" as the standings WEEK pill (the in-progress week)."""
+
+    def _games(self):
+        # Week 7 fully played; week 8 half played (one of two games has a result).
+        return pd.DataFrame({
+            "season": [2026] * 4, "game_type": ["REG"] * 4, "week": [7, 7, 8, 8],
+            "result": [3.0, -4.0, 6.0, None],
+        })
+
+    def test_partially_played_week_counts_as_current(self):
+        assert ps.current_played_week(self._games(), 2026) == 8
+
+    def test_nudge_starts_during_nudge_week_not_after_it(self):
+        week = ps.current_played_week(self._games(), 2026)
+        assert ps.compute_unpaid_stage(week, _vis(nudge_week=8, public_week=10, banner_week=13)) == "nudge"
+
+    def test_no_completed_game_is_week_zero_even_if_nudge_week_is_one(self):
+        games = pd.DataFrame({"season": [2026], "game_type": ["REG"], "week": [1], "result": [None]})
+        week = ps.current_played_week(games, 2026)
+        assert week == 0
+        assert ps.compute_unpaid_stage(week, _vis(nudge_week=1, public_week=1, banner_week=1)) == "off"

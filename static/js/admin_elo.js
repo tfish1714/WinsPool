@@ -129,7 +129,7 @@ class EloExplorer {
                 border: 2px solid ${color};
                 border-radius: 4px;
                 background: transparent;
-                color: rgba(255,255,255,0.5);
+                color: var(--ink-3);
                 font-size: 0.75rem;
                 font-weight: 600;
                 cursor: pointer;
@@ -144,7 +144,7 @@ class EloExplorer {
         if (this._selected.has(team)) {
             this._selected.delete(team);
             btn.style.background = 'transparent';
-            btn.style.color = 'rgba(255,255,255,0.5)';
+            btn.style.color = 'var(--ink-3)';
         } else {
             this._selected.add(team);
             btn.style.background = color + '55'; // tinted, not fully filled
@@ -186,7 +186,7 @@ class EloExplorer {
         this._selected.clear();
         this._teamGrid.querySelectorAll('.elo-team-btn').forEach(btn => {
             btn.style.background = 'transparent';
-            btn.style.color = 'rgba(255,255,255,0.5)';
+            btn.style.color = 'var(--ink-3)';
         });
     }
 
@@ -316,8 +316,8 @@ class EloExplorer {
             item.style.cssText = 'display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;padding:0.2rem 0.5rem;border-radius:4px;background:rgba(255,255,255,0.04);';
             item.innerHTML = `
                 <span style="width:12px;height:12px;border-radius:2px;background:${ds.borderColor};border:1px solid rgba(255,255,255,0.25);flex-shrink:0;display:inline-block;"></span>
-                <span style="color:rgba(255,255,255,0.85);font-weight:600;">${ds.label}</span>
-                <span style="color:rgba(255,255,255,0.45);margin-left:auto;font-variant-numeric:tabular-nums;">${lastVal != null ? lastVal.toFixed(0) : '—'}</span>
+                <span style="color:var(--ink);font-weight:600;">${ds.label}</span>
+                <span style="color:var(--ink-3);margin-left:auto;font-variant-numeric:tabular-nums;">${lastVal != null ? lastVal.toFixed(0) : '—'}</span>
             `;
             this._legend.appendChild(item);
         });

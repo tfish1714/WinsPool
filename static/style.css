@@ -1227,8 +1227,8 @@ tr:hover {
 }
 
 .progress-controls select {
-    background: rgba(0, 0, 0, 0.4);
-    color: #fff;
+    background: var(--bg-elev-2);
+    color: var(--ink);
     border: 1px solid var(--glass-border);
     padding: 0.5rem;
     border-radius: 4px;

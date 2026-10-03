@@ -247,7 +247,7 @@ Auth required (any logged-in player). Gated view of unpaid entries for a season 
 
 | Field | Meaning |
 |---|---|
-| `stage` | `off`, `nudge`, `public` or `banner`, from the last fully completed REG week (`data_service.get_most_recent_completed_week`) and the season's `unpaid_visibility` weeks. Always `off` while `enabled` is false. |
+| `stage` | `off`, `nudge`, `public` or `banner`, from the season's current REG week (the in-progress week the standings WEEK pill shows, via `data_service.get_latest_week_for_year`; 0 before any game has a result) and the season's `unpaid_visibility` weeks. Always `off` while `enabled` is false. |
 | `unpaid` | `[{playerId, name}]`. Populated **only** when `admin_view` is true or the season is `enabled` and the stage is `public`/`banner`; otherwise `[]`, so it cannot be revealed by editing the client. |
 | `me_unpaid` | The caller's own status (`bool`) once the stage is past `off` and the caller is a member of the season, else `null`. |
 | `payment_note` | The season's plain-text payment note, only for admins or an unpaid caller past `off`; otherwise `""`. |

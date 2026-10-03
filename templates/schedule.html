@@ -116,10 +116,10 @@
                         {% set is_future = row['result'] is not number or row['result'] == -1000 %}
                         {% set weeks_out = [row['week']|int - current_week|int, 0]|max %}
                         <div class="game-prediction"
-                            style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1); color: var(--accent-gold); font-weight: 600; display: flex; justify-content: space-between; align-items: flex-start;">
+                            style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed var(--line-strong); color: var(--accent-gold); font-weight: 600; display: flex; justify-content: space-between; align-items: flex-start;">
                             <div>
                                 <span><i data-lucide="sparkles"></i> Predictor:</span>
-                                <div style="font-size: 0.75rem; color: #fff;">
+                                <div style="font-size: 0.75rem; color: var(--ink);">
                                     {% if is_future %}
                                     <span style="opacity:{{ '0.6' if weeks_out >= 5 else ('0.8' if weeks_out >= 2 else '1.0') }};">
                                         {{ row['pred_winner'] }} wins {{ row['pred_su_conf'] }}% of simulations

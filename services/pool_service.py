@@ -14,7 +14,7 @@ import math
 
 import pandas as pd
 
-from services.data_service import get_most_recent_completed_week
+from services.data_service import get_latest_week_for_year, get_most_recent_completed_week
 from services.db_service import get_config_settings, set_config_settings
 
 DEFAULT_ENTRY_FEE = 200
@@ -235,13 +235,16 @@ def compute_unpaid_stage(current_week, settings) -> str:
 
 
 def current_played_week(games, season) -> int:
-    """Most recent completed REG week of `season`; 0 if none. Thin wrapper over the
-    existing data_service.get_most_recent_completed_week (also used for recaps), which
-    ignores the unplayed schedule, unlike get_latest_season_and_week."""
+    """The season's current REG week as the standings page shows it (the in-progress
+    week, else the last completed one); 0 before any game has a result. Built on the
+    existing data_service helpers, which ignore the unplayed schedule (unlike
+    get_latest_season_and_week, which returns the schedule's last week). Using the
+    in-progress week makes "nudge from week N" begin during week N, not after it."""
     if games is None:
         return 0
-    week = get_most_recent_completed_week(games, season)
-    return 0 if week is None else int(week)
+    if get_most_recent_completed_week(games, season) is None:
+        return 0  # get_latest_week_for_year would report 1 here
+    return int(get_latest_week_for_year(games, season))
 
 
 def _unpaid_members(order_df, players_df, season) -> list:

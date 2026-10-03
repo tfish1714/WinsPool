@@ -142,3 +142,21 @@ def test_theme_init_behavior(tmp_path):
     assert got["toggleTwice"] == ["dark", "dark"]
     assert got["toggleWithBlockedStorage"] in ("light", "dark")
     assert got["key"] == "nfl_wins_theme"
+
+
+@pytest.mark.parametrize("rel,pattern", [
+    ("templates/schedule.html", r"color:\s*#fff"),
+    ("templates/schedule.html", r"rgba\(255,\s*255,\s*255,\s*0\.1\)"),
+    ("templates/admin.html", r"color:\s*#fff"),
+    ("static/js/admin_elo.js", r"style\.color\s*=\s*'rgba\(255,255,255"),
+    ("static/js/admin_elo.js", r"(?m)^\s*color:\s*rgba\(255,\s*255,\s*255"),
+    ("static/js/admin_elo.js", r"color:rgba\(255,255,255"),
+])
+def test_no_hardcoded_white_text_that_vanishes_on_light_cards(rel, pattern):
+    assert not re.search(pattern, _read(rel)), f"{rel} still hard-codes white ({pattern}); use a token"
+
+
+def test_progress_controls_select_uses_tokens():
+    css = _read("static/style.css")
+    block = re.search(r"\.progress-controls select\s*\{([^}]*)\}", css).group(1)
+    assert "#fff" not in block and "rgba(0, 0, 0" not in block
