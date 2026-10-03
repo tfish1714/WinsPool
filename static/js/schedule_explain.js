@@ -360,9 +360,8 @@ async function handleExplainClick(btn) {
 
     try {
         const url = `/api/predictions/explain?season=${season}&week=${week}&home=${encodeURIComponent(home)}&away=${encodeURIComponent(away)}`;
-        const token = AuthService.getToken();
         const resp = await fetch(url, {
-            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+            headers: AuthService.getAuthHeaders()
         });
         if (resp.status === 401) {
             content.innerHTML = `
@@ -390,7 +389,7 @@ async function handleExplainClick(btn) {
         try {
             const featResp = await fetch(
                 `/api/prediction_features/${season}/${week}/${encodeURIComponent(away)}/${encodeURIComponent(home)}`,
-                { headers: token ? { 'Authorization': `Bearer ${token}` } : {} }
+                { headers: AuthService.getAuthHeaders() }
             );
             if (featResp.ok) featureData = await featResp.json();
         } catch (_) { /* no feature data — silently skip */ }

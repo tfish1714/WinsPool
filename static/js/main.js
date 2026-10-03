@@ -1,5 +1,5 @@
 import { ApiService } from './api.js';
-import { AuthService } from './auth_service.js';
+import { AuthService, STORAGE_KEYS, getAuthHeaders } from './auth_service.js';
 import { UiRenderer } from './ui_renderer.js';
 import { WebSocketService } from './websocket_service.js';
 import { initChat, loadHistory, appendMessage } from './chat.js';
@@ -16,7 +16,7 @@ class App {
         this.selectedTeam = null;
         this.draftSummary = null;
         this.shameTimerInterval = null;
-        this.draftActive = localStorage.getItem('nfl_wins_draft_active') === 'true';
+        this.draftActive = localStorage.getItem(STORAGE_KEYS.DRAFT_ACTIVE) === 'true';
         this.mockDraftActive = localStorage.getItem('nfl_wins_mock_draft_active') === 'true';
         // 0 (hidden) on a fresh browser so the Playoff Race link never flashes in.
         this.latestWeek = Number(localStorage.getItem('nfl_wins_latest_week')) || 0;
@@ -78,7 +78,7 @@ class App {
 
             if (cfg) {
                 const freshDraftActive = cfg.draft_active === true;
-                localStorage.setItem('nfl_wins_draft_active', String(freshDraftActive));
+                localStorage.setItem(STORAGE_KEYS.DRAFT_ACTIVE, String(freshDraftActive));
                 if (freshDraftActive !== this.draftActive) {
                     this.draftActive = freshDraftActive;
                     needsNavUpdate = true;
@@ -464,7 +464,7 @@ class App {
         } else if (msg.type === 'config_changed') {
             if (typeof msg.draft_active === 'boolean' && msg.draft_active !== this.draftActive) {
                 this.draftActive = msg.draft_active;
-                localStorage.setItem('nfl_wins_draft_active', String(msg.draft_active));
+                localStorage.setItem(STORAGE_KEYS.DRAFT_ACTIVE, String(msg.draft_active));
                 this._patchDraftNav();
                 // Someone already on /draft when the admin flips this toggle
                 // would otherwise be stuck showing the stale "hasn't opened
@@ -506,12 +506,11 @@ class App {
                 applicationServerKey: _urlBase64ToUint8Array(vapidKey),
             });
 
-            const token = AuthService.getToken();
             await fetch('/api/draft/push-subscribe', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                    ...getAuthHeaders(),
                 },
                 body: JSON.stringify({
                     playerId: this.user.playerId,
@@ -522,12 +521,11 @@ class App {
             console.warn('[Push] Subscription failed:', e);
             // console.warn alone is invisible once the user closes devtools --
             // report it server-side so it's actually observable in Cloud Logging.
-            const token = AuthService.getToken();
             fetch('/api/push/client-error', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                    ...getAuthHeaders(),
                 },
                 body: JSON.stringify({ reason: `${e?.name || 'Error'}: ${e?.message || e}` }),
             }).catch(() => {});

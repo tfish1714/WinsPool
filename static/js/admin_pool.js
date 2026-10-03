@@ -5,6 +5,8 @@
  * built with createElement/textContent; server data is never fed to innerHTML.
  */
 
+import { getAuthHeaders } from './auth_service.js';
+
 // Shared helper defined in admin_main.js (window.adminHttpError); resolves to an
 // Error reading "<status>: <server message>". Called only at error time.
 const _httpErr = (r) => (window.adminHttpError ? window.adminHttpError(r) : Promise.resolve(new Error(String(r.status))));
@@ -15,11 +17,7 @@ let _poolMembers = 0;
 let _poolLoadToken = 0;
 
 function _poolHeaders(json) {
-    const headers = {};
-    try {
-        const token = localStorage.getItem('nfl_wins_token');
-        if (token) headers['Authorization'] = 'Bearer ' + token;
-    } catch (e) { /* storage unavailable; cookie auth still applies */ }
+    const headers = getAuthHeaders();
     if (json) headers['Content-Type'] = 'application/json';
     return headers;
 }

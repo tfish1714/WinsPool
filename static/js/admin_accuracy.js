@@ -6,6 +6,8 @@
  * Each game row has a magnifying glass that opens a feature detail modal.
  */
 
+import { getAuthHeaders } from './auth_service.js';
+
 // Shared helper defined in admin_main.js (window.adminHttpError); resolves to an
 // Error reading "<status>: <server message>". Called only at error time.
 const _httpErr = (r) => (window.adminHttpError ? window.adminHttpError(r) : Promise.resolve(new Error(String(r.status))));
@@ -84,8 +86,7 @@ async function loadWeekGames(season, week, containerId) {
     container.innerHTML = '<div style="padding:8px;color:var(--text-secondary);font-size:0.8rem;">Loading…</div>';
 
     try {
-        const token   = localStorage.getItem('nfl_wins_token');
-        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const headers = getAuthHeaders();
         const resp = await fetch(
             `/api/admin/predictions/games?season=${season}&week=${week}`,
             { headers }
@@ -218,8 +219,7 @@ window._openGameFeatureModal = async function(season, week, away, home) {
     }
 
     try {
-        const token   = localStorage.getItem('nfl_wins_token');
-        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const headers = getAuthHeaders();
         const resp = await fetch(
             `/api/prediction_features/${season}/${week}/${encodeURIComponent(away)}/${encodeURIComponent(home)}`,
             { headers }
@@ -393,8 +393,7 @@ async function loadForecastData() {
     if (!el) return;
     el.innerHTML = '<div style="padding:1rem;color:var(--text-secondary);font-size:0.85rem;">Loading 2026 forecast…</div>';
     try {
-        const token   = localStorage.getItem('nfl_wins_token');
-        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const headers = getAuthHeaders();
         const resp = await fetch('/api/admin/forecast', { headers });
         if (!resp.ok) throw await _httpErr(resp);
         _forecastData = await resp.json();
@@ -532,8 +531,7 @@ async function loadAccuracyData(season) {
     table.innerHTML = '<div style="padding:2rem; text-align:center; color:var(--text-secondary);">Loading accuracy data…</div>';
 
     try {
-        const token   = localStorage.getItem('nfl_wins_token');
-        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const headers = getAuthHeaders();
         const seasonParam = (typeof season === 'string' || typeof season === 'number') && season !== ''
             ? `?season=${encodeURIComponent(season)}` : '';
         const resp = await fetch(`/api/predictions/accuracy${seasonParam}`, { headers });
@@ -611,8 +609,7 @@ function renderSnapshotsTable(seasons) {
 async function loadSnapshotsData() {
     const wrap = document.getElementById('acc-snapshots-table');
     try {
-        const token   = localStorage.getItem('nfl_wins_token');
-        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const headers = getAuthHeaders();
         const resp = await fetch('/api/admin/nn_weekly_accuracy', { headers });
         if (resp.status === 404) {
             wrap.innerHTML = '<p style="color:var(--text-secondary);">No weekly snapshots recorded yet. Run <code>weekly_model_eval.py --firestore</code> after a week completes.</p>';

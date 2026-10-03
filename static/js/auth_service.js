@@ -3,9 +3,30 @@
  * Handles user sessions, login, and registration.
  */
 
+export const STORAGE_KEYS = {
+    TOKEN: 'nfl_wins_token',
+    PLAYER_ID: 'nfl_wins_my_player_id',
+    ROLE: 'nfl_wins_role',
+    DRAFT_ACTIVE: 'nfl_wins_draft_active',
+};
+
+/**
+ * Bearer header map for the saved session token, or {} when there is no token
+ * (or storage is unavailable). Safe to spread into any fetch headers object.
+ */
+export function getAuthHeaders() {
+    let token = null;
+    try {
+        token = localStorage.getItem(STORAGE_KEYS.TOKEN);
+    } catch (e) { /* storage unavailable; cookie auth still applies */ }
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
 export const AuthService = {
+    getAuthHeaders,
+
     getCredentials() {
-        const pid = localStorage.getItem('nfl_wins_my_player_id');
+        const pid = localStorage.getItem(STORAGE_KEYS.PLAYER_ID);
         if (!pid || pid === 'null' || pid === 'undefined') {
             return { playerId: null, playerName: null, nickName: null, role: 'user', token: null };
         }
@@ -13,23 +34,23 @@ export const AuthService = {
             playerId: pid,
             playerName: localStorage.getItem('nfl_wins_playerName'),
             nickName: localStorage.getItem('nfl_wins_nickName'),
-            role: localStorage.getItem('nfl_wins_role') || 'user',
-            token: localStorage.getItem('nfl_wins_token') || null,
+            role: localStorage.getItem(STORAGE_KEYS.ROLE) || 'user',
+            token: localStorage.getItem(STORAGE_KEYS.TOKEN) || null,
         };
     },
 
     getToken() {
-        return localStorage.getItem('nfl_wins_token') || null;
+        return localStorage.getItem(STORAGE_KEYS.TOKEN) || null;
     },
 
     setCredentials(data) {
-        localStorage.setItem('nfl_wins_my_player_id', data.playerId);
+        localStorage.setItem(STORAGE_KEYS.PLAYER_ID, data.playerId);
         localStorage.setItem('nfl_wins_playerName', data.playerName);
         localStorage.setItem('nfl_wins_nickName', data.nickName || '');
         localStorage.setItem('nfl_wins_user_email', data.email);
-        localStorage.setItem('nfl_wins_role', data.role || 'user');
+        localStorage.setItem(STORAGE_KEYS.ROLE, data.role || 'user');
         if (data.token) {
-            localStorage.setItem('nfl_wins_token', data.token);
+            localStorage.setItem(STORAGE_KEYS.TOKEN, data.token);
         }
     },
 
@@ -61,11 +82,10 @@ export const AuthService = {
     },
 
     async syncProfile() {
-        const token = this.getToken();
-        if (!token) return null;
+        if (!this.getToken()) return null;
         try {
             const resp = await fetch('/api/profile', {
-                headers: { 'Authorization': `Bearer ${token}` }
+                headers: getAuthHeaders()
             });
             if (resp.ok) {
                 const data = await resp.json();

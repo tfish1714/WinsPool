@@ -3,13 +3,10 @@
  * Encapsulates all backend communication with robust timeout handling.
  */
 
+import { getAuthHeaders } from './auth_service.js';
+
 const API_BASE = '/api';
 const DEFAULT_TIMEOUT = 10000; // 10 seconds
-
-function _getAuthHeaders() {
-    const token = localStorage.getItem('nfl_wins_token');
-    return token ? { 'Authorization': `Bearer ${token}` } : {};
-}
 
 async function fetchWithTimeout(url, options = {}) {
     const { timeout = DEFAULT_TIMEOUT } = options;
@@ -18,7 +15,7 @@ async function fetchWithTimeout(url, options = {}) {
 
     const mergedHeaders = {
         'Content-Type': 'application/json',
-        ..._getAuthHeaders(),
+        ...getAuthHeaders(),
         ...(options.headers || {}),
     };
 

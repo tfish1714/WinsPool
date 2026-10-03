@@ -2,6 +2,8 @@
 // Same-origin fetch sends the httpOnly session_token cookie; the token in
 // localStorage (api.js convention) is also sent as a Bearer header when present.
 // Payout split and paid counts live on the owner's /player/{id} page, not here.
+import { getAuthHeaders, STORAGE_KEYS } from './auth_service.js';
+
 (function () {
     const el = document.getElementById('pool-fee-banner');
     if (!el) return;
@@ -12,12 +14,10 @@
 
     async function load() {
         try {
-            const headers = {};
+            const headers = getAuthHeaders();
             let myId = null;
             try {
-                const token = localStorage.getItem('nfl_wins_token');
-                if (token) headers['Authorization'] = 'Bearer ' + token;
-                myId = localStorage.getItem('nfl_wins_my_player_id');
+                myId = localStorage.getItem(STORAGE_KEYS.PLAYER_ID);
             } catch (e) { /* storage unavailable */ }
             const year = el.dataset.year;
             const res = await fetch('/api/pool/status?season=' + encodeURIComponent(year), { headers });
