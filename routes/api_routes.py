@@ -15,7 +15,7 @@ from services.draft_service import sanitize_state
 from services.live_standings_service import build_live_standings_payload
 from services.utils import filter_season
 from services.db_service import get_config_settings, is_draft_active_fail_closed
-from services.pool_service import build_pool_status
+from services.pool_service import build_pool_status, build_unpaid_payload, current_played_week
 from services.session_service import require_auth, require_admin
 import services.analysis_service as analysis
 from services.analysis_service import get_season_progress
@@ -751,4 +751,26 @@ def get_pool_status(season: int | None = None, _auth: dict = Depends(require_aut
         return JSONResponse(content=status)
     except Exception:
         logger.exception("Unhandled error in get_pool_status")
+        return server_error()
+
+
+@router.get("/pool/unpaid")
+def get_pool_unpaid(season: int | None = None, _auth: dict = Depends(require_auth)):
+    """Gated unpaid-entry view; names are returned only to admins or in the public/banner stages."""
+    try:
+        from services.data_service import get_active_season
+        _, _, games, players_df, order_df, draft_results, rules = load_data()
+        if season is None:
+            season = int(get_active_season(games, draft_results, rules))
+        try:
+            caller_id = int(_auth.get("sub"))
+        except (TypeError, ValueError):
+            caller_id = None
+        payload = build_unpaid_payload(
+            order_df, players_df, get_config_settings(), season,
+            current_played_week(games, season), caller_id, _auth.get("role") == "admin",
+        )
+        return JSONResponse(content=payload)
+    except Exception:
+        logger.exception("Unhandled error in get_pool_unpaid")
         return server_error()

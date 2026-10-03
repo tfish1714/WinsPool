@@ -12,6 +12,9 @@ plain-text ``payment_note``; both are optional and read through their own getter
 """
 import math
 
+import pandas as pd
+
+from services.data_service import get_most_recent_completed_week
 from services.db_service import get_config_settings, set_config_settings
 
 DEFAULT_ENTRY_FEE = 200
@@ -210,4 +213,79 @@ def build_pool_status(order_df, settings: dict, season: int, player_id) -> dict:
         "payout_total": pot["payout_total"],
         "pot_balance": pot["pot_balance"],
         "my_paid": my_paid,
+    }
+
+
+def compute_unpaid_stage(current_week, settings) -> str:
+    """'off' | 'nudge' | 'public' | 'banner' for the week and an unpaid_visibility dict."""
+    vis = clean_unpaid_visibility(settings)
+    if not vis["enabled"]:
+        return "off"
+    try:
+        week = int(current_week)
+    except (TypeError, ValueError):
+        return "off"
+    if week >= vis["banner_week"]:
+        return "banner"
+    if week >= vis["public_week"]:
+        return "public"
+    if week >= vis["nudge_week"]:
+        return "nudge"
+    return "off"
+
+
+def current_played_week(games, season) -> int:
+    """Most recent completed REG week of `season`; 0 if none. Thin wrapper over the
+    existing data_service.get_most_recent_completed_week (also used for recaps), which
+    ignores the unplayed schedule, unlike get_latest_season_and_week."""
+    if games is None:
+        return 0
+    week = get_most_recent_completed_week(games, season)
+    return 0 if week is None else int(week)
+
+
+def _unpaid_members(order_df, players_df, season) -> list:
+    if order_df is None or order_df.empty or not {"season", "playerId"} <= set(order_df.columns):
+        return []
+    rows = order_df[order_df["season"] == season]
+    if rows.empty:
+        return []
+    if "paid" in rows.columns:
+        paid = rows["paid"].fillna(False).astype(bool)
+    else:
+        paid = pd.Series(False, index=rows.index)
+    names = {}
+    if players_df is not None and not players_df.empty and {"playerId", "fullName"} <= set(players_df.columns):
+        names = {int(r.playerId): str(r.fullName) for r in players_df.itertuples() if pd.notna(r.fullName)}
+    out = [{"playerId": int(pid), "name": names.get(int(pid), f"Player {int(pid)}")}
+           for pid in rows.loc[~paid, "playerId"]]
+    return sorted(out, key=lambda r: r["name"].lower())
+
+
+def build_unpaid_payload(order_df, players_df, settings, season, week, caller_id, is_admin) -> dict:
+    """Gated unpaid-entry view. Names leave this function only for admins or in the
+    public/banner stages of an enabled season; nudge and off return an empty list."""
+    cfg = get_pool_config(settings, season)
+    vis = get_unpaid_visibility(settings, season)
+    stage = compute_unpaid_stage(week, vis)
+    unpaid = _unpaid_members(order_df, players_df, season)
+    unpaid_ids = {u["playerId"] for u in unpaid}
+
+    member_ids = set()
+    if order_df is not None and not order_df.empty and {"season", "playerId"} <= set(order_df.columns):
+        member_ids = {int(p) for p in order_df.loc[order_df["season"] == season, "playerId"]}
+    me_member = caller_id is not None and int(caller_id) in member_ids
+    me_unpaid = (int(caller_id) in unpaid_ids) if (stage != "off" and me_member) else None
+
+    reveal = bool(is_admin) or (vis["enabled"] and stage in ("public", "banner"))
+    show_note = bool(is_admin) or (stage != "off" and me_unpaid is True)
+    return {
+        "enabled": vis["enabled"],
+        "stage": stage,
+        "week": int(week),
+        "amount": cfg["entry_fee"],
+        "unpaid": unpaid if reveal else [],
+        "me_unpaid": me_unpaid,
+        "payment_note": get_payment_note(settings, season) if show_note else "",
+        "admin_view": bool(is_admin),
     }
