@@ -24,7 +24,7 @@
 ## Deviations From The Task Text (verified against the code, 2026-10-03)
 
 1. **Item 4.4 file:** `services/player_profile_service.py` and `tests/test_player_profile_service.py` do not exist. `compute_preseason_player_profiles` lives in `services/nn_feature_engine.py:1294`. The guard goes there; the new test file keeps the requested name `tests/test_player_profile_service.py`.
-2. **Current week:** `get_latest_season_and_week(games)` returns the schedule maximum (2026, 18) while only week 3 has results, so using it would put the pool straight into the `banner` stage. A new `current_played_week(games, season)` (max REG week with a result) is used instead.
+2. **Current week:** `get_latest_season_and_week(games)` returns the schedule maximum (2026, 18) while only week 3 has results, so using it would put the pool straight into the `banner` stage. A thin `current_played_week(games, season)` wrapper over the existing `data_service.get_most_recent_completed_week` is used instead (no new week logic).
 3. **Task 2.2:** `get_active_season` takes `(games, draft_results, rules)`, not no arguments. `fetch_admin_seasons` already loads those frames.
 4. **Task 2.1 item 3:** `set_member_paid` already calls both `clear_data_cache` and `signal_data_update`. It is switched to `_invalidate_static()` (behavior identical) and pinned by a test.
 5. **Task 1.2 theme init:** `main.js` is a deferred module, so it cannot run before first paint. Init lives in a classic `static/js/theme_init.js` loaded in `<head>`; `main.js` imports `STORAGE_KEYS.THEME` and wires toggle buttons and cross-tab sync.
@@ -946,7 +946,7 @@ Note: the last test proves the route reads fresh `load_data()` output on each ca
 Run: `python -m pytest tests/test_unpaid_visibility.py -q`
 Expected: FAIL (`compute_unpaid_stage`, `current_played_week`, `build_unpaid_payload` undefined; route returns 404).
 
-- [ ] **Step 3: Implement** in `services/pool_service.py` (add `import pandas as pd` and `from services.constants import UNDRAFTED_SENTINEL` at the top):
+- [ ] **Step 3: Implement** in `services/pool_service.py` (add `import pandas as pd` and `from services.data_service import get_most_recent_completed_week` at the top):
 
 ```python
 def compute_unpaid_stage(current_week, settings) -> str:
@@ -968,19 +968,13 @@ def compute_unpaid_stage(current_week, settings) -> str:
 
 
 def current_played_week(games, season) -> int:
-    """Highest REG week of `season` with a real result; 0 if none. Unlike
-    get_latest_season_and_week this ignores the unplayed schedule."""
-    if games is None or games.empty or not {"season", "week"} <= set(games.columns):
+    """Most recent completed REG week of `season`; 0 if none. Thin wrapper over the
+    existing data_service.get_most_recent_completed_week (also used for recaps), which
+    ignores the unplayed schedule, unlike get_latest_season_and_week."""
+    if games is None:
         return 0
-    g = games[games["season"] == season]
-    if "game_type" in g.columns:
-        g = g[g["game_type"] == "REG"]
-    if "result" in g.columns:
-        g = g[g["result"].notna() & (g["result"] != UNDRAFTED_SENTINEL)]
-    else:
-        return 0
-    week = pd.to_numeric(g["week"], errors="coerce").max()
-    return 0 if pd.isna(week) else int(week)
+    week = get_most_recent_completed_week(games, season)
+    return 0 if week is None else int(week)
 
 
 def _unpaid_members(order_df, players_df, season) -> list:
