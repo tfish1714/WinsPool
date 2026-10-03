@@ -4190,3 +4190,8 @@ a.pool-chip-mine:hover { text-decoration: underline; }
     border-radius: 8px;
     cursor: pointer;
 }
+
+/* Light theme: the off-screen bottom sheet's shadow would otherwise bleed onto the screen edge. */
+:root[data-theme="light"] .bottom-sheet:not(.active) { box-shadow: none; }
+:root[data-theme="light"] .bottom-sheet.active { box-shadow: 0 -8px 32px rgba(15, 23, 42, 0.18); }
+:root[data-theme="light"] .bottom-sheet-overlay { background: rgba(15, 23, 42, 0.35); }
