@@ -10,6 +10,7 @@ docs/superpowers/specs/2026-09-18-model-prediction-e2e-review-design.md
 XGB v9-vs-v3 comparison) this exists to prevent.
 """
 import logging
+import numbers
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ PROMOTION_GATES: dict[str, float] = {
 
 def _fmt(value) -> str:
     """Format a metric for a log line; None or non-numeric renders as n/a."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
         return "n/a"
     return f"{value:.4f}"
 

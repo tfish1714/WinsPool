@@ -182,3 +182,20 @@ class TestPromotionGateLogging:
             assert_promotion_ready({"test_accuracy": 0.6, "test_auc": 0.6},
                                    {"test_accuracy": 0.6, "test_auc": 0.6}, "XGB")
         assert len(self._decisions(caplog)) == 1
+
+
+def test_fmt_accepts_numpy_scalars():
+    import numpy as np
+    from services.model_promotion import _fmt
+    assert _fmt(np.float32(0.5)) == "0.5000"
+    assert _fmt(np.int64(1)) == "1.0000"
+    assert _fmt(np.float64(0.25)) == "0.2500"
+
+
+def test_fmt_still_rejects_bool_none_and_strings():
+    import numpy as np
+    from services.model_promotion import _fmt
+    assert _fmt(True) == "n/a"
+    assert _fmt(np.bool_(True)) == "n/a"
+    assert _fmt(None) == "n/a"
+    assert _fmt("0.5") == "n/a"
