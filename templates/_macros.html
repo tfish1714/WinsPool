@@ -1,0 +1,14 @@
+{# Shared Jinja2 macros. Import with: {% from "_macros.html" import year_picker %} #}
+
+{#
+  Season dropdown used in the page header of the per-year pages.
+  base_url   - path prefix the chosen year is appended to, e.g. "/schedule/"
+  url_suffix - optional path appended after the year, e.g. "/weekbyweek"
+#}
+{% macro year_picker(available_years, current_year, base_url, url_suffix='') -%}
+<select id="year-pick" class="season-select" onchange="window.location='{{ base_url }}' + this.value{% if url_suffix %} + '{{ url_suffix }}'{% endif %}" aria-label="Season">
+    {% for y in available_years | sort(reverse=True) %}
+    <option value="{{ y }}" {% if y==current_year %}selected{% endif %}>{{ y }} Season</option>
+    {% endfor %}
+</select>
+{%- endmacro %}

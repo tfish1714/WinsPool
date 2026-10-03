@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import year_picker %}
 {% block title %}Head-to-Head Records — {{ year }}{% endblock %}
 {% block content %}
 
@@ -13,11 +14,7 @@
                 </p>
             </div>
             <div class="wp-top-right">
-                <select id="year-pick" class="season-select" onchange="window.location='/headtohead/' + this.value" aria-label="Season">
-                    {% for y in available_years | sort(reverse=True) %}
-                    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }} Season</option>
-                    {% endfor %}
-                </select>
+                {{ year_picker(available_years, year, "/headtohead/") }}
             </div>
         </header>
 

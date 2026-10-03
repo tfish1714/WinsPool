@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import year_picker %}
 
 {% block title %}NFL Game Schedule — {{ year }}{% endblock %}
 
@@ -13,11 +14,7 @@
                 <h1 class="wp-h1">Game Schedule<span class="wp-year">/{{ year }}</span></h1>
             </div>
             <div class="wp-top-right">
-                <select id="year-pick" class="season-select" onchange="window.location='/schedule/' + this.value" aria-label="Season">
-                    {% for y in available_years | sort(reverse=True) %}
-                    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }} Season</option>
-                    {% endfor %}
-                </select>
+                {{ year_picker(available_years, year, "/schedule/") }}
             </div>
         </header>
 
