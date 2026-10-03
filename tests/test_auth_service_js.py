@@ -43,6 +43,7 @@ def test_storage_keys_values():
         "PLAYER_ID": "nfl_wins_my_player_id",
         "ROLE": "nfl_wins_role",
         "DRAFT_ACTIVE": "nfl_wins_draft_active",
+        "THEME": "nfl_wins_theme",
     }
 
 

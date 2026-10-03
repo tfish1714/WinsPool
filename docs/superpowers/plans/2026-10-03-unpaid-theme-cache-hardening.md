@@ -72,7 +72,7 @@
 **Interfaces:**
 - Produces: `services.db_service._invalidate_static() -> None` (clear then signal, `DOMAIN_STATIC`).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 """Draft/pool writers must clear the local cache AND signal other instances (issue #71)."""
@@ -132,12 +132,12 @@ def test_no_writer_clears_static_cache_without_signalling():
     assert offenders == []
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `python -m pytest tests/test_db_cache_signals.py -q`
 Expected: FAIL. `_invalidate_static` missing (AttributeError); the two writer tests and the guard fail on the missing signal (guard lists `delete_draft_results_for_season`, `add_draft_order`).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add directly after `signal_data_update` in `services/db_service.py`:
 
@@ -150,12 +150,12 @@ def _invalidate_static() -> None:
 
 Replace the trailing `clear_data_cache(DOMAIN_STATIC)` in `delete_draft_results_for_season` and `add_draft_order` with `_invalidate_static()`, and replace the `clear_data_cache(DOMAIN_STATIC)` / `signal_data_update(DOMAIN_STATIC)` pair in `set_member_paid` with `_invalidate_static()`. Do not touch other writers.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `python -m pytest tests/test_db_cache_signals.py tests/test_set_member_paid.py tests/test_db.py tests/test_local_db_isolation.py -q`
 Expected: all PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add services/db_service.py tests/test_db_cache_signals.py
@@ -173,7 +173,7 @@ git commit -m "fix: signal other instances after draft result and draft order wr
 **Interfaces:**
 - Produces: `GET /api/admin/seasons` -> `{"seasons": [int, ...], "active_season": int | null}`; JS helper `_poolPickInitialSeason(seasons, active) -> number`.
 
-- [ ] **Step 1: Write the failing tests** (append to `tests/test_admin_routes.py`; reuse its `admin_token` fixture and module-level `client`)
+- [x] **Step 1: Write the failing tests** (append to `tests/test_admin_routes.py`; reuse its `admin_token` fixture and module-level `client`)
 
 ```python
 class TestAdminSeasonsActive:
@@ -228,12 +228,12 @@ def test_admin_pool_prefers_active_season():
     assert "_poolPickInitialSeason(seasons, active_season)" in src
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `python -m pytest tests/test_admin_routes.py -k "AdminSeasonsActive or admin_pool_prefers" -q`
 Expected: FAIL (`KeyError: 'active_season'`; `get_active_season` not an attribute of `routes.admin_routes`; JS helper missing).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `routes/admin_routes.py` add `from services.data_service import get_active_season` beside the existing `load_data` import, then change `fetch_admin_seasons`:
 
@@ -275,12 +275,12 @@ and in `_poolInit` replace the destructure and load lines:
 
 The test's literal-string assertion `_poolPickInitialSeason(seasons, active_season)` is satisfied by that call.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `python -m pytest tests/test_admin_routes.py tests/test_admin_pool_config.py -q`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add routes/admin_routes.py static/js/admin_pool.js tests/test_admin_routes.py
@@ -299,7 +299,7 @@ Four independent red/green cycles, one commit each.
 
 #### 3a. Item 4.4 roster ingestion guard
 
-- [ ] **Step 1: Failing test** (`tests/test_player_profile_service.py`)
+- [x] **Step 1: Failing test** (`tests/test_player_profile_service.py`)
 
 ```python
 """compute_preseason_player_profiles degrades to {} on a malformed weekly roster file."""
@@ -314,8 +314,8 @@ def test_weekly_roster_without_week_column_returns_empty(monkeypatch, tmp_path):
     assert nfe.compute_preseason_player_profiles(2026, tmp_path, week=3) == {}
 ```
 
-- [ ] **Step 2:** `python -m pytest tests/test_player_profile_service.py -q` -> FAIL with `KeyError: 'week'`.
-- [ ] **Step 3: Implement** in `compute_preseason_player_profiles`, replace the `if week is not None:` roster block with:
+- [x] **Step 2:** `python -m pytest tests/test_player_profile_service.py -q` -> FAIL with `KeyError: 'week'`.
+- [x] **Step 3: Implement** in `compute_preseason_player_profiles`, replace the `if week is not None:` roster block with:
 
 ```python
     roster = shared_inputs["roster"]
@@ -331,12 +331,12 @@ def test_weekly_roster_without_week_column_returns_empty(monkeypatch, tmp_path):
             return {}
 ```
 
-- [ ] **Step 4:** `python -m pytest tests/test_player_profile_service.py tests/test_preseason_profiles.py -q` -> PASS.
-- [ ] **Step 5:** `git add services/nn_feature_engine.py tests/test_player_profile_service.py && git commit -m "fix: return no profiles when weekly roster lacks a week column (4.4)"`
+- [x] **Step 4:** `python -m pytest tests/test_player_profile_service.py tests/test_preseason_profiles.py -q` -> PASS.
+- [x] **Step 5:** `git add services/nn_feature_engine.py tests/test_player_profile_service.py && git commit -m "fix: return no profiles when weekly roster lacks a week column (4.4)"`
 
 #### 3b. Item 5.4 numpy scalars in `_fmt`
 
-- [ ] **Step 1: Failing test** (append to `tests/test_model_promotion.py`; add `import numpy as np` and `from services.model_promotion import _fmt` if absent)
+- [x] **Step 1: Failing test** (append to `tests/test_model_promotion.py`; add `import numpy as np` and `from services.model_promotion import _fmt` if absent)
 
 ```python
 def test_fmt_accepts_numpy_scalars():
@@ -352,20 +352,20 @@ def test_fmt_still_rejects_bool_none_and_strings():
     assert _fmt("0.5") == "n/a"
 ```
 
-- [ ] **Step 2:** `python -m pytest tests/test_model_promotion.py -k fmt -q` -> `test_fmt_accepts_numpy_scalars` FAILS (`'n/a' != '0.5000'`); the second test passes (existing behavior pinned).
-- [ ] **Step 3: Implement** in `services/model_promotion.py`: add `import numbers` to the imports and change `_fmt`:
+- [x] **Step 2:** `python -m pytest tests/test_model_promotion.py -k fmt -q` -> `test_fmt_accepts_numpy_scalars` FAILS (`'n/a' != '0.5000'`); the second test passes (existing behavior pinned).
+- [x] **Step 3: Implement** in `services/model_promotion.py`: add `import numbers` to the imports and change `_fmt`:
 
 ```python
     if isinstance(value, bool) or not isinstance(value, numbers.Real):
         return "n/a"
 ```
 
-- [ ] **Step 4:** `python -m pytest tests/test_model_promotion.py tests/test_promotion_gate_xgb.py -q` -> PASS.
-- [ ] **Step 5:** `git add services/model_promotion.py tests/test_model_promotion.py && git commit -m "fix: format numpy scalars in promotion log lines (5.4)"`
+- [x] **Step 4:** `python -m pytest tests/test_model_promotion.py tests/test_promotion_gate_xgb.py -q` -> PASS.
+- [x] **Step 5:** `git add services/model_promotion.py tests/test_model_promotion.py && git commit -m "fix: format numpy scalars in promotion log lines (5.4)"`
 
 #### 3c. Item 5.7 normalized join key for OAK/LV
 
-- [ ] **Step 1: Failing test** (`tests/test_historical_oak_join.py`)
+- [x] **Step 1: Failing test** (`tests/test_historical_oak_join.py`)
 
 ```python
 """Historical Oakland/Las Vegas rows join whichever abbreviation each side uses (5.7)."""
@@ -393,8 +393,8 @@ def test_oak_lv_rows_join(draft_team, standings_team):
 
 Before running, open `calculate_wins_pool_standings` (`services/analysis_service.py:~600`) and confirm its positional signature is `(draft_results, standings, season, ...)`; adjust the call if the real order differs, and add whatever minimal extra columns (for example `players` or `team_records`) the function requires to reach the merge. Do not change production code to fit the test.
 
-- [ ] **Step 2:** `python -m pytest tests/test_historical_oak_join.py -q` -> the `("OAK","LV")` and `("LV","OAK")` cases FAIL (`wins` is 0.0 from the left-join fill); `("OAK","OAK")` PASSES.
-- [ ] **Step 3: Implement** in `calculate_wins_pool_standings`, replace the `pd.merge(...)` call with:
+- [x] **Step 2:** `python -m pytest tests/test_historical_oak_join.py -q` -> the `("OAK","LV")` and `("LV","OAK")` cases FAIL (`wins` is 0.0 from the left-join fill); `("OAK","OAK")` PASSES.
+- [x] **Step 3: Implement** in `calculate_wins_pool_standings`, replace the `pd.merge(...)` call with:
 
 ```python
     from services.utils import normalize_team_abbr
@@ -409,12 +409,12 @@ Before running, open `calculate_wins_pool_standings` (`services/analysis_service
 
 (Move the import to module top if `services.utils` is already imported there; it is: `from services.utils import filter_season`, so extend that import instead.)
 
-- [ ] **Step 4:** `python -m pytest tests/test_historical_oak_join.py tests/test_wins_pool_missing_standings.py tests/test_standings_player_links.py tests/test_analysis_service.py -q` -> PASS (include any other `analysis`/standings test files the repo has; run `python -m pytest tests -k "standings" -q` to be sure).
-- [ ] **Step 5:** `git add services/analysis_service.py tests/test_historical_oak_join.py && git commit -m "fix: join standings on a normalized team key so OAK/LV rows match (5.7)"`
+- [x] **Step 4:** `python -m pytest tests/test_historical_oak_join.py tests/test_wins_pool_missing_standings.py tests/test_standings_player_links.py tests/test_analysis_service.py -q` -> PASS (include any other `analysis`/standings test files the repo has; run `python -m pytest tests -k "standings" -q` to be sure).
+- [x] **Step 5:** `git add services/analysis_service.py tests/test_historical_oak_join.py && git commit -m "fix: join standings on a normalized team key so OAK/LV rows match (5.7)"`
 
 #### 3d. Item 5.8 AST scan replaces the string check
 
-- [ ] **Step 1: Failing test** — add to `tests/test_team_abbr_consolidation.py`, above the existing guard:
+- [x] **Step 1: Failing test** — add to `tests/test_team_abbr_consolidation.py`, above the existing guard:
 
 ```python
 import ast
@@ -437,8 +437,8 @@ def test_abbr_dict_detector():
     assert not _has_abbr_dict_literal('s = "JAC"; t = "WSH"')
 ```
 
-- [ ] **Step 2:** `python -m pytest tests/test_team_abbr_consolidation.py -q` -> FAIL only if the helper is absent; it is defined in the same edit, so instead run the file once before editing the guard and confirm everything else passes (baseline), then proceed.
-- [ ] **Step 3: Implement (exact replacement)** — replace the body of `test_no_second_abbreviation_dict_outside_constants` with:
+- [x] **Step 2:** `python -m pytest tests/test_team_abbr_consolidation.py -q` -> FAIL only if the helper is absent; it is defined in the same edit, so instead run the file once before editing the guard and confirm everything else passes (baseline), then proceed.
+- [x] **Step 3: Implement (exact replacement)** — replace the body of `test_no_second_abbreviation_dict_outside_constants` with:
 
 ```python
 def test_no_second_abbreviation_dict_outside_constants():
@@ -455,8 +455,8 @@ def test_no_second_abbreviation_dict_outside_constants():
 
 If any file fails to parse, the test must surface it (do not swallow `SyntaxError`). If the AST scan reports offenders the old string check missed, STOP and report them; do not edit production files to satisfy the test.
 
-- [ ] **Step 4:** `python -m pytest tests/test_team_abbr_consolidation.py tests/test_player_profile_service.py tests/test_model_promotion.py tests/test_historical_oak_join.py -q` -> PASS.
-- [ ] **Step 5:** `git add tests/test_team_abbr_consolidation.py && git commit -m "test: scan dict literals via AST for a second team abbreviation map (5.8)"`
+- [x] **Step 4:** `python -m pytest tests/test_team_abbr_consolidation.py tests/test_player_profile_service.py tests/test_model_promotion.py tests/test_historical_oak_join.py -q` -> PASS.
+- [x] **Step 5:** `git add tests/test_team_abbr_consolidation.py && git commit -m "test: scan dict literals via AST for a second team abbreviation map (5.8)"`
 
 ---
 
@@ -476,7 +476,7 @@ If any file fails to parse, the test must surface it (do not swallow `SyntaxErro
 - Produces (`routes/models.py`): `UnpaidVisibilityItem(enabled: bool, nudge_week, public_week, banner_week)` with 1..22 bounds and `nudge <= public <= banner`; `PoolConfigRequest.unpaidVisibility: Optional[UnpaidVisibilityItem]`, `PoolConfigRequest.paymentNote: Optional[str]` (max 200).
 - Admin `GET/POST /api/admin/pool/config` responses gain `unpaid_visibility` and `payment_note`.
 
-- [ ] **Step 1: Write the failing tests** (start `tests/test_unpaid_visibility.py`)
+- [x] **Step 1: Write the failing tests** (start `tests/test_unpaid_visibility.py`)
 
 ```python
 """Unpaid entry visibility: config, stage function, gated endpoint, source contracts."""
@@ -618,12 +618,12 @@ class TestAdminPoolConfigUnpaid:
         assert r.status_code == 403
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `python -m pytest tests/test_unpaid_visibility.py tests/test_admin_pool_config.py -q`
 Expected: collection ImportError on `clean_unpaid_visibility` (and later failures once imports exist).
 
-- [ ] **Step 3: Implement `services/pool_service.py`**
+- [x] **Step 3: Implement `services/pool_service.py`**
 
 ```python
 DEFAULT_UNPAID_VISIBILITY = {"enabled": False, "nudge_week": 8, "public_week": 10, "banner_week": 13}
@@ -728,12 +728,12 @@ and add to `PoolConfigRequest`:
 `"unpaid_visibility": pool_service.get_unpaid_visibility(settings, season), "payment_note": pool_service.get_payment_note(settings, season),` and in the POST handler pass
 `unpaid_visibility=body.unpaidVisibility.model_dump() if body.unpaidVisibility else None, payment_note=body.paymentNote`.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `python -m pytest tests/test_unpaid_visibility.py tests/test_pool_service.py tests/test_admin_pool_config.py -q`
 Expected: PASS. If an existing admin test pins the exact key set of the config response, replace only that assertion with the same set plus the two new keys (exact superset replacement) and say so in the commit message.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add services/pool_service.py routes/models.py routes/admin_routes.py tests/test_unpaid_visibility.py tests/test_admin_pool_config.py
@@ -758,7 +758,7 @@ git commit -m "feat: per-season unpaid visibility config and payment note (#87)"
 
 Payload rules: `unpaid` is `[{"playerId": int, "name": str}]` sorted by name, populated only if `is_admin` or (`enabled` and stage in `public`/`banner`), otherwise `[]`. `me_unpaid` is `bool` when stage is not `off` and the caller is a season member, else `None`. `payment_note` is non-empty only for admins or for an unpaid caller when stage is not `off`. A `paid` value that is missing or NaN counts as unpaid.
 
-- [ ] **Step 1: Write the failing tests** (append)
+- [x] **Step 1: Write the failing tests** (append)
 
 ```python
 class TestComputeUnpaidStage:
@@ -941,12 +941,12 @@ class TestUnpaidRoute:
 
 Note: the last test proves the route reads fresh `load_data()` output on each call (no response caching in the route); the actual cache invalidation path is pinned in `tests/test_set_member_paid.py::TestPoolStatusSeesPaidToggle` and Task 1.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `python -m pytest tests/test_unpaid_visibility.py -q`
 Expected: FAIL (`compute_unpaid_stage`, `current_played_week`, `build_unpaid_payload` undefined; route returns 404).
 
-- [ ] **Step 3: Implement** in `services/pool_service.py` (add `import pandas as pd` and `from services.data_service import get_most_recent_completed_week` at the top):
+- [x] **Step 3: Implement** in `services/pool_service.py` (add `import pandas as pd` and `from services.data_service import get_most_recent_completed_week` at the top):
 
 ```python
 def compute_unpaid_stage(current_week, settings) -> str:
@@ -1046,12 +1046,12 @@ def get_pool_unpaid(season: int | None = None, _auth: dict = Depends(require_aut
         return server_error()
 ```
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `python -m pytest tests/test_unpaid_visibility.py tests/test_pool_service.py tests/test_set_member_paid.py -q`
 Expected: PASS, including the unchanged `/api/pool/status` key-set test.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add services/pool_service.py routes/api_routes.py tests/test_unpaid_visibility.py
@@ -1070,7 +1070,7 @@ git commit -m "feat: gated GET /api/pool/unpaid with staged visibility (#87)"
 - Consumes: admin config response keys `unpaid_visibility`, `payment_note` (Task 4).
 - Produces: DOM ids `pool-unpaid-enabled`, `pool-unpaid-nudge`, `pool-unpaid-public`, `pool-unpaid-banner`, `pool-unpaid-preview`, `pool-payment-note`; JS functions `_poolUnpaidPreview(vis)` (string) and `_poolUnpaidValidate(vis)` (error string or `null`).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 import re
@@ -1128,9 +1128,9 @@ def test_admin_pool_unpaid_preview_and_validation():
     assert got[2] is None and got[3] and got[4] and got[5]
 ```
 
-- [ ] **Step 2: Run to verify failure** — `python -m pytest tests/test_unpaid_visibility.py -k "admin_pool" -q` -> FAIL (ids and functions absent).
+- [x] **Step 2: Run to verify failure** — `python -m pytest tests/test_unpaid_visibility.py -k "admin_pool" -q` -> FAIL (ids and functions absent).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `templates/admin.html` (insert before the Save button row; match the file's existing indentation and the `pool-label`/`admin-input` classes already used there):
 
@@ -1198,8 +1198,8 @@ In `_poolRender(cfg)`, after the existing lines, populate from `cfg.unpaid_visib
 
 In the `DOMContentLoaded` handler add `input`/`change` listeners on the four controls that call `_poolUnpaidRefreshPreview`.
 
-- [ ] **Step 4: Run to verify pass** — `python -m pytest tests/test_unpaid_visibility.py tests/test_admin_routes.py -q` -> PASS. Then load `/admin` locally (see the `run` skill) and check the Pool tab at 1280px and 390px: controls wrap without horizontal scroll, preview updates live, Save round-trips.
-- [ ] **Step 5: Commit**
+- [x] **Step 4: Run to verify pass** — `python -m pytest tests/test_unpaid_visibility.py tests/test_admin_routes.py -q` -> PASS. Then load `/admin` locally (see the `run` skill) and check the Pool tab at 1280px and 390px: controls wrap without horizontal scroll, preview updates live, Save round-trips.
+- [x] **Step 5: Commit**
 
 ```bash
 git add templates/admin.html static/js/admin_pool.js tests/test_unpaid_visibility.py
@@ -1219,7 +1219,7 @@ git commit -m "feat: admin pool tab controls for unpaid visibility (#87)"
 - Consumes: `GET /api/pool/unpaid` payload (Task 5); `getAuthHeaders` from `auth_service.js`.
 - Produces: classes `.unpaid-pill`, `.unpaid-notice`, `.unpaid-owed-line`; script hooks `data-player-id` (existing) and name containers `.wp-leader-name`, `.wp-row-name`, `.standings-stacked-card__name`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_unpaid_script_contract():
@@ -1260,9 +1260,9 @@ def test_player_profile_shows_amount_owed_and_note_safely():
     assert "innerHTML" not in seg
 ```
 
-- [ ] **Step 2: Run to verify failure** — `python -m pytest tests/test_unpaid_visibility.py -k "unpaid_script or loads_unpaid or unpaid_styles or amount_owed" -q` -> FAIL (file and markup absent).
+- [x] **Step 2: Run to verify failure** — `python -m pytest tests/test_unpaid_visibility.py -k "unpaid_script or loads_unpaid or unpaid_styles or amount_owed" -q` -> FAIL (file and markup absent).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `static/js/unpaid_notice.js`:
 
@@ -1436,8 +1436,8 @@ import { getAuthHeaders } from './auth_service.js';
 
 (`add` and `money` are already defined in that scope; the enclosing IIFE is `async`, so `await` is valid.)
 
-- [ ] **Step 4: Run to verify pass** — `python -m pytest tests/test_unpaid_visibility.py tests/test_standings_player_links.py tests/test_player_page.py tests/test_wins_pool_missing_standings.py -q` -> PASS. Then in a browser at 1280px and 390px with the feature enabled and a lowered `public_week` for the test season: pills appear in the leader card, desktop rows and stacked cards, are not clickable, do not shrink the 44px name link tap area, and survive the 30s refresh without duplicating.
-- [ ] **Step 5: Commit**
+- [x] **Step 4: Run to verify pass** — `python -m pytest tests/test_unpaid_visibility.py tests/test_standings_player_links.py tests/test_player_page.py tests/test_wins_pool_missing_standings.py -q` -> PASS. Then in a browser at 1280px and 390px with the feature enabled and a lowered `public_week` for the test season: pills appear in the leader card, desktop rows and stacked cards, are not clickable, do not shrink the 44px name link tap area, and survive the 30s refresh without duplicating.
+- [x] **Step 5: Commit**
 
 ```bash
 git add static/js/unpaid_notice.js static/style.css templates/wins_pool.html templates/player_profile.html tests/test_unpaid_visibility.py
@@ -1458,7 +1458,7 @@ git commit -m "feat: unpaid pills, reminder strip, still-owed line and amount ow
 
 Real tokens in `static/style.css` are `--bg`, `--bg-elev`, `--bg-elev-2`, `--line`, `--line-strong`, `--ink`, `--ink-2`, `--ink-3`, `--leader`, `--leader-soft`, `--pos`, `--neg`, `--link`, `--warn`, `--primary-hover`, `--glass-bg`; `--glass-border` aliases `--line-strong` and `--text-*` alias `--ink*`, so overriding the base tokens recolors the aliases.
 
-- [ ] **Step 1: Write the failing tests** (`tests/test_theme.py`)
+- [x] **Step 1: Write the failing tests** (`tests/test_theme.py`)
 
 ```python
 """Light/dark theme: token contract, WCAG AA contrast, and node-run init/toggle behavior."""
@@ -1590,9 +1590,9 @@ def test_theme_init_behavior(tmp_path):
     assert got["key"] == "nfl_wins_theme"
 ```
 
-- [ ] **Step 2: Run to verify failure** — `python -m pytest tests/test_theme.py -q` -> FAIL (light block, `theme_init.js`, key and buttons all absent).
+- [x] **Step 2: Run to verify failure** — `python -m pytest tests/test_theme.py -q` -> FAIL (light block, `theme_init.js`, key and buttons all absent).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `static/js/auth_service.js`: add `THEME: 'nfl_wins_theme',` to `STORAGE_KEYS`.
 
@@ -1700,8 +1700,8 @@ function wireThemeToggles() {
 
 Then fix the hard-coded colors that do not use tokens. Run `grep -nE "rgba\(255, ?255, ?255|#fff\b|#ffffff|#000\b|rgba\(0, ?0, ?0" static/style.css`, load `/wins-pool/<year>`, `/player/<id>`, `/draft` and `/admin` at 1280px and 390px in each theme, and add targeted overrides of the form `:root[data-theme="light"] .selector { ... }` only for elements that are unreadable or invisible (for example `.glass-bg`, card hover tints, `backdrop-filter` blur strength). Do not edit existing dark rules.
 
-- [ ] **Step 4: Run to verify pass** — `python -m pytest tests/test_theme.py tests/test_auth_guard.py tests/test_player_page.py -q` -> PASS. Browser check (both widths, both themes): no flash of dark theme on reload with light stored, toggle persists across reload and across two tabs, drawer button works at 390px, sign-in screen readable in light.
-- [ ] **Step 5: Commit**
+- [x] **Step 4: Run to verify pass** — `python -m pytest tests/test_theme.py tests/test_auth_guard.py tests/test_player_page.py -q` -> PASS. Browser check (both widths, both themes): no flash of dark theme on reload with light stored, toggle persists across reload and across two tabs, drawer button works at 390px, sign-in screen readable in light.
+- [x] **Step 5: Commit**
 
 ```bash
 git add static/js/theme_init.js static/js/auth_service.js static/js/main.js static/style.css templates/base.html templates/player_profile.html tests/test_theme.py
@@ -1715,22 +1715,22 @@ git commit -m "feat: light/dark theme with persisted user preference (#107)"
 **Files:**
 - Modify: `docs/api_endpoints.md`, `docs/frontend.md`, `docs/architecture.md` (only if it describes cache invalidation; check with `grep -n "invalidat\|signal" docs/architecture.md`), `CLAUDE.md`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
   - `docs/api_endpoints.md`: document `GET /api/pool/unpaid` (params, payload keys, the leak invariant, stage meaning), the new `unpaid_visibility`/`payment_note` fields on `GET/POST /api/admin/pool/config` (`unpaidVisibility` snake_case inner keys, `paymentNote`, 422 rules), and `active_season` on `GET /api/admin/seasons` (~line 228).
   - `docs/frontend.md`: correct the stale CSS token table to the real tokens, add a "Theme" section (`theme_init.js`, `:root[data-theme="light"]`, `STORAGE_KEYS.THEME`, `data-theme-toggle`, sign-out clears the theme), add `STORAGE_KEYS.THEME` to the `auth_service.js` row, and document `unpaid_notice.js` and the Pool tab controls.
   - `CLAUDE.md`: add `THEME` to the `STORAGE_KEYS` list; add `/api/pool/unpaid` and the config fields under "Newer API endpoints" (state that `/api/pool/status` is unchanged); note `_invalidate_static()` beside the cache rules; note `active_season` on admin seasons; note that `current_played_week` (not `get_latest_season_and_week`) drives the unpaid stage.
   - Mark every checkbox in this plan as done.
-- [ ] **Step 2: Full suite**
+- [x] **Step 2: Full suite**
 
 Run: `python -m pytest tests/ -n auto -q 2>&1 | tail -25`
 Expected: all pass. Note the repo documents 34 environment failures only in a checkout without `.local_db/`; this checkout has it. Report any failure by name, including pre-existing ones, and confirm `git status` shows no changes under `.local_db/` (the session guard also enforces this).
 
-- [ ] **Step 3: Targeted e2e (if the e2e env vars are set)**
+- [x] **Step 3: Targeted e2e (if the e2e env vars are set)**
 
 Run: `python -m pytest tests_e2e/test_nav_parity.py -v`
 Expected: PASS (the drawer gained a button, not a link). Skip with a note if `E2E_TEST_PLAYER_IDS` is unset.
 
-- [ ] **Step 4: Refresh the graph and commit**
+- [x] **Step 4: Refresh the graph and commit**
 
 ```bash
 graphify update .

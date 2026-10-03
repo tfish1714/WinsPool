@@ -233,7 +233,35 @@ Lists all seasons with draft data.
 |---|---|---|---|
 | `playerId` | query | `string` | Admin player ID |
 
-**Response**: `{ seasons: [int] }`
+**Response**: `{ seasons: [int], active_season: int | null }`. `active_season` is the current season from
+`get_active_season` (`null` if the lookup fails); the admin Pool tab selects it by default when it is in `seasons`.
+
+---
+
+### `GET /api/pool/unpaid`
+
+Auth required (any logged-in player). Gated view of unpaid entries for a season (`?season=`, default the active season).
+`/api/pool/status` is unchanged and never carries other players' paid flags; this endpoint is the only place they can appear.
+
+**Response**: `{ enabled, stage, week, amount, unpaid, me_unpaid, payment_note, admin_view }`
+
+| Field | Meaning |
+|---|---|
+| `stage` | `off`, `nudge`, `public` or `banner`, from the last fully completed REG week (`data_service.get_most_recent_completed_week`) and the season's `unpaid_visibility` weeks. Always `off` while `enabled` is false. |
+| `unpaid` | `[{playerId, name}]`. Populated **only** when `admin_view` is true or the season is `enabled` and the stage is `public`/`banner`; otherwise `[]`, so it cannot be revealed by editing the client. |
+| `me_unpaid` | The caller's own status (`bool`) once the stage is past `off` and the caller is a member of the season, else `null`. |
+| `payment_note` | The season's plain-text payment note, only for admins or an unpaid caller past `off`; otherwise `""`. |
+| `admin_view` | `true` for admins, who always receive the full list regardless of stage. |
+
+A missing or NaN `paid` value counts as unpaid. A season with no `draft_order` rows returns an empty list.
+
+### `GET/POST /api/admin/pool/config`
+
+Admin only. Besides `entry_fee`/`payouts`, the response carries `unpaid_visibility`
+(`{enabled, nudge_week, public_week, banner_week}`, defaults `false/8/10/13`) and `payment_note`.
+`POST` accepts optional `unpaidVisibility` (same snake_case inner keys; weeks 1..22 and
+`nudge_week <= public_week <= banner_week`, else 422) and `paymentNote` (max 200 chars). Omitting either keeps the
+season's stored value; other seasons are never touched.
 
 ---
 
