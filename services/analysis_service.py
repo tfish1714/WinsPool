@@ -12,7 +12,7 @@ except Exception:
     pass  # Option added in pandas 2.2; silently skip on older versions
 from typing import Dict, List, Any, Optional
 from services.constants import UNDRAFTED_SENTINEL, TIEBREAKER_SORT_COLS, DRAFT_ROUNDS, TEAMS_PER_PLAYER, PODIUM_SIZE
-from services.utils import filter_season
+from services.utils import filter_season, normalize_team_abbr
 from services.data_service import load_data, get_active_season, get_season_projection_legacy_shape
 
 logger = logging.getLogger(__name__)
@@ -632,9 +632,15 @@ def calculate_wins_pool_standings(standings, draft_results, players, season, gam
             'season': pd.Series(dtype=today_draft_results['season'].dtype),
             **{c: pd.Series(dtype=float) for c in stat_cols},
         })
+    # Join on a normalized key so historical Oakland/Las Vegas rows (OAK vs LV) match
+    # whichever abbreviation each side uses; the displayed `team` stays the draft's.
+    today_draft_results['_team_key'] = today_draft_results['team'].map(normalize_team_abbr)
+    standings_for_join = today_standings.assign(
+        _team_key=today_standings['team'].map(normalize_team_abbr)
+    ).drop(columns=['team'])
     wins_pool_standings = pd.merge(
-        today_draft_results, today_standings, on=['team', 'season'], how='left'
-    )
+        today_draft_results, standings_for_join, on=['_team_key', 'season'], how='left'
+    ).drop(columns=['_team_key'])
     fill_cols = [c for c in stat_cols if c in wins_pool_standings.columns]
     wins_pool_standings[fill_cols] = wins_pool_standings[fill_cols].fillna(0)
 
