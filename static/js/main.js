@@ -1023,6 +1023,8 @@ document.querySelectorAll('table.wp-data-table').forEach(table => {
         });
     });
 });
+// Wired first so an exception in init() cannot leave the theme buttons dead.
+wireThemeToggles();
 window.App.init();
 
 function wireThemeToggles() {
@@ -1045,7 +1047,6 @@ function wireThemeToggles() {
     });
     label();
 }
-wireThemeToggles();
 
 function _urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - base64String.length % 4) % 4);

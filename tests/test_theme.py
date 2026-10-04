@@ -160,3 +160,9 @@ def test_progress_controls_select_uses_tokens():
     css = _read("static/style.css")
     block = re.search(r"\.progress-controls select\s*\{([^}]*)\}", css).group(1)
     assert "#fff" not in block and "rgba(0, 0, 0" not in block
+
+
+def test_theme_toggles_are_wired_before_app_init():
+    js = _read("static/js/main.js")
+    assert js.count("wireThemeToggles();") == 1
+    assert js.index("wireThemeToggles();") < js.index("window.App.init();"),         "an exception in App.init() must not leave the theme buttons unwired"
