@@ -28,7 +28,7 @@ function _colorForAccuracy(pct) {
 function _bar(pct) {
     const color = _colorForAccuracy(pct);
     return `<div style="display:flex; align-items:center; gap:8px; min-width:120px;">
-        <div style="flex:1; height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden;">
+        <div style="flex:1; height:6px; background:var(--tint-strong); border-radius:3px; overflow:hidden;">
             <div style="width:${pct}%; height:100%; background:${color}; border-radius:3px;"></div>
         </div>
         <span style="color:${color}; font-weight:700; font-size:0.85rem; white-space:nowrap;">${pct}%</span>
@@ -273,7 +273,7 @@ window._openGameFeatureModal = async function(season, week, away, home) {
                 <td>${score.toFixed(4)}</td>
                 <td style="color:${col};">${label}</td>
                 <td style="width:80px;">
-                    <div style="height:4px;border-radius:2px;background:rgba(255,255,255,0.07);">
+                    <div style="height:4px;border-radius:2px;background:var(--tint);">
                         <div style="height:4px;border-radius:2px;width:${pct}%;background:${col};"></div>
                     </div>
                 </td>
@@ -337,7 +337,7 @@ function renderForecastCard(data) {
             const pct  = Math.min((wins / 17) * 100, 100).toFixed(1);
             return `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;min-width:0;">
                 <span style="width:36px;font-size:0.8rem;font-weight:700;color:var(--text-primary);flex-shrink:0;">${_esc(t.team)}</span>
-                <div style="flex:1;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;min-width:60px;">
+                <div style="flex:1;height:6px;background:var(--tint-strong);border-radius:3px;overflow:hidden;min-width:60px;">
                     <div style="width:${pct}%;height:100%;background:var(--accent-green);border-radius:3px;"></div>
                 </div>
                 <span style="font-size:0.8rem;color:var(--text-primary);white-space:nowrap;width:36px;">${wins.toFixed(1)}W</span>
@@ -349,19 +349,19 @@ function renderForecastCard(data) {
 
     const weekRows = (data.weeks || []).map(wk => {
         const cid = `forecast-games-${wk}`;
-        return `<div class="fc-week-row" data-week="${wk}" data-cid="${_esc(cid)}" style="border-bottom:1px solid rgba(255,255,255,0.04);">
+        return `<div class="fc-week-row" data-week="${wk}" data-cid="${_esc(cid)}" style="border-bottom:1px solid var(--hairline);">
             <div class="fc-week-header" style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;">
                 <span class="fc-chevron" style="font-size:0.65rem;color:var(--text-secondary);">&#9658;</span>
                 <span style="font-weight:600;font-size:0.9rem;">Week ${wk}</span>
             </div>
-            <div class="fc-expand" style="display:none;padding:0.5rem 1rem 0.75rem 1.5rem;background:rgba(0,0,0,0.2);">
+            <div class="fc-expand" style="display:none;padding:0.5rem 1rem 0.75rem 1.5rem;background:var(--surface-sunken);">
                 <div id="${cid}" style="font-size:0.82rem;"></div>
             </div>
         </div>`;
     }).join('');
 
     el.innerHTML = `
-        <div style="border:1px solid var(--glass-border);border-radius:8px;padding:1.25rem;background:rgba(255,255,255,0.02);">
+        <div style="border:1px solid var(--glass-border);border-radius:8px;padding:1.25rem;background:var(--tint-faint);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:0.5rem;">
                 <h3 style="margin:0;font-size:1rem;">2026 Season Forecast${version}</h3>
                 <span style="font-size:0.8rem;color:var(--text-secondary);">${_esc(data.game_count ?? 0)} games · ${(data.weeks || []).length} weeks</span>
@@ -414,7 +414,7 @@ function renderSeasonTable(seasons) {
 
     const rows = seasons.map(s => `
         <tr class="acc-season-row" data-season="${s.season}" style="cursor:pointer; transition: background 0.15s;"
-            onmouseover="this.style.background='rgba(255,255,255,0.04)'"
+            onmouseover="this.style.background='var(--tint)'"
             onmouseout="this.style.background=''">
             <td style="padding:10px 14px; font-weight:700; color:var(--accent-gold);">${s.season}</td>
             <td style="padding:10px 14px; text-align:right;">${s.correct}/${s.total}</td>
@@ -459,8 +459,8 @@ function renderWeekPanel(seasonData) {
 
     const rows = seasonData.by_week.map(w => `
         <tr class="acc-week-row" data-season="${seasonData.season}" data-week="${w.week}"
-            style="cursor:pointer;transition:background 0.15s;border-bottom:1px solid rgba(255,255,255,0.04);"
-            onmouseover="this.style.background='rgba(255,255,255,0.04)'"
+            style="cursor:pointer;transition:background 0.15s;border-bottom:1px solid var(--hairline);"
+            onmouseover="this.style.background='var(--tint)'"
             onmouseout="this.style.background=''">
             <td style="padding:8px 14px;font-weight:600;">
                 Week ${w.week}
@@ -470,7 +470,7 @@ function renderWeekPanel(seasonData) {
             <td style="padding:8px 14px;min-width:160px;">${_bar(w.accuracy)}</td>
         </tr>
         <tr class="acc-expansion-row" data-exp-season="${seasonData.season}" data-exp-week="${w.week}" style="display:none;">
-            <td colspan="3" style="padding:0.5rem 1rem 0.75rem 2rem;background:rgba(0,0,0,0.2);">
+            <td colspan="3" style="padding:0.5rem 1rem 0.75rem 2rem;background:var(--surface-sunken);">
                 <div id="acc-games-${seasonData.season}-${w.week}" style="font-size:0.82rem;"></div>
             </td>
         </tr>

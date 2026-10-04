@@ -246,7 +246,7 @@
       #player-page .seasons-table td.season-wins { margin-left: auto; }
       #player-page .seasons-table td.pick-cell {
         display: block; flex: 1 1 100%; min-width: 0; text-align: left;
-        padding: 0.5rem 0; border-top: 1px solid rgba(255,255,255,0.06); border-bottom: none;
+        padding: 0.5rem 0; border-top: 1px solid var(--hairline); border-bottom: none;
         overflow-wrap: anywhere;
       }
       #player-page .pick-cell__head { flex-wrap: wrap; }
@@ -273,7 +273,7 @@
     .switch input { opacity: 0; width: 0; height: 0; }
     .slider {
         position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-        background-color: rgba(255, 255, 255, 0.1); transition: .4s;
+        background-color: var(--tint-strong); transition: .4s;
     }
     .slider:before {
         position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px;
@@ -291,7 +291,7 @@
       padding: 6px 14px;
       border-radius: 9999px;
       border: 1px solid var(--glass-border);
-      background: rgba(255, 255, 255, 0.05);
+      background: var(--tint);
       color: var(--text-primary);
       font-family: inherit;
       font-size: 0.85rem;
@@ -300,8 +300,8 @@
       transition: background 150ms ease, border-color 150ms ease;
     }
     .share-card-btn:hover {
-      background: rgba(255, 255, 255, 0.12);
-      border-color: rgba(255, 255, 255, 0.28);
+      background: var(--tint-strong);
+      border-color: var(--hairline-strong);
     }
     .share-card-btn:active {
       transform: scale(0.98);

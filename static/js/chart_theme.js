@@ -64,5 +64,17 @@
         window.addEventListener('wins-theme-change', onChange);
     }
 
+    // Every live Chart.js instance repaints on a theme change, so pages need no per-chart wiring.
+    window.addEventListener('wins-theme-change', function () {
+        var instances = (window.Chart && window.Chart.instances) || {};
+        Object.keys(instances).forEach(function (k) {
+            var chart = instances[k];
+            if (chart && chart.canvas) {
+                paint(chart);
+                chart.update('none');
+            }
+        });
+    });
+
     window.WinsPoolChartTheme = { colors: colors, paint: paint, track: track };
 })();

@@ -47,8 +47,8 @@ function _appendMessage(msgType, playerName, text, timestamp, animate) {
     const el = document.createElement('div');
     el.style.cssText = `font-size:0.8rem; padding:3px 6px; border-radius:5px; word-break:break-word;
         ${isSystem
-            ? 'color:var(--text-secondary); font-style:italic; background:rgba(255,255,255,0.03);'
-            : 'background:rgba(255,255,255,0.05);'}`;
+            ? 'color:var(--text-secondary); font-style:italic; background:var(--tint-faint);'
+            : 'background:var(--tint);'}`;
     el.innerHTML = isSystem
         ? `<span>${_esc(text)}</span> <span style="color:var(--text-secondary);font-size:0.7rem;">${ts}</span>`
         : `<span style="font-weight:600; color:var(--accent-gold);">${_esc(playerName)}</span>

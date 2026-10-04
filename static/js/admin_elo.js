@@ -303,7 +303,6 @@ class EloExplorer {
                 }
             }
         });
-        window.WinsPoolChartTheme.track(this._chart);
 
         // Legend
         this._legend.innerHTML = '';
@@ -315,9 +314,9 @@ class EloExplorer {
         sorted.forEach(ds => {
             const lastVal = ds.data.filter(v => v !== null).at(-1);
             const item = document.createElement('div');
-            item.style.cssText = 'display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;padding:0.2rem 0.5rem;border-radius:4px;background:rgba(255,255,255,0.04);';
+            item.style.cssText = 'display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;padding:0.2rem 0.5rem;border-radius:4px;background:var(--tint);';
             item.innerHTML = `
-                <span style="width:12px;height:12px;border-radius:2px;background:${ds.borderColor};border:1px solid rgba(255,255,255,0.25);flex-shrink:0;display:inline-block;"></span>
+                <span style="width:12px;height:12px;border-radius:2px;background:${ds.borderColor};border:1px solid var(--hairline-strong);flex-shrink:0;display:inline-block;"></span>
                 <span style="color:var(--ink);font-weight:600;">${ds.label}</span>
                 <span style="color:var(--ink-3);margin-left:auto;font-variant-numeric:tabular-nums;">${lastVal != null ? lastVal.toFixed(0) : '—'}</span>
             `;

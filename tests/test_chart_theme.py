@@ -73,6 +73,7 @@ const vars2 = Object.assign({}, LIGHT);
 ({ window, listeners } = build(vars2));
 const T2 = window.WinsPoolChartTheme;
 const c2 = fakeChart();
+const baseline = (listeners['wins-theme-change'] || []).length;
 T2.paint(c2); T2.track(c2);
 vars2['--ink-2'] = '#e8eaef';
 listeners['wins-theme-change'].forEach(fn => fn());
@@ -81,7 +82,16 @@ out.afterChange = { tick: c2.options.scales.x.ticks.color, updates: c2.updates.l
 // a destroyed chart is ignored and unsubscribed
 c2.canvas = null;
 listeners['wins-theme-change'].forEach(fn => fn());
-out.afterDestroy = { updates: c2.updates.length, remaining: (listeners['wins-theme-change'] || []).length };
+out.afterDestroy = { updates: c2.updates.length, remaining: (listeners['wins-theme-change'] || []).length - baseline };
+
+// every live Chart.js instance repaints on a theme change, without per-chart wiring
+const vars3 = Object.assign({}, LIGHT);
+({ window, listeners } = build(vars3));
+const live = fakeChart(), dead = fakeChart(); dead.canvas = null;
+window.Chart = { instances: { 1: live, 2: dead } };
+vars3['--ink-2'] = '#e8eaef';
+listeners['wins-theme-change'].forEach(fn => fn());
+out.global = { tick: live.options.scales.x.ticks.color, updates: live.updates.length, deadUpdates: dead.updates.length };
 
 // missing variables fall back to dark-theme defaults instead of undefined
 ({ window } = build({}));
@@ -108,5 +118,6 @@ def test_chart_theme_behavior(tmp_path):
     assert got["painted"]["title"] == "#414854"
     assert got["afterChange"] == {"tick": "#e8eaef", "updates": 1}
     assert got["afterDestroy"] == {"updates": 1, "remaining": 0}
+    assert got["global"] == {"tick": "#e8eaef", "updates": 1, "deadUpdates": 0}
     for key in ("text", "muted", "grid", "tipBg", "tipTitle", "tipBody", "tipBorder"):
         assert got["fallback"][key], f"{key} must have a fallback"

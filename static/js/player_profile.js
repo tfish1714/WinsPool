@@ -1,10 +1,15 @@
 (function () {
     'use strict';
 
+    // Read from the active theme each time a chart is built (canvas cannot use CSS variables);
+    // chart_theme.js repaints live charts when the theme changes.
     const CHART_DEFAULTS = {
-        tickColor: 'rgba(255,255,255,0.7)',
-        gridColor: 'rgba(255,255,255,0.1)',
-        tooltipBg: 'rgba(0,0,0,0.85)',
+        get tickColor() { return window.WinsPoolChartTheme.colors().text; },
+        get gridColor() { return window.WinsPoolChartTheme.colors().grid; },
+        get tooltipBg() { return window.WinsPoolChartTheme.colors().tipBg; },
+        get tooltipTitle() { return window.WinsPoolChartTheme.colors().tipTitle; },
+        get tooltipBody() { return window.WinsPoolChartTheme.colors().tipBody; },
+        get missingBar() { return window.WinsPoolChartTheme.colors().muted; },
     };
 
     function linearTrendline(values) {
@@ -71,14 +76,14 @@
                 maintainAspectRatio: false,
                 plugins: {
                     legend: { display: false },
-                    tooltip: { backgroundColor: CHART_DEFAULTS.tooltipBg },
+                    tooltip: { backgroundColor: CHART_DEFAULTS.tooltipBg, titleColor: CHART_DEFAULTS.tooltipTitle, bodyColor: CHART_DEFAULTS.tooltipBody },
                 },
                 scales: { x: axisConfig(), y: axisConfig() },
             },
         });
 
         // ── Chart 2: Draft ROI ────────────────────────────────────────────────
-        const pickColors = values => values.map(v => v == null ? 'rgba(255,255,255,0.2)' : (v >= 0 ? '#4ade80' : '#f87171'));
+        const pickColors = values => values.map(v => v == null ? CHART_DEFAULTS.missingBar : (v >= 0 ? '#4ade80' : '#f87171'));
 
         const roiDatasets = [0, 1, 2].map(idx => {
             const values = seasons.map(s => s.picks[idx] ? s.picks[idx].vsProjected : 0);
@@ -99,7 +104,7 @@
                 plugins: {
                     legend: { display: false },
                     tooltip: {
-                        backgroundColor: CHART_DEFAULTS.tooltipBg,
+                        backgroundColor: CHART_DEFAULTS.tooltipBg, titleColor: CHART_DEFAULTS.tooltipTitle, bodyColor: CHART_DEFAULTS.tooltipBody,
                         callbacks: {
                             label: function (ctx) {
                                 const s = seasons[ctx.dataIndex];
@@ -156,7 +161,7 @@
                 maintainAspectRatio: false,
                 plugins: {
                     legend: { display: false },
-                    tooltip: { backgroundColor: CHART_DEFAULTS.tooltipBg },
+                    tooltip: { backgroundColor: CHART_DEFAULTS.tooltipBg, titleColor: CHART_DEFAULTS.tooltipTitle, bodyColor: CHART_DEFAULTS.tooltipBody },
                 },
                 scales: {
                     x: axisConfig(),

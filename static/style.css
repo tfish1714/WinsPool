@@ -36,6 +36,13 @@
     --surface-sunken-soft:   rgba(0,0,0,0.15);
     --surface-hover:         rgba(255,255,255,0.05);
     --toggle-off:            rgba(255,255,255,0.12);
+    /* Neutral tints and hairlines for cards, hovers, zebra rows and dividers */
+    --tint-faint:            rgba(255,255,255,0.03);
+    --tint:                  rgba(255,255,255,0.05);
+    --tint-strong:           rgba(255,255,255,0.10);
+    --tint-heavy:            rgba(255,255,255,0.25);
+    --hairline:              rgba(255,255,255,0.06);
+    --hairline-strong:       rgba(255,255,255,0.20);
 }
 
 /* Light theme: overrides the base tokens; the alias tokens above resolve through them. */
@@ -63,6 +70,12 @@
     --surface-sunken-soft:   rgba(15,23,42,0.03);
     --surface-hover:         rgba(15,23,42,0.06);
     --toggle-off:            rgba(15,23,42,0.22);
+    --tint-faint:            rgba(15,23,42,0.03);
+    --tint:                  rgba(15,23,42,0.05);
+    --tint-strong:           rgba(15,23,42,0.09);
+    --tint-heavy:            rgba(15,23,42,0.25);
+    --hairline:              rgba(15,23,42,0.08);
+    --hairline-strong:       rgba(15,23,42,0.28);
 }
 
 /* ── New design-system atoms ──────────────────────── */
@@ -191,7 +204,7 @@
     transition: background 120ms ease;
 }
 
-.members-row:hover { background: rgba(255,255,255,0.02); }
+.members-row:hover { background: var(--tint-faint); }
 
 .members-row-name { font-weight: 600; font-size: 15px; }
 .members-row-email { font-family: 'JetBrains Mono', monospace; color: var(--ink-2); font-size: 12px; word-break: break-all; }
@@ -260,7 +273,7 @@
 }
 .admin-tab-btn:hover { background: var(--surface-hover); color: var(--text-primary); }
 .admin-tab-btn.active {
-    background: rgba(255,255,255,0.09);
+    background: var(--tint-strong);
     color: var(--text-primary);
     font-weight: 600;
 }
@@ -352,7 +365,7 @@
     align-items: center;
     gap: 10px;
     padding: 6px 12px 6px 6px;
-    background: rgba(255,255,255,0.025);
+    background: var(--tint-faint);
     border: 1px solid var(--line);
     border-radius: 999px;
 }
@@ -449,7 +462,7 @@
     transition: background 120ms ease;
 }
 
-.wp-row:hover { background: rgba(255,255,255,0.018); }
+.wp-row:hover { background: var(--tint-faint); }
 
 .wp-row-rank {
     font-family: 'Newsreader', serif;
@@ -710,7 +723,7 @@ header h1 {
 }
 
 .board-container::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--tint-heavy);
     border-radius: 3px;
 }
 
@@ -726,7 +739,7 @@ header h1 {
     justify-content: space-between;
     align-items: center;
     padding: 0.75rem 1.25rem;
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--tint-faint);
     border-radius: 8px;
     border: 1px solid transparent;
     transition: all 0.3s ease;
@@ -797,7 +810,7 @@ header h1 {
 }
 
 .team-card {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--tint);
     border: 1px solid var(--glass-border);
     border-radius: 12px;
     padding: 1.25rem 0.5rem;
@@ -842,7 +855,7 @@ header h1 {
 }
 
 .team-card:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--tint-strong);
     transform: translateY(-4px);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
@@ -856,7 +869,7 @@ header h1 {
 
 /* Actions */
 .selection-preview {
-    background: rgba(0, 0, 0, 0.2);
+    background: var(--surface-sunken);
     padding: 1rem;
     border-radius: 8px;
     display: flex;
@@ -930,7 +943,7 @@ th {
 }
 
 tr:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--tint);
 }
 
 /* Sign In */
@@ -998,7 +1011,7 @@ tr:hover {
 }
 
 .player-btn {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--tint);
     border: 1px solid var(--glass-border);
     color: var(--text-primary);
     padding: 0.75rem 1rem;
@@ -1026,7 +1039,7 @@ tr:hover {
     padding: 0.75rem;
     border-radius: 8px;
     border: 1px solid var(--glass-border);
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--surface-sunken-strong);
     color: var(--text-primary);
     font-family: inherit;
     font-size: 1.2rem;
@@ -1196,12 +1209,12 @@ tr:hover {
 }
 
 .tab-btn:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--tint);
     color: var(--text-primary);
 }
 
 .tab-btn.active {
-    background: rgba(255, 255, 255, 0.10);
+    background: var(--tint-strong);
     color: var(--text-primary);
     font-weight: 600;
 }
@@ -1232,7 +1245,7 @@ tr:hover {
     display: flex;
     align-items: center;
     gap: 1rem;
-    background: rgba(0, 0, 0, 0.2);
+    background: var(--surface-sunken);
     padding: 1rem;
     border-radius: 8px;
 }
@@ -1249,7 +1262,7 @@ tr:hover {
 .chart-container {
     height: 600px;
     width: 100%;
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--tint-faint);
     border-radius: 8px;
     padding: 1rem;
 }
@@ -1289,7 +1302,7 @@ tr:hover {
     border-right: 1px solid var(--glass-border);
     vertical-align: top;
     padding-top: 1.5rem !important;
-    background: rgba(0, 0, 0, 0.15);
+    background: var(--surface-sunken-soft);
     border-bottom: 1px solid var(--glass-border) !important;
 }
 
@@ -1329,10 +1342,10 @@ tr:hover {
     justify-content: center;
     gap: 0.75rem;
     flex: 1;
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--tint-faint);
     padding: 0.75rem;
     border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--hairline);
 }
 
 .small-logo {
@@ -1632,7 +1645,7 @@ tr:hover {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--tint);
     border: 1px solid var(--glass-border);
     border-radius: 8px;
     padding: 6px 10px;
@@ -1837,7 +1850,7 @@ tr:hover {
 }
 
 .nav-drawer__close:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--tint-strong);
 }
 
 .nav-drawer__links {
@@ -1862,7 +1875,7 @@ tr:hover {
 
 .nav-drawer__links a:hover,
 .nav-drawer__links a:active {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--tint-strong);
     color: var(--ink);
 }
 
@@ -1886,7 +1899,7 @@ tr:hover {
 }
 
 .nav-drawer__footer .drawer-logout-btn {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--tint-strong);
     border: 1px solid var(--line-strong);
     color: var(--ink-2);
     padding: 0.5rem 1rem;
@@ -1934,7 +1947,7 @@ tr:hover {
 }
 
 .rules-help-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--tint-strong);
     color: var(--ink);
 }
 
@@ -2061,7 +2074,7 @@ tr:hover {
 }
 
 .rules-drawer__close:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--tint-strong);
 }
 
 .rules-drawer__body {
@@ -2425,12 +2438,12 @@ tr:hover {
 
 .schedule-table td {
     padding: 0.5rem 0.8rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid var(--hairline);
     white-space: nowrap;
 }
 
 .schedule-table tr:hover td {
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--tint-faint);
 }
 
 .highlight-match {
@@ -2638,7 +2651,7 @@ tr:hover {
 
 .toggle-btn:hover {
     color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--tint);
 }
 
 .toggle-btn.active {
@@ -2666,7 +2679,7 @@ tr:hover {
 
 .dense-history-table td {
     padding: 1.25rem 0.5rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--hairline);
     vertical-align: middle;
 }
 
@@ -2675,7 +2688,7 @@ tr:hover {
 }
 
 .dense-history-table tr:hover {
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--tint-faint);
 }
 
 /* Head-to-head matrix table */
@@ -2800,11 +2813,11 @@ table.wp-data-table tbody tr {
 }
 
 table.wp-data-table tbody tr:nth-child(even) {
-    background: rgba(255, 255, 255, 0.025);
+    background: var(--tint-faint);
 }
 
 table.wp-data-table tbody tr:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--tint);
 }
 
 table.wp-data-table tbody td {
@@ -2842,7 +2855,7 @@ table.wp-data-table tbody td:last-child {
 .week-carousel-container {
     position: relative;
     margin: 1.5rem 0 1rem;
-    background: rgba(0, 0, 0, 0.2);
+    background: var(--surface-sunken);
     border-radius: 12px;
     padding: 2px;
 }
@@ -2883,7 +2896,7 @@ table.wp-data-table tbody td:last-child {
 
 .week-item:hover {
     color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--tint);
 }
 
 .week-item.active {
@@ -2944,7 +2957,7 @@ table.wp-data-table tbody td:last-child {
 
 .game-card:hover {
     transform: translateY(-2px);
-    border-color: rgba(255, 255, 255, 0.2);
+    border-color: var(--hairline-strong);
 }
 
 .game-teams {
@@ -3243,7 +3256,7 @@ table.wp-data-table tbody td:last-child {
 }
 
 .stacked-table tbody tr:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--tint);
 }
 
 /* Mobile label: hidden on desktop, shown on mobile */
@@ -3291,7 +3304,7 @@ table.wp-data-table tbody td:last-child {
         justify-content: space-between;
         align-items: center;
         padding: 0.5rem 0;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        border-bottom: 1px solid var(--hairline);
         text-align: right;
         gap: 1rem;
     }
@@ -3411,7 +3424,7 @@ table.wp-data-table tbody td:last-child {
         display: flex;
         align-items: center;
         gap: 0.75rem;
-        background: rgba(255, 255, 255, 0.03);
+        background: var(--tint-faint);
         padding: 0.6rem 0.75rem;
         border-radius: 8px;
         border: 1px solid var(--line);
@@ -3446,7 +3459,7 @@ table.wp-data-table tbody td:last-child {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 0.35rem;
-        background: rgba(0, 0, 0, 0.2);
+        background: var(--surface-sunken);
         padding: 0.6rem 0.75rem;
         border-radius: 6px;
         font-family: 'JetBrains Mono', monospace;
@@ -3514,7 +3527,7 @@ table.wp-data-table tbody td:last-child {
 .bottom-sheet__handle {
     width: 40px;
     height: 4px;
-    background: rgba(255, 255, 255, 0.3);
+    background: var(--tint-heavy);
     border-radius: 2px;
     margin: 0 auto 1rem;
 }
@@ -3536,7 +3549,7 @@ table.wp-data-table tbody td:last-child {
     display: flex;
     justify-content: space-between;
     padding: 0.5rem 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--hairline);
 }
 
 .bottom-sheet__content .detail-row:last-child {
@@ -3725,7 +3738,7 @@ table.wp-data-table tbody td:last-child {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    background: rgba(255,255,255,0.04);
+    background: var(--tint);
     border: 1px solid var(--glass-border);
     border-radius: 6px;
     padding: 4px 10px;
@@ -3854,7 +3867,7 @@ table.wp-data-table tbody td:last-child {
 }
 .team-btn:not(:disabled):hover {
     border-color: var(--line-strong);
-    background: rgba(255,255,255,0.025);
+    background: var(--tint-faint);
 }
 .team-btn:disabled { cursor: default; opacity: 0.4; }
 .team-btn.selected {
@@ -3918,8 +3931,8 @@ table.wp-data-table tbody td:last-child {
     white-space: nowrap; text-decoration: none; display: flex; align-items: center; gap: 6px;
     transition: background 100ms, color 100ms;
 }
-.nav-rail-link:hover { background: rgba(255,255,255,0.05); color: var(--ink); }
-.nav-rail-link.active { background: rgba(255,255,255,0.07); color: var(--ink); font-weight: 600; }
+.nav-rail-link:hover { background: var(--tint); color: var(--ink); }
+.nav-rail-link.active { background: var(--tint); color: var(--ink); font-weight: 600; }
 .nav-rail-link--live {
     color: var(--pos);
     background: rgba(111,191,115,0.08);
@@ -3954,7 +3967,7 @@ table.wp-data-table tbody td:last-child {
     text-decoration: none; cursor: pointer; transition: background 80ms;
     background: none; border: none; width: 100%; text-align: left;
 }
-.nav-drop-item:hover { background: rgba(255,255,255,0.05); color: var(--ink); }
+.nav-drop-item:hover { background: var(--tint); color: var(--ink); }
 .nav-drop-divider { height: 1px; background: var(--line); margin: 4px 0; }
 
 /* Avatar */
@@ -3976,11 +3989,11 @@ table.wp-data-table tbody td:last-child {
 .nav-ap-role { font-size: 11px; color: var(--ink-3); margin-bottom: 8px; }
 .nav-ap-logout {
     width: 100%; padding: 6px 0; border-radius: 6px; font-size: 13px;
-    background: rgba(255,255,255,0.06); border: 1px solid var(--line);
+    background: var(--tint); border: 1px solid var(--line);
     color: var(--ink-2); cursor: pointer; margin-top: 4px;
     transition: background 100ms;
 }
-.nav-ap-logout:hover { background: rgba(255,255,255,0.1); color: var(--ink); }
+.nav-ap-logout:hover { background: var(--tint-strong); color: var(--ink); }
 .nav-ap-version {
     margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line);
     font: 500 10px/1.4 'JetBrains Mono', monospace; color: var(--ink-3);
@@ -4050,7 +4063,7 @@ table.wp-data-table tbody td:last-child {
 .tb-tooltip[hidden] { display: none; }
 
 /* Pool chip (wins pool page header) */
-.pool-chip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; max-width: 100%; padding: 4px 12px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: 13px; background: rgba(255, 255, 255, 0.03); }
+.pool-chip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; max-width: 100%; padding: 4px 12px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: 13px; background: var(--tint-faint); }
 .pool-chip[hidden] { display: none; }
 .pool-chip-sep { opacity: 0.4; }
 .pool-chip-mine { font-weight: 600; color: var(--warn); text-decoration: none; }

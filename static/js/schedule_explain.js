@@ -43,7 +43,7 @@ function _fmtLine(line, home_team, away_team) {
 
 function _bar(pct, color) {
     const w = Math.min(100, Math.max(0, Math.abs(pct)));
-    return `<div style="height:4px; background:rgba(255,255,255,0.08); border-radius:2px; overflow:hidden; margin-top:3px;">
+    return `<div style="height:4px; background:var(--tint-strong); border-radius:2px; overflow:hidden; margin-top:3px;">
         <div style="width:${w}%; height:100%; background:${color}; border-radius:2px;"></div>
     </div>`;
 }
@@ -56,7 +56,7 @@ function _gradeIcon(isCorrect) {
 }
 
 function _row(label, valueHtml, subHtml = '') {
-    return `<div style="display:flex; justify-content:space-between; align-items:flex-start; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+    return `<div style="display:flex; justify-content:space-between; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--hairline);">
         <span style="color:var(--text-secondary); font-size:0.8rem; flex:1;">${label}</span>
         <div style="text-align:right; font-size:0.82rem;">
             ${valueHtml}
@@ -84,7 +84,7 @@ function renderExplanation(data) {
     // Card 1: ML Pick
     const suGrade = _gradeIcon(is_correct);
     const pickCard = `
-        <div style="flex:1; min-width:130px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
+        <div style="flex:1; min-width:130px; padding:10px 12px; border-radius:8px; background:var(--tint); border:1px solid var(--line-strong);">
             <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">ML Pick${suGrade ? ` · SU ${suGrade}` : ''}</div>
             <div style="font-size:1.3rem; font-weight:800; color:${predColor};">${pred_winner}</div>
             <div style="font-size:0.75rem;">${isMcSimulation ? `wins ${pred_su_conf}% of simulations` : `${pred_su_conf}% confidence`}</div>
@@ -108,7 +108,7 @@ function renderExplanation(data) {
                 : `<div style="margin-top:5px; font-size:0.73rem; color:var(--text-secondary);">≈ Agrees with Vegas</div>`;
         }
         linesCard = `
-            <div style="flex:1.4; min-width:150px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
+            <div style="flex:1.4; min-width:150px; padding:10px 12px; border-radius:8px; background:var(--tint); border:1px solid var(--line-strong);">
                 <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:5px;">Lines</div>
                 <div style="display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:0.82rem; align-items:center;">
                     ${vegasStr ? `<span style="color:var(--text-secondary); font-size:0.72rem;">Vegas</span><span style="font-weight:600; font-family:'JetBrains Mono',monospace;">${vegasStr}</span>` : ''}
@@ -122,7 +122,7 @@ function renderExplanation(data) {
     const atsDiffers = pred_ats_pick && pred_ats_pick !== pred_winner;
     const atsGrade = gradeBadge(is_correct_ats);  // true | false | "push" | null
     const atsCard = pred_ats_pick ? `
-        <div style="flex:1; min-width:110px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
+        <div style="flex:1; min-width:110px; padding:10px 12px; border-radius:8px; background:var(--tint); border:1px solid var(--line-strong);">
             <div style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">ATS Pick${atsGrade ? ` · ${atsGrade}` : ''}</div>
             <div style="font-size:1.3rem; font-weight:800; color:${atsDiffers ? 'var(--accent-gold)' : predColor};">${pred_ats_pick}</div>
             <div style="font-size:0.72rem; color:var(--text-secondary);">${atsDiffers ? '⚡ differs from SU' : 'vs spread'}</div>
@@ -227,11 +227,11 @@ function renderExplanation(data) {
     }
 
     const sourceNote = isProfileOnly
-        ? `<div style="margin-top:0.75rem; padding:6px 10px; border-radius:6px; background:rgba(255,255,255,0.04); font-size:0.72rem; color:var(--text-secondary);">
+        ? `<div style="margin-top:0.75rem; padding:6px 10px; border-radius:6px; background:var(--tint); font-size:0.72rem; color:var(--text-secondary);">
             ℹ Pre-season projection — factors reflect prior-season averages. Values update as ${data.season} game data becomes available.
            </div>`
         : isMcSimulation
-        ? `<div style="margin-top:0.75rem; padding:6px 10px; border-radius:6px; background:rgba(255,255,255,0.04); font-size:0.72rem; color:var(--text-secondary);">
+        ? `<div style="margin-top:0.75rem; padding:6px 10px; border-radius:6px; background:var(--tint); font-size:0.72rem; color:var(--text-secondary);">
             ℹ ${ex?.source || 'MC simulation (10,000 trials)'} — projected using week-by-week simulation. Later-season games carry higher uncertainty as each simulated week compounds variance from prior simulated outcomes.
            </div>`
         : '';
@@ -283,7 +283,7 @@ function renderFeatureAuditSection(featureData, homeTeam, awayTeam) {
     // Per-model probability row
     const fmt = p => p != null ? `${Math.round(p * 100)}%` : '—';
     const modelRow = `
-        <div style="background:rgba(255,255,255,0.04); border-radius:8px; padding:10px 14px; margin-bottom:12px;">
+        <div style="background:var(--tint); border-radius:8px; padding:10px 14px; margin-bottom:12px;">
             <div style="font-size:0.72rem; color:var(--text-secondary); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.05em;">Model breakdown</div>
             <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
                 <span style="font-size:0.82rem;">NN <strong>${fmt(nn_prob)}</strong></span>
@@ -315,7 +315,7 @@ function renderFeatureAuditSection(featureData, homeTeam, awayTeam) {
                     <span style="color:var(--text-secondary);">${label}</span>
                     <span style="color:${color}; font-weight:600;">${dir} <span style="font-weight:400;color:var(--text-secondary);font-size:0.68rem;">${f.score.toFixed(3)}</span></span>
                 </div>
-                <div style="height:5px; background:rgba(255,255,255,0.07); border-radius:3px; overflow:hidden;">
+                <div style="height:5px; background:var(--tint); border-radius:3px; overflow:hidden;">
                     <div style="width:${pct}%; height:100%; background:${color}; border-radius:3px;"></div>
                 </div>
             </div>`;
@@ -343,7 +343,7 @@ function renderFeatureAuditSection(featureData, homeTeam, awayTeam) {
         : '';
 
     return `${modelRow}
-        <div style="background:rgba(255,255,255,0.04); border-radius:8px; padding:10px 14px; margin-bottom:12px;">
+        <div style="background:var(--tint); border-radius:8px; padding:10px 14px; margin-bottom:12px;">
             <div style="font-size:0.72rem; color:var(--text-secondary); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.05em;">Top factors (blended importance)</div>
             ${topBars}
             ${expandToggle}

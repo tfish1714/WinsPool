@@ -90,7 +90,7 @@
 
                 const ctx = document.getElementById('winsChart').getContext('2d');
                 const CT = window.WinsPoolChartTheme.colors();
-                const winsChart = new Chart(ctx, {
+                new Chart(ctx, {
                     type: 'line',
                     data: { labels: weeks, datasets: datasets },
                     options: {
@@ -134,7 +134,6 @@
                         }
                     }
                 });
-                window.WinsPoolChartTheme.track(winsChart);
             })
             .catch(err => console.error('Chart load error:', err));
     }

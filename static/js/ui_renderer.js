@@ -154,15 +154,15 @@ export const UiRenderer = {
 
         sorted.forEach(p => {
             const teamStrings = p.teams.map(t =>
-                `<span style="display:inline-block; padding:2px 6px; background:rgba(255,255,255,0.1); border-radius:4px; margin:2px; font-size:0.8rem;">
+                `<span style="display:inline-block; padding:2px 6px; background:var(--tint-strong); border-radius:4px; margin:2px; font-size:0.8rem;">
                     <img src="${this.getTeamLogo(t.team)}" style="width:14px;height:14px;vertical-align:middle;margin-right:4px;">${t.team} (${t.base.toFixed(1)}W)
                 </span>`
             ).join('');
             html += `
                 <tr>
-                    <td style="padding:0.5rem; border-bottom:1px solid rgba(255,255,255,0.05); font-weight:bold;">${p.playerName}</td>
-                    <td style="padding:0.5rem; border-bottom:1px solid rgba(255,255,255,0.05);">${teamStrings || '<span style="color:#666;">No teams yet</span>'}</td>
-                    <td style="padding:0.5rem; border-bottom:1px solid rgba(255,255,255,0.05); text-align:right; font-weight:bold;">${p.totalBase.toFixed(1)}</td>
+                    <td style="padding:0.5rem; border-bottom:1px solid var(--hairline); font-weight:bold;">${p.playerName}</td>
+                    <td style="padding:0.5rem; border-bottom:1px solid var(--hairline);">${teamStrings || '<span style="color:#666;">No teams yet</span>'}</td>
+                    <td style="padding:0.5rem; border-bottom:1px solid var(--hairline); text-align:right; font-weight:bold;">${p.totalBase.toFixed(1)}</td>
                 </tr>
             `;
         });
@@ -304,7 +304,7 @@ export const UiRenderer = {
             if (isAdminTimerRow) {
                 return `
                 <div class="q-row q-row-admin" data-pick-num="${item.pick}" style="
-                    opacity:1; background:rgba(255,255,255,0.025); border-color:var(--line-strong);
+                    opacity:1; background:var(--tint-faint); border-color:var(--line-strong);
                     flex-direction:column; align-items:stretch; cursor:pointer; padding:0;">
                     <div class="q-row-main" style="display:flex;align-items:center;gap:14px;padding:12px 14px;">
                         <span class="numeral" style="font-size:22px;color:var(--ink);min-width:28px">${item.pick}</span>
@@ -323,7 +323,7 @@ export const UiRenderer = {
             return `
                 <div class="q-row" data-pick-num="${item.pick}" style="
                     opacity:${isPast ? 0.6 : 1};
-                    background:${isActive ? 'rgba(255,255,255,0.025)' : 'transparent'};
+                    background:${isActive ? 'var(--tint-faint)' : 'transparent'};
                     border-color:${isActive ? 'var(--line-strong)' : 'var(--line)'}">
                     <span class="numeral" style="font-size:22px;color:${isActive ? 'var(--ink)' : 'var(--ink-3)'};min-width:28px">${item.pick}</span>
                     <div style="flex:1;min-width:0">

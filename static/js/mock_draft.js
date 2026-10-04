@@ -235,7 +235,7 @@ class MockDraft {
             rows.push(`
                 <div class="q-row" style="
                     opacity:${done ? 0.6 : 1};
-                    background:${isActive ? 'rgba(255,255,255,0.025)' : 'transparent'};
+                    background:${isActive ? 'var(--tint-faint)' : 'transparent'};
                     border-color:${isActive ? 'var(--line-strong)' : 'var(--line)'}">
                     <span class="numeral" style="font-size:22px;color:${isActive ? 'var(--ink)' : 'var(--ink-3)'};min-width:28px">${entry.pick}</span>
                     <div style="flex:1;min-width:0">
@@ -252,7 +252,7 @@ class MockDraft {
         const rows = this.slots.map(slot => {
             const isYou = slot === this.mySlot;
             const teamsHtml = (this.rosters[slot] || []).map(t => `
-                <span style="display:inline-block;padding:2px 6px;background:rgba(255,255,255,0.1);border-radius:4px;margin:2px;font-size:0.8rem;">
+                <span style="display:inline-block;padding:2px 6px;background:var(--tint-strong);border-radius:4px;margin:2px;font-size:0.8rem;">
                     <img src="${teamLogo(t)}" alt="${t}" style="width:14px;height:14px;vertical-align:middle;margin-right:4px;">${t}
                 </span>`).join('') || '<span style="color:var(--ink-3);">No teams yet</span>';
             return `

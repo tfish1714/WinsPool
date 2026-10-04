@@ -107,7 +107,7 @@
                     </span>
                     {% if row['spread_line'] is not none or row['total_line'] is not none %}
                     <div class="game-odds"
-                        style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px;">
+                        style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; border-top: 1px solid var(--hairline); padding-top: 4px;">
                         {% if row['total_line'] is not none %}
                         <div>O/U: {{ row['total_line'] }}</div>
                         {% endif %}
