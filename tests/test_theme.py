@@ -60,11 +60,6 @@ def test_base_loads_classic_theme_script_in_head():
         "theme_init.js must be a classic script in <head>"
 
 
-def test_toggle_buttons_exist_on_profile_and_drawer():
-    assert "data-theme-toggle" in _read("templates/player_profile.html")
-    assert "data-theme-toggle" in _read("templates/base.html")
-
-
 def test_main_js_uses_theme_storage_key_and_wires_toggles():
     js = _read("static/js/main.js")
     assert "STORAGE_KEYS.THEME" in js
@@ -166,3 +161,52 @@ def test_theme_toggles_are_wired_before_app_init():
     js = _read("static/js/main.js")
     assert js.count("wireThemeToggles();") == 1
     assert js.index("wireThemeToggles();") < js.index("window.App.init();"),         "an exception in App.init() must not leave the theme buttons unwired"
+
+
+# ---------------------------------------------------------------------------
+# Top-bar icon toggle and admin surfaces
+# ---------------------------------------------------------------------------
+
+def test_theme_toggle_is_an_icon_button_in_both_top_bars():
+    html = _read("templates/base.html")
+    rail = html[html.index('id="app-nav"'): html.index('id="app-nav-mobile"')]
+    mobile = html[html.index('id="app-nav-mobile"'): html.index('id="nav-drawer-overlay"')]
+    for bar in (rail, mobile):
+        assert "data-theme-toggle" in bar
+        assert "theme-icon-sun" in bar and "theme-icon-moon" in bar
+        assert "aria-label" in bar
+    # Moved out of the places the text buttons used to live.
+    assert "data-theme-toggle" not in _read("templates/player_profile.html")
+    assert "data-theme-toggle" not in html[html.index('id="nav-drawer"'):]
+
+
+def test_theme_icons_swap_with_the_theme():
+    css = _read("static/style.css")
+    assert re.search(r"\.theme-icon-moon\s*\{[^}]*display:\s*none", css)
+    assert re.search(r':root\[data-theme="light"\]\s+\.theme-icon-sun\s*\{[^}]*display:\s*none', css)
+    assert re.search(r':root\[data-theme="light"\]\s+\.theme-icon-moon\s*\{[^}]*display:\s*(inline-block|block|inline)', css)
+
+
+def test_main_js_labels_toggles_with_aria_label_not_text():
+    js = _read("static/js/main.js")
+    body = js[js.index("function wireThemeToggles()"):]
+    body = body[: body.index("\n}\n") + 3]
+    assert "aria-label" in body and "Switch to " in body
+    assert "textContent" not in body  # icon-only buttons keep their SVG children
+
+
+def test_admin_surface_tokens_exist_in_both_themes():
+    css = _read("static/style.css")
+    light = _light_tokens()
+    for name in ("--surface-sunken", "--surface-sunken-strong", "--surface-sunken-soft",
+                 "--surface-hover", "--toggle-off"):
+        assert name in light, f"{name} missing from the light theme"
+        assert len(re.findall(rf"{name}\s*:", css)) >= 2, f"{name} needs a dark default and a light override"
+
+
+@pytest.mark.parametrize("rel", ["templates/admin.html", "static/js/admin_main.js"])
+def test_admin_uses_tokens_not_dark_theme_tints(rel):
+    src = _read(rel)
+    assert "rgba(255,255,255" not in src.replace(" ", ""), f"{rel} still hard-codes a white tint"
+    assert not re.search(r"background:\s*rgba\(0,\s*0,\s*0,\s*0\.(15|2|3)\)", src), \
+        f"{rel} still hard-codes a dark panel background"

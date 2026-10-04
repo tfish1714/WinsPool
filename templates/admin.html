@@ -27,7 +27,7 @@
     }
     #acc-game-modal-inner {
         background: var(--glass-bg, #1a1a2e);
-        border: 1px solid var(--glass-border, rgba(255,255,255,0.12));
+        border: 1px solid var(--glass-border);
         border-radius: 12px;
         padding: 1.5rem;
         width: min(860px, 95vw);
@@ -51,7 +51,7 @@
         transition: background 0.15s, color 0.15s;
     }
     #acc-game-modal-close:hover {
-        background: rgba(255,255,255,0.1);
+        background: var(--surface-hover);
         color: var(--text-primary);
     }
     #acc-game-modal-title {
@@ -76,7 +76,7 @@
     }
     #acc-game-modal-body td {
         padding: 7px 10px;
-        border-bottom: 1px solid rgba(255,255,255,0.04);
+        border-bottom: 1px solid var(--line);
     }
     #acc-game-modal-body tr:last-child td { border-bottom: none; }
 </style>
@@ -168,7 +168,7 @@
                 </div>
                 <button id="draft-active-toggle" aria-pressed="false" style="
                     width: 42px; height: 24px; border-radius: 999px; border: none; cursor: pointer;
-                    background: rgba(255,255,255,0.12); position: relative; transition: background 200ms;"
+                    background: var(--toggle-off); position: relative; transition: background 200ms;"
                     title="Toggle draft active">
                     <span style="
                         position: absolute; top: 3px; left: 3px;
@@ -190,7 +190,7 @@
                 </div>
                 <button id="mock-draft-active-toggle" aria-pressed="false" style="
                     width: 42px; height: 24px; border-radius: 999px; border: none; cursor: pointer;
-                    background: rgba(255,255,255,0.12); position: relative; transition: background 200ms;"
+                    background: var(--toggle-off); position: relative; transition: background 200ms;"
                     title="Toggle mock draft active">
                     <span style="
                         position: absolute; top: 3px; left: 3px;
@@ -205,7 +205,7 @@
             </div>
 
             <div id="player-selection-container"
-                style="border: 1px solid var(--glass-border); padding: 1rem; border-radius: 8px; background: rgba(0,0,0,0.2);">
+                style="border: 1px solid var(--glass-border); padding: 1rem; border-radius: 8px; background: var(--surface-sunken);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
                     <h4 style="margin: 0; color: var(--accent-gold);">Select Draft Entrants (Toggle 10)</h4>
                     <span id="player-count" style="font-size: 0.8rem; color: var(--text-secondary);">Selected:
@@ -293,7 +293,7 @@
 
         <!-- Create New Player -->
         <div
-            style="border: 1px solid var(--glass-border); padding: 1rem; border-radius: 8px; background: rgba(0,0,0,0.2); margin-top: 1rem;">
+            style="border: 1px solid var(--glass-border); padding: 1rem; border-radius: 8px; background: var(--surface-sunken); margin-top: 1rem;">
             <h4 style="margin: 0 0 0.75rem 0; color: var(--accent-gold);">Add New Player</h4>
             <div class="admin-form" style="display: flex; flex-direction: column; gap: 0.75rem;">
                 <input type="text" id="new-player-name" class="admin-input" placeholder="Full Name">
@@ -351,7 +351,7 @@
             </div>
 
             <div id="recap-prompt-preview-container" class="hidden"
-                style="border: 1px solid var(--glass-border); padding: 1rem; border-radius: 8px; background: rgba(0,0,0,0.3);">
+                style="border: 1px solid var(--glass-border); padding: 1rem; border-radius: 8px; background: var(--surface-sunken-strong);">
                 <h4 style="margin: 0 0 0.5rem 0; color: var(--accent-gold);"><i data-lucide="sparkles"></i> Data Prompt
                     (Gemini Input)</h4>
                 <textarea id="recap-prompt-text" readonly
@@ -420,7 +420,7 @@
             </div>
 
             <!-- Team grid -->
-            <div id="elo-team-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 0.4rem; border: 1px solid var(--glass-border); padding: 0.75rem; border-radius: 8px; background: rgba(0,0,0,0.2);">
+            <div id="elo-team-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 0.4rem; border: 1px solid var(--glass-border); padding: 0.75rem; border-radius: 8px; background: var(--surface-sunken);">
                 <!-- Populated by JS -->
             </div>
 
@@ -429,7 +429,7 @@
         <!-- Chart -->
         <div style="position: relative; margin-top: 1.5rem; height: 420px;">
             <canvas id="elo-chart" style="display: none;"></canvas>
-            <div id="elo-empty" style="display: flex; align-items: center; justify-content: center; height: 100%; border: 1px dashed rgba(255,255,255,0.12); border-radius: 8px; color: rgba(255,255,255,0.3); font-size: 0.9rem;">
+            <div id="elo-empty" style="display: flex; align-items: center; justify-content: center; height: 100%; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--ink-3); font-size: 0.9rem;">
                 Select teams above to compare Elo ratings
             </div>
         </div>
@@ -566,7 +566,7 @@
         <div id="betting-backtest-summary" style="margin-top: 1.25rem;"></div>
         <div id="betting-candidates-wrap" style="margin-top: 1.25rem; overflow-x: auto;"></div>
 
-        <hr style="margin: 2rem 0; border-color: var(--border-color, rgba(255,255,255,0.12));">
+        <hr style="margin: 2rem 0; border-color: var(--line-strong);">
 
         <h3>Pattern Scanner</h3>
         <p style="color: var(--text-secondary); font-size: 0.9rem;">

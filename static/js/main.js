@@ -1034,8 +1034,9 @@ function wireThemeToggles() {
     const label = () => {
         const next = theme.get() === 'light' ? 'dark' : 'light';
         buttons.forEach(b => {
-            b.textContent = 'Switch to ' + next + ' mode';
-            b.setAttribute('aria-pressed', String(theme.get() === 'light'));
+            const text = 'Switch to ' + next + ' mode';
+            b.setAttribute('aria-label', text);
+            b.setAttribute('title', text);
         });
     };
     buttons.forEach(b => b.addEventListener('click', () => { theme.toggle(); label(); }));

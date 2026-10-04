@@ -278,7 +278,7 @@ class AdminApp {
         players.forEach(p => {
             const card = document.createElement('div');
             card.className = 'player-mgmt-card';
-            card.style.cssText = 'border: 1px solid var(--glass-border); border-radius: 8px; padding: 0.75rem 1rem; background: rgba(0,0,0,0.15);';
+            card.style.cssText = 'border: 1px solid var(--glass-border); border-radius: 8px; padding: 0.75rem 1rem; background: var(--surface-sunken-soft);';
             card.setAttribute('data-player-id', p.playerId);
 
             let pwBadge = '';
@@ -793,7 +793,7 @@ async function initDraftActiveToggle() {
 
     function applyState(active) {
         toggle.setAttribute('aria-pressed', active ? 'true' : 'false');
-        toggle.style.background = active ? 'var(--pos)' : 'rgba(255,255,255,0.12)';
+        toggle.style.background = active ? 'var(--pos)' : 'var(--toggle-off)';
         knob.style.left = active ? '21px' : '3px';
         sub.textContent = active
             ? 'Live Draft visible in nav · all users'
@@ -850,7 +850,7 @@ async function initMockDraftActiveToggle() {
 
     function applyState(active) {
         toggle.setAttribute('aria-pressed', active ? 'true' : 'false');
-        toggle.style.background = active ? 'var(--pos)' : 'rgba(255,255,255,0.12)';
+        toggle.style.background = active ? 'var(--pos)' : 'var(--toggle-off)';
         knob.style.left = active ? '21px' : '3px';
         sub.textContent = active
             ? 'Mock Draft visible in nav · open to everyone'
