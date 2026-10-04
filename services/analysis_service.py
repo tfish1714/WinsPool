@@ -69,7 +69,13 @@ def compute_team_records(games: pd.DataFrame, season: int) -> Dict[str, Dict[str
 def format_team_record(team: str, records: Dict[str, Dict[str, int]]) -> str:
     """Format a team's W-L(-T) record as a display string."""
     if team not in records:
-        return "0-0"
+        # Records may be keyed by a different abbreviation for the same franchise (OAK/LV).
+        normalized = {normalize_team_abbr(k): v for k, v in records.items()}
+        key = normalize_team_abbr(team)
+        if key not in normalized:
+            return "0-0"
+        records = normalized
+        team = key
     r = records[team]
     if r.get('T', 0) > 0:
         return f"{r['W']}-{r['L']}-{r['T']}"
@@ -638,6 +644,10 @@ def calculate_wins_pool_standings(standings, draft_results, players, season, gam
     standings_for_join = today_standings.assign(
         _team_key=today_standings['team'].map(normalize_team_abbr)
     ).drop(columns=['team'])
+    # Two raw abbreviations for one franchise in a season (OAK and LV) must not double
+    # the drafted row; keep the later standings row.
+    standings_for_join = standings_for_join.drop_duplicates(
+        subset=['_team_key', 'season'], keep='last')
     wins_pool_standings = pd.merge(
         today_draft_results, standings_for_join, on=['_team_key', 'season'], how='left'
     ).drop(columns=['_team_key'])
