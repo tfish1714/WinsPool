@@ -595,11 +595,29 @@ async def get_predictions_games(season: int, week: int, _: dict = Depends(requir
                 "is_correct_ats": is_correct_ats,
             })
 
+        # Order by the actual schedule (gameday, then kickoff time) so the list
+        # reads like the week's slate. Games with no schedule row sort last.
+        kickoff_order = {}
+        try:
+            if all_games is not None and not all_games.empty and "gameday" in all_games.columns:
+                wk = all_games[(all_games["season"] == season) & (all_games["week"] == week)]
+                times = wk["gametime"] if "gametime" in wk.columns else [None] * len(wk)
+                for home, away, gd, gt in zip(wk["home_team"], wk["away_team"], wk["gameday"], times):
+                    k = f"W{week:02d}_{normalize_team_abbr(str(home))}_{normalize_team_abbr(str(away))}"
+                    gd = "" if pd.isna(gd) else str(gd)[:10]
+                    gt = "" if gt is None or pd.isna(gt) else str(gt)
+                    kickoff_order[k] = (gd, gt)
+        except Exception:
+            logger.warning("Could not build kickoff order for predictions/games", exc_info=True)
+
         def _sort_key(g):
-            ic = g["is_correct"]
-            if ic is False: return 0
-            if ic is None:  return 1
-            return 2
+            gd, gt = kickoff_order.get(g["key"], ("9999-99-99", ""))
+            return (gd or "9999-99-99", gt, g["key"])
+
+        for g in games:
+            gd, gt = kickoff_order.get(g["key"], (None, None))
+            g["gameday"] = gd or None
+            g["gametime"] = gt or None
 
         games.sort(key=_sort_key)
         return JSONResponse(content={"season": season, "week": week, "games": games})

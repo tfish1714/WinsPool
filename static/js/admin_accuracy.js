@@ -44,6 +44,14 @@ function _pgFmtSpread(line, home, away) {
     return `${fav} -${Math.abs(line).toFixed(1)}`;
 }
 
+// "Sun 13:00" from schedule gameday (YYYY-MM-DD) + gametime (HH:MM, ET); '—' if unknown.
+function _pgKickoff(gameday, gametime) {
+    if (!gameday) return '—';
+    const d = new Date(`${gameday}T12:00:00`);
+    const day = isNaN(d) ? gameday : d.toLocaleDateString('en-US', { weekday: 'short' });
+    return gametime ? `${day} ${_esc(gametime)}` : day;
+}
+
 function _pgCorrectIcon(isCorrect) {
     if (isCorrect === null || isCorrect === undefined)
         return '<span style="color:var(--text-secondary);">—</span>';
@@ -118,6 +126,7 @@ async function loadWeekGames(season, week, containerId) {
                 : '';
             // onclick uses global function assigned below
             return `<tr style="${rowBg}">
+                <td style="padding:4px 8px;white-space:nowrap;color:var(--text-secondary);font-size:0.75rem;">${_pgKickoff(g.gameday, g.gametime)}</td>
                 <td style="padding:4px 8px;">
                     <span style="font-weight:600;">${_esc(g.away_team)} @ ${_esc(g.home_team)}</span>
                     <button class="acc-feature-debug-btn"
@@ -162,6 +171,7 @@ async function loadWeekGames(season, week, containerId) {
             <table style="width:100%;border-collapse:collapse;font-size:0.8rem;margin-top:0.25rem;">
                 <thead>
                     <tr style="color:var(--text-secondary);font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;">
+                        <th style="padding:4px 8px;text-align:left;">Kickoff</th>
                         <th style="padding:4px 8px;text-align:left;">Matchup</th>
                         <th style="padding:4px 8px;text-align:left;">Model Pick</th>
                         <th style="padding:4px 8px;text-align:left;">Actual</th>
