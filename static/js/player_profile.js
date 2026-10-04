@@ -85,6 +85,14 @@
         // ── Chart 2: Draft ROI ────────────────────────────────────────────────
         const pickColors = values => values.map(v => v == null ? CHART_DEFAULTS.missingBar : (v >= 0 ? '#4ade80' : '#f87171'));
 
+        // Dataset colors are computed once; refresh the missing-value bars when the theme changes.
+        window.addEventListener('wins-theme-change', () => {
+            const chart = window.Chart.getChart('draftRoiChart');
+            if (!chart) return;
+            chart.data.datasets.forEach(ds => { ds.backgroundColor = pickColors(ds.data); });
+            chart.update('none');
+        });
+
         const roiDatasets = [0, 1, 2].map(idx => {
             const values = seasons.map(s => s.picks[idx] ? s.picks[idx].vsProjected : 0);
             return {

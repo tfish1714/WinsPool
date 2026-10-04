@@ -3,7 +3,7 @@
 
     var STATUS_COLORS = {
         ok:      'var(--accent-green)',
-        warn:    '#f5a623',
+        warn:    'var(--warn)',
         error:   'var(--accent-red)',
         unknown: 'var(--text-secondary)',
     };

@@ -286,3 +286,43 @@ def test_dark_chips_set_their_own_text_color(rel):
 
 def test_admin_textarea_text_uses_a_token():
     assert not re.search(r"color:\s*#ccc", _read("templates/admin.html"))
+
+
+def _token(theme, name):
+    css = _read("static/style.css")
+    if theme == "light":
+        block = re.search(r':root\[data-theme="light"\]\s*\{(.*?)\n\}', css, re.S).group(1)
+    else:
+        block = re.search(r"(?m)^:root\s*\{(.*?)\n\}", css, re.S).group(1)
+    return re.search(rf"{re.escape(name)}\s*:\s*(#[0-9a-fA-F]{{6}})", block).group(1)
+
+
+def test_health_warn_dot_uses_the_warn_token():
+    assert "#f5a623" not in _read("static/js/admin_health.js").lower()
+    assert "var(--warn)" in _read("static/js/admin_health.js")
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_primary_button_blue_has_readable_white_text(theme):
+    assert _ratio("#ffffff", _token(theme, "--btn-primary-bg")) >= 4.5
+
+
+@pytest.mark.parametrize("selector", [".btn-primary", ".team-card.selected", ".week-item.active", ".expand-button"])
+def test_white_text_on_blue_uses_the_button_token(selector):
+    css = _read("static/style.css")
+    block = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", css).group(1)
+    assert re.search(r"background:\s*var\(--btn-primary-bg\)", block), f"{selector} must use --btn-primary-bg"
+
+
+def test_mock_draft_page_has_a_theme_toggle():
+    html = _read("templates/mock_draft.html")
+    assert "data-theme-toggle" in html and "theme-icon-sun" in html and "theme-icon-moon" in html
+    assert "aria-label" in html[html.index("data-theme-toggle") - 120: html.index("data-theme-toggle") + 200]
+    js = _read("static/js/mock_draft.js")
+    assert "data-theme-toggle" in js and "WinsPoolTheme" in js
+
+
+def test_profile_roi_bars_recolor_on_theme_change():
+    js = _read("static/js/player_profile.js")
+    assert "wins-theme-change" in js
+    assert "getChart('draftRoiChart')" in js

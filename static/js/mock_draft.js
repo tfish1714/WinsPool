@@ -458,6 +458,20 @@ class MockDraft {
     }
 }
 
+// This page does not load main.js, so it wires its own theme toggle (theme_init.js owns the state).
+function wireThemeToggle() {
+    const theme = window.WinsPoolTheme;
+    if (!theme) return;
+    const buttons = document.querySelectorAll('[data-theme-toggle]');
+    const label = () => {
+        const text = 'Switch to ' + (theme.get() === 'light' ? 'dark' : 'light') + ' mode';
+        buttons.forEach(b => { b.setAttribute('aria-label', text); b.setAttribute('title', text); });
+    };
+    buttons.forEach(b => b.addEventListener('click', () => { theme.toggle(); label(); }));
+    label();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    wireThemeToggle();
     new MockDraft().init();
 });

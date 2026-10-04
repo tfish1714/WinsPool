@@ -31,6 +31,8 @@
     --container-max: 1600px;
     --content-padding: 2rem;
     --warn: #d9a86c;
+    --btn-primary-bg:        #3b66d6; /* white text >= 4.5:1 (the link blue is too light for that) */
+    --btn-primary-hover:     #2f5bd0;
     /* Sunken panels, hover tint and switch-off track (light theme overrides these) */
     --surface-sunken:        rgba(0,0,0,0.2);
     --surface-sunken-strong: rgba(0,0,0,0.3);
@@ -64,6 +66,8 @@
     --link:          #1f4fc0;
     --primary-hover: #163f9e;
     --warn:          #86540f;
+    --btn-primary-bg:        #1f4fc0;
+    --btn-primary-hover:     #163f9e;
     --active-pulse:  rgba(31,79,192,0.35);
     --glass-bg:      rgba(255,255,255,0.88);
     --surface-sunken:        rgba(15,23,42,0.04);
@@ -862,7 +866,7 @@ header h1 {
 }
 
 .team-card.selected {
-    background: var(--primary-color);
+    background: var(--btn-primary-bg);
     color: #fff;
     border-color: var(--primary-color);
     box-shadow: 0 0 20px rgba(88, 166, 255, 0.5);
@@ -889,7 +893,7 @@ header h1 {
 }
 
 .btn-primary {
-    background: var(--primary-color);
+    background: var(--btn-primary-bg);
     color: #fff;
     border: none;
     padding: 0.5rem 1.5rem;
@@ -2191,7 +2195,7 @@ tr:hover {
     }
 
     .expand-button {
-        background: var(--primary-color);
+        background: var(--btn-primary-bg);
         color: #fff;
         border: none;
         padding: 0.45rem 1rem;
@@ -2901,7 +2905,7 @@ table.wp-data-table tbody td:last-child {
 }
 
 .week-item.active {
-    background: var(--primary-color);
+    background: var(--btn-primary-bg);
     color: #fff;
     box-shadow: 0 4px 12px rgba(88, 166, 255, 0.3);
 }
