@@ -1372,12 +1372,12 @@ tr:hover {
     display: grid;
     grid-template-columns: repeat(6, 1fr);
     gap: 0.5rem;
-    background: rgba(0, 0, 0, 0.2);
+    background: var(--surface-sunken);
     padding: 0.6rem 1rem;
     border-radius: 6px;
     font-size: 0.8rem;
     color: var(--text-secondary);
-    border: 1px dashed rgba(255, 255, 255, 0.1);
+    border: 1px dashed var(--line-strong);
     text-align: center;
 }
 
@@ -4040,9 +4040,10 @@ table.wp-data-table tbody td:last-child {
     font-size: 0.8rem;
     line-height: 1.35;
     white-space: pre-line;
-    color: var(--ink, #fff);
-    background: rgba(0, 0, 0, 0.9);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--ink);
+    background: var(--bg-elev-2);
+    border: 1px solid var(--line-strong);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
     border-radius: 8px;
     pointer-events: none;
 }

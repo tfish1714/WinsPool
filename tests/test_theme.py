@@ -210,3 +210,25 @@ def test_admin_uses_tokens_not_dark_theme_tints(rel):
     assert "rgba(255,255,255" not in src.replace(" ", ""), f"{rel} still hard-codes a white tint"
     assert not re.search(r"background:\s*rgba\(0,\s*0,\s*0,\s*0\.(15|2|3)\)", src), \
         f"{rel} still hard-codes a dark panel background"
+
+
+def _css_block(selector):
+    css = _read("static/style.css")
+    return re.search(re.escape(selector) + r"\s*\{([^}]*)\}", css).group(1)
+
+
+def test_tiebreaker_tooltip_is_readable_in_both_themes():
+    block = _css_block(".tb-tooltip")
+    surface = " ".join(l for l in block.splitlines() if "shadow" not in l)  # a shadow may be black
+    assert "rgba(0, 0, 0" not in surface and "rgba(255, 255, 255" not in surface
+    bg = re.search(r"background:\s*var\((--[\w-]+)\)", block)
+    fg = re.search(r"(?<![-\w])color:\s*var\((--[\w-]+)", block)
+    assert bg and fg, "tooltip must take its colors from theme tokens"
+    light = _light_tokens()
+    assert _ratio(light[fg.group(1)], light[bg.group(1)]) >= 4.5
+    assert "var(--line-strong)" in block and "box-shadow" in block  # visible edge on a light page
+
+
+def test_tiebreaker_grid_uses_tokens():
+    block = _css_block(".tb-grid")
+    assert "rgba(0, 0, 0" not in block and "rgba(255, 255, 255" not in block
