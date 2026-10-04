@@ -97,10 +97,12 @@ function run({stored, light, storageThrows, noMatchMedia}) {
     },
   };
   if (!noMatchMedia) window.matchMedia = () => ({ matches: !!light });
+  const meta = { content: 'unset', setAttribute(k, v) { this[k] = v; } };
   const document = { documentElement: {
-    setAttribute(k, v) { attrs[k] = v; }, getAttribute(k) { return k in attrs ? attrs[k] : null; } } };
+    setAttribute(k, v) { attrs[k] = v; }, getAttribute(k) { return k in attrs ? attrs[k] : null; } },
+    querySelector(sel) { return String(sel).indexOf('theme-color') !== -1 ? meta : null; } };
   vm.runInNewContext(src, { window, document });
-  return { window, attrs, store };
+  return { window, attrs, store, meta };
 }
 const out = {};
 out.unsetLight = run({light: true}).attrs['data-theme'];
@@ -116,6 +118,9 @@ out.toggleTwice = [r.window.WinsPoolTheme.toggle(), r.store.nfl_wins_theme];
 const b = run({storageThrows: true});
 out.toggleWithBlockedStorage = b.window.WinsPoolTheme.toggle();
 out.key = r.window.WinsPoolTheme.KEY;
+out.metaLight = run({light: true}).meta.content;
+out.metaDark = run({light: false}).meta.content;
+const mt = run({stored: 'dark'}); mt.window.WinsPoolTheme.toggle(); out.metaAfterToggle = mt.meta.content;
 console.log(JSON.stringify(out));
 """
 
@@ -137,6 +142,8 @@ def test_theme_init_behavior(tmp_path):
     assert got["toggleTwice"] == ["dark", "dark"]
     assert got["toggleWithBlockedStorage"] in ("light", "dark")
     assert got["key"] == "nfl_wins_theme"
+    assert got["metaLight"] == _bg_elev("light") and got["metaDark"] == _bg_elev("dark")
+    assert got["metaAfterToggle"] == _bg_elev("light")  # dark -> light
 
 
 @pytest.mark.parametrize("rel,pattern", [
@@ -232,3 +239,29 @@ def test_tiebreaker_tooltip_is_readable_in_both_themes():
 def test_tiebreaker_grid_uses_tokens():
     block = _css_block(".tb-grid")
     assert "rgba(0, 0, 0" not in block and "rgba(255, 255, 255" not in block
+
+
+def _bg_elev(theme):
+    css = _read("static/style.css")
+    if theme == "light":
+        block = re.search(r':root\[data-theme="light"\]\s*\{(.*?)\n\}', css, re.S).group(1)
+    else:
+        block = re.search(r"(?m)^:root\s*\{(.*?)\n\}", css, re.S).group(1)
+    return re.search(r"--bg-elev\s*:\s*(#[0-9a-fA-F]{6})", block).group(1).lower()
+
+
+def test_dark_theme_declares_color_scheme_for_native_controls():
+    css = _read("static/style.css")
+    dark_block = re.search(r"(?m)^:root\s*\{(.*?)\n\}", css, re.S).group(1)
+    assert re.search(r"color-scheme:\s*dark", dark_block)
+
+
+def test_base_has_theme_color_meta_matching_the_top_bar():
+    html = _read("templates/base.html")
+    m = re.search(r'<meta name="theme-color" content="(#[0-9a-fA-F]{6})"', html)
+    assert m, "base.html needs a theme-color meta"
+    assert m.group(1).lower() == _bg_elev("dark")  # server default is the dark theme
+    head = html[: html.index("</head>")]
+    assert head.index('name="theme-color"') < head.index("theme_init.js")  # exists when the script runs
+    js = _read("static/js/theme_init.js")
+    assert _bg_elev("light") in js.lower() and _bg_elev("dark") in js.lower()

@@ -3,6 +3,8 @@
 // the first paint and flash the dark theme. Every storage access is guarded.
 (function () {
     var KEY = 'nfl_wins_theme';
+    // Browser/status-bar color; matches --bg-elev (the top bar) in each theme.
+    var BAR_COLOR = { dark: '#14171d', light: '#ffffff' };
 
     function stored() {
         try {
@@ -19,6 +21,10 @@
 
     function apply(theme) {
         document.documentElement.setAttribute('data-theme', theme);
+        try {
+            var meta = document.querySelector('meta[name="theme-color"]');
+            if (meta) meta.setAttribute('content', BAR_COLOR[theme] || BAR_COLOR.dark);
+        } catch (e) { /* no DOM */ }
         // Canvas charts cannot use CSS variables; they repaint on this event (chart_theme.js).
         try { window.dispatchEvent(new CustomEvent('wins-theme-change', { detail: { theme: theme } })); } catch (e) { /* no DOM events */ }
         return theme;

@@ -1,4 +1,5 @@
 :root {
+    color-scheme: dark; /* native scrollbars, form controls and pickers match the dark theme */
     /* ── Design system ───────────────────────────────────────── */
     --bg:            #0c0e12;
     --bg-elev:       #14171d;
