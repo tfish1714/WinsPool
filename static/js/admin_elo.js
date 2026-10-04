@@ -261,6 +261,7 @@ class EloExplorer {
 
         if (this._chart) this._chart.destroy();
 
+        const CT = window.WinsPoolChartTheme.colors();
         this._chart = new Chart(this._canvas, {
             type: 'line',
             data: { labels, datasets },
@@ -273,10 +274,10 @@ class EloExplorer {
                     legend: { display: false },
                     tooltip: {
                         itemSort: (a, b) => (b.parsed.y ?? 0) - (a.parsed.y ?? 0),
-                        backgroundColor: 'rgba(0,0,0,0.85)',
-                        titleColor: 'rgba(255,255,255,0.9)',
-                        bodyColor: 'rgba(255,255,255,0.75)',
-                        borderColor: 'rgba(255,255,255,0.1)',
+                        backgroundColor: CT.tipBg,
+                        titleColor: CT.tipTitle,
+                        bodyColor: CT.tipBody,
+                        borderColor: CT.tipBorder,
                         borderWidth: 1,
                         callbacks: {
                             label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1) ?? 'N/A'}`
@@ -286,22 +287,23 @@ class EloExplorer {
                 scales: {
                     x: {
                         ticks: {
-                            color: 'rgba(255,255,255,0.7)',
+                            color: CT.text,
                             maxRotation: resolution === 'week' ? 45 : 0,
                             autoSkip: true,
                             maxTicksLimit: resolution === 'week' ? 36 : 20,
                             font: { size: 11 }
                         },
-                        grid: { color: 'rgba(255,255,255,0.1)' }
+                        grid: { color: CT.grid }
                     },
                     y: {
-                        ticks: { color: 'rgba(255,255,255,0.7)', font: { size: 11 } },
-                        grid: { color: 'rgba(255,255,255,0.1)' },
-                        title: { display: true, text: 'Elo Rating', color: 'rgba(255,255,255,0.5)', font: { size: 12 } }
+                        ticks: { color: CT.text, font: { size: 11 } },
+                        grid: { color: CT.grid },
+                        title: { display: true, text: 'Elo Rating', color: CT.muted, font: { size: 12 } }
                     }
                 }
             }
         });
+        window.WinsPoolChartTheme.track(this._chart);
 
         // Legend
         this._legend.innerHTML = '';

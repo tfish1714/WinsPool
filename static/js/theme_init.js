@@ -19,6 +19,8 @@
 
     function apply(theme) {
         document.documentElement.setAttribute('data-theme', theme);
+        // Canvas charts cannot use CSS variables; they repaint on this event (chart_theme.js).
+        try { window.dispatchEvent(new CustomEvent('wins-theme-change', { detail: { theme: theme } })); } catch (e) { /* no DOM events */ }
         return theme;
     }
 

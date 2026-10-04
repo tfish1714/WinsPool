@@ -89,7 +89,8 @@
                 });
 
                 const ctx = document.getElementById('winsChart').getContext('2d');
-                new Chart(ctx, {
+                const CT = window.WinsPoolChartTheme.colors();
+                const winsChart = new Chart(ctx, {
                     type: 'line',
                     data: { labels: weeks, datasets: datasets },
                     options: {
@@ -98,10 +99,10 @@
                         interaction: { mode: 'index', intersect: false },
                         plugins: {
                             tooltip: {
-                                backgroundColor: 'rgba(0,0,0,0.85)',
-                                titleColor: 'rgba(255,255,255,0.9)',
-                                bodyColor: 'rgba(255,255,255,0.75)',
-                                borderColor: 'rgba(255,255,255,0.1)',
+                                backgroundColor: CT.tipBg,
+                                titleColor: CT.tipTitle,
+                                bodyColor: CT.tipBody,
+                                borderColor: CT.tipBorder,
                                 borderWidth: 1,
                                 itemSort: function (a, b) {
                                     // Primary: highest wins first
@@ -117,22 +118,23 @@
                             title: {
                                 display: true,
                                 text: `Player Total Wins by Week — ${year}`,
-                                color: 'rgba(255,255,255,0.7)',
+                                color: CT.text,
                                 font: { size: 13, weight: '500' }
                             }
                         },
                         scales: {
                             x: {
-                                ticks: { color: 'rgba(255,255,255,0.7)' },
-                                grid: { color: 'rgba(255,255,255,0.1)' }
+                                ticks: { color: CT.text },
+                                grid: { color: CT.grid }
                             },
                             y: {
-                                ticks: { color: 'rgba(255,255,255,0.7)' },
-                                grid: { color: 'rgba(255,255,255,0.1)' }
+                                ticks: { color: CT.text },
+                                grid: { color: CT.grid }
                             }
                         }
                     }
                 });
+                window.WinsPoolChartTheme.track(winsChart);
             })
             .catch(err => console.error('Chart load error:', err));
     }
