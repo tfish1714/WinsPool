@@ -43,9 +43,11 @@
         var scales = o.scales || {};
         Object.keys(scales).forEach(function (k) {
             var s = scales[k];
-            s.ticks = s.ticks || {};
+            // Assign only when missing: Chart.js 4 returns resolver proxies, and re-assigning an
+            // existing nested object onto itself recurses until the stack overflows.
+            if (!s.ticks) s.ticks = {};
             s.ticks.color = c.text;
-            s.grid = s.grid || {};
+            if (!s.grid) s.grid = {};
             s.grid.color = c.grid;
             if (s.title) s.title.color = c.muted;
         });

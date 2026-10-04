@@ -96,6 +96,23 @@ out.global = { tick: live.options.scales.x.ticks.color, updates: live.updates.le
 // missing variables fall back to dark-theme defaults instead of undefined
 ({ window } = build({}));
 out.fallback = window.WinsPoolChartTheme.colors();
+
+// Chart.js 4 returns resolver proxies for options: re-assigning an existing nested object
+// (s.ticks = s.ticks || {}) recurses forever in the browser. Emulate that with throwing setters.
+({ window, listeners } = build(Object.assign({}, LIGHT)));
+function strictChart() {
+  const mk = (extra) => { const o = Object.assign({}, extra); return o; };
+  const guard = (holder, key, value) => {
+    let v = value;
+    Object.defineProperty(holder, key, { get() { return v; }, set(nv) { if (v !== undefined) throw new RangeError('reassigned ' + key); v = nv; }, enumerable: true });
+  };
+  const scale = {}; guard(scale, 'ticks', mk({})); guard(scale, 'grid', mk({}));
+  const tooltip = {}; const title = {};
+  return { canvas: {}, options: { plugins: { tooltip, title }, scales: { x: scale } }, update() {} };
+}
+let strictErr = null;
+try { window.WinsPoolChartTheme.paint(strictChart()); } catch (e) { strictErr = String(e); }
+out.strictErr = strictErr;
 console.log(JSON.stringify(out));
 """
 
@@ -118,6 +135,7 @@ def test_chart_theme_behavior(tmp_path):
     assert got["painted"]["title"] == "#414854"
     assert got["afterChange"] == {"tick": "#e8eaef", "updates": 1}
     assert got["afterDestroy"] == {"updates": 1, "remaining": 0}
+    assert got["strictErr"] is None, got["strictErr"]  # must not reassign existing option objects
     assert got["global"] == {"tick": "#e8eaef", "updates": 1, "deadUpdates": 0}
     for key in ("text", "muted", "grid", "tipBg", "tipTitle", "tipBody", "tipBorder"):
         assert got["fallback"][key], f"{key} must have a fallback"

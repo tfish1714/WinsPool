@@ -265,3 +265,24 @@ def test_base_has_theme_color_meta_matching_the_top_bar():
     assert head.index('name="theme-color"') < head.index("theme_init.js")  # exists when the script runs
     js = _read("static/js/theme_init.js")
     assert _bg_elev("light") in js.lower() and _bg_elev("dark") in js.lower()
+
+
+def test_standalone_mock_draft_page_follows_the_saved_theme():
+    html = _read("templates/mock_draft.html")
+    head = html[: html.index("</head>")]
+    m = re.search(r'<script(?![^>]*type="module")[^>]*theme_init\.js', head)
+    assert m, "mock_draft.html does not extend base.html, so it must load theme_init.js itself"
+    assert m.start() < head.index("style.css"), "theme must be applied before the stylesheet paints"
+
+
+@pytest.mark.parametrize("rel", ["static/js/ui_renderer.js", "static/js/mock_draft.js"])
+def test_dark_chips_set_their_own_text_color(rel):
+    """A hard-coded dark chip must not inherit the theme's text color (dark text on #444 in light)."""
+    src = _read(rel)
+    chips = re.findall(r"background:#444;[^\"`]*", src)
+    assert chips, f"expected a #444 chip in {rel}"
+    assert all("color:#fff" in c for c in chips)
+
+
+def test_admin_textarea_text_uses_a_token():
+    assert not re.search(r"color:\s*#ccc", _read("templates/admin.html"))

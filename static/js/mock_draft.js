@@ -224,7 +224,7 @@ class MockDraft {
                 right = `
                     <div style="display:flex;align-items:center;gap:8px">
                         <img src="${teamLogo(done.team)}" alt="${done.team}" style="width:16px;height:16px;object-fit:contain;">
-                        <span style="background:#444;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace">${done.team}${done.wasWildcard ? ' 🎲' : ''}</span>
+                        <span style="background:#444;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace">${done.team}${done.wasWildcard ? ' 🎲' : ''}</span>
                     </div>`;
             } else if (isActive) {
                 right = '<span class="mono-pill"><span class="dot pulse"></span>picking</span>';

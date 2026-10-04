@@ -269,7 +269,7 @@ export const UiRenderer = {
                 rightHtml = `
                     <div style="display:flex;align-items:center;gap:10px">
                         ${tookFmt ? `<span class="mono" style="font-size:11px;color:${isSlow ? 'var(--warn)' : 'var(--ink-3)'}">${tookFmt}</span>` : ''}
-                        <span style="background:#444;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace">${_esc(item.team)}</span>
+                        <span style="background:#444;color:#fff;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace">${_esc(item.team)}</span>
                     </div>`;
             } else if (isActive) {
                 rightHtml = `<span class="mono-pill"><span class="dot pulse"></span>picking</span>`;
