@@ -41,12 +41,20 @@ def test_nn_feature_engine_reuses_canonical_map_and_function():
 
 
 def _has_abbr_dict_literal(source: str) -> bool:
-    """True if any dict literal in source has both "WSH" and "JAC" string keys."""
+    """True if any dict literal maps two or more legacy abbreviations (the keys of
+    TEAM_ABBR_MAP) to string values, i.e. looks like a second abbreviation map.
+    Tables keyed by the same abbreviations with non-string values (for example
+    stadium coordinates) are not abbreviation maps and are ignored."""
     for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.Dict):
-            keys = {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
-            if {"WSH", "JAC"} <= keys:
-                return True
+        if not isinstance(node, ast.Dict):
+            continue
+        hits = 0
+        for k, v in zip(node.keys, node.values):
+            if (isinstance(k, ast.Constant) and k.value in TEAM_ABBR_MAP
+                    and isinstance(v, ast.Constant) and isinstance(v.value, str)):
+                hits += 1
+        if hits >= 2:
+            return True
     return False
 
 
@@ -55,6 +63,13 @@ def test_abbr_dict_detector():
     assert _has_abbr_dict_literal("M = {'JAC': 'JAX', 'X': 1, 'WSH': 'WAS'}")
     assert not _has_abbr_dict_literal('M = {"JAC": "JAX"}')
     assert not _has_abbr_dict_literal('s = "JAC"; t = "WSH"')
+
+
+def test_abbr_dict_detector_catches_any_two_legacy_keys_but_not_coordinate_tables():
+    assert _has_abbr_dict_literal('M = {"JAC": "JAX", "OAK": "LV"}')
+    assert _has_abbr_dict_literal('M = {"SD": "LAC", "STL": "LA", "X": "Y"}')
+    assert not _has_abbr_dict_literal('M = {"OAK": (37.7, -122.2), "SD": (32.7, -117.1)}')
+    assert not _has_abbr_dict_literal('M = {"OAK": 1}')
 
 
 def test_no_second_abbreviation_dict_outside_constants():
