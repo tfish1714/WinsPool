@@ -400,3 +400,25 @@ class TestDuplicateOrderRows:
         p = ps.build_unpaid_payload(self._order_dupe([True, False, True]), _players(2),
                                     _settings(_vis()), 2026, 10, 1, False)
         assert p["unpaid"] == []
+
+
+class TestNanPlayerIds:
+    """A bad id in either frame must be skipped, never turn the endpoint into a 500."""
+
+    def test_nan_playerid_in_order_is_skipped(self):
+        order = pd.DataFrame({"season": [2026, 2026, 2026], "playerId": [1, float("nan"), 3],
+                              "draftOrder": [1, 2, 3], "paid": [True, False, False]})
+        p = ps.build_unpaid_payload(order, _players(3), _settings(_vis()), 2026, 10, 1, False)
+        assert p["unpaid"] == [{"playerId": 3, "name": "Player C"}]
+
+    def test_nan_playerid_or_name_in_players_is_skipped(self):
+        players = pd.DataFrame({"playerId": [1, float("nan"), 3], "fullName": ["Player A", "Ghost", None]})
+        order = _order([True, False, False])
+        p = ps.build_unpaid_payload(order, players, _settings(_vis()), 2026, 10, 1, False)
+        assert p["unpaid"] == [{"playerId": 2, "name": "Player 2"}, {"playerId": 3, "name": "Player 3"}]
+
+    def test_nan_playerid_does_not_break_membership_lookup(self):
+        order = pd.DataFrame({"season": [2026, 2026], "playerId": [float("nan"), 2],
+                              "draftOrder": [1, 2], "paid": [False, False]})
+        p = ps.build_unpaid_payload(order, _players(2), _settings(_vis()), 2026, 9, 2, False)
+        assert p["me_unpaid"] is True

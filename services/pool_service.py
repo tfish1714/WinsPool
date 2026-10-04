@@ -250,7 +250,7 @@ def current_played_week(games, season) -> int:
 def _unpaid_members(order_df, players_df, season) -> list:
     if order_df is None or order_df.empty or not {"season", "playerId"} <= set(order_df.columns):
         return []
-    rows = order_df[order_df["season"] == season]
+    rows = order_df[order_df["season"] == season].dropna(subset=["playerId"])
     if rows.empty:
         return []
     if "paid" in rows.columns:
@@ -259,7 +259,8 @@ def _unpaid_members(order_df, players_df, season) -> list:
         paid = pd.Series(False, index=rows.index)
     names = {}
     if players_df is not None and not players_df.empty and {"playerId", "fullName"} <= set(players_df.columns):
-        names = {int(r.playerId): str(r.fullName) for r in players_df.itertuples() if pd.notna(r.fullName)}
+        names = {int(r.playerId): str(r.fullName) for r in players_df.itertuples()
+                 if pd.notna(r.playerId) and pd.notna(r.fullName)}
     # One entry per player: a player listed twice in a season's draft_order counts as
     # paid if any of their rows is paid.
     paid_by_player = paid.groupby(rows["playerId"]).any()
@@ -279,7 +280,7 @@ def build_unpaid_payload(order_df, players_df, settings, season, week, caller_id
 
     member_ids = set()
     if order_df is not None and not order_df.empty and {"season", "playerId"} <= set(order_df.columns):
-        member_ids = {int(p) for p in order_df.loc[order_df["season"] == season, "playerId"]}
+        member_ids = {int(p) for p in order_df.loc[order_df["season"] == season, "playerId"].dropna()}
     me_member = caller_id is not None and int(caller_id) in member_ids
     me_unpaid = (int(caller_id) in unpaid_ids) if (stage != "off" and me_member) else None
 
