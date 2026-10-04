@@ -382,3 +382,21 @@ class TestStageUsesTheWeekShownOnStandings:
         week = ps.current_played_week(games, 2026)
         assert week == 0
         assert ps.compute_unpaid_stage(week, _vis(nudge_week=1, public_week=1, banner_week=1)) == "off"
+
+
+class TestDuplicateOrderRows:
+    """A player listed twice in one season's draft_order (seen in real 2020 data) appears once."""
+
+    def _order_dupe(self, flags):
+        return pd.DataFrame({"season": [2026] * len(flags), "playerId": [1, 2, 2][: len(flags)],
+                             "draftOrder": list(range(1, len(flags) + 1)), "paid": flags})
+
+    def test_listed_once_when_both_rows_unpaid(self):
+        p = ps.build_unpaid_payload(self._order_dupe([True, False, False]), _players(2),
+                                    _settings(_vis()), 2026, 10, 1, False)
+        assert p["unpaid"] == [{"playerId": 2, "name": "Player B"}]
+
+    def test_paid_if_any_row_is_paid(self):
+        p = ps.build_unpaid_payload(self._order_dupe([True, False, True]), _players(2),
+                                    _settings(_vis()), 2026, 10, 1, False)
+        assert p["unpaid"] == []

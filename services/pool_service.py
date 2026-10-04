@@ -260,8 +260,11 @@ def _unpaid_members(order_df, players_df, season) -> list:
     names = {}
     if players_df is not None and not players_df.empty and {"playerId", "fullName"} <= set(players_df.columns):
         names = {int(r.playerId): str(r.fullName) for r in players_df.itertuples() if pd.notna(r.fullName)}
+    # One entry per player: a player listed twice in a season's draft_order counts as
+    # paid if any of their rows is paid.
+    paid_by_player = paid.groupby(rows["playerId"]).any()
     out = [{"playerId": int(pid), "name": names.get(int(pid), f"Player {int(pid)}")}
-           for pid in rows.loc[~paid, "playerId"]]
+           for pid, is_paid in paid_by_player.items() if not is_paid]
     return sorted(out, key=lambda r: r["name"].lower())
 
 
