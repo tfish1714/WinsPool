@@ -266,6 +266,7 @@ class TestOutlookPreseasonFromFrozenSnapshot:
              patch("services.data_service.get_active_season", return_value=2026), \
              patch("routes.api_routes.get_season_projection_legacy_shape", return_value=PROJ), \
              patch("routes.api_routes.get_frozen_preseason_projection", return_value=frozen), \
+             patch("routes.api_routes.is_draft_active_fail_closed", return_value=False), \
              patch("routes.api_routes.get_config_settings", return_value={"draft_active": False}), \
              patch("services.cache_service.get_game_predictions", return_value=preds):
             return TestClient(app).get("/api/profile/portfolio").json()
@@ -310,6 +311,7 @@ def test_frozen_preseason_read_failure_keeps_per_game_numbers(auth_player):
          patch("services.data_service.get_active_season", return_value=2026), \
          patch("routes.api_routes.get_season_projection_legacy_shape", return_value=PROJ), \
          patch("routes.api_routes.get_frozen_preseason_projection", side_effect=RuntimeError("boom")), \
+         patch("routes.api_routes.is_draft_active_fail_closed", return_value=False), \
          patch("routes.api_routes.get_config_settings", return_value={"draft_active": False}), \
          patch("services.cache_service.get_game_predictions", return_value=preds):
         b = TestClient(app).get("/api/profile/portfolio").json()
