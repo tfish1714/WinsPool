@@ -23,7 +23,7 @@ from routes.models import (
 from services.cache_service import get_game_predictions, get_prediction_features
 from services.data_service import (
     load_data, get_active_season, get_preseason_predictions,
-    get_consensus_projections,
+    get_consensus_projections, get_most_recent_completed_week,
 )
 from services.response_helpers import server_error
 from services.db_service import (
@@ -386,10 +386,19 @@ async def get_draft_snapshot_status(
 async def preview_recap_prompt(body: RecapWeekRequest, _: dict = Depends(require_admin)):
     """Admin: Generate the data prompt for an AI weekly recap."""
     try:
-        data_summary, _ = recap_service.extract_weekly_data(body.year, body.week)
+        year, week = body.year, body.week
+        if year is None or week is None:
+            _, _, games, _, _, draft_results, rules = load_data()
+            if year is None:
+                year = int(get_active_season(games, draft_results, rules))
+            if week is None:
+                week = get_most_recent_completed_week(games, year)
+            if week is None:
+                return JSONResponse(status_code=404, content={"error": f"No completed games found for {year}."})
+        data_summary, _ = recap_service.extract_weekly_data(year, week)
         if not data_summary:
-            return JSONResponse(status_code=404, content={"error": f"No game results found for {body.year} Week {body.week}."})
-        return JSONResponse(content={"prompt": ai_service.get_recap_prompt(data_summary)})
+            return JSONResponse(status_code=404, content={"error": f"No game results found for {year} Week {week}."})
+        return JSONResponse(content={"prompt": ai_service.get_recap_prompt(data_summary), "year": year, "week": int(week)})
     except Exception as e:
         logger.exception("Unhandled error in admin endpoint")
         return server_error()

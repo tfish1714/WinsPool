@@ -338,10 +338,12 @@ Generates a data-only prompt for AI weekly recap review. Includes system instruc
 
 **Request Body**:
 ```json
-{ "playerId": "string", "year": "int", "week": "int" }
+{ "playerId": "string", "year": "int (optional)", "week": "int (optional)" }
 ```
 
-**Response**: `{ success, prompt_data, system_instructions }`
+`year` and `week` are optional. A missing `year` defaults to the active season; a missing `week` defaults to the most recent completed week of that season.
+
+**Response**: `{ prompt, year, week }` (`year`/`week` echo the values actually used). Returns 404 `{ "error": "No completed games found for <year>." }` when no week can be determined.
 
 ---
 

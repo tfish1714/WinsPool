@@ -65,6 +65,9 @@ class AdminApp {
                 if (target === 'consensus-section') {
                     this.initConsensusTab();
                 }
+                if (target === 'recap-section') {
+                    this.initRecapTab();
+                }
             };
         });
     }
@@ -254,6 +257,7 @@ class AdminApp {
         // Recap Handlers
         document.getElementById('draft-recap-preview-btn')?.addEventListener('click', () => this.previewDraftRecapPrompt());
         document.getElementById('recap-preview-prompt-btn')?.addEventListener('click', () => this.previewRecapPrompt());
+        document.getElementById('recap-copy-prompt-btn')?.addEventListener('click', () => this.copyRecapPrompt());
         document.getElementById('recap-generate-ai-btn')?.addEventListener('click', () => this.generateRecapAI());
         document.getElementById('recap-broadcast-btn')?.addEventListener('click', () => this.broadcastRecap());
 
@@ -543,24 +547,79 @@ class AdminApp {
         }
     }
 
-    async previewRecapPrompt() {
+    // Runs once per page load, the first time the Recap tab opens: asks the
+    // server for the default (active season, latest completed week) prompt and
+    // fills any blank year/week input from the echoed values. Read-only; the
+    // AI generation and broadcast steps stay manual.
+    initRecapTab() {
+        if (this._recapTabReady) return;
+        this._recapTabReady = true;
+        this.previewRecapPrompt({ silent: true });
+    }
+
+    async previewRecapPrompt({ silent = false } = {}) {
         console.log('[Admin] Requesting recap prompt preview...');
-        const year = document.getElementById('recap-year').value;
-        const week = document.getElementById('recap-week').value;
-        if (!year || !week) {
+        const yearEl = document.getElementById('recap-year');
+        const weekEl = document.getElementById('recap-week');
+        const year = yearEl.value;
+        const week = weekEl.value;
+        if (!silent && (!year || !week)) {
             alert('Please specify Year and Week.');
             return;
         }
 
         try {
-            const { prompt } = await ApiService.previewRecapPrompt(this.playerId, year, week);
+            // Blank inputs are omitted so the server applies its defaults.
+            const res = await ApiService.previewRecapPrompt(
+                this.playerId,
+                year ? Number(year) : undefined,
+                week ? Number(week) : undefined
+            );
             const textEl = document.getElementById('recap-prompt-text');
-            if (textEl) textEl.value = prompt;
+            if (textEl) textEl.value = res.prompt;
+            if (!yearEl.value && res.year != null) yearEl.value = res.year;
+            if (!weekEl.value && res.week != null) weekEl.value = res.week;
             document.getElementById('recap-prompt-preview-container')?.classList.remove('hidden');
+            const copyBtn = document.getElementById('recap-copy-prompt-btn');
+            if (copyBtn) copyBtn.disabled = !res.prompt;
             console.log('[Admin] Preview prompt received.');
         } catch (e) {
-            alert(`Preview failed: ${e.message}`);
+            if (silent) {
+                console.warn(`[Admin] Auto recap preview skipped: ${e.message}`);
+            } else {
+                alert(`Preview failed: ${e.message}`);
+            }
         }
+    }
+
+    async copyRecapPrompt() {
+        const textEl = document.getElementById('recap-prompt-text');
+        const btn = document.getElementById('recap-copy-prompt-btn');
+        if (!textEl || !btn || !textEl.value) return;
+        const original = btn.dataset.label || btn.textContent;
+        btn.dataset.label = original;
+        let ok = false;
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(textEl.value);
+                ok = true;
+            }
+        } catch (e) {
+            console.warn('[Admin] Clipboard API failed, trying fallback:', e);
+        }
+        if (!ok) {
+            try {
+                textEl.focus();
+                textEl.select();
+                ok = document.execCommand('copy');
+                textEl.setSelectionRange(0, 0);
+            } catch (e) {
+                ok = false;
+            }
+        }
+        btn.textContent = ok ? 'Copied' : 'Copy failed';
+        clearTimeout(this._copyLabelTimer);
+        this._copyLabelTimer = setTimeout(() => { btn.textContent = original; }, 1500);
     }
 
     async previewDraftRecapPrompt() {

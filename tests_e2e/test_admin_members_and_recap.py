@@ -85,3 +85,12 @@ def test_recap_prompt_preview_populates(live_server, page, test_player_credentia
 
     prompt_text = page.locator("#recap-prompt-text").input_value()
     assert len(prompt_text) > 0, "recap prompt preview returned empty text"
+
+    # Copy button: label flips to "Copied" and the clipboard holds the prompt.
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    page.click("#recap-copy-prompt-btn")
+    page.wait_for_function(
+        "document.getElementById('recap-copy-prompt-btn').textContent.trim() === 'Copied'",
+        timeout=5000,
+    )
+    assert page.evaluate("navigator.clipboard.readText()") == prompt_text
