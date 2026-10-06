@@ -1191,6 +1191,25 @@ class TestPreviewRecapPromptDefaults:
         assert resp.json() == {"prompt": "P", "year": 2025, "week": 9}
         extract.assert_called_once_with(2025, 9)
 
+    def test_only_year_supplied_defaults_week_for_that_year(self, admin_token):
+        with patch("routes.admin_routes.load_data", return_value=self._load(self._games())),              patch("routes.admin_routes.get_active_season", return_value=2026) as active,              patch("routes.admin_routes.get_most_recent_completed_week", return_value=7) as recent,              patch("routes.admin_routes.recap_service.extract_weekly_data", return_value=({"x": 1}, [])) as extract,              patch("routes.admin_routes.ai_service.get_recap_prompt", return_value="P"):
+            resp = client.post("/api/admin/recap/preview_prompt", json={"year": 2024},
+                               headers={"Authorization": admin_token})
+        assert resp.status_code == 200
+        assert resp.json() == {"prompt": "P", "year": 2024, "week": 7}
+        active.assert_not_called()
+        assert recent.call_args.args[1] == 2024
+        extract.assert_called_once_with(2024, 7)
+
+    def test_only_week_supplied_defaults_year_to_active_season(self, admin_token):
+        with patch("routes.admin_routes.load_data", return_value=self._load(self._games())),              patch("routes.admin_routes.get_active_season", return_value=2026),              patch("routes.admin_routes.get_most_recent_completed_week", return_value=3) as recent,              patch("routes.admin_routes.recap_service.extract_weekly_data", return_value=({"x": 1}, [])) as extract,              patch("routes.admin_routes.ai_service.get_recap_prompt", return_value="P"):
+            resp = client.post("/api/admin/recap/preview_prompt", json={"week": 5},
+                               headers={"Authorization": admin_token})
+        assert resp.status_code == 200
+        assert resp.json() == {"prompt": "P", "year": 2026, "week": 5}
+        recent.assert_not_called()
+        extract.assert_called_once_with(2026, 5)
+
     def test_no_completed_week_returns_404(self, admin_token):
         with patch("routes.admin_routes.load_data", return_value=self._load(pd.DataFrame())), \
              patch("routes.admin_routes.get_active_season", return_value=2026), \
