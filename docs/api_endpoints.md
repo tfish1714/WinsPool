@@ -6,6 +6,10 @@ All JSON API endpoints are defined in `routes/api_routes.py` under the `/api` pr
 
 Authorization for admin endpoints is enforced via Role-Based Access Control (RBAC). The `playerId` parameter is validated against `db_service.get_player_role()` to confirm `admin` access.
 
+### Error responses
+
+Any unhandled server-side exception on any `/api` route returns HTTP 500 with the body `{ "error": "An internal server error occurred." }` (global handler in `main.py`; the traceback is logged server-side, never returned). Explicit errors (400/401/403/404/422/429) keep their own shapes as documented per endpoint. Tests asserting this 500 must build `TestClient(app, raise_server_exceptions=False)`.
+
 ---
 
 ## Public Data Endpoints

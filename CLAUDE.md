@@ -226,6 +226,8 @@ docs/                    # Architecture and model documentation (prediction_mode
 
 ### Shared helpers
 
+- **Route error handling**: do not add a generic `try/except Exception` that logs and returns `server_error()` in route handlers; the global handler in `main.py` (`global_exception_handler`) logs and returns 500 `{"error": "An internal server error occurred."}`. Keep `except` clauses only for domain-specific cases. Tests asserting a 500 for an unhandled error need `TestClient(app, raise_server_exceptions=False)` (Starlette re-raises after the handler responds).
+
 - `services/constants.py::make_game_key(week, home, away)` is the single builder for the per-game key `W{week:02d}_{HOME}_{AWAY}` (game_predictions, prediction caches, projection engine); it normalizes both teams via `normalize_team_abbr` and coerces the week from int/str/float. Never hand-format that string.
 - `templates/_macros.html::year_picker(available_years, current_year, base_url, url_suffix='')` is the season dropdown for the six per-year pages.
 - `routes/models.py` request models carry field descriptions and bounds (`EMAIL_PATTERN`, season 2000..2100). Password length/complexity stays in the routes on purpose (a 422 would bypass lockout counting); see `docs/api_endpoints.md`.
