@@ -914,6 +914,36 @@ header h1 {
     opacity: 0.5;
 }
 
+.btn-secondary {
+    background: var(--surface-sunken);
+    color: var(--ink);
+    border: 1px solid var(--hairline-strong);
+    padding: 0.5rem 1.5rem;
+    border-radius: 6px;
+    font-family: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.btn-secondary:hover {
+    background: var(--surface-hover);
+}
+
+.btn-secondary:active {
+    transform: scale(0.98);
+}
+
+.btn-secondary:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+
+.btn-secondary:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
 .btn-cancel {
     background: #555;
 }
