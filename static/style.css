@@ -4321,3 +4321,34 @@ a.pool-chip-mine:hover { text-decoration: underline; }
 .h2h-list li { display: flex; justify-content: space-between; align-items: center; min-height: 44px; padding: 0 14px; font-size: 14px; color: var(--ink); }
 .h2h-list li + li { border-top: 1px solid var(--line); }
 .h2h-list li span:last-child { font: 700 14px 'JetBrains Mono', monospace; }
+
+/* iOS add-to-home-screen push hint (static/js/ios_push_hint.js) */
+.ios-install-banner {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--bg-elev);
+    color: var(--ink);
+    border: 1px solid var(--hairline-strong);
+    border-radius: 12px;
+    font-size: 0.9rem;
+    line-height: 1.35;
+}
+.ios-install-banner__text { flex: 1; }
+.ios-install-banner__dismiss {
+    min-width: 44px;
+    min-height: 44px;
+    background: var(--surface-sunken);
+    color: var(--ink);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    font-size: 1.4rem;
+    line-height: 1;
+    cursor: pointer;
+}

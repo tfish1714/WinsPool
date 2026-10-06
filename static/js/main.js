@@ -4,6 +4,7 @@ import { UiRenderer } from './ui_renderer.js';
 import { WebSocketService } from './websocket_service.js';
 import { initChat, loadHistory, appendMessage } from './chat.js';
 import { isPlayoffRaceVisible } from './nav_gating.js';
+import { maybeShowIosInstallHint } from './ios_push_hint.js';
 
 /**
  * WinsPool Main Application Module (Refactored)
@@ -55,6 +56,8 @@ class App {
         // Background sync: refresh profile + config in parallel, re-render nav only if something changed
         if (this.user.playerId) {
             this._backgroundSync();
+            // iOS Safari tabs lack PushManager; guide the user to Add to Home Screen
+            maybeShowIosInstallHint();
         }
     }
 
@@ -492,7 +495,10 @@ class App {
     }
 
     async initPushNotifications() {
-        if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+            if (this.user.playerId) maybeShowIosInstallHint();
+            return;
+        }
         const vapidKey = document.querySelector('meta[name="vapid-public-key"]')?.content;
         if (!vapidKey) return;
 

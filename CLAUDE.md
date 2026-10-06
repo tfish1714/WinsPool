@@ -211,6 +211,7 @@ static/
     websocket_service.js # WebSocket client for live draft
     admin_main.js        # Admin dashboard
     auth_service.js      # Client-side auth; also exports STORAGE_KEYS ({TOKEN, PLAYER_ID, ROLE, DRAFT_ACTIVE, THEME}) and getAuthHeaders() -- use these, never inline localStorage key literals or hand-built Bearer headers
+    manifest.json (static/) + ios_push_hint.js  # PWA manifest; iOS Safari (non-standalone) 'Add to Home Screen' push hint banner; pure shouldShowIosInstallHint() is node-tested; shown once per page for signed-in users from main.js
     responsive.js        # Mobile drawer controller (non-module IIFE, loaded after main.js)
     chat.js              # Draft room chat overlay
     mock_draft.js        # Standalone mock draft page logic — does NOT import main.js/websocket_service.js/auth_service.js
