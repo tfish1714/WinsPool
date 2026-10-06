@@ -915,13 +915,16 @@ class TestDraftSnapshotSync:
         assert resp.status_code in (401, 403)
 
     def test_unhandled_exception_returns_server_error(self, admin_token):
+        # The global handler (main.py) re-raises after responding, so use a non-raising client.
+        quiet_client = TestClient(app, raise_server_exceptions=False)
         with patch("routes.admin_routes.sync_draft_snapshot_for_season", side_effect=RuntimeError("boom")):
-            resp = client.post(
+            resp = quiet_client.post(
                 "/api/admin/draft_snapshot/sync",
                 json={"season": 2026},
                 headers={"Authorization": admin_token},
             )
         assert resp.status_code == 500
+        assert resp.json() == {"error": "An internal server error occurred."}
 
 
 class TestDraftSnapshotStatus:
@@ -1154,3 +1157,63 @@ def test_admin_pool_prefers_active_season():
     res = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True)
     assert res.stdout.strip() == "[2025,2026,2026,2026]"
     assert "_poolPickInitialSeason(seasons, active_season)" in src
+
+
+# -- /api/admin/recap/preview_prompt defaults ---------------------------------
+
+class TestPreviewRecapPromptDefaults:
+    def _load(self, games):
+        return (None, None, games, None, None, pd.DataFrame(), None)
+
+    def _games(self):
+        return pd.DataFrame([
+            {"season": 2026, "week": 3, "game_type": "REG", "home_team": "KC", "away_team": "BUF",
+             "home_score": 24, "away_score": 20},
+        ])
+
+    def test_defaults_year_and_week_when_omitted(self, admin_token):
+        with patch("routes.admin_routes.load_data", return_value=self._load(self._games())), \
+             patch("routes.admin_routes.get_active_season", return_value=2026), \
+             patch("routes.admin_routes.get_most_recent_completed_week", return_value=3), \
+             patch("routes.admin_routes.recap_service.extract_weekly_data", return_value=({"x": 1}, [])) as extract, \
+             patch("routes.admin_routes.ai_service.get_recap_prompt", return_value="PROMPT"):
+            resp = client.post("/api/admin/recap/preview_prompt", json={}, headers={"Authorization": admin_token})
+        assert resp.status_code == 200
+        assert resp.json() == {"prompt": "PROMPT", "year": 2026, "week": 3}
+        extract.assert_called_once_with(2026, 3)
+
+    def test_explicit_values_are_not_overridden(self, admin_token):
+        with patch("routes.admin_routes.recap_service.extract_weekly_data", return_value=({"x": 1}, [])) as extract, \
+             patch("routes.admin_routes.ai_service.get_recap_prompt", return_value="P"):
+            resp = client.post("/api/admin/recap/preview_prompt", json={"year": 2025, "week": 9},
+                               headers={"Authorization": admin_token})
+        assert resp.status_code == 200
+        assert resp.json() == {"prompt": "P", "year": 2025, "week": 9}
+        extract.assert_called_once_with(2025, 9)
+
+    def test_only_year_supplied_defaults_week_for_that_year(self, admin_token):
+        with patch("routes.admin_routes.load_data", return_value=self._load(self._games())),              patch("routes.admin_routes.get_active_season", return_value=2026) as active,              patch("routes.admin_routes.get_most_recent_completed_week", return_value=7) as recent,              patch("routes.admin_routes.recap_service.extract_weekly_data", return_value=({"x": 1}, [])) as extract,              patch("routes.admin_routes.ai_service.get_recap_prompt", return_value="P"):
+            resp = client.post("/api/admin/recap/preview_prompt", json={"year": 2024},
+                               headers={"Authorization": admin_token})
+        assert resp.status_code == 200
+        assert resp.json() == {"prompt": "P", "year": 2024, "week": 7}
+        active.assert_not_called()
+        assert recent.call_args.args[1] == 2024
+        extract.assert_called_once_with(2024, 7)
+
+    def test_only_week_supplied_defaults_year_to_active_season(self, admin_token):
+        with patch("routes.admin_routes.load_data", return_value=self._load(self._games())),              patch("routes.admin_routes.get_active_season", return_value=2026),              patch("routes.admin_routes.get_most_recent_completed_week", return_value=3) as recent,              patch("routes.admin_routes.recap_service.extract_weekly_data", return_value=({"x": 1}, [])) as extract,              patch("routes.admin_routes.ai_service.get_recap_prompt", return_value="P"):
+            resp = client.post("/api/admin/recap/preview_prompt", json={"week": 5},
+                               headers={"Authorization": admin_token})
+        assert resp.status_code == 200
+        assert resp.json() == {"prompt": "P", "year": 2026, "week": 5}
+        recent.assert_not_called()
+        extract.assert_called_once_with(2026, 5)
+
+    def test_no_completed_week_returns_404(self, admin_token):
+        with patch("routes.admin_routes.load_data", return_value=self._load(pd.DataFrame())), \
+             patch("routes.admin_routes.get_active_season", return_value=2026), \
+             patch("routes.admin_routes.get_most_recent_completed_week", return_value=None):
+            resp = client.post("/api/admin/recap/preview_prompt", json={}, headers={"Authorization": admin_token})
+        assert resp.status_code == 404
+        assert resp.json() == {"error": "No completed games found for 2026."}

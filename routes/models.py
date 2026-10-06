@@ -97,8 +97,8 @@ class SeasonRequest(BaseModel):
 
 
 class RecapWeekRequest(BaseModel):
-    year: int
-    week: int
+    year: Optional[int] = None
+    week: Optional[int] = None
 
 
 class RecapYearRequest(BaseModel):

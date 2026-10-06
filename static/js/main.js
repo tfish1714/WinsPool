@@ -4,6 +4,7 @@ import { UiRenderer } from './ui_renderer.js';
 import { WebSocketService } from './websocket_service.js';
 import { initChat, loadHistory, appendMessage } from './chat.js';
 import { isPlayoffRaceVisible } from './nav_gating.js';
+import { maybeShowIosInstallHint } from './ios_push_hint.js';
 
 /**
  * WinsPool Main Application Module (Refactored)
@@ -55,6 +56,8 @@ class App {
         // Background sync: refresh profile + config in parallel, re-render nav only if something changed
         if (this.user.playerId) {
             this._backgroundSync();
+            // iOS Safari tabs lack PushManager; guide the user to Add to Home Screen
+            maybeShowIosInstallHint();
         }
     }
 
@@ -161,10 +164,16 @@ class App {
         const { playerId, nickName, playerName, role } = this.user;
         if (!playerId) return;
 
-        const initials = (nickName || playerName || '?').slice(0, 2).toUpperCase();
         const path = window.location.pathname;
 
-        // ── Primary links ──
+        const showPlayoffRace = this._updatePrimaryLinks(path, role);
+        this._updateMoreDropdown(role);
+        this._updateAvatar({ nickName, playerName, role });
+        this._updateDrawer({ role, nickName, playerName, showPlayoffRace });
+        this._updateBottomTabs(path);
+    }
+
+    _updatePrimaryLinks(path, role) {
         const primaryLinks = [
             { href: `/wins-pool/${new Date().getFullYear()}`, label: 'Standings', paths: ['/wins-pool'] },
             { href: '/schedule',      label: 'Schedule',     paths: ['/schedule'] },
@@ -194,8 +203,10 @@ class App {
                 return `<a href="${link.href}" class="${cls}"${id}>${dot}${link.label}</a>`;
             }).join('');
         }
+        return showPlayoffRace;
+    }
 
-        // ── More dropdown ──
+    _updateMoreDropdown(role) {
         const moreLinks = [
             { href: `/wins-pool/${new Date().getFullYear()}/weekbyweek`, label: 'Weekly Progress' },
             { href: '/headtohead', label: 'Head to Head' },
@@ -228,16 +239,19 @@ class App {
                     : `<a href="${link.href}" class="nav-drop-item">${link.label}</a>`
             ).join('');
         }
+    }
 
-        // ── Avatar ──
+    _updateAvatar({ nickName, playerName, role }) {
+        const initials = (nickName || playerName || '?').slice(0, 2).toUpperCase();
         const avatarInitials = document.getElementById('nav-avatar-initials');
         const apName = document.getElementById('nav-ap-name');
         const apRole = document.getElementById('nav-ap-role');
         if (avatarInitials) avatarInitials.textContent = initials;
         if (apName) apName.textContent = nickName || playerName || '';
         if (apRole) apRole.textContent = role === 'admin' ? 'Admin' : 'Player';
+    }
 
-        // ── Drawer admin link ──
+    _updateDrawer({ role, nickName, playerName, showPlayoffRace }) {
         const drawerAdmin = document.getElementById('admin-nav-link-drawer');
         if (drawerAdmin) {
             if (role === 'admin') drawerAdmin.classList.remove('admin-hidden');
@@ -274,8 +288,9 @@ class App {
                 });
             }
         }
+    }
 
-        // ── Bottom tab active state ──
+    _updateBottomTabs(path) {
         document.querySelectorAll('.btb-item').forEach(item => {
             const tabPath = item.dataset.path;
             if (tabPath && path.startsWith(tabPath)) {
@@ -492,7 +507,10 @@ class App {
     }
 
     async initPushNotifications() {
-        if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+            if (this.user.playerId) maybeShowIosInstallHint();
+            return;
+        }
         const vapidKey = document.querySelector('meta[name="vapid-public-key"]')?.content;
         if (!vapidKey) return;
 

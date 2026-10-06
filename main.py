@@ -4,6 +4,7 @@ main.py — Application entry point.
 All route logic lives in the routes/ package.
 This file only wires the app together.
 """
+import logging
 import os
 import time
 import pathlib
@@ -14,7 +15,7 @@ load_dotenv()
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.responses import RedirectResponse, FileResponse, JSONResponse
 
 from services.data_service import load_data, get_active_season, get_team_logo
 from services.utils import normalize_team_abbr
@@ -30,6 +31,18 @@ from routes.prediction_routes import router as prediction_router
 from routes.mock_draft_routes import router as mock_draft_router, page_router as mock_draft_page_router
 
 app = FastAPI(title="WinsPool")
+
+logger = logging.getLogger(__name__)
+
+
+# -- Unhandled exceptions ----------------------------------------------------
+# Routes do not wrap their bodies in a generic try/except returning a 500; any
+# exception that escapes lands here. HTTPException and validation errors keep
+# FastAPI's own handlers (more specific, so they take precedence).
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled error on %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(status_code=500, content={"error": "An internal server error occurred."})
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 from fastapi.middleware.cors import CORSMiddleware

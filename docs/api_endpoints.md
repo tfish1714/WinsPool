@@ -6,6 +6,10 @@ All JSON API endpoints are defined in `routes/api_routes.py` under the `/api` pr
 
 Authorization for admin endpoints is enforced via Role-Based Access Control (RBAC). The `playerId` parameter is validated against `db_service.get_player_role()` to confirm `admin` access.
 
+### Error responses
+
+Any unhandled server-side exception on any `/api` route returns HTTP 500 with the body `{ "error": "An internal server error occurred." }` (global handler in `main.py`; the traceback is logged server-side, never returned). Explicit errors (400/401/403/404/422/429) keep their own shapes as documented per endpoint. Tests asserting this 500 must build `TestClient(app, raise_server_exceptions=False)`.
+
 ---
 
 ## Public Data Endpoints
@@ -338,10 +342,12 @@ Generates a data-only prompt for AI weekly recap review. Includes system instruc
 
 **Request Body**:
 ```json
-{ "playerId": "string", "year": "int", "week": "int" }
+{ "playerId": "string", "year": "int (optional)", "week": "int (optional)" }
 ```
 
-**Response**: `{ success, prompt_data, system_instructions }`
+`year` and `week` are optional. A missing `year` defaults to the active season; a missing `week` defaults to the most recent completed week of that season.
+
+**Response**: `{ prompt, year, week }` (`year`/`week` echo the values actually used). Returns 404 `{ "error": "No completed games found for <year>." }` when no week can be determined.
 
 ---
 

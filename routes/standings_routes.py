@@ -1,5 +1,4 @@
 """routes/standings_routes.py — Standings, week-by-week, and playoff race routes."""
-import logging
 
 import pandas as pd
 from fastapi import APIRouter, Request
@@ -11,14 +10,12 @@ from services.data_service import (
     get_latest_week_for_year, get_active_season,
 )
 from services.constants import PLAYOFF_RACE_MIN_WEEK
-from services.response_helpers import server_error
 from services.utils import abbreviate_player_name as _first_name, filter_season
 import services.db_service as db
 from services.session_service import decode_current_token
 import services.analysis_service as analysis
 from services.live_standings_service import _live_games_by_team
 
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -65,64 +62,60 @@ async def wins_pool_redirect():
 
 @router.get("/wins-pool/{year}")
 async def wins_pool_by_year(request: Request, year: int):
-    try:
-        # Load ALL data once — data_service will cache this master set.
-        # Sub-calls for available_years etc. will now be instant memory hits.
-        all_st, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
+    # Load ALL data once — data_service will cache this master set.
+    # Sub-calls for available_years etc. will now be instant memory hits.
+    all_st, teams, all_games, players, draft_order, all_draft_results, rules = load_data()
 
-        # Filter for the specific year in-memory
-        standings = filter_season(all_st, year)
-        games = filter_season(all_games, year)
-        draft_results = filter_season(all_draft_results, year)
-        rules_year = filter_season(rules, year)
+    # Filter for the specific year in-memory
+    standings = filter_season(all_st, year)
+    games = filter_season(all_games, year)
+    draft_results = filter_season(all_draft_results, year)
+    rules_year = filter_season(rules, year)
 
-        # Both analysis calls below need the same per-team W-L-T table; scan
-        # the season's games once and share it (GitHub #95).
-        team_records = analysis.compute_team_records(games, year) if not games.empty else None
+    # Both analysis calls below need the same per-team W-L-T table; scan
+    # the season's games once and share it (GitHub #95).
+    team_records = analysis.compute_team_records(games, year) if not games.empty else None
 
-        picks_made, picks_expected = analysis.get_draft_progress(draft_results, rules_year)
-        draft_pending = picks_expected > 0 and picks_made < picks_expected
+    picks_made, picks_expected = analysis.get_draft_progress(draft_results, rules_year)
+    draft_pending = picks_expected > 0 and picks_made < picks_expected
 
-        sorted_df = (
-            pd.DataFrame() if draft_pending
-            else analysis.calculate_wins_pool_standings(standings, draft_results, players, year, games, team_records=team_records)
-        )
-        current_year = get_active_season(all_games, all_draft_results, rules)
-        available_years = get_available_years(all_draft_results, all_games, rules)
-        if year not in available_years:
-            available_years = sorted(available_years + [year])
+    sorted_df = (
+        pd.DataFrame() if draft_pending
+        else analysis.calculate_wins_pool_standings(standings, draft_results, players, year, games, team_records=team_records)
+    )
+    current_year = get_active_season(all_games, all_draft_results, rules)
+    available_years = get_available_years(all_draft_results, all_games, rules)
+    if year not in available_years:
+        available_years = sorted(available_years + [year])
 
-        schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year, team_records=team_records)
-        latest_week = get_latest_week_for_year(games, year)
-        unique_weeks = (
-            sorted(schedule_enriched["week"].dropna().astype(int).unique().tolist())
-            if not schedule_enriched.empty and "week" in schedule_enriched.columns else []
-        )
+    schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year, team_records=team_records)
+    latest_week = get_latest_week_for_year(games, year)
+    unique_weeks = (
+        sorted(schedule_enriched["week"].dropna().astype(int).unique().tolist())
+        if not schedule_enriched.empty and "week" in schedule_enriched.columns else []
+    )
 
-        h2h_df = analysis.player_winlossmatrix(schedule_enriched)
+    h2h_df = analysis.player_winlossmatrix(schedule_enriched)
 
-        recap = db.get_weekly_recap(year, latest_week)
-        live_team_abbrs = set(_live_games_by_team(games).keys())
+    recap = db.get_weekly_recap(year, latest_week)
+    live_team_abbrs = set(_live_games_by_team(games).keys())
 
-        return templates.TemplateResponse(request, "wins_pool.html", {
-            "data": sorted_df.to_dict(orient="records"),
-            "live_team_abbrs": live_team_abbrs,
-            "refreshTime": sorted_df["refreshTime"].iloc[0] if not sorted_df.empty and "refreshTime" in sorted_df.columns else "",
-            "current_year": current_year,
-            "year": year,
-            "available_years": available_years,
-            "recap": recap["summary"] if recap else None,
-            "h2h_html": (h2h_df.rename(columns=_first_name, index=_first_name)
-                         .to_html(classes="wp-data-table", border=0)) if not h2h_df.empty else "",
-            "current_week": latest_week,
-            "latest_week": latest_week,
-            "draft_pending": draft_pending,
-            "draft_picks_made": picks_made,
-            "draft_picks_expected": picks_expected,
-        })
-    except Exception as e:
-        logger.exception("Unhandled error rendering standings page")
-        return server_error()
+    return templates.TemplateResponse(request, "wins_pool.html", {
+        "data": sorted_df.to_dict(orient="records"),
+        "live_team_abbrs": live_team_abbrs,
+        "refreshTime": sorted_df["refreshTime"].iloc[0] if not sorted_df.empty and "refreshTime" in sorted_df.columns else "",
+        "current_year": current_year,
+        "year": year,
+        "available_years": available_years,
+        "recap": recap["summary"] if recap else None,
+        "h2h_html": (h2h_df.rename(columns=_first_name, index=_first_name)
+                     .to_html(classes="wp-data-table", border=0)) if not h2h_df.empty else "",
+        "current_week": latest_week,
+        "latest_week": latest_week,
+        "draft_pending": draft_pending,
+        "draft_picks_made": picks_made,
+        "draft_picks_expected": picks_expected,
+    })
 
 
 @router.get("/wins-pool/{year}/weekbyweek")

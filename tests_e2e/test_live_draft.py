@@ -464,10 +464,10 @@ def test_full_ten_player_live_draft(
             # assert that the rendered progress matches `pick`.
             wp_response = wp_page.goto(f"{live_server}/wins-pool/{SEASON}")
             # The load-bearing 500 detector for THIS route is the status code,
-            # not the body. wins_pool_by_year() wraps itself in a try/except
-            # that returns server_error() — a JSONResponse with status 500 and
-            # body {"error": "An internal error occurred."} — so Starlette's
-            # default "Internal Server Error" page is never rendered here and
+            # not the body. A failure in wins_pool_by_year() is turned into a
+            # 500 by the global exception handler in main.py (JSON body
+            # "An internal server error occurred."), so Starlette's default
+            # "Internal Server Error" page is never rendered here and
             # the string check below is a no-op for this route. (It is kept as
             # cheap defence in depth, and it *is* load-bearing for
             # /draft-results and /draft/{year} further down, which have no

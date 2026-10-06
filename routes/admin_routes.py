@@ -23,9 +23,8 @@ from routes.models import (
 from services.cache_service import get_game_predictions, get_prediction_features
 from services.data_service import (
     load_data, get_active_season, get_preseason_predictions,
-    get_consensus_projections,
+    get_consensus_projections, get_most_recent_completed_week,
 )
-from services.response_helpers import server_error
 from services.db_service import (
     add_draft_order, add_draft_rule, add_player, delete_draft_results_for_season,
     delete_season_data, get_collection_df, get_metadata, get_password_hash, save_weekly_recap,
@@ -51,52 +50,48 @@ _page_router = APIRouter()  # No prefix — for HTML page routes
 @router.post("/admin/new_season")
 async def create_new_season(body: NewSeasonRequest, _: dict = Depends(require_admin)):
     """Generate a randomized draft order for a new season."""
-    try:
-        season = body.season
-        player_ids = body.playerIds
+    season = body.season
+    player_ids = body.playerIds
 
-        if not player_ids:
-            return JSONResponse(status_code=400, content={"error": "At least one player must be selected."})
+    if not player_ids:
+        return JSONResponse(status_code=400, content={"error": "At least one player must be selected."})
 
-        order_df = get_collection_df("draft_order")
-        existing = order_df[order_df["season"] == season] if not order_df.empty and "season" in order_df.columns else []
-        if len(existing):
-            return JSONResponse(status_code=400, content={"error": f"Season {season} already exists."})
+    order_df = get_collection_df("draft_order")
+    existing = order_df[order_df["season"] == season] if not order_df.empty and "season" in order_df.columns else []
+    if len(existing):
+        return JSONResponse(status_code=400, content={"error": f"Season {season} already exists."})
 
-        random.shuffle(player_ids)
-        for idx, pid in enumerate(player_ids):
-            add_draft_order(season, idx + 1, int(pid))
+    random.shuffle(player_ids)
+    for idx, pid in enumerate(player_ids):
+        add_draft_order(season, idx + 1, int(pid))
 
-        rules_df = get_collection_df("draft_order_rules")
-        if not rules_df.empty and "season" in rules_df.columns:
-            prev_s = int(rules_df["season"].max())
-            for _, r in rules_df[rules_df["season"] == prev_s].iterrows():
-                if int(r["draftOrder"]) <= len(player_ids):
-                    add_draft_rule(season, int(r["draftOrder"]), int(r["pickOne"]), int(r["pickTwo"]), int(r["pickThree"]))
+    rules_df = get_collection_df("draft_order_rules")
+    if not rules_df.empty and "season" in rules_df.columns:
+        prev_s = int(rules_df["season"].max())
+        for _, r in rules_df[rules_df["season"] == prev_s].iterrows():
+            if int(r["draftOrder"]) <= len(player_ids):
+                add_draft_rule(season, int(r["draftOrder"]), int(r["pickOne"]), int(r["pickTwo"]), int(r["pickThree"]))
 
-        wipe_draft_cache()
+    wipe_draft_cache()
 
-        _, _, _, players_df, _, _, _ = load_data()
-        ordered_players = []
-        recipient_emails = []
-        for idx, pid in enumerate(player_ids):
-            player = players_df[players_df["playerId"].astype(int) == int(pid)]
-            if player.empty:
-                continue
-            p = player.iloc[0]
-            ordered_players.append({"position": idx + 1, "name": str(p.get("fullName", ""))})
-            email = str(p.get("email", "")) if pd.notna(p.get("email")) else ""
-            if email:
-                recipient_emails.append(email)
-        email_service.send_draft_order_email(recipient_emails, season, ordered_players)
+    _, _, _, players_df, _, _, _ = load_data()
+    ordered_players = []
+    recipient_emails = []
+    for idx, pid in enumerate(player_ids):
+        player = players_df[players_df["playerId"].astype(int) == int(pid)]
+        if player.empty:
+            continue
+        p = player.iloc[0]
+        ordered_players.append({"position": idx + 1, "name": str(p.get("fullName", ""))})
+        email = str(p.get("email", "")) if pd.notna(p.get("email")) else ""
+        if email:
+            recipient_emails.append(email)
+    email_service.send_draft_order_email(recipient_emails, season, ordered_players)
 
-        return JSONResponse(content={
-            "message": f"Draft order for {season} created successfully with {len(player_ids)} players. "
-                       f"Draft order notification sent to {len(recipient_emails)} players."
-        })
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+    return JSONResponse(content={
+        "message": f"Draft order for {season} created successfully with {len(player_ids)} players. "
+                   f"Draft order notification sent to {len(recipient_emails)} players."
+    })
 
 
 @router.get("/admin/players")
@@ -106,240 +101,196 @@ async def fetch_admin_players(include_test_accounts: bool = False, _: dict = Dep
     Test/QA fixture accounts (is_test_account=True) are excluded by default so
     they don't clutter the real season-creation player picker.
     """
-    try:
-        _, _, _, players_df, _, _, _ = load_data()
-        records = []
-        for r in players_df.to_dict(orient="records"):
-            is_test = bool(r.get("is_test_account", False)) if pd.notna(r.get("is_test_account")) else False
-            if is_test and not include_test_accounts:
-                continue
-            pw_hash = r.get("password_hash")
-            has_pw = bool(pw_hash) if pd.notna(pw_hash) else False
-            must_change = bool(r.get("must_change_password", False)) if pd.notna(r.get("must_change_password")) else False
-            last_login_val = r.get("last_login")
-            last_login = float(last_login_val) if pd.notna(last_login_val) and last_login_val is not None else None
-            last_active_val = r.get("last_active")
-            last_active = float(last_active_val) if last_active_val is not None and pd.notna(last_active_val) else None
+    _, _, _, players_df, _, _, _ = load_data()
+    records = []
+    for r in players_df.to_dict(orient="records"):
+        is_test = bool(r.get("is_test_account", False)) if pd.notna(r.get("is_test_account")) else False
+        if is_test and not include_test_accounts:
+            continue
+        pw_hash = r.get("password_hash")
+        has_pw = bool(pw_hash) if pd.notna(pw_hash) else False
+        must_change = bool(r.get("must_change_password", False)) if pd.notna(r.get("must_change_password")) else False
+        last_login_val = r.get("last_login")
+        last_login = float(last_login_val) if pd.notna(last_login_val) and last_login_val is not None else None
+        last_active_val = r.get("last_active")
+        last_active = float(last_active_val) if last_active_val is not None and pd.notna(last_active_val) else None
 
-            rec = {
-                "playerId": int(r["playerId"]),
-                "fullName": str(r.get("fullName", "")),
-                "nickName": str(r.get("nickName", "")),
-                "email": str(r.get("email", "")),
-                "cell": str(r.get("cell", "")) if pd.notna(r.get("cell")) else "",
-                "role": str(r.get("role", "user")),
-                "has_password": has_pw,
-                "must_change_password": must_change,
-                "last_login": last_login,
-                "last_active": last_active,
-                "is_test_account": is_test,
-            }
-            if "failed_setup_attempts" in r and pd.notna(r.get("failed_setup_attempts")):
-                rec["failed_setup_attempts"] = int(r["failed_setup_attempts"])
-            records.append(rec)
-        return JSONResponse(content=sanitize_state(records))
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+        rec = {
+            "playerId": int(r["playerId"]),
+            "fullName": str(r.get("fullName", "")),
+            "nickName": str(r.get("nickName", "")),
+            "email": str(r.get("email", "")),
+            "cell": str(r.get("cell", "")) if pd.notna(r.get("cell")) else "",
+            "role": str(r.get("role", "user")),
+            "has_password": has_pw,
+            "must_change_password": must_change,
+            "last_login": last_login,
+            "last_active": last_active,
+            "is_test_account": is_test,
+        }
+        if "failed_setup_attempts" in r and pd.notna(r.get("failed_setup_attempts")):
+            rec["failed_setup_attempts"] = int(r["failed_setup_attempts"])
+        records.append(rec)
+    return JSONResponse(content=sanitize_state(records))
 
 
 @router.get("/admin/members/{season}")
 async def get_season_members(season: int, _: dict = Depends(require_admin)):
     """Return all players enrolled in a season with draft order, paid status, password state, and last login."""
-    try:
-        _, _, _, players_df, _, _, _ = load_data()
-        order_df = get_collection_df("draft_order")
-        if order_df.empty or "season" not in order_df.columns:
-            return JSONResponse(content=[])
-        season_order = order_df[order_df["season"].astype(int) == season]
-        members = []
-        for _, row in season_order.iterrows():
-            pid = int(row["playerId"])
-            player = players_df[players_df["playerId"].astype(int) == pid]
-            if player.empty:
-                continue
-            p = player.iloc[0]
-            pw_hash = p.get("password_hash")
-            has_pw = bool(pw_hash) if pd.notna(pw_hash) else False
-            must_change = bool(p.get("must_change_password", False)) if pd.notna(p.get("must_change_password")) else False
-            last_login_val = p.get("last_login")
-            last_login = float(last_login_val) if pd.notna(last_login_val) and last_login_val is not None else None
-            last_active_val = p.get("last_active")
-            last_active = float(last_active_val) if last_active_val is not None and pd.notna(last_active_val) else None
+    _, _, _, players_df, _, _, _ = load_data()
+    order_df = get_collection_df("draft_order")
+    if order_df.empty or "season" not in order_df.columns:
+        return JSONResponse(content=[])
+    season_order = order_df[order_df["season"].astype(int) == season]
+    members = []
+    for _, row in season_order.iterrows():
+        pid = int(row["playerId"])
+        player = players_df[players_df["playerId"].astype(int) == pid]
+        if player.empty:
+            continue
+        p = player.iloc[0]
+        pw_hash = p.get("password_hash")
+        has_pw = bool(pw_hash) if pd.notna(pw_hash) else False
+        must_change = bool(p.get("must_change_password", False)) if pd.notna(p.get("must_change_password")) else False
+        last_login_val = p.get("last_login")
+        last_login = float(last_login_val) if pd.notna(last_login_val) and last_login_val is not None else None
+        last_active_val = p.get("last_active")
+        last_active = float(last_active_val) if last_active_val is not None and pd.notna(last_active_val) else None
 
-            members.append({
-                "playerId": pid,
-                "fullName": str(p.get("fullName", "")),
-                "email": str(p.get("email", "")),
-                "role": str(p.get("role", "member")),
-                "draftOrder": int(row.get("draftOrder", 0)),
-                "paid": bool(row.get("paid", False)),
-                "has_password": has_pw,
-                "must_change_password": must_change,
-                "last_login": last_login,
-                "last_active": last_active,
-            })
-        members.sort(key=lambda x: x["draftOrder"])
-        return JSONResponse(content={"members": members})
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+        members.append({
+            "playerId": pid,
+            "fullName": str(p.get("fullName", "")),
+            "email": str(p.get("email", "")),
+            "role": str(p.get("role", "member")),
+            "draftOrder": int(row.get("draftOrder", 0)),
+            "paid": bool(row.get("paid", False)),
+            "has_password": has_pw,
+            "must_change_password": must_change,
+            "last_login": last_login,
+            "last_active": last_active,
+        })
+    members.sort(key=lambda x: x["draftOrder"])
+    return JSONResponse(content={"members": members})
 
 
 @router.post("/admin/members/paid")
 async def update_member_paid(body: MemberPaidRequest, _: dict = Depends(require_admin)):
     """Toggle paid status for a player in a given season."""
-    try:
-        ok = set_member_paid(body.season, body.targetPlayerId, body.paid)
-        return JSONResponse(content={"ok": ok})
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+    ok = set_member_paid(body.season, body.targetPlayerId, body.paid)
+    return JSONResponse(content={"ok": ok})
 
 
 @router.get("/admin/seasons")
 async def fetch_admin_seasons(_: dict = Depends(require_admin)):
     """Retrieve all years that have at least some draft data."""
+    _, _, games_df, _, draft_order_df, draft_results_df, rules_df = load_data()
+    seasons = set()
+    if not draft_order_df.empty and "season" in draft_order_df.columns:
+        seasons.update(draft_order_df["season"].unique().tolist())
+    if not draft_results_df.empty and "season" in draft_results_df.columns:
+        seasons.update(draft_results_df["season"].unique().tolist())
     try:
-        _, _, games_df, _, draft_order_df, draft_results_df, rules_df = load_data()
-        seasons = set()
-        if not draft_order_df.empty and "season" in draft_order_df.columns:
-            seasons.update(draft_order_df["season"].unique().tolist())
-        if not draft_results_df.empty and "season" in draft_results_df.columns:
-            seasons.update(draft_results_df["season"].unique().tolist())
-        try:
-            active = int(get_active_season(games_df, draft_results_df, rules_df))
-        except Exception:
-            logger.warning("fetch_admin_seasons: active season lookup failed", exc_info=True)
-            active = None
-        return JSONResponse(content={
-            "seasons": sorted([int(s) for s in seasons], reverse=True),
-            "active_season": active,
-        })
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+        active = int(get_active_season(games_df, draft_results_df, rules_df))
+    except Exception:
+        logger.warning("fetch_admin_seasons: active season lookup failed", exc_info=True)
+        active = None
+    return JSONResponse(content={
+        "seasons": sorted([int(s) for s in seasons], reverse=True),
+        "active_season": active,
+    })
 
 
 @router.post("/admin/preview_draft_order")
 async def preview_draft_order(body: PreviewDraftOrderRequest, _: dict = Depends(require_admin)):
     """Randomize selected players and return the order for review without saving."""
-    try:
-        player_ids = body.playerIds
-        if not player_ids:
-            return JSONResponse(status_code=400, content={"error": "No players selected."})
+    player_ids = body.playerIds
+    if not player_ids:
+        return JSONResponse(status_code=400, content={"error": "No players selected."})
 
-        random.shuffle(player_ids)
-        _, _, _, players_df, _, _, _ = load_data()
-        preview = []
-        for idx, pid in enumerate(player_ids):
-            p_row = players_df[players_df["playerId"] == int(pid)]
-            p_name = p_row["fullName"].iloc[0] if not p_row.empty else f"Unknown ({pid})"
-            preview.append({"order": idx + 1, "playerName": p_name, "playerId": int(pid)})
-        return JSONResponse(content={"preview": preview})
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+    random.shuffle(player_ids)
+    _, _, _, players_df, _, _, _ = load_data()
+    preview = []
+    for idx, pid in enumerate(player_ids):
+        p_row = players_df[players_df["playerId"] == int(pid)]
+        p_name = p_row["fullName"].iloc[0] if not p_row.empty else f"Unknown ({pid})"
+        preview.append({"order": idx + 1, "playerName": p_name, "playerId": int(pid)})
+    return JSONResponse(content={"preview": preview})
 
 
 @router.post("/admin/create_player")
 async def create_player(body: CreatePlayerRequest, _: dict = Depends(require_admin)):
     """Admin-only: Create a new player."""
-    try:
-        if not body.fullName or not body.nickName or not body.email:
-            return JSONResponse(status_code=400, content={"error": "Name, Nickname, and Email are required."})
-        new_id = add_player(body.fullName, body.nickName, body.email, phone=body.phone)
-        return JSONResponse(content={"message": f"Player created with ID {new_id}", "playerId": new_id})
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+    if not body.fullName or not body.nickName or not body.email:
+        return JSONResponse(status_code=400, content={"error": "Name, Nickname, and Email are required."})
+    new_id = add_player(body.fullName, body.nickName, body.email, phone=body.phone)
+    return JSONResponse(content={"message": f"Player created with ID {new_id}", "playerId": new_id})
 
 
 @router.post("/admin/update_player")
 async def admin_update_player(body: UpdatePlayerRequest, _: dict = Depends(require_admin)):
     """Admin-only: Update an existing player's profile fields."""
-    try:
-        if not body.targetPlayerId:
-            return JSONResponse(status_code=400, content={"error": "targetPlayerId is required."})
+    if not body.targetPlayerId:
+        return JSONResponse(status_code=400, content={"error": "targetPlayerId is required."})
 
-        allowed_fields = {"fullName", "nickName", "email", "cell"}
-        updates = {k: v for k, v in body.fields.items() if k in allowed_fields}
-        if not updates:
-            return JSONResponse(status_code=400, content={"error": "No valid fields to update."})
+    allowed_fields = {"fullName", "nickName", "email", "cell"}
+    updates = {k: v for k, v in body.fields.items() if k in allowed_fields}
+    if not updates:
+        return JSONResponse(status_code=400, content={"error": "No valid fields to update."})
 
-        if "email" in updates:
-            updates["email"] = updates["email"].strip().lower()
+    if "email" in updates:
+        updates["email"] = updates["email"].strip().lower()
 
-        update_player_profile(str(body.targetPlayerId), updates)
-        return JSONResponse(content={"message": "Player updated successfully."})
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+    update_player_profile(str(body.targetPlayerId), updates)
+    return JSONResponse(content={"message": "Player updated successfully."})
 
 
 @router.post("/admin/reset_password")
 async def admin_reset_password(body: TargetPlayerRequest, _: dict = Depends(require_admin)):
     """Admin-only: Clear a player's password hash, forcing them to set a new one."""
-    try:
-        if not body.targetPlayerId:
-            return JSONResponse(status_code=400, content={"error": "targetPlayerId is required."})
-        update_player_profile(str(body.targetPlayerId), {
-            "password_hash": None,
-            "failed_setup_attempts": 0,
-            "lockout_until": None,
-            "mfa_secret": None,
-            "mfa_enabled": False,
-        }, bump_token_version=True)  # revoke the target's existing sessions
-        return JSONResponse(content={"message": "Password reset. Player will be prompted to set a new password on next login."})
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+    if not body.targetPlayerId:
+        return JSONResponse(status_code=400, content={"error": "targetPlayerId is required."})
+    update_player_profile(str(body.targetPlayerId), {
+        "password_hash": None,
+        "failed_setup_attempts": 0,
+        "lockout_until": None,
+        "mfa_secret": None,
+        "mfa_enabled": False,
+    }, bump_token_version=True)  # revoke the target's existing sessions
+    return JSONResponse(content={"message": "Password reset. Player will be prompted to set a new password on next login."})
 
 
 @router.post("/admin/set_temp_password")
 async def admin_set_temp_password(body: SetTempPasswordRequest, _: dict = Depends(require_admin)):
     """Admin-only: Set a temporary password; player must change it on next login."""
-    try:
-        if not body.targetPlayerId or not body.tempPassword:
-            return JSONResponse(status_code=400, content={"error": "targetPlayerId and tempPassword are required."})
+    if not body.targetPlayerId or not body.tempPassword:
+        return JSONResponse(status_code=400, content={"error": "targetPlayerId and tempPassword are required."})
 
-        if not re.match(PASSWORD_COMPLEXITY_RE, body.tempPassword):
-            return JSONResponse(status_code=400, content={
-                "error": "Temporary password must be 12+ characters with uppercase, lowercase, number, and symbol."
-            })
+    if not re.match(PASSWORD_COMPLEXITY_RE, body.tempPassword):
+        return JSONResponse(status_code=400, content={
+            "error": "Temporary password must be 12+ characters with uppercase, lowercase, number, and symbol."
+        })
 
-        hashed = get_password_hash(body.tempPassword)
-        update_player_credentials(str(body.targetPlayerId), hashed)
-        update_player_profile(str(body.targetPlayerId), {"must_change_password": True})
-        return JSONResponse(content={"message": "Temporary password set. Player will be required to change it on next login."})
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+    hashed = get_password_hash(body.tempPassword)
+    update_player_credentials(str(body.targetPlayerId), hashed)
+    update_player_profile(str(body.targetPlayerId), {"must_change_password": True})
+    return JSONResponse(content={"message": "Temporary password set. Player will be required to change it on next login."})
 
 
 @router.post("/admin/delete_season")
 async def delete_season(body: SeasonRequest, _: dict = Depends(require_admin)):
     """Wipe all draft data for a specific season, including chat history and the pick timer."""
-    try:
-        delete_season_data(body.season)
-        chat_service.clear_chat_history(body.season)
-        wipe_draft_cache()
-        return JSONResponse(content={"message": f"Season {body.season} data wiped successfully."})
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+    delete_season_data(body.season)
+    chat_service.clear_chat_history(body.season)
+    wipe_draft_cache()
+    return JSONResponse(content={"message": f"Season {body.season} data wiped successfully."})
 
 
 @router.post("/admin/reset_draft")
 async def reset_draft(body: SeasonRequest, _: dict = Depends(require_admin)):
     """Admin: Delete all draft results for a given season (sandbox reset)."""
-    try:
-        delete_draft_results_for_season(body.season)
-        wipe_draft_cache()
-        return JSONResponse(content={"message": f"Draft Results for {body.season} securely wiped! Mock draft reset successful."})
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+    delete_draft_results_for_season(body.season)
+    wipe_draft_cache()
+    return JSONResponse(content={"message": f"Draft Results for {body.season} securely wiped! Mock draft reset successful."})
 
 
 @router.post("/admin/draft_snapshot/sync")
@@ -349,12 +300,8 @@ async def sync_draft_snapshot(body: SeasonRequest, _: dict = Depends(require_adm
     scripts/refresh_preseason.py run. Locks automatically if draft_results
     already has rows for this season -- identical rule to the scheduled path,
     since both call services.db_service.sync_draft_snapshot_for_season()."""
-    try:
-        result = sync_draft_snapshot_for_season(body.season)
-        return JSONResponse(content=result)
-    except Exception:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+    result = sync_draft_snapshot_for_season(body.season)
+    return JSONResponse(content=result)
 
 
 @router.get("/admin/draft_snapshot/{season}")
@@ -366,93 +313,82 @@ async def get_draft_snapshot_status(
     team count, whether every team is locked, and the most recent
     generated_at, so an admin can tell whether a sync is needed before
     triggering POST .../sync."""
-    try:
-        df = get_collection_df("draft_snapshot_predictions", filters=[("season", "==", season)])
-        if df.empty:
-            return JSONResponse(content={"season": season, "team_count": 0,
-                                          "locked": False, "generated_at": None})
-        return JSONResponse(content={
-            "season": season,
-            "team_count": int(len(df)),
-            "locked": bool(df["locked"].all()) if "locked" in df.columns else False,
-            "generated_at": float(df["generated_at"].max()) if "generated_at" in df.columns else None,
-        })
-    except Exception:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+    df = get_collection_df("draft_snapshot_predictions", filters=[("season", "==", season)])
+    if df.empty:
+        return JSONResponse(content={"season": season, "team_count": 0,
+                                      "locked": False, "generated_at": None})
+    return JSONResponse(content={
+        "season": season,
+        "team_count": int(len(df)),
+        "locked": bool(df["locked"].all()) if "locked" in df.columns else False,
+        "generated_at": float(df["generated_at"].max()) if "generated_at" in df.columns else None,
+    })
 
 
 @router.post("/admin/recap/preview_prompt")
 async def preview_recap_prompt(body: RecapWeekRequest, _: dict = Depends(require_admin)):
     """Admin: Generate the data prompt for an AI weekly recap."""
-    try:
-        data_summary, _ = recap_service.extract_weekly_data(body.year, body.week)
-        if not data_summary:
-            return JSONResponse(status_code=404, content={"error": f"No game results found for {body.year} Week {body.week}."})
-        return JSONResponse(content={"prompt": ai_service.get_recap_prompt(data_summary)})
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+    year, week = body.year, body.week
+    if year is None or week is None:
+        _, _, games, _, _, draft_results, rules = load_data()
+        if year is None:
+            year = int(get_active_season(games, draft_results, rules))
+        if week is None:
+            week = get_most_recent_completed_week(games, year)
+        if week is None:
+            return JSONResponse(status_code=404, content={"error": f"No completed games found for {year}."})
+    data_summary, _ = recap_service.extract_weekly_data(year, week)
+    if not data_summary:
+        return JSONResponse(status_code=404, content={"error": f"No game results found for {year} Week {week}."})
+    return JSONResponse(content={"prompt": ai_service.get_recap_prompt(data_summary), "year": year, "week": int(week)})
 
 
 @router.post("/admin/recap/preview_draft_prompt")
 async def preview_draft_recap_prompt(body: RecapYearRequest, _: dict = Depends(require_admin)):
     """Admin: Generate the data prompt for an AI draft recap."""
-    try:
-        data_summary, _ = recap_service.extract_draft_data(body.year)
-        if not data_summary:
-            return JSONResponse(status_code=404, content={"error": f"No draft data found for {body.year}."})
-        return JSONResponse(content={"prompt": ai_service.get_draft_recap_prompt(data_summary)})
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+    data_summary, _ = recap_service.extract_draft_data(body.year)
+    if not data_summary:
+        return JSONResponse(status_code=404, content={"error": f"No draft data found for {body.year}."})
+    return JSONResponse(content={"prompt": ai_service.get_draft_recap_prompt(data_summary)})
 
 
 @router.post("/admin/recap/generate")
 async def generate_admin_recap(body: GenerateRecapRequest, _: dict = Depends(require_admin)):
     """Admin: Send the prompt to AI and return the generated summary."""
-    try:
-        if not body.prompt_data:
-            return JSONResponse(status_code=400, content={"error": "Prompt data is required."})
-        summary = ai_service.generate_generic_content(body.prompt_data)
-        return JSONResponse(content={"summary": summary})
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+    if not body.prompt_data:
+        return JSONResponse(status_code=400, content={"error": "Prompt data is required."})
+    summary = ai_service.generate_generic_content(body.prompt_data)
+    return JSONResponse(content={"summary": summary})
 
 
 @router.post("/admin/recap/save_and_broadcast")
 async def save_and_broadcast_recap(body: SaveBroadcastRecapRequest, _: dict = Depends(require_admin)):
     """Admin: Save a recap to the DB and email it to all enrolled players."""
-    try:
-        if not body.summary:
-            return JSONResponse(status_code=400, content={"error": "Summary text is required."})
+    if not body.summary:
+        return JSONResponse(status_code=400, content={"error": "Summary text is required."})
 
-        save_weekly_recap(body.year, body.week, body.summary)
+    save_weekly_recap(body.year, body.week, body.summary)
 
-        _, emails = recap_service.extract_weekly_data(body.year, body.week)
-        if emails:
-            html_body = f"""
-            <html>
-                <body style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px;">
-                    <div style="background-color: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1);">
-                        <h2 style="color: #333;">🏈 Weekly Recap: NFL Week {body.week}</h2>
-                        <div style="white-space: pre-wrap; color: #555; line-height: 1.6;">
-                            {html_module.escape(body.summary)}
-                        </div>
-                        <p style="margin-top: 20px; font-size: 0.8em; color: #888;">
-                            This recap was generated by Gemini AI for the Wins Pool.
-                        </p>
+    _, emails = recap_service.extract_weekly_data(body.year, body.week)
+    if emails:
+        html_body = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px;">
+                <div style="background-color: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1);">
+                    <h2 style="color: #333;">🏈 Weekly Recap: NFL Week {body.week}</h2>
+                    <div style="white-space: pre-wrap; color: #555; line-height: 1.6;">
+                        {html_module.escape(body.summary)}
                     </div>
-                </body>
-            </html>
-            """
-            email_service.send_weekly_recap_email(emails, f"Week {body.week} Recap - Wins Pool", html_body)
+                    <p style="margin-top: 20px; font-size: 0.8em; color: #888;">
+                        This recap was generated by Gemini AI for the Wins Pool.
+                    </p>
+                </div>
+            </body>
+        </html>
+        """
+        email_service.send_weekly_recap_email(emails, f"Week {body.week} Recap - Wins Pool", html_body)
 
-        return JSONResponse(content={"message": f"Week {body.week} recap saved and broadcast to {len(emails)} players."})
-    except Exception as e:
-        logger.exception("Unhandled error in admin endpoint")
-        return server_error()
+    return JSONResponse(content={"message": f"Week {body.week} recap saved and broadcast to {len(emails)} players."})
 
 
 _broadcast_limiter = get_limiter("admin-push-broadcast", 1, 60.0)
@@ -467,59 +403,51 @@ async def broadcast_push(body: PushBroadcastRequest, admin: dict = Depends(requi
     has no lock, so it is checked here on the event loop; only the blocking
     push loop goes to the threadpool.
     """
-    try:
-        import services.push_service as push_service
-        if not push_service.is_configured():
-            return JSONResponse(status_code=503, content={"error": "Push notifications are not configured."})
-        allowed, retry_after = _broadcast_limiter.check(str(admin.get("sub")))
-        if not allowed:
-            return JSONResponse(
-                status_code=429,
-                content={"error": f"A broadcast was sent recently. Try again in {retry_after} seconds."},
-                headers={"Retry-After": str(retry_after)},
-            )
-        from starlette.concurrency import run_in_threadpool
-        result = await run_in_threadpool(push_service.broadcast_push_notification, body.title, body.body)
-        logger.info("admin push broadcast by player %s: %s", admin.get("sub"), result)
-        return JSONResponse(content=result)
-    except Exception:
-        logger.exception("Unhandled error in broadcast_push")
-        return server_error()
+    import services.push_service as push_service
+    if not push_service.is_configured():
+        return JSONResponse(status_code=503, content={"error": "Push notifications are not configured."})
+    allowed, retry_after = _broadcast_limiter.check(str(admin.get("sub")))
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"error": f"A broadcast was sent recently. Try again in {retry_after} seconds."},
+            headers={"Retry-After": str(retry_after)},
+        )
+    from starlette.concurrency import run_in_threadpool
+    result = await run_in_threadpool(push_service.broadcast_push_notification, body.title, body.body)
+    logger.info("admin push broadcast by player %s: %s", admin.get("sub"), result)
+    return JSONResponse(content=result)
 
 
 @router.get("/admin/predictions/vs-vegas")
 async def get_predictions_vs_vegas(season: int, week: int, _: dict = Depends(require_admin)):
     """All predictions for a given week sorted by |edge vs Vegas| (admin only)."""
-    try:
-        from services.cache_service import get_game_predictions
-        preds = get_game_predictions(season)
-        week_prefix = f"W{week:02d}_"
-        games = []
-        for key, pred in preds.items():
-            if not key.startswith(week_prefix):
-                continue
-            parts = key.split("_")
-            ht = parts[1] if len(parts) > 1 else "?"
-            at = parts[2] if len(parts) > 2 else "?"
-            ev = pred.get("edge_vs_vegas")
-            ex = pred.get("explanation") or {}
-            games.append({
-                "key":           key,
-                "home_team":     ht,
-                "away_team":     at,
-                "pred_winner":   pred.get("pred_winner"),
-                "pred_su_conf":  pred.get("pred_su_conf"),
-                "home_win_prob": pred.get("home_win_prob"),
-                "model_spread":  pred.get("model_spread"),
-                "vegas_line":    ex.get("vegas_line"),
-                "edge_vs_vegas": ev,
-                "pred_ats_pick": pred.get("pred_ats_pick"),
-            })
-        games.sort(key=lambda g: abs(g.get("edge_vs_vegas") or 0), reverse=True)
-        return JSONResponse(content={"season": season, "week": week, "games": games})
-    except Exception:
-        logger.exception("Unhandled error in get_predictions_vs_vegas")
-        return server_error()
+    from services.cache_service import get_game_predictions
+    preds = get_game_predictions(season)
+    week_prefix = f"W{week:02d}_"
+    games = []
+    for key, pred in preds.items():
+        if not key.startswith(week_prefix):
+            continue
+        parts = key.split("_")
+        ht = parts[1] if len(parts) > 1 else "?"
+        at = parts[2] if len(parts) > 2 else "?"
+        ev = pred.get("edge_vs_vegas")
+        ex = pred.get("explanation") or {}
+        games.append({
+            "key":           key,
+            "home_team":     ht,
+            "away_team":     at,
+            "pred_winner":   pred.get("pred_winner"),
+            "pred_su_conf":  pred.get("pred_su_conf"),
+            "home_win_prob": pred.get("home_win_prob"),
+            "model_spread":  pred.get("model_spread"),
+            "vegas_line":    ex.get("vegas_line"),
+            "edge_vs_vegas": ev,
+            "pred_ats_pick": pred.get("pred_ats_pick"),
+        })
+    games.sort(key=lambda g: abs(g.get("edge_vs_vegas") or 0), reverse=True)
+    return JSONResponse(content={"season": season, "week": week, "games": games})
 
 
 @router.get("/admin/predictions/games")
@@ -529,112 +457,104 @@ async def get_predictions_games(season: int, week: int, _: dict = Depends(requir
     Returns all predictions for the given season/week with actual_winner
     from nfl_games. actual_winner and is_correct are null for future games.
     """
+    from services.utils import normalize_team_abbr
+    from services.betting_screener_service import grade_ats_pick
+    from services.utils import edge_vs_vegas as _edge_vs_vegas
+
+    preds = get_game_predictions(season)
+
+    # Build actual-winner lookup from nfl_games
+    from services.prediction_service import build_result_lookup
+    _, _, all_games, _, _, _, _ = load_data()
+    result_lookup = build_result_lookup(all_games, season)
+
+    week_prefix = f"W{week:02d}_"
+    games = []
+    for key, pred in preds.items():
+        if not key.startswith(week_prefix):
+            continue
+        parts = key.split("_")
+        ht = parts[1] if len(parts) > 1 else "?"
+        at = parts[2] if len(parts) > 2 else "?"
+        ex = pred.get("explanation") or {}
+        result_entry  = result_lookup.get(key, {})
+        actual_winner = result_entry.get("winner") if isinstance(result_entry, dict) else result_entry
+        pw = pred.get("pred_winner")
+        is_correct = None
+        if actual_winner is not None and pw is not None:
+            is_correct = (normalize_team_abbr(str(pw)) == actual_winner)
+
+        # Vegas line: prefer stored explanation value, fall back to live schedule data
+        vegas_line = ex.get("vegas_line")
+        if vegas_line is None and isinstance(result_entry, dict):
+            vegas_line = result_entry.get("spread_line")
+        model_spread = pred.get("model_spread")
+        edge_vs_vegas = pred.get("edge_vs_vegas")
+        if edge_vs_vegas is None:
+            edge_vs_vegas = _edge_vs_vegas(model_spread, vegas_line)
+
+        # ATS grading: did pred_ats_pick's team actually cover the Vegas line?
+        # grade_ats_pick() is the shared grader (vegas_line convention matches
+        # model_spread: positive = home favored). A push, or a pick that
+        # matches neither team, stays None here so this table's accuracy
+        # counters only ever see graded picks; the per-game explain modal
+        # (/api/predictions/explain) is where a push is surfaced.
+        pred_ats_pick = pred.get("pred_ats_pick")
+        home_score = result_entry.get("home_score") if isinstance(result_entry, dict) else None
+        away_score = result_entry.get("away_score") if isinstance(result_entry, dict) else None
+        ats_grade = grade_ats_pick(pred_ats_pick, ht, at, home_score, away_score, vegas_line)
+        is_correct_ats = (ats_grade == "win") if ats_grade in ("win", "loss") else None
+
+        games.append({
+            "key":            key,
+            "away_team":      at,
+            "home_team":      ht,
+            "pred_winner":    pw,
+            "pred_su_conf":   pred.get("pred_su_conf"),
+            "model_spread":   model_spread,
+            "vegas_line":     vegas_line,
+            "edge_vs_vegas":  edge_vs_vegas,
+            "pred_ats_pick":  pred_ats_pick,
+            "actual_winner":  actual_winner,
+            "home_score":     home_score,
+            "away_score":     away_score,
+            "is_correct":     is_correct,
+            "is_correct_ats": is_correct_ats,
+        })
+
+    # Order by the actual schedule (gameday, then kickoff time) so the list
+    # reads like the week's slate. Games with no schedule row sort last.
+    kickoff_order = {}
     try:
-        from services.utils import normalize_team_abbr
-        from services.betting_screener_service import grade_ats_pick
-        from services.utils import edge_vs_vegas as _edge_vs_vegas
-
-        preds = get_game_predictions(season)
-
-        # Build actual-winner lookup from nfl_games
-        from services.prediction_service import build_result_lookup
-        _, _, all_games, _, _, _, _ = load_data()
-        result_lookup = build_result_lookup(all_games, season)
-
-        week_prefix = f"W{week:02d}_"
-        games = []
-        for key, pred in preds.items():
-            if not key.startswith(week_prefix):
-                continue
-            parts = key.split("_")
-            ht = parts[1] if len(parts) > 1 else "?"
-            at = parts[2] if len(parts) > 2 else "?"
-            ex = pred.get("explanation") or {}
-            result_entry  = result_lookup.get(key, {})
-            actual_winner = result_entry.get("winner") if isinstance(result_entry, dict) else result_entry
-            pw = pred.get("pred_winner")
-            is_correct = None
-            if actual_winner is not None and pw is not None:
-                is_correct = (normalize_team_abbr(str(pw)) == actual_winner)
-
-            # Vegas line: prefer stored explanation value, fall back to live schedule data
-            vegas_line = ex.get("vegas_line")
-            if vegas_line is None and isinstance(result_entry, dict):
-                vegas_line = result_entry.get("spread_line")
-            model_spread = pred.get("model_spread")
-            edge_vs_vegas = pred.get("edge_vs_vegas")
-            if edge_vs_vegas is None:
-                edge_vs_vegas = _edge_vs_vegas(model_spread, vegas_line)
-
-            # ATS grading: did pred_ats_pick's team actually cover the Vegas line?
-            # grade_ats_pick() is the shared grader (vegas_line convention matches
-            # model_spread: positive = home favored). A push, or a pick that
-            # matches neither team, stays None here so this table's accuracy
-            # counters only ever see graded picks; the per-game explain modal
-            # (/api/predictions/explain) is where a push is surfaced.
-            pred_ats_pick = pred.get("pred_ats_pick")
-            home_score = result_entry.get("home_score") if isinstance(result_entry, dict) else None
-            away_score = result_entry.get("away_score") if isinstance(result_entry, dict) else None
-            ats_grade = grade_ats_pick(pred_ats_pick, ht, at, home_score, away_score, vegas_line)
-            is_correct_ats = (ats_grade == "win") if ats_grade in ("win", "loss") else None
-
-            games.append({
-                "key":            key,
-                "away_team":      at,
-                "home_team":      ht,
-                "pred_winner":    pw,
-                "pred_su_conf":   pred.get("pred_su_conf"),
-                "model_spread":   model_spread,
-                "vegas_line":     vegas_line,
-                "edge_vs_vegas":  edge_vs_vegas,
-                "pred_ats_pick":  pred_ats_pick,
-                "actual_winner":  actual_winner,
-                "home_score":     home_score,
-                "away_score":     away_score,
-                "is_correct":     is_correct,
-                "is_correct_ats": is_correct_ats,
-            })
-
-        # Order by the actual schedule (gameday, then kickoff time) so the list
-        # reads like the week's slate. Games with no schedule row sort last.
-        kickoff_order = {}
-        try:
-            if all_games is not None and not all_games.empty and "gameday" in all_games.columns:
-                wk = all_games[(all_games["season"] == season) & (all_games["week"] == week)]
-                times = wk["gametime"] if "gametime" in wk.columns else [None] * len(wk)
-                for home, away, gd, gt in zip(wk["home_team"], wk["away_team"], wk["gameday"], times):
-                    k = f"W{week:02d}_{normalize_team_abbr(str(home))}_{normalize_team_abbr(str(away))}"
-                    gd = "" if pd.isna(gd) else str(gd)[:10]
-                    gt = "" if gt is None or pd.isna(gt) else str(gt)
-                    kickoff_order[k] = (gd, gt)
-        except Exception:
-            logger.warning("Could not build kickoff order for predictions/games", exc_info=True)
-
-        def _sort_key(g):
-            gd, gt = kickoff_order.get(g["key"], ("9999-99-99", ""))
-            return (gd or "9999-99-99", gt, g["key"])
-
-        for g in games:
-            gd, gt = kickoff_order.get(g["key"], (None, None))
-            g["gameday"] = gd or None
-            g["gametime"] = gt or None
-
-        games.sort(key=_sort_key)
-        return JSONResponse(content={"season": season, "week": week, "games": games})
+        if all_games is not None and not all_games.empty and "gameday" in all_games.columns:
+            wk = all_games[(all_games["season"] == season) & (all_games["week"] == week)]
+            times = wk["gametime"] if "gametime" in wk.columns else [None] * len(wk)
+            for home, away, gd, gt in zip(wk["home_team"], wk["away_team"], wk["gameday"], times):
+                k = f"W{week:02d}_{normalize_team_abbr(str(home))}_{normalize_team_abbr(str(away))}"
+                gd = "" if pd.isna(gd) else str(gd)[:10]
+                gt = "" if gt is None or pd.isna(gt) else str(gt)
+                kickoff_order[k] = (gd, gt)
     except Exception:
-        logger.exception("Unhandled error in get_predictions_games")
-        return server_error()
+        logger.warning("Could not build kickoff order for predictions/games", exc_info=True)
+
+    def _sort_key(g):
+        gd, gt = kickoff_order.get(g["key"], ("9999-99-99", ""))
+        return (gd or "9999-99-99", gt, g["key"])
+
+    for g in games:
+        gd, gt = kickoff_order.get(g["key"], (None, None))
+        g["gameday"] = gd or None
+        g["gametime"] = gt or None
+
+    games.sort(key=_sort_key)
+    return JSONResponse(content={"season": season, "week": week, "games": games})
 
 
 @router.get("/admin/sync_status")
 async def get_sync_status(_: dict = Depends(require_admin)):
     """Admin: Health check on all calculated data and sync pipelines."""
-    try:
-        all_st, _, all_games, _, _, _, _ = load_data()
-        active_season = get_active_season(all_games)
-    except Exception:
-        logger.exception("sync_status: failed to load data")
-        return server_error()
+    all_st, _, all_games, _, _, _, _ = load_data()
+    active_season = get_active_season(all_games)
 
     result: dict = {}
 
@@ -770,43 +690,39 @@ async def get_sync_status(_: dict = Depends(require_admin)):
 @router.get("/admin/forecast")
 async def get_forecast(_: dict = Depends(require_admin)):
     """Admin: 2026 season forecast — team win projections and per-game prediction metadata."""
+    preds_2026 = get_game_predictions(2026)
+    preseason = get_preseason_predictions(2026)
+
+    team_projections = sorted(
+        [
+            {
+                "team": team,
+                "projected_wins": float(v["projected_wins"]),
+                "std_dev": float(v["std_dev"]),
+            }
+            for team, v in preseason.items()
+        ],
+        key=lambda x: x["projected_wins"],
+        reverse=True,
+    )
+
+    weeks = sorted({int(k[1:3]) for k in preds_2026 if len(k) >= 3 and k[1:3].isdigit()})
+
+    model_version = None
     try:
-        preds_2026 = get_game_predictions(2026)
-        preseason = get_preseason_predictions(2026)
+        feat_doc = get_prediction_features(2026)
+        if feat_doc:
+            model_version = feat_doc.get("ensemble_version")
+    except Exception as _e:
+        logger.warning("forecast: could not load prediction_features: %s", _e)
 
-        team_projections = sorted(
-            [
-                {
-                    "team": team,
-                    "projected_wins": float(v["projected_wins"]),
-                    "std_dev": float(v["std_dev"]),
-                }
-                for team, v in preseason.items()
-            ],
-            key=lambda x: x["projected_wins"],
-            reverse=True,
-        )
-
-        weeks = sorted({int(k[1:3]) for k in preds_2026 if len(k) >= 3 and k[1:3].isdigit()})
-
-        model_version = None
-        try:
-            feat_doc = get_prediction_features(2026)
-            if feat_doc:
-                model_version = feat_doc.get("ensemble_version")
-        except Exception as _e:
-            logger.warning("forecast: could not load prediction_features: %s", _e)
-
-        return JSONResponse(content={
-            "season": 2026,
-            "model_version": model_version,
-            "game_count": len(preds_2026),
-            "weeks": weeks,
-            "team_projections": team_projections,
-        })
-    except Exception:
-        logger.exception("forecast: unhandled error")
-        return server_error()
+    return JSONResponse(content={
+        "season": 2026,
+        "model_version": model_version,
+        "game_count": len(preds_2026),
+        "weeks": weeks,
+        "team_projections": team_projections,
+    })
 
 
 @router.get("/admin/consensus/{season}")
@@ -816,28 +732,24 @@ async def get_consensus_comparison(season: int, _: dict = Depends(require_admin)
     Scores both against actual wins when the season is complete; otherwise
     reports agreement only.
     """
-    try:
-        from services.consensus_service import build_comparison
+    from services.consensus_service import build_comparison
 
-        consensus = get_consensus_projections(season)
-        model = {t: v for t, v in get_preseason_predictions(season).items()}
+    consensus = get_consensus_projections(season)
+    model = {t: v for t, v in get_preseason_predictions(season).items()}
 
-        actuals = None
-        standings_df = load_data().standings
-        if not standings_df.empty and "season" in standings_df.columns:
-            season_rows = standings_df[standings_df["season"].astype(int) == season]
-            if not season_rows.empty:
-                actuals = {
-                    str(r["team"]): int(r["wins"])
-                    for _, r in season_rows.iterrows()
-                }
+    actuals = None
+    standings_df = load_data().standings
+    if not standings_df.empty and "season" in standings_df.columns:
+        season_rows = standings_df[standings_df["season"].astype(int) == season]
+        if not season_rows.empty:
+            actuals = {
+                str(r["team"]): int(r["wins"])
+                for _, r in season_rows.iterrows()
+            }
 
-        return JSONResponse(content=sanitize_state(
-            build_comparison(model, consensus, actuals)
-        ))
-    except Exception:
-        logger.exception("Unhandled error building consensus comparison")
-        return server_error()
+    return JSONResponse(content=sanitize_state(
+        build_comparison(model, consensus, actuals)
+    ))
 
 
 @_page_router.get("/admin/predictions", response_class=HTMLResponse)
@@ -858,17 +770,13 @@ async def get_admin_prediction_features(
 
     Returns the latest ensemble version doc for the season.
     """
-    try:
-        doc = get_prediction_features(season)
-        if doc is None:
-            return JSONResponse(
-                status_code=404,
-                content={"error": f"No feature data for season {season}."},
-            )
-        return JSONResponse(content=doc)
-    except Exception:
-        logger.exception("Unhandled error in get_admin_prediction_features")
-        return server_error()
+    doc = get_prediction_features(season)
+    if doc is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"No feature data for season {season}."},
+        )
+    return JSONResponse(content=doc)
 
 
 
@@ -896,24 +804,16 @@ def _pool_config_response(season: int) -> dict:
 @router.get("/admin/pool/config")
 async def get_pool_config_admin(season: int, _: dict = Depends(require_admin)):
     """Per-season pool fee and dollar payouts, with pot figures for the current member count."""
-    try:
-        return JSONResponse(content=_pool_config_response(season))
-    except Exception:
-        logger.exception("Unhandled error in get_pool_config_admin")
-        return server_error()
+    return JSONResponse(content=_pool_config_response(season))
 
 
 @router.post("/admin/pool/config")
 async def set_pool_config(body: PoolConfigRequest, _: dict = Depends(require_admin)):
     """Store one season's pool entry fee and dollar payouts (other seasons untouched)."""
-    try:
-        pool_service.set_pool_config(
-            body.season, body.entryFee,
-            [{"place": p.place, "amount": p.amount} for p in body.payouts],
-            unpaid_visibility=body.unpaidVisibility.model_dump() if body.unpaidVisibility else None,
-            payment_note=body.paymentNote,
-        )
-        return JSONResponse(content=_pool_config_response(body.season))
-    except Exception:
-        logger.exception("Unhandled error in set_pool_config")
-        return server_error()
+    pool_service.set_pool_config(
+        body.season, body.entryFee,
+        [{"place": p.place, "amount": p.amount} for p in body.payouts],
+        unpaid_visibility=body.unpaidVisibility.model_dump() if body.unpaidVisibility else None,
+        payment_note=body.paymentNote,
+    )
+    return JSONResponse(content=_pool_config_response(body.season))

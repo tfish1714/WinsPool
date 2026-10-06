@@ -119,9 +119,9 @@ the mobile nav drawer (`templates/base.html`'s `.nav-drawer__links`) is
 separate, hardcoded, server-rendered markup — `responsive.js` only toggles the
 drawer open/closed, it doesn't populate its links. **A nav link added to one
 does not appear in the other.** When adding or changing a nav destination,
-update both `updateNav()`'s `moreLinks`/`primaryLinks` arrays *and* the matching
+update both the link arrays (`updateNav()` now delegates to per-region helpers; `primaryLinks` lives in `_updatePrimaryLinks`, `moreLinks` in `_updateMoreDropdown`) *and* the matching
 `<a>` in `base.html`'s drawer, and check both a desktop width and a narrow
-(~390px) mobile width before calling it done.
+(~390px) mobile width before calling it done. The header brand (`.nav-brand` in both the desktop rail and the mobile header) is an anchor to `/wins-pool` (standings, resolved server-side), not a nav link, so it is outside the parity diff.
 `tests_e2e/test_nav_parity.py` is the automated regression test for exactly
 this gotcha — it logs in, then diffs the visible desktop nav hrefs against the
 visible mobile drawer hrefs across several pages and fails on any asymmetry.
@@ -211,6 +211,7 @@ static/
     websocket_service.js # WebSocket client for live draft
     admin_main.js        # Admin dashboard
     auth_service.js      # Client-side auth; also exports STORAGE_KEYS ({TOKEN, PLAYER_ID, ROLE, DRAFT_ACTIVE, THEME}) and getAuthHeaders() -- use these, never inline localStorage key literals or hand-built Bearer headers
+    manifest.json (static/) + ios_push_hint.js  # PWA manifest; iOS Safari (non-standalone) 'Add to Home Screen' push hint banner; pure shouldShowIosInstallHint() is node-tested; shown once per page for signed-in users from main.js
     responsive.js        # Mobile drawer controller (non-module IIFE, loaded after main.js)
     chat.js              # Draft room chat overlay
     mock_draft.js        # Standalone mock draft page logic — does NOT import main.js/websocket_service.js/auth_service.js
@@ -224,6 +225,8 @@ docs/                    # Architecture and model documentation (prediction_mode
 ```
 
 ### Shared helpers
+
+- **Route error handling**: do not add a generic `try/except Exception` that logs and returns `server_error()` in route handlers; the global handler in `main.py` (`global_exception_handler`) logs and returns 500 `{"error": "An internal server error occurred."}`. Keep `except` clauses only for domain-specific cases. Tests asserting a 500 for an unhandled error need `TestClient(app, raise_server_exceptions=False)` (Starlette re-raises after the handler responds).
 
 - `services/constants.py::make_game_key(week, home, away)` is the single builder for the per-game key `W{week:02d}_{HOME}_{AWAY}` (game_predictions, prediction caches, projection engine); it normalizes both teams via `normalize_team_abbr` and coerces the week from int/str/float. Never hand-format that string.
 - `templates/_macros.html::year_picker(available_years, current_year, base_url, url_suffix='')` is the season dropdown for the six per-year pages.

@@ -1,0 +1,12 @@
+{
+  "name": "WinsPool",
+  "short_name": "WinsPool",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#14171d",
+  "theme_color": "#14171d",
+  "icons": [
+    { "src": "/static/fishbone.png", "sizes": "any", "type": "image/png" }
+  ]
+}

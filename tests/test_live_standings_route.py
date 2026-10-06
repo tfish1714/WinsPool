@@ -145,10 +145,13 @@ def test_route_requires_year():
 
 
 def test_route_returns_500_on_failure():
+    # Global handler responds then re-raises; use a non-raising client.
+    quiet_client = TestClient(app, raise_server_exceptions=False)
     with patch("routes.api_routes.load_data", side_effect=RuntimeError("boom")):
-        res = client.get("/api/live-standings?year=2026")
+        res = quiet_client.get("/api/live-standings?year=2026")
 
     assert res.status_code == 500
+    assert res.json() == {"error": "An internal server error occurred."}
 
 
 def _render_standings_page():
