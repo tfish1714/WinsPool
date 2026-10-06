@@ -915,13 +915,16 @@ class TestDraftSnapshotSync:
         assert resp.status_code in (401, 403)
 
     def test_unhandled_exception_returns_server_error(self, admin_token):
+        # The global handler (main.py) re-raises after responding, so use a non-raising client.
+        quiet_client = TestClient(app, raise_server_exceptions=False)
         with patch("routes.admin_routes.sync_draft_snapshot_for_season", side_effect=RuntimeError("boom")):
-            resp = client.post(
+            resp = quiet_client.post(
                 "/api/admin/draft_snapshot/sync",
                 json={"season": 2026},
                 headers={"Authorization": admin_token},
             )
         assert resp.status_code == 500
+        assert resp.json() == {"error": "An internal server error occurred."}
 
 
 class TestDraftSnapshotStatus:
