@@ -121,7 +121,7 @@ drawer open/closed, it doesn't populate its links. **A nav link added to one
 does not appear in the other.** When adding or changing a nav destination,
 update both the link arrays (`updateNav()` now delegates to per-region helpers; `primaryLinks` lives in `_updatePrimaryLinks`, `moreLinks` in `_updateMoreDropdown`) *and* the matching
 `<a>` in `base.html`'s drawer, and check both a desktop width and a narrow
-(~390px) mobile width before calling it done.
+(~390px) mobile width before calling it done. The header brand (`.nav-brand` in both the desktop rail and the mobile header) is an anchor to `/wins-pool` (standings, resolved server-side), not a nav link, so it is outside the parity diff.
 `tests_e2e/test_nav_parity.py` is the automated regression test for exactly
 this gotcha — it logs in, then diffs the visible desktop nav hrefs against the
 visible mobile drawer hrefs across several pages and fails on any asymmetry.

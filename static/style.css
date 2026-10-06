@@ -3964,6 +3964,8 @@ table.wp-data-table tbody td:last-child {
 /* Desktop rail */
 .nav-brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .nav-brand h1 { font-size: 15px; font-weight: 700; margin: 0; }
+a.nav-brand { text-decoration: none; color: inherit; }
+a.nav-brand:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-radius: 6px; }
 .nav-rail__links { display: flex; gap: 2px; flex: 1; padding: 0 8px; }
 .nav-rail-link {
     padding: 6px 12px; border-radius: 7px; font-size: 13px; color: var(--ink-2);

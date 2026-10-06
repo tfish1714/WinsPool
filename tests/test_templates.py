@@ -27,3 +27,13 @@ def test_manifest_contents_and_icons_exist():
     for icon in m["icons"]:
         assert icon["src"].startswith("/static/")
         assert (STATIC / icon["src"][len("/static/"):]).is_file()
+
+
+def test_header_brands_link_to_standings():
+    import re
+    html = client.get("/").text
+    anchors = re.findall(r'<a\b[^>]*class="nav-brand"[^>]*>', html)
+    assert len(anchors) == 2
+    for a in anchors:
+        assert 'href="/wins-pool"' in a
+    assert '<div class="nav-brand">' not in html
