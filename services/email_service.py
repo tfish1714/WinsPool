@@ -130,6 +130,11 @@ def send_betting_edge_email(to_email: str, week_summary: dict) -> bool:
                     _pick_html(g["home_team"] if side == "home" else g["away_team"])
                     for side in g["matched_sides"]
                 )
+                + (
+                    " <span style=\"color:#b45309; font-size:0.85em;\">"
+                    "&#9888; heavy favorite &mdash; price too short, not worth the risk</span>"
+                    if g.get("heavy_favorite") else ""
+                )
                 for g in m["games"]
             )
             test_rate_text = (

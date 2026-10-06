@@ -141,6 +141,28 @@ class TestFindValidatedAngleMatches:
 
     @patch("services.betting_edge_alert_service.screen_games")
     @patch("services.betting_edge_alert_service.scan_angles")
+    def test_su_heavy_favorite_is_flagged_not_hidden(self, mock_scan, mock_screen):
+        scan = self._scan_result(held_up=True)
+        scan["su_leaderboard"] = scan["ats_leaderboard"]
+        scan["ats_leaderboard"] = []
+        mock_scan.return_value = scan
+        mock_screen.return_value = {"backtest": {}, "filterable_features": {}, "candidates": [
+            {"home_team": "BAL", "away_team": "X", "matched_sides": ["home"],
+             "already_played": False, "spread_line": 13.0},
+            {"home_team": "DET", "away_team": "Y", "matched_sides": ["away"],
+             "already_played": False, "spread_line": -9.0},
+            {"home_team": "KC", "away_team": "SF", "matched_sides": ["home"],
+             "already_played": False, "spread_line": 3.0},
+        ]}
+
+        result = find_validated_angle_matches(
+            {}, pd.DataFrame(), target_season=2026, target_week=3,
+        )
+        flags = {g["home_team"]: g["heavy_favorite"] for g in result[0]["games"]}
+        assert flags == {"BAL": True, "DET": True, "KC": False}
+
+    @patch("services.betting_edge_alert_service.screen_games")
+    @patch("services.betting_edge_alert_service.scan_angles")
     def test_angle_that_did_not_hold_up_is_excluded(self, mock_scan, mock_screen):
         mock_scan.return_value = self._scan_result(held_up=False)
         mock_screen.return_value = self._screen_result(with_candidate=True)

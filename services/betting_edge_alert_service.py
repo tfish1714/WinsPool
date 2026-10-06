@@ -41,6 +41,21 @@ from services.pattern_scanner_service import scan_angles
 
 DEFAULT_EDGE_THRESHOLD = 3.0
 DEFAULT_MAX_ANGLE_MATCHES = 10
+# A SU pick on a side favored by at least this many points (~-300 moneyline or
+# shorter) risks far more than it wins; flagged in the email, not hidden.
+HEAVY_FAVORITE_SPREAD = 7.0
+
+
+def _is_heavy_su_favorite(candidate: dict) -> bool:
+    """True if any matched side is favored by >= HEAVY_FAVORITE_SPREAD.
+    spread_line is home-perspective (positive = home favored); away is flipped."""
+    spread = candidate.get("spread_line")
+    if spread is None:
+        return False
+    return any(
+        (spread if side == "home" else -spread) >= HEAVY_FAVORITE_SPREAD
+        for side in candidate.get("matched_sides", [])
+    )
 
 
 def find_raw_edge_outliers(
@@ -107,7 +122,11 @@ def find_validated_angle_matches(
 ) -> list[dict]:
     """Walk-forward-validated (held_up=True) leaderboard entries from
     scan_angles that currently match at least one of the upcoming week's
-    games. Checks both the ATS and SU leaderboards. Each entry's own
+    games. Checks both the ATS and SU leaderboards. SU picks have no price
+    here (no moneyline data), so a SU pick on a heavy favorite (spread
+    >= HEAVY_FAVORITE_SPREAD, roughly -300 or shorter) is flagged
+    `heavy_favorite=True` on its game: still listed, but the email marks it
+    as not worth the risk. Each entry's own
     `conditions` list is reused verbatim as screen_games' `filters` -- both
     already share the {"feature", "min"|"max"} shape (see
     pattern_scanner_service._condition / betting_screener_service.matches_filters).
@@ -127,6 +146,8 @@ def find_validated_angle_matches(
                 filters=entry["conditions"],
             )
             upcoming = [c for c in result["candidates"] if not c["already_played"]]
+            if metric == "su":
+                upcoming = [{**c, "heavy_favorite": _is_heavy_su_favorite(c)} for c in upcoming]
             if not upcoming:
                 continue
 
