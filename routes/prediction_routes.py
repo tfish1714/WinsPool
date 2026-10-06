@@ -7,7 +7,6 @@ from fastapi.responses import JSONResponse
 
 from services.betting_screener_service import load_predictions_by_season
 from services.data_service import load_data
-from services.response_helpers import server_error
 from services.session_service import require_admin
 
 logger = logging.getLogger(__name__)
@@ -18,63 +17,59 @@ router = APIRouter(prefix="/api")
 @router.get("/admin/elo_history")
 async def get_elo_history(_: dict = Depends(require_admin)):
     """Admin-only: Elo ratings over time for all teams, structured for Chart.js."""
-    try:
-        import json
+    import json
 
-        import pandas as pd
+    import pandas as pd
 
-        from services.cache_service import get_all_elo_history
+    from services.cache_service import get_all_elo_history
 
-        rows = get_all_elo_history()
-        if not rows:
-            return JSONResponse(status_code=404, content={"error": "No Elo history found. Run scripts/compute_elo.py --firestore first."})
+    rows = get_all_elo_history()
+    if not rows:
+        return JSONResponse(status_code=404, content={"error": "No Elo history found. Run scripts/compute_elo.py --firestore first."})
 
-        df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
 
-        records = []
-        for _, row in df.iterrows():
-            records.append({"season": int(row["season"]), "week": int(row["week"]),
-                            "team": row["home_team"], "elo": round(float(row["home_elo_post"]), 1)})
-            records.append({"season": int(row["season"]), "week": int(row["week"]),
-                            "team": row["away_team"], "elo": round(float(row["away_elo_post"]), 1)})
+    records = []
+    for _, row in df.iterrows():
+        records.append({"season": int(row["season"]), "week": int(row["week"]),
+                        "team": row["home_team"], "elo": round(float(row["home_elo_post"]), 1)})
+        records.append({"season": int(row["season"]), "week": int(row["week"]),
+                        "team": row["away_team"], "elo": round(float(row["away_elo_post"]), 1)})
 
-        elo_df = pd.DataFrame(records)
-        elo_df = elo_df.sort_values(["season", "week"]).drop_duplicates(
-            subset=["season", "week", "team"], keep="last"
-        )
+    elo_df = pd.DataFrame(records)
+    elo_df = elo_df.sort_values(["season", "week"]).drop_duplicates(
+        subset=["season", "week", "team"], keep="last"
+    )
 
-        seasons = sorted(elo_df["season"].unique().tolist())
-        teams_data: dict = {}
-        for (season, week, team), group in elo_df.groupby(["season", "week", "team"]):
-            if team not in teams_data:
-                teams_data[team] = {}
-            season_key = str(season)
-            if season_key not in teams_data[team]:
-                teams_data[team][season_key] = []
-            teams_data[team][season_key].append({"week": int(week), "elo": group["elo"].iloc[0]})
+    seasons = sorted(elo_df["season"].unique().tolist())
+    teams_data: dict = {}
+    for (season, week, team), group in elo_df.groupby(["season", "week", "team"]):
+        if team not in teams_data:
+            teams_data[team] = {}
+        season_key = str(season)
+        if season_key not in teams_data[team]:
+            teams_data[team][season_key] = []
+        teams_data[team][season_key].append({"week": int(week), "elo": group["elo"].iloc[0]})
 
-        team_meta_path = pathlib.Path(__file__).parent.parent / "static" / "data" / "team_meta.json"
-        divisions: dict = {}
-        conferences: dict = {}
-        colors: dict = {}
-        if team_meta_path.exists():
-            with open(team_meta_path) as f:
-                team_meta = json.load(f)
-            for abbr, meta in team_meta.items():
-                divisions[abbr] = meta["division"]
-                conferences[abbr] = meta["conference"]
-                colors[abbr] = meta["color"]
+    team_meta_path = pathlib.Path(__file__).parent.parent / "static" / "data" / "team_meta.json"
+    divisions: dict = {}
+    conferences: dict = {}
+    colors: dict = {}
+    if team_meta_path.exists():
+        with open(team_meta_path) as f:
+            team_meta = json.load(f)
+        for abbr, meta in team_meta.items():
+            divisions[abbr] = meta["division"]
+            conferences[abbr] = meta["conference"]
+            colors[abbr] = meta["color"]
 
-        return JSONResponse(content={
-            "seasons": seasons,
-            "teams": teams_data,
-            "divisions": divisions,
-            "conferences": conferences,
-            "colors": colors,
-        })
-    except Exception as e:
-        logger.exception("Unhandled error in prediction endpoint")
-        return server_error()
+    return JSONResponse(content={
+        "seasons": seasons,
+        "teams": teams_data,
+        "divisions": divisions,
+        "conferences": conferences,
+        "colors": colors,
+    })
 
 
 @router.get("/admin/nn_weekly_accuracy")
@@ -87,27 +82,23 @@ async def get_nn_weekly_accuracy(_: dict = Depends(require_admin)):
     known, unrelated to (and not overwritten by) game_predictions, which
     cache_builder.py recomputes with the currently-deployed model every day.
     """
-    try:
-        from services.cache_service import get_all_nn_weekly_accuracy
+    from services.cache_service import get_all_nn_weekly_accuracy
 
-        rows = get_all_nn_weekly_accuracy()
-        if not rows:
-            return JSONResponse(status_code=404, content={
-                "error": "No weekly accuracy history found. Run "
-                         "scripts/weekly_model_eval.py --firestore after a week completes."
-            })
+    rows = get_all_nn_weekly_accuracy()
+    if not rows:
+        return JSONResponse(status_code=404, content={
+            "error": "No weekly accuracy history found. Run "
+                     "scripts/weekly_model_eval.py --firestore after a week completes."
+        })
 
-        seasons: dict = {}
-        for row in rows:
-            season_key = str(row.get("season"))
-            seasons.setdefault(season_key, []).append(row)
-        for season_key in seasons:
-            seasons[season_key].sort(key=lambda r: r.get("week", 0))
+    seasons: dict = {}
+    for row in rows:
+        season_key = str(row.get("season"))
+        seasons.setdefault(season_key, []).append(row)
+    for season_key in seasons:
+        seasons[season_key].sort(key=lambda r: r.get("week", 0))
 
-        return JSONResponse(content={"seasons": seasons})
-    except Exception as e:
-        logger.exception("Unhandled error in prediction endpoint")
-        return server_error()
+    return JSONResponse(content={"seasons": seasons})
 
 
 @router.get("/admin/betting/screen")
@@ -129,57 +120,53 @@ async def get_betting_screen(
     `filters` is a JSON-encoded array of {"feature": <key in
     betting_screener_service.FILTERABLE_FEATURES>, "min": float|None, "max": float|None}.
     """
-    try:
-        import json as _json
-        from services.betting_screener_service import (
-            screen_games, find_next_upcoming_week, FILTERABLE_FEATURES,
-        )
+    import json as _json
+    from services.betting_screener_service import (
+        screen_games, find_next_upcoming_week, FILTERABLE_FEATURES,
+    )
 
-        if side not in ("home", "away", "any"):
-            return JSONResponse(status_code=400, content={"error": "side must be home, away, or any"})
-        if favorite_or_dog not in ("favorite", "dog", "any"):
-            return JSONResponse(status_code=400, content={"error": "favorite_or_dog must be favorite, dog, or any"})
+    if side not in ("home", "away", "any"):
+        return JSONResponse(status_code=400, content={"error": "side must be home, away, or any"})
+    if favorite_or_dog not in ("favorite", "dog", "any"):
+        return JSONResponse(status_code=400, content={"error": "favorite_or_dog must be favorite, dog, or any"})
 
-        parsed_filters = []
-        if filters:
-            try:
-                parsed_filters = _json.loads(filters)
-            except _json.JSONDecodeError:
-                return JSONResponse(status_code=400, content={"error": "filters must be valid JSON"})
-            if not isinstance(parsed_filters, list):
-                return JSONResponse(status_code=400, content={"error": "filters must be a JSON array"})
-            for f in parsed_filters:
-                if not isinstance(f, dict) or f.get("feature") not in FILTERABLE_FEATURES:
-                    bad = f.get("feature") if isinstance(f, dict) else f
-                    return JSONResponse(status_code=400, content={"error": f"unknown filter feature: {bad!r}"})
+    parsed_filters = []
+    if filters:
+        try:
+            parsed_filters = _json.loads(filters)
+        except _json.JSONDecodeError:
+            return JSONResponse(status_code=400, content={"error": "filters must be valid JSON"})
+        if not isinstance(parsed_filters, list):
+            return JSONResponse(status_code=400, content={"error": "filters must be a JSON array"})
+        for f in parsed_filters:
+            if not isinstance(f, dict) or f.get("feature") not in FILTERABLE_FEATURES:
+                bad = f.get("feature") if isinstance(f, dict) else f
+                return JSONResponse(status_code=400, content={"error": f"unknown filter feature: {bad!r}"})
 
-        _, _, all_games, _, _, _, _ = load_data()
-        if all_games.empty:
-            return JSONResponse(status_code=404, content={"error": "No schedule data available."})
+    _, _, all_games, _, _, _, _ = load_data()
+    if all_games.empty:
+        return JSONResponse(status_code=404, content={"error": "No schedule data available."})
 
-        target_season = season if season is not None else int(all_games["season"].max())
+    target_season = season if season is not None else int(all_games["season"].max())
 
-        target_week = week
+    target_week = week
+    if target_week is None:
+        target_week = find_next_upcoming_week(all_games, target_season)
         if target_week is None:
-            target_week = find_next_upcoming_week(all_games, target_season)
-            if target_week is None:
-                target_week = 1
+            target_week = 1
 
-        predictions_by_season, min_season, max_season = load_predictions_by_season(all_games)
+    predictions_by_season, min_season, max_season = load_predictions_by_season(all_games)
 
-        result = screen_games(
-            predictions_by_season, all_games,
-            target_season=target_season, target_week=target_week,
-            side=side, favorite_or_dog=favorite_or_dog,
-            filters=parsed_filters,
-        )
-        result["target_season"] = target_season
-        result["target_week"] = target_week
-        result["seasons_covered"] = [min_season, max_season]
-        return JSONResponse(content=result)
-    except Exception as e:
-        logger.exception("Unhandled error in get_betting_screen")
-        return server_error()
+    result = screen_games(
+        predictions_by_season, all_games,
+        target_season=target_season, target_week=target_week,
+        side=side, favorite_or_dog=favorite_or_dog,
+        filters=parsed_filters,
+    )
+    result["target_season"] = target_season
+    result["target_week"] = target_week
+    result["seasons_covered"] = [min_season, max_season]
+    return JSONResponse(content=result)
 
 
 @router.get("/admin/betting/scan")
@@ -200,29 +187,25 @@ async def get_betting_pattern_scan(
     combo is evaluated once -- no re-tuning -- against the held-out seasons.
     Results are in-sample-derived leads to investigate, not proven edges.
     """
-    try:
-        from services.pattern_scanner_service import scan_angles
+    from services.pattern_scanner_service import scan_angles
 
-        if top_n < 1 or top_n > 100:
-            return JSONResponse(status_code=400, content={"error": "top_n must be between 1 and 100"})
-        if min_sample < 1 or min_test_sample < 1:
-            return JSONResponse(status_code=400, content={"error": "min_sample and min_test_sample must be positive"})
-        if test_seasons < 0:
-            return JSONResponse(status_code=400, content={"error": "test_seasons must be non-negative"})
+    if top_n < 1 or top_n > 100:
+        return JSONResponse(status_code=400, content={"error": "top_n must be between 1 and 100"})
+    if min_sample < 1 or min_test_sample < 1:
+        return JSONResponse(status_code=400, content={"error": "min_sample and min_test_sample must be positive"})
+    if test_seasons < 0:
+        return JSONResponse(status_code=400, content={"error": "test_seasons must be non-negative"})
 
-        _, _, all_games, _, _, _, _ = load_data()
-        if all_games.empty:
-            return JSONResponse(status_code=404, content={"error": "No schedule data available."})
+    _, _, all_games, _, _, _, _ = load_data()
+    if all_games.empty:
+        return JSONResponse(status_code=404, content={"error": "No schedule data available."})
 
-        predictions_by_season, min_season, max_season = load_predictions_by_season(all_games)
+    predictions_by_season, min_season, max_season = load_predictions_by_season(all_games)
 
-        result = scan_angles(
-            predictions_by_season, all_games,
-            test_seasons=test_seasons, include_pairs=include_pairs,
-            min_sample=min_sample, min_test_sample=min_test_sample, top_n=top_n,
-        )
-        result["seasons_covered"] = [min_season, max_season]
-        return JSONResponse(content=result)
-    except Exception as e:
-        logger.exception("Unhandled error in get_betting_pattern_scan")
-        return server_error()
+    result = scan_angles(
+        predictions_by_season, all_games,
+        test_seasons=test_seasons, include_pairs=include_pairs,
+        min_sample=min_sample, min_test_sample=min_test_sample, top_n=top_n,
+    )
+    result["seasons_covered"] = [min_season, max_season]
+    return JSONResponse(content=result)
