@@ -40,42 +40,34 @@ def fetch_progress(
     """
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_route = time.time()
-    try:
-        standings, teams, games, players, _, draft_results, _ = load_data()
-        if games.empty or "season" not in games.columns:
-            return JSONResponse(content={"labels": [], "datasets": []})
-        res = get_season_progress(
-            season, week,
-            games_df=games, standings_df=standings, draft_results_df=draft_results,
-            teams_df=teams, players_df=players,
-        )
-        if is_debug:
-            logger.debug("/api/progress route total took %.3fs", time.time() - start_route)
-        return JSONResponse(content=res)
-    except Exception as e:
-        logger.exception("Unhandled error in /api/progress")
-        return server_error()
+    standings, teams, games, players, _, draft_results, _ = load_data()
+    if games.empty or "season" not in games.columns:
+        return JSONResponse(content={"labels": [], "datasets": []})
+    res = get_season_progress(
+        season, week,
+        games_df=games, standings_df=standings, draft_results_df=draft_results,
+        teams_df=teams, players_df=players,
+    )
+    if is_debug:
+        logger.debug("/api/progress route total took %.3fs", time.time() - start_route)
+    return JSONResponse(content=res)
 
 
 @router.get("/progress/draft_summary")
 def fetch_draft_summary(_auth: dict = Depends(require_auth)):
     """Best-picks summary for the current season (used by draft board tab)."""
-    try:
-        standings, teams, games, players, _, draft_results, _ = load_data()
-        s, w = get_latest_season_and_week(games)
-        data = get_season_progress(
-            s, w,
-            games_df=games, standings_df=standings, draft_results_df=draft_results,
-            teams_df=teams, players_df=players,
-        )
-        return JSONResponse(content={
-            "season": s, "week": w,
-            "best_overall": data.get("best_overall"),
-            "best_by_round": data.get("best_by_round"),
-        })
-    except Exception as e:
-        logger.exception("Unhandled error in fetch_draft_summary")
-        return server_error()
+    standings, teams, games, players, _, draft_results, _ = load_data()
+    s, w = get_latest_season_and_week(games)
+    data = get_season_progress(
+        s, w,
+        games_df=games, standings_df=standings, draft_results_df=draft_results,
+        teams_df=teams, players_df=players,
+    )
+    return JSONResponse(content={
+        "season": s, "week": w,
+        "best_overall": data.get("best_overall"),
+        "best_by_round": data.get("best_by_round"),
+    })
 
 
 @router.get("/standings")
@@ -83,19 +75,15 @@ def get_standings(year: int, _auth: dict = Depends(require_auth)):
     """Data for the standings table."""
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_route = time.time()
-    try:
-        standings, _, _, players, _, draft_results, _ = load_data(year=year)
-        sorted_df = analysis.calculate_wins_pool_standings(standings, draft_results, players, year)
-        data = sorted_df.to_dict(orient="records")
-        for row in data:
-            row['entrant'] = row.get('fullName')
-            row['total_wins'] = row.get('TotalWins')
-        if is_debug:
-            logger.debug("/api/standings route total took %.3fs", time.time() - start_route)
-        return JSONResponse(content=sanitize_state(data))
-    except Exception as e:
-        logger.exception("Unhandled error in get_standings")
-        return server_error()
+    standings, _, _, players, _, draft_results, _ = load_data(year=year)
+    sorted_df = analysis.calculate_wins_pool_standings(standings, draft_results, players, year)
+    data = sorted_df.to_dict(orient="records")
+    for row in data:
+        row['entrant'] = row.get('fullName')
+        row['total_wins'] = row.get('TotalWins')
+    if is_debug:
+        logger.debug("/api/standings route total took %.3fs", time.time() - start_route)
+    return JSONResponse(content=sanitize_state(data))
 
 
 from services.cache_service import merge_game_predictions as _merge_game_predictions
@@ -104,208 +92,200 @@ from services.cache_service import merge_game_predictions as _merge_game_predict
 @router.get("/predictions/accuracy")
 def get_prediction_accuracy(season: Optional[int] = Query(None), _auth: dict = Depends(require_auth)):
     """ML prediction accuracy vs actual game results, by season and week."""
-    try:
-        from services.cache_service import get_game_predictions
-        from services.utils import normalize_team_abbr
-        from services.prediction_service import build_result_lookup, get_candidate_seasons
-        import pathlib, json, numpy as np
-        from services.local_paths import local_db_dir
+    from services.cache_service import get_game_predictions
+    from services.utils import normalize_team_abbr
+    from services.prediction_service import build_result_lookup, get_candidate_seasons
+    import pathlib, json, numpy as np
+    from services.local_paths import local_db_dir
 
-        _, _, all_games, _, _, _, _ = load_data()
+    _, _, all_games, _, _, _, _ = load_data()
 
-        local_db = local_db_dir()
-        seasons_data = {}
-        overall_correct = overall_total = 0
-        candidate_seasons = get_candidate_seasons()
-        available_seasons = list(candidate_seasons)
-        if season is not None:
-            candidate_seasons = [season]
+    local_db = local_db_dir()
+    seasons_data = {}
+    overall_correct = overall_total = 0
+    candidate_seasons = get_candidate_seasons()
+    available_seasons = list(candidate_seasons)
+    if season is not None:
+        candidate_seasons = [season]
 
-        for season in candidate_seasons:
-            preds = get_game_predictions(season)
-            if not preds:
+    for season in candidate_seasons:
+        preds = get_game_predictions(season)
+        if not preds:
+            continue
+        # Scoped per season: the key has no season component (see
+        # build_result_lookup).
+        result_lookup = build_result_lookup(all_games, season)
+
+        by_week = {}
+        s_correct = s_total = 0
+        for key, pred in preds.items():
+            if not pred.get('locked'):
                 continue
-            # Scoped per season: the key has no season component (see
-            # build_result_lookup).
-            result_lookup = build_result_lookup(all_games, season)
-
-            by_week = {}
-            s_correct = s_total = 0
-            for key, pred in preds.items():
-                if not pred.get('locked'):
-                    continue
-                entry = result_lookup.get(key)
-                actual = entry["winner"] if entry else None
-                if actual is None:
-                    continue
-                pw = pred.get('pred_winner')
-                if pw is None:
-                    continue
-                correct = int(normalize_team_abbr(str(pw)) == actual)
-                wk = int(key[1:3])
-                if wk not in by_week:
-                    by_week[wk] = {'week': wk, 'total': 0, 'correct': 0}
-                by_week[wk]['total'] += 1
-                by_week[wk]['correct'] += correct
-                s_correct += correct
-                s_total += 1
-
-            if s_total == 0:
+            entry = result_lookup.get(key)
+            actual = entry["winner"] if entry else None
+            if actual is None:
                 continue
+            pw = pred.get('pred_winner')
+            if pw is None:
+                continue
+            correct = int(normalize_team_abbr(str(pw)) == actual)
+            wk = int(key[1:3])
+            if wk not in by_week:
+                by_week[wk] = {'week': wk, 'total': 0, 'correct': 0}
+            by_week[wk]['total'] += 1
+            by_week[wk]['correct'] += correct
+            s_correct += correct
+            s_total += 1
 
-            week_rows = sorted(by_week.values(), key=lambda r: r['week'])
-            for r in week_rows:
-                r['accuracy'] = round(r['correct'] / r['total'] * 100, 1)
+        if s_total == 0:
+            continue
 
-            seasons_data[season] = {
-                'season': season,
-                'total': s_total,
-                'correct': s_correct,
-                'accuracy': round(s_correct / s_total * 100, 1),
-                'by_week': week_rows,
-            }
-            overall_correct += s_correct
-            overall_total += s_total
+        week_rows = sorted(by_week.values(), key=lambda r: r['week'])
+        for r in week_rows:
+            r['accuracy'] = round(r['correct'] / r['total'] * 100, 1)
 
-        seasons_list = sorted(seasons_data.values(), key=lambda r: r['season'], reverse=True)
-        overall = {
-            'total': overall_total,
-            'correct': overall_correct,
-            'accuracy': round(overall_correct / overall_total * 100, 1) if overall_total else 0,
+        seasons_data[season] = {
+            'season': season,
+            'total': s_total,
+            'correct': s_correct,
+            'accuracy': round(s_correct / s_total * 100, 1),
+            'by_week': week_rows,
         }
+        overall_correct += s_correct
+        overall_total += s_total
 
-        # ── Attach model version from prediction_features ─────────────────
-        import re as _re
-        version_map: dict = {}
-        feat_files = sorted(local_db.glob('prediction_features_*.json')) if local_db.exists() else []
-        if feat_files:
-            for ff in feat_files:
-                m = _re.match(r'prediction_features_(\d{4})_(.+)\.json', ff.name)
-                if m:
-                    version_map[int(m.group(1))] = m.group(2)
-        else:
-            # Production: read ensemble_version field from Firestore prediction_features collection
-            try:
-                from services.cache_service import get_prediction_features
-                for s_row in seasons_list:
-                    doc = get_prediction_features(s_row['season'])
-                    if doc and doc.get('ensemble_version'):
-                        version_map[s_row['season']] = doc['ensemble_version']
-            except Exception:
-                pass
+    seasons_list = sorted(seasons_data.values(), key=lambda r: r['season'], reverse=True)
+    overall = {
+        'total': overall_total,
+        'correct': overall_correct,
+        'accuracy': round(overall_correct / overall_total * 100, 1) if overall_total else 0,
+    }
 
-        for row in seasons_list:
-            row['model_version'] = version_map.get(row['season'])
+    # ── Attach model version from prediction_features ─────────────────
+    import re as _re
+    version_map: dict = {}
+    feat_files = sorted(local_db.glob('prediction_features_*.json')) if local_db.exists() else []
+    if feat_files:
+        for ff in feat_files:
+            m = _re.match(r'prediction_features_(\d{4})_(.+)\.json', ff.name)
+            if m:
+                version_map[int(m.group(1))] = m.group(2)
+    else:
+        # Production: read ensemble_version field from Firestore prediction_features collection
+        try:
+            from services.cache_service import get_prediction_features
+            for s_row in seasons_list:
+                doc = get_prediction_features(s_row['season'])
+                if doc and doc.get('ensemble_version'):
+                    version_map[s_row['season']] = doc['ensemble_version']
+        except Exception:
+            pass
 
-        return JSONResponse(content={
-            'seasons': seasons_list,
-            'overall': overall,
-            'available_seasons': available_seasons,
-        })
-    except Exception as e:
-        logger.exception("Unhandled error in /api/predictions/accuracy")
-        return server_error()
+    for row in seasons_list:
+        row['model_version'] = version_map.get(row['season'])
+
+    return JSONResponse(content={
+        'seasons': seasons_list,
+        'overall': overall,
+        'available_seasons': available_seasons,
+    })
 
 
 @router.get("/predictions/explain")
 def get_prediction_explain(season: int, week: int, home: str, away: str, _auth: dict = Depends(require_auth)):
     """Return the stored explanation (feature values) for a single game prediction."""
-    try:
-        from services.cache_service import get_game_predictions
-        from services.utils import normalize_team_abbr
-        from services.betting_screener_service import grade_ats_pick
-        from services.utils import edge_vs_vegas
-        import math
-        import pandas as pd
-        ht = normalize_team_abbr(home)
-        at = normalize_team_abbr(away)
-        key = make_game_key(week, ht, at)
-        preds = get_game_predictions(season)
-        pred = preds.get(key)
-        if not pred:
-            return not_found("No prediction found for this game.")
+    from services.cache_service import get_game_predictions
+    from services.utils import normalize_team_abbr
+    from services.betting_screener_service import grade_ats_pick
+    from services.utils import edge_vs_vegas
+    import math
+    import pandas as pd
+    ht = normalize_team_abbr(home)
+    at = normalize_team_abbr(away)
+    key = make_game_key(week, ht, at)
+    preds = get_game_predictions(season)
+    pred = preds.get(key)
+    if not pred:
+        return not_found("No prediction found for this game.")
 
-        ex = dict(pred.get("explanation") or {})
+    ex = dict(pred.get("explanation") or {})
 
-        # One shared game-row lookup feeds both the existing vegas_line
-        # fallback below and the new SU/ATS grading (Finding 3b: this
-        # endpoint never returned is_correct/is_correct_ats at all, unlike
-        # /admin/predictions/games's per-game table). Both grading fields
-        # stay None for a future/unplayed game.
-        actual_winner, home_score, away_score = None, None, None
-        row = None
-        _, _, all_games, _, _, _, _ = load_data()
-        if not all_games.empty:
-            # Narrow to the requested season/week BEFORE normalizing team
-            # names: load_data() returns every season, and normalizing both
-            # team columns across all of them on each modal open is wasted work.
-            season_week = all_games[(all_games["season"] == season) & (all_games["week"] == week)]
-            mask = (
-                (season_week["home_team"].apply(normalize_team_abbr) == ht) &
-                (season_week["away_team"].apply(normalize_team_abbr) == at)
-            )
-            matched = season_week[mask]
-            if not matched.empty:
-                row = matched.iloc[0]
-                res = row.get("result")
-                if pd.notna(res):
-                    actual_winner = ht if res > 0 else (at if res < 0 else None)
-                    hs, aws = row.get("home_score"), row.get("away_score")
-                    home_score = int(hs) if pd.notna(hs) else None
-                    away_score = int(aws) if pd.notna(aws) else None
-
-        # If the stored explanation has no vegas_line, fall back to nfl_games.spread_line.
-        # This is the same fallback used by /admin/predictions/games.
-        if ex.get("vegas_line") is None and row is not None:
-            sl = row.get("spread_line")
-            try:
-                sv = float(sl)
-                if not math.isnan(sv):
-                    ex["vegas_line"] = round(sv, 1)
-                    if ex.get("edge_vs_vegas") is None:
-                        edge = edge_vs_vegas(pred.get("model_spread"), sv)
-                        if edge is not None:
-                            ex["edge_vs_vegas"] = edge
-            except (TypeError, ValueError):
-                pass
-            pred = {**pred, "explanation": ex}
-            # Also patch top-level edge_vs_vegas if still missing
-            if pred.get("edge_vs_vegas") is None and ex.get("edge_vs_vegas") is not None:
-                pred = {**pred, "edge_vs_vegas": ex["edge_vs_vegas"]}
-
-        # SU grading -- only meaningful once the game has an actual winner.
-        is_correct = None
-        pw = pred.get("pred_winner")
-        if actual_winner is not None and pw is not None:
-            is_correct = (normalize_team_abbr(str(pw)) == actual_winner)
-
-        # ATS grading -- grade_ats_pick() wraps grade_bet(), the helper the
-        # betting backtester already uses, so there is one copy of the
-        # win/loss/push formula. Tri-state plus push: True (covered), False
-        # (did not), "push" (landed on the line -- distinct from None, which
-        # means unplayed or not gradable, so the modal can show a neutral
-        # PUSH badge instead of nothing), and None.
-        grade = grade_ats_pick(
-            pred.get("pred_ats_pick"), ht, at, home_score, away_score, ex.get("vegas_line")
+    # One shared game-row lookup feeds both the existing vegas_line
+    # fallback below and the new SU/ATS grading (Finding 3b: this
+    # endpoint never returned is_correct/is_correct_ats at all, unlike
+    # /admin/predictions/games's per-game table). Both grading fields
+    # stay None for a future/unplayed game.
+    actual_winner, home_score, away_score = None, None, None
+    row = None
+    _, _, all_games, _, _, _, _ = load_data()
+    if not all_games.empty:
+        # Narrow to the requested season/week BEFORE normalizing team
+        # names: load_data() returns every season, and normalizing both
+        # team columns across all of them on each modal open is wasted work.
+        season_week = all_games[(all_games["season"] == season) & (all_games["week"] == week)]
+        mask = (
+            (season_week["home_team"].apply(normalize_team_abbr) == ht) &
+            (season_week["away_team"].apply(normalize_team_abbr) == at)
         )
-        is_correct_ats = {"win": True, "loss": False, "push": "push"}.get(grade)
+        matched = season_week[mask]
+        if not matched.empty:
+            row = matched.iloc[0]
+            res = row.get("result")
+            if pd.notna(res):
+                actual_winner = ht if res > 0 else (at if res < 0 else None)
+                hs, aws = row.get("home_score"), row.get("away_score")
+                home_score = int(hs) if pd.notna(hs) else None
+                away_score = int(aws) if pd.notna(aws) else None
 
-        return JSONResponse(content={
-            "key": key,
-            "home_team": ht,
-            "away_team": at,
-            "season": season,
-            "week": week,
-            **{k: v for k, v in pred.items() if k != "locked"},
-            "actual_winner": actual_winner,
-            "home_score": home_score,
-            "away_score": away_score,
-            "is_correct": is_correct,
-            "is_correct_ats": is_correct_ats,
-        })
-    except Exception as e:
-        logger.exception("Unhandled error in get_prediction_explain")
-        return server_error()
+    # If the stored explanation has no vegas_line, fall back to nfl_games.spread_line.
+    # This is the same fallback used by /admin/predictions/games.
+    if ex.get("vegas_line") is None and row is not None:
+        sl = row.get("spread_line")
+        try:
+            sv = float(sl)
+            if not math.isnan(sv):
+                ex["vegas_line"] = round(sv, 1)
+                if ex.get("edge_vs_vegas") is None:
+                    edge = edge_vs_vegas(pred.get("model_spread"), sv)
+                    if edge is not None:
+                        ex["edge_vs_vegas"] = edge
+        except (TypeError, ValueError):
+            pass
+        pred = {**pred, "explanation": ex}
+        # Also patch top-level edge_vs_vegas if still missing
+        if pred.get("edge_vs_vegas") is None and ex.get("edge_vs_vegas") is not None:
+            pred = {**pred, "edge_vs_vegas": ex["edge_vs_vegas"]}
+
+    # SU grading -- only meaningful once the game has an actual winner.
+    is_correct = None
+    pw = pred.get("pred_winner")
+    if actual_winner is not None and pw is not None:
+        is_correct = (normalize_team_abbr(str(pw)) == actual_winner)
+
+    # ATS grading -- grade_ats_pick() wraps grade_bet(), the helper the
+    # betting backtester already uses, so there is one copy of the
+    # win/loss/push formula. Tri-state plus push: True (covered), False
+    # (did not), "push" (landed on the line -- distinct from None, which
+    # means unplayed or not gradable, so the modal can show a neutral
+    # PUSH badge instead of nothing), and None.
+    grade = grade_ats_pick(
+        pred.get("pred_ats_pick"), ht, at, home_score, away_score, ex.get("vegas_line")
+    )
+    is_correct_ats = {"win": True, "loss": False, "push": "push"}.get(grade)
+
+    return JSONResponse(content={
+        "key": key,
+        "home_team": ht,
+        "away_team": at,
+        "season": season,
+        "week": week,
+        **{k: v for k, v in pred.items() if k != "locked"},
+        "actual_winner": actual_winner,
+        "home_score": home_score,
+        "away_score": away_score,
+        "is_correct": is_correct,
+        "is_correct_ats": is_correct_ats,
+    })
 
 
 @router.get("/schedule")
@@ -313,21 +293,17 @@ def get_schedule(year: int, _auth: dict = Depends(require_auth)):
     """Data for the week-by-week schedule grid."""
     is_debug = os.environ.get("DEBUG_PAGE_LOAD", "False").lower() == "true"
     start_route = time.time()
-    try:
-        _, _, games, players, _, draft_results, _ = load_data(year=year)
-        if games.empty:
-            from services.sandbox_service import get_future_schedule
-            schedule_enriched = get_future_schedule(year)
-        else:
-            schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
-        schedule_enriched = _merge_game_predictions(schedule_enriched, year)
+    _, _, games, players, _, draft_results, _ = load_data(year=year)
+    if games.empty:
+        from services.sandbox_service import get_future_schedule
+        schedule_enriched = get_future_schedule(year)
+    else:
+        schedule_enriched = analysis.get_enriched_schedule(games, draft_results, players, year)
+    schedule_enriched = _merge_game_predictions(schedule_enriched, year)
 
-        if is_debug:
-            logger.debug("/api/schedule route total took %.3fs", time.time() - start_route)
-        return JSONResponse(content=sanitize_state(schedule_enriched.to_dict(orient="records")))
-    except Exception as e:
-        logger.exception("Unhandled error in /api/schedule")
-        return server_error()
+    if is_debug:
+        logger.debug("/api/schedule route total took %.3fs", time.time() - start_route)
+    return JSONResponse(content=sanitize_state(schedule_enriched.to_dict(orient="records")))
 
 
 _LIVE_SCORE_COLS = [
@@ -343,26 +319,22 @@ def get_live_scores(year: int):
     full page reload. Public — same visibility as the schedule page itself
     (no login wall on /schedule/{year}), unlike /api/schedule above.
     """
-    try:
-        _, _, games, _, _, _, _ = load_data(year=year)
-        if games.empty or "game_id" not in games.columns:
-            return JSONResponse(content={})
-        cols = [c for c in _LIVE_SCORE_COLS if c in games.columns]
-        out = {}
-        for _, row in games.iterrows():
-            values = {c: row[c] for c in cols}
-            # period is NaN for every game the live-scores job hasn't touched,
-            # which forces the whole column to float64 -- an in-progress
-            # game's real value (e.g. 1) comes out as 1.0 and renders as
-            # "Q1.0" client-side unless cast back to int here (matches
-            # live_standings_service.py's _live_games_by_team()).
-            period = values.get("period")
-            values["period"] = None if period is None or pd.isna(period) else int(period)
-            out[str(row["game_id"])] = sanitize_state(values)
-        return JSONResponse(content=out)
-    except Exception:
-        logger.exception("Unhandled error in /api/live-scores")
-        return server_error()
+    _, _, games, _, _, _, _ = load_data(year=year)
+    if games.empty or "game_id" not in games.columns:
+        return JSONResponse(content={})
+    cols = [c for c in _LIVE_SCORE_COLS if c in games.columns]
+    out = {}
+    for _, row in games.iterrows():
+        values = {c: row[c] for c in cols}
+        # period is NaN for every game the live-scores job hasn't touched,
+        # which forces the whole column to float64 -- an in-progress
+        # game's real value (e.g. 1) comes out as 1.0 and renders as
+        # "Q1.0" client-side unless cast back to int here (matches
+        # live_standings_service.py's _live_games_by_team()).
+        period = values.get("period")
+        values["period"] = None if period is None or pd.isna(period) else int(period)
+        out[str(row["game_id"])] = sanitize_state(values)
+    return JSONResponse(content=out)
 
 
 @router.get("/live-standings")
@@ -372,26 +344,22 @@ def get_live_standings(year: int):
     visibility as /wins-pool/{year} itself. Reuses the page's own standings
     calculation so a poll can never disagree with a fresh page load.
     """
-    try:
-        all_st, _, all_games, players, _, all_draft, rules = load_data()
-        standings = filter_season(all_st, year)
-        games = filter_season(all_games, year)
-        draft_results = filter_season(all_draft, year)
-        picks_made, picks_expected = analysis.get_draft_progress(
-            draft_results, filter_season(rules, year)
+    all_st, _, all_games, players, _, all_draft, rules = load_data()
+    standings = filter_season(all_st, year)
+    games = filter_season(all_games, year)
+    draft_results = filter_season(all_draft, year)
+    picks_made, picks_expected = analysis.get_draft_progress(
+        draft_results, filter_season(rules, year)
+    )
+    if picks_expected > 0 and picks_made < picks_expected:
+        sorted_df = None
+    else:
+        sorted_df = analysis.calculate_wins_pool_standings(
+            standings, draft_results, players, year, games
         )
-        if picks_expected > 0 and picks_made < picks_expected:
-            sorted_df = None
-        else:
-            sorted_df = analysis.calculate_wins_pool_standings(
-                standings, draft_results, players, year, games
-            )
-        return JSONResponse(
-            content=sanitize_state(build_live_standings_payload(sorted_df, games, year))
-        )
-    except Exception:
-        logger.exception("Unhandled error in /api/live-standings")
-        return server_error()
+    return JSONResponse(
+        content=sanitize_state(build_live_standings_payload(sorted_df, games, year))
+    )
 
 
 @router.get("/player/{player_id}/analytics")
@@ -400,14 +368,10 @@ def get_player_analytics_endpoint(
     _auth: dict = Depends(require_auth),
 ):
     """Multi-season analytics payload for Chart.js on the player profile page."""
-    try:
-        result = get_player_analytics_data(player_id)
-        if result is None:
-            return not_found()
-        return JSONResponse(content=result)
-    except Exception:
-        logger.exception("Error in /api/player/%d/analytics", player_id)
-        return server_error()
+    result = get_player_analytics_data(player_id)
+    if result is None:
+        return not_found()
+    return JSONResponse(content=result)
 
 
 @router.get("/prediction_features/{season}/{week}/{away_team}/{home_team}")
@@ -428,52 +392,44 @@ def get_game_prediction_features(
     W{week:02d}_{home}_{away} to match the nflverse schedule convention
     (home_team listed first), matching what feature_audit_service stores.
     """
-    try:
-        from services.utils import normalize_team_abbr
-        ht = normalize_team_abbr(home_team)   # home team first in game_key
-        at = normalize_team_abbr(away_team)   # away team second
-        game_key = make_game_key(week, ht, at)
+    from services.utils import normalize_team_abbr
+    ht = normalize_team_abbr(home_team)   # home team first in game_key
+    at = normalize_team_abbr(away_team)   # away team second
+    game_key = make_game_key(week, ht, at)
 
-        doc = get_prediction_features(season)
-        if doc is None:
-            return JSONResponse(
-                status_code=404,
-                content={"error": "No feature data for this season."},
-            )
+    doc = get_prediction_features(season)
+    if doc is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "No feature data for this season."},
+        )
 
-        game_data = doc.get("games", {}).get(game_key)
-        if game_data is None:
-            return JSONResponse(
-                status_code=404,
-                content={"error": f"No feature data for game {game_key}."},
-            )
+    game_data = doc.get("games", {}).get(game_key)
+    if game_data is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"No feature data for game {game_key}."},
+        )
 
-        return JSONResponse(content={
-            **game_data,
-            "ensemble_version": doc.get("ensemble_version"),
-        })
-    except Exception:
-        logger.exception("Unhandled error in get_game_prediction_features")
-        return server_error()
+    return JSONResponse(content={
+        **game_data,
+        "ensemble_version": doc.get("ensemble_version"),
+    })
 
 
 @router.post("/draft/push-subscribe")
 async def push_subscribe(request: Request, _auth: dict = Depends(require_auth)):
     """Store a browser push subscription on the player's Firestore document."""
-    try:
-        body = await request.json()
-        player_id = body.get("playerId")
-        subscription = body.get("subscription")
-        if not player_id or not subscription:
-            return error_response("playerId and subscription are required.")
-        from services.push_service import save_push_subscription
-        ok = save_push_subscription(int(player_id), subscription)
-        if ok:
-            return JSONResponse(content={"ok": True})
-        return server_error()
-    except Exception:
-        logger.exception("push_subscribe error")
-        return server_error()
+    body = await request.json()
+    player_id = body.get("playerId")
+    subscription = body.get("subscription")
+    if not player_id or not subscription:
+        return error_response("playerId and subscription are required.")
+    from services.push_service import save_push_subscription
+    ok = save_push_subscription(int(player_id), subscription)
+    if ok:
+        return JSONResponse(content={"ok": True})
+    return server_error()
 
 
 @router.post("/push/client-error")
@@ -551,20 +507,16 @@ def get_config():
 async def set_config(request: Request, _auth: dict = Depends(require_admin)):
     """Updates app config. Admin only."""
     from services.db_service import set_config_settings
+    body = await request.json()
+    allowed = {k: v for k, v in body.items() if k in {"draft_active", "mock_draft_active"}}
+    set_config_settings(allowed)
     try:
-        body = await request.json()
-        allowed = {k: v for k, v in body.items() if k in {"draft_active", "mock_draft_active"}}
-        set_config_settings(allowed)
-        try:
-            from routes.draft_routes import manager as ws_manager
-            import asyncio
-            asyncio.create_task(ws_manager.broadcast({"type": "config_changed", **allowed}))
-        except Exception:
-            pass  # non-fatal — clients pick it up on next background sync
-        return JSONResponse(content={"ok": True, **allowed})
+        from routes.draft_routes import manager as ws_manager
+        import asyncio
+        asyncio.create_task(ws_manager.broadcast({"type": "config_changed", **allowed}))
     except Exception:
-        logger.exception("set_config error")
-        return server_error()
+        pass  # non-fatal — clients pick it up on next background sync
+    return JSONResponse(content={"ok": True, **allowed})
 
 
 
@@ -715,62 +667,46 @@ def build_player_outlook(player_id: int, is_admin: bool) -> dict:
 def get_profile_portfolio(_auth: dict = Depends(require_auth)):
     """Caller's season outlook. Projections are withheld from non-admins while the draft is active."""
     try:
-        try:
-            player_id = int(_auth.get("sub"))
-        except (TypeError, ValueError):
-            player_id = -1  # unparseable subject: resolves to reason "no_teams"
-        return JSONResponse(content=build_player_outlook(player_id, _auth.get("role") == "admin"))
-    except Exception:
-        logger.exception("Unhandled error in get_profile_portfolio")
-        return server_error()
+        player_id = int(_auth.get("sub"))
+    except (TypeError, ValueError):
+        player_id = -1  # unparseable subject: resolves to reason "no_teams"
+    return JSONResponse(content=build_player_outlook(player_id, _auth.get("role") == "admin"))
 
 
 @router.get("/players/{player_id}/portfolio")
 def get_player_portfolio(player_id: int, _auth: dict = Depends(require_auth)):
     """Any player's season outlook, visible to every authenticated player (no paid data)."""
-    try:
-        return JSONResponse(content=build_player_outlook(player_id, _auth.get("role") == "admin"))
-    except Exception:
-        logger.exception("Unhandled error in get_player_portfolio")
-        return server_error()
+    return JSONResponse(content=build_player_outlook(player_id, _auth.get("role") == "admin"))
 
 
 @router.get("/pool/status")
 def get_pool_status(season: int | None = None, _auth: dict = Depends(require_auth)):
     """Pool fee/prize pot summary: aggregate counts plus the caller's own paid flag only."""
+    from services.data_service import get_active_season
+    _, _, games, _, order_df, draft_results, rules = load_data()
+    if season is None:
+        season = int(get_active_season(games, draft_results, rules))
     try:
-        from services.data_service import get_active_season
-        _, _, games, _, order_df, draft_results, rules = load_data()
-        if season is None:
-            season = int(get_active_season(games, draft_results, rules))
-        try:
-            player_id = int(_auth.get("sub"))
-        except (TypeError, ValueError):
-            player_id = None
-        status = build_pool_status(order_df, get_config_settings(), season, player_id)
-        return JSONResponse(content=status)
-    except Exception:
-        logger.exception("Unhandled error in get_pool_status")
-        return server_error()
+        player_id = int(_auth.get("sub"))
+    except (TypeError, ValueError):
+        player_id = None
+    status = build_pool_status(order_df, get_config_settings(), season, player_id)
+    return JSONResponse(content=status)
 
 
 @router.get("/pool/unpaid")
 def get_pool_unpaid(season: int | None = None, _auth: dict = Depends(require_auth)):
     """Gated unpaid-entry view; names are returned only to admins or in the public/banner stages."""
+    from services.data_service import get_active_season
+    _, _, games, players_df, order_df, draft_results, rules = load_data()
+    if season is None:
+        season = int(get_active_season(games, draft_results, rules))
     try:
-        from services.data_service import get_active_season
-        _, _, games, players_df, order_df, draft_results, rules = load_data()
-        if season is None:
-            season = int(get_active_season(games, draft_results, rules))
-        try:
-            caller_id = int(_auth.get("sub"))
-        except (TypeError, ValueError):
-            caller_id = None
-        payload = build_unpaid_payload(
-            order_df, players_df, get_config_settings(), season,
-            current_played_week(games, season), caller_id, _auth.get("role") == "admin",
-        )
-        return JSONResponse(content=payload)
-    except Exception:
-        logger.exception("Unhandled error in get_pool_unpaid")
-        return server_error()
+        caller_id = int(_auth.get("sub"))
+    except (TypeError, ValueError):
+        caller_id = None
+    payload = build_unpaid_payload(
+        order_df, players_df, get_config_settings(), season,
+        current_played_week(games, season), caller_id, _auth.get("role") == "admin",
+    )
+    return JSONResponse(content=payload)
