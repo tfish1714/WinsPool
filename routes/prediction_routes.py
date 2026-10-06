@@ -1,5 +1,4 @@
 """routes/prediction_routes.py — Win prediction and Elo endpoints."""
-import logging
 import pathlib
 
 from fastapi import APIRouter, Depends
@@ -9,7 +8,6 @@ from services.betting_screener_service import load_predictions_by_season
 from services.data_service import load_data
 from services.session_service import require_admin
 
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 

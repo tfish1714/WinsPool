@@ -1,5 +1,4 @@
 """routes/standings_routes.py — Standings, week-by-week, and playoff race routes."""
-import logging
 
 import pandas as pd
 from fastapi import APIRouter, Request
@@ -17,7 +16,6 @@ from services.session_service import decode_current_token
 import services.analysis_service as analysis
 from services.live_standings_service import _live_games_by_team
 
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
