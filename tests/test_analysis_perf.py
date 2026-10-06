@@ -30,6 +30,17 @@ def simple_schedule():
     ])
 
 
+def test_wins_by_week_ignores_unplayed_sentinel_games(simple_schedule):
+    """Unplayed games arrive with result == -1000 and must not become weeks or wins."""
+    future = pd.DataFrame([
+        {"week": 3, "fullName_away": "Alice", "fullName_home": "Bob", "result": -1000.0},
+    ])
+    result = player_winsbyWeek(pd.concat([simple_schedule, future], ignore_index=True))
+    assert "Week 3" not in result.index
+    assert result.loc["Total", "Alice"] == "1-1"
+    assert result.loc["Total", "Bob"] == "1-1"
+
+
 def test_wins_by_week_shape(simple_schedule):
     """Result must have rows = weeks+1 (Total row) and cols = players."""
     result = player_winsbyWeek(simple_schedule)
@@ -197,3 +208,39 @@ def test_get_enriched_schedule_non_live_games_stay_not_live():
 
     assert len(result) == 1
     assert result.iloc[0]["is_live"] == False
+
+
+# -- mobile card helpers ------------------------------------------------------
+
+def test_mobile_weekly_cards_shape(simple_schedule):
+    cards = analysis_cards(simple_schedule)
+    assert [c["name"] for c in cards] == ["Alice", "Bob"]
+    alice = cards[0]
+    assert alice["total"] == "1-1"
+    assert alice["latest"]["label"] == "Week 2"
+    assert [w["label"] for w in alice["weeks"]] == ["Week 2", "Week 1"]
+    assert alice["weeks"][1]["weekly"] == "1-0" and alice["weeks"][1]["tone"] == "win"
+
+
+def analysis_cards(schedule):
+    from services.analysis_service import mobile_weekly_cards
+    return mobile_weekly_cards(player_winsbyWeek(schedule))
+
+
+def test_mobile_h2h_lists_skips_undrafted_as_viewable():
+    from services.analysis_service import mobile_h2h_lists
+    m = pd.DataFrame(
+        [["0-0", "1-0", "1-0"], ["0-1", "0-0", "0-0"], ["0-1", "0-0", "0-0"]],
+        index=["A", "B", "Undrafted"], columns=["A", "B", "Undrafted"],
+    )
+    m["Overall"] = ["2-0", "0-1", "0-1"]
+    out = mobile_h2h_lists(m)
+    assert [p["name"] for p in out] == ["A", "B"]
+    assert [o["name"] for o in out[0]["opponents"]] == ["B", "Undrafted"]
+    assert out[0]["overall"] == "2-0" and out[0]["opponents"][0]["tone"] == "win"
+
+
+def test_mobile_helpers_handle_empty():
+    from services.analysis_service import mobile_weekly_cards, mobile_h2h_lists
+    assert mobile_weekly_cards(pd.DataFrame()) == []
+    assert mobile_h2h_lists(pd.DataFrame()) == []

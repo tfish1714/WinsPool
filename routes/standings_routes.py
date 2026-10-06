@@ -145,8 +145,10 @@ async def wins_pool_weekbyweek(request: Request, year: int):
     if year not in _yrs:
         _yrs = sorted(_yrs + [year])
 
+    record_by_week = record_by_week.rename(columns=_first_name)
     return templates.TemplateResponse(request, "weekbyweek.html", {
-        "table": record_by_week.rename(columns=_first_name).to_html(classes="wp-data-table", index=True, border=0),
+        "table": record_by_week.to_html(classes="wp-data-table", index=True, border=0),
+        "cards": analysis.mobile_weekly_cards(record_by_week),
         "current_year": get_active_season(all_games, all_draft_results, rules),
         "year": year,
         "available_years": _yrs,

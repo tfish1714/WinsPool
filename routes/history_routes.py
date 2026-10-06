@@ -179,15 +179,33 @@ async def headtohead_by_year(request: Request, year: int):
     games = filter_season(all_games, year)
     draft_results = filter_season(all_draft_results, year)
 
+    mobile_lists, selected = [], None
     try:
         sched = analysis.get_enriched_schedule(games, draft_results, players, year)
-        h2h_df = analysis.player_winlossmatrix(sched)
-        h2h_html = h2h_df.rename(columns=_first_name, index=_first_name).to_html(classes="wp-data-table", border=0)
+        h2h_df = analysis.player_winlossmatrix(sched).rename(columns=_first_name, index=_first_name)
+        h2h_html = h2h_df.to_html(classes="wp-data-table", border=0)
+        mobile_lists = analysis.mobile_h2h_lists(h2h_df)
     except Exception:
         h2h_html = ""
 
+    # Default the phone view to the signed-in viewer (cookie only; the page also
+    # re-selects from localStorage when the cookie is absent).
+    viewer_id, _ = _viewer(request)
+    viewer_known = False
+    if viewer_id is not None and not players.empty:
+        row = players[players["playerId"] == viewer_id]
+        if not row.empty:
+            selected = _first_name(str(row.iloc[0]["fullName"]))
+            viewer_known = selected in {m["name"] for m in mobile_lists}
+    if selected not in {m["name"] for m in mobile_lists}:
+        selected = mobile_lists[0]["name"] if mobile_lists else None
+
     return templates.TemplateResponse(request, "headtohead.html", {
         "h2h_html": h2h_html,
+        "mobile_lists": mobile_lists,
+        "mobile_selected": selected,
+        "viewer_known": viewer_known,
+        "player_names": {str(r.playerId): _first_name(str(r.fullName)) for r in players.itertuples()} if not players.empty else {},
         "year": year,
         "current_year": get_active_season(all_games, all_draft_results, rules),
         "available_years": get_available_years(all_draft_results, all_games, rules),

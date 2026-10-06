@@ -16,9 +16,32 @@
                 {{ year_picker(available_years, year, "/wins-pool/", "/weekbyweek") }}
             </div>
         </header>
-        <div class="table-container">
+        <div class="table-container desktop-only-table">
             {{ table|safe }}
         </div>
+
+        {% if cards %}
+        <div class="card-container wbw-cards">
+            {% for c in cards %}
+            <details class="wbw-card">
+                <summary class="wbw-summary">
+                    <span class="wbw-rank">{{ c.rank }}</span>
+                    <span class="wbw-name">{{ c.name }}</span>
+                    {% if c.latest %}<span class="wbw-latest rec-{{ c.latest.tone }}">{{ c.latest.label }}: {{ c.latest.weekly }}</span>{% endif %}
+                    <span class="wbw-total rec-{{ c.total_tone }}">{{ c.total }}</span>
+                </summary>
+                <table class="wbw-weeks">
+                    <thead><tr><th>Week</th><th>Result</th><th>Season</th></tr></thead>
+                    <tbody>
+                    {% for w in c.weeks %}
+                        <tr><td>{{ w.label|replace('Week ', 'Wk ') }}</td><td class="rec-{{ w.tone }}">{{ w.weekly }}</td><td>{{ w.running }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </details>
+            {% endfor %}
+        </div>
+        {% endif %}
     </div>
 </main>
 {% endblock %}

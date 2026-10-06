@@ -102,6 +102,9 @@ def get_remaining_games(player: str, schedule: pd.DataFrame) -> int:
 def player_winsbyWeek(schedule: pd.DataFrame, sorted_players: List[str] = None) -> pd.DataFrame:
     """Return a DataFrame of cumulative wins per player broken down by week."""
     df = schedule[['week', 'fullName_away', 'fullName_home', 'result']].dropna(subset=['result'])
+    # get_enriched_schedule fills unplayed games' result with UNDRAFTED_SENTINEL;
+    # without this filter every future game counted as a away-team win/home loss.
+    df = df[df['result'] != UNDRAFTED_SENTINEL]
     if df.empty:
         return pd.DataFrame()
 
@@ -163,6 +166,65 @@ def player_winsbyWeek(schedule: pd.DataFrame, sorted_players: List[str] = None) 
         result_df = result_df[cols]
 
     return result_df
+
+def _record_tone(record: str) -> str:
+    """'win' / 'loss' / 'even' for a 'W-L' or 'W-L-T' string ('even' when unparseable or 0-0)."""
+    try:
+        w, l = (int(x) for x in str(record).split(' ')[0].split('-')[:2])
+    except ValueError:
+        return 'even'
+    return 'win' if w > l else 'loss' if l > w else 'even'
+
+
+def mobile_weekly_cards(record_by_week: pd.DataFrame) -> list:
+    """Per-player cards from the player_winsbyWeek frame (columns already in standing order).
+
+    Each card: rank, name, total, latest week's record, and the weekly history newest first.
+    """
+    if record_by_week is None or record_by_week.empty or 'Total' not in record_by_week.index:
+        return []
+    week_rows = [r for r in record_by_week.index if r != 'Total']
+    cards = []
+    for rank, name in enumerate(record_by_week.columns, start=1):
+        weeks = []
+        for label in week_rows:
+            cell = str(record_by_week.at[label, name])
+            weekly, _, running = cell.partition(' (')
+            weeks.append({'label': label, 'weekly': weekly, 'running': running.rstrip(')'),
+                          'tone': _record_tone(weekly)})
+        cards.append({
+            'rank': rank,
+            'name': name,
+            'total': str(record_by_week.at['Total', name]),
+            'total_tone': _record_tone(str(record_by_week.at['Total', name])),
+            'latest': weeks[0] if weeks else None,
+            'weeks': weeks,
+        })
+    return cards
+
+
+def mobile_h2h_lists(matrix: pd.DataFrame) -> list:
+    """Per-player opponent lists from the player_winlossmatrix frame.
+
+    'Undrafted' is listed as an opponent but is not offered as a player to view.
+    """
+    if matrix is None or matrix.empty:
+        return []
+    opponents = [c for c in matrix.columns if c != 'Overall']
+    out = []
+    for name in matrix.index:
+        if name == 'Undrafted':
+            continue
+        out.append({
+            'name': name,
+            'overall': str(matrix.at[name, 'Overall']) if 'Overall' in matrix.columns else '',
+            'opponents': [
+                {'name': o, 'record': str(matrix.at[name, o]), 'tone': _record_tone(matrix.at[name, o])}
+                for o in opponents if o != name
+            ],
+        })
+    return out
+
 
 def create_what_if_scenario_matrix(schedule: pd.DataFrame, record_by_week: pd.DataFrame, step: float = 0.166666666666) -> pd.DataFrame:
     """Build a matrix of hypothetical final-standings outcomes across remaining games.

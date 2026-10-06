@@ -19,9 +19,52 @@
         </header>
 
         {% if h2h_html %}
-        <div class="table-container">
+        <div class="table-container desktop-only-table">
             {{ h2h_html | safe }}
         </div>
+
+        {% if mobile_lists %}
+        <div class="card-container h2h-mobile">
+            <label class="h2h-pick">
+                <span>Viewing</span>
+                <select id="h2h-player" class="season-select">
+                    {% for m in mobile_lists %}
+                    <option value="{{ m.name }}" {% if m.name == mobile_selected %}selected{% endif %}>{{ m.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            {% for m in mobile_lists %}
+            <section class="h2h-panel" data-player="{{ m.name }}" {% if m.name != mobile_selected %}hidden{% endif %}>
+                <div class="h2h-overall">Overall <strong>{{ m.overall }}</strong></div>
+                <ul class="h2h-list">
+                    {% for o in m.opponents %}
+                    <li><span>vs {{ o.name }}</span><span class="rec-{{ o.tone }}">{{ o.record }}</span></li>
+                    {% endfor %}
+                </ul>
+            </section>
+            {% endfor %}
+        </div>
+        <script>
+        (function () {
+            var sel = document.getElementById('h2h-player');
+            if (!sel) return;
+            function show() {
+                document.querySelectorAll('.h2h-panel').forEach(function (p) {
+                    p.hidden = p.getAttribute('data-player') !== sel.value;
+                });
+            }
+            try {
+                var names = {{ player_names | tojson }};
+                var mine = names[localStorage.getItem('nfl_wins_my_player_id')];
+                if (mine && !{{ 'true' if viewer_known else 'false' }}) {
+                    for (var i = 0; i < sel.options.length; i++) if (sel.options[i].value === mine) sel.value = mine;
+                }
+            } catch (e) {}
+            sel.addEventListener('change', show);
+            show();
+        })();
+        </script>
+        {% endif %}
         {% else %}
         <div class="empty-note">No head-to-head data available for {{ year }}.</div>
         {% endif %}

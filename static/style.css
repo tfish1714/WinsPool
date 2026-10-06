@@ -3611,6 +3611,40 @@ table.wp-data-table tbody td:last-child {
         width: 56px;
         font-size: 11px;
     }
+
+    /* 11-12 player columns cannot fit a phone with fixed layout (names and
+       records ellipsize into nothing): size columns to content and let the
+       .table-container scroll sideways, keeping the row label pinned. */
+    table.wp-data-table {
+        table-layout: auto;
+        width: max-content;
+        min-width: 100%;
+    }
+    table.wp-data-table thead th,
+    table.wp-data-table tbody td,
+    table.wp-data-table tbody th {
+        overflow: visible;
+        text-overflow: clip;
+        min-width: 64px;
+    }
+    table.wp-data-table thead th:first-child,
+    table.wp-data-table tbody th,
+    table.wp-data-table tbody td:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 1;
+        min-width: 72px;
+        width: auto;
+        text-align: left;
+        font-weight: 600;
+        color: var(--ink);
+        background: var(--bg-elev-2);
+    }
+    table.wp-data-table tbody th {
+        padding: 8px 5px;
+        font-size: 11px;
+        white-space: nowrap;
+    }
 }
 
 /* =============================================================
@@ -4236,3 +4270,54 @@ a.pool-chip-mine:hover { text-decoration: underline; }
 :root[data-theme="light"] .theme-icon-sun { display: none; }
 :root[data-theme="light"] .theme-icon-moon { display: inline-block; }
 .nav-mobile-header .theme-toggle { margin-left: auto; }
+
+/* =============================================================
+   Mobile card views for Week by Week and Head to Head
+   (.desktop-only-table hides the wide tables and .card-container
+   shows these at <= 768px; see the shared rules above)
+   ============================================================= */
+.rec-win  { color: var(--pos); }
+.rec-loss { color: var(--neg); }
+.rec-even { color: var(--ink-2); }
+
+.wbw-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+}
+.wbw-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 52px;
+    padding: 8px 14px;
+    cursor: pointer;
+    list-style: none;
+}
+.wbw-summary::-webkit-details-marker { display: none; }
+.wbw-summary::after { content: '▾'; color: var(--ink-3); font-size: 12px; }
+.wbw-card[open] .wbw-summary::after { content: '▴'; }
+.wbw-rank { width: 20px; color: var(--ink-3); font: 600 13px 'JetBrains Mono', monospace; }
+.wbw-name { flex: 1; min-width: 0; font: 600 15px 'Outfit', sans-serif; color: var(--ink); }
+.wbw-latest { font: 12px 'JetBrains Mono', monospace; }
+.wbw-total { min-width: 42px; text-align: right; font: 700 15px 'JetBrains Mono', monospace; }
+.wbw-weeks { width: 100%; border-collapse: collapse; border-top: 1px solid var(--line); }
+.wbw-weeks th, .wbw-weeks td {
+    padding: 8px 14px;
+    text-align: left;
+    font: 12px 'JetBrains Mono', monospace;
+    color: var(--ink-2);
+}
+.wbw-weeks th { font: 600 11px 'Outfit', sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.wbw-weeks tbody tr + tr { border-top: 1px solid var(--line); }
+
+.h2h-mobile { gap: 12px; }
+.h2h-pick { display: flex; align-items: center; gap: 10px; color: var(--ink-3); font: 600 11px 'Outfit', sans-serif; letter-spacing: 0.08em; text-transform: uppercase; }
+.h2h-pick select { flex: 1; min-height: 44px; }
+.h2h-panel[hidden] { display: none; }
+.h2h-overall { padding: 10px 2px 12px; color: var(--ink-2); font-size: 14px; }
+.h2h-overall strong { color: var(--ink); font-family: 'JetBrains Mono', monospace; }
+.h2h-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--bg-elev); }
+.h2h-list li { display: flex; justify-content: space-between; align-items: center; min-height: 44px; padding: 0 14px; font-size: 14px; color: var(--ink); }
+.h2h-list li + li { border-top: 1px solid var(--line); }
+.h2h-list li span:last-child { font: 700 14px 'JetBrains Mono', monospace; }
