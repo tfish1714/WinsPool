@@ -575,13 +575,9 @@ class AdminApp {
                 year ? Number(year) : undefined,
                 week ? Number(week) : undefined
             );
-            const textEl = document.getElementById('recap-prompt-text');
-            if (textEl) textEl.value = res.prompt;
+            this.showRecapPrompt(res.prompt);
             if (!yearEl.value && res.year != null) yearEl.value = res.year;
             if (!weekEl.value && res.week != null) weekEl.value = res.week;
-            document.getElementById('recap-prompt-preview-container')?.classList.remove('hidden');
-            const copyBtn = document.getElementById('recap-copy-prompt-btn');
-            if (copyBtn) copyBtn.disabled = !res.prompt;
             console.log('[Admin] Preview prompt received.');
         } catch (e) {
             if (silent) {
@@ -590,6 +586,15 @@ class AdminApp {
                 alert(`Preview failed: ${e.message}`);
             }
         }
+    }
+
+    // Shared by the weekly and draft previews so the copy button stays in sync.
+    showRecapPrompt(prompt) {
+        const textEl = document.getElementById('recap-prompt-text');
+        if (textEl) textEl.value = prompt;
+        document.getElementById('recap-prompt-preview-container')?.classList.remove('hidden');
+        const copyBtn = document.getElementById('recap-copy-prompt-btn');
+        if (copyBtn) copyBtn.disabled = !prompt;
     }
 
     async copyRecapPrompt() {
@@ -632,9 +637,7 @@ class AdminApp {
 
         try {
             const { prompt } = await ApiService.previewDraftRecapPrompt(this.playerId, year);
-            const textEl = document.getElementById('recap-prompt-text');
-            if (textEl) textEl.value = prompt;
-            document.getElementById('recap-prompt-preview-container')?.classList.remove('hidden');
+            this.showRecapPrompt(prompt);
             console.log('[Admin] Draft Preview prompt received.');
         } catch (e) {
             alert(`Preview failed: ${e.message}`);
