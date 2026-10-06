@@ -4050,6 +4050,7 @@ table.wp-data-table tbody td:last-child {
 }
 
 /* Bottom tab bar */
+:root { --bottom-tab-bar-height: 72px; }
 .bottom-tab-bar {
     display: none;
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 200;
@@ -4074,7 +4075,7 @@ table.wp-data-table tbody td:last-child {
     html:not(.show-signin) .nav-mobile-header { display: flex !important; }
     html:not(.show-signin) .bottom-tab-bar { display: flex !important; }
     /* Pad page content so bottom bar doesn't cover it */
-    #content { padding-bottom: 72px; }
+    #content { padding-bottom: var(--bottom-tab-bar-height); }
 }
 
 /* Decisive tiebreaker highlight + explainer (static/js/tiebreaker_explain.js) */
@@ -4339,6 +4340,10 @@ a.pool-chip-mine:hover { text-decoration: underline; }
     border-radius: 12px;
     font-size: 0.9rem;
     line-height: 1.35;
+}
+/* Sit above the mobile bottom tab bar (same 860px breakpoint) so it never blocks tab taps */
+@media (max-width: 860px) {
+    .ios-install-banner { bottom: calc(var(--bottom-tab-bar-height) + 8px + env(safe-area-inset-bottom, 0px)); }
 }
 .ios-install-banner__text { flex: 1; }
 .ios-install-banner__dismiss {
