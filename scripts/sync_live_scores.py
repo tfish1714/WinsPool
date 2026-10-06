@@ -78,9 +78,16 @@ def _load_schedule_for_window() -> pd.DataFrame:
     local = RAWDATA_DIR / "schedules" / "games.csv"
     if local.exists():
         return pd.read_csv(local, low_memory=False)
-    resp = requests.get(SCHEDULE_URL, timeout=15)
-    resp.raise_for_status()
-    return pd.read_csv(io.StringIO(resp.text), low_memory=False)
+    try:
+        resp = requests.get(SCHEDULE_URL, timeout=15)
+        resp.raise_for_status()
+        return pd.read_csv(io.StringIO(resp.text), low_memory=False)
+    except requests.RequestException:
+        # nflverse stopped publishing the plain games.csv on 2026-10-06; the
+        # same data is still published as games.csv.gz.
+        resp = requests.get(SCHEDULE_URL + ".gz", timeout=15)
+        resp.raise_for_status()
+        return pd.read_csv(io.BytesIO(resp.content), compression="gzip", low_memory=False)
 
 
 def is_live_score_window_active(now_et=None, games=None) -> bool:

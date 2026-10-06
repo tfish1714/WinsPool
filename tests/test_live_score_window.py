@@ -1,5 +1,6 @@
 """scripts/sync_live_scores.py::is_live_score_window_active() and main()'s
 fast exit outside NFL game windows."""
+import gzip
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -114,6 +115,31 @@ def test_schedule_loader_downloads_when_no_local_copy(monkeypatch, tmp_path):
 
     df = sls._load_schedule_for_window()
 
+    assert list(df["gameday"]) == ["2026-09-20"]
+
+
+def test_schedule_loader_falls_back_to_csv_gz(monkeypatch, tmp_path):
+    """nflverse stopped publishing the plain games.csv (404); .csv.gz remains."""
+    monkeypatch.setattr(sls, "RAWDATA_DIR", tmp_path)
+    urls = []
+
+    class _Gz:
+        content = gzip.compress(b"gameday,gametime,result\n2026-09-20,13:00,\n")
+
+        def raise_for_status(self):
+            pass
+
+    def fake_get(url, timeout):
+        urls.append(url)
+        if url.endswith(".gz"):
+            return _Gz()
+        raise sls.requests.HTTPError("404 Not Found")
+
+    monkeypatch.setattr(sls.requests, "get", fake_get)
+
+    df = sls._load_schedule_for_window()
+
+    assert urls == [sls.SCHEDULE_URL, sls.SCHEDULE_URL + ".gz"]
     assert list(df["gameday"]) == ["2026-09-20"]
 
 

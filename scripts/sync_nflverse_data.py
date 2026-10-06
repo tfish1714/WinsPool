@@ -73,6 +73,9 @@ RELEASES = {
         ],
         "year_specific": False,
         "priority": 1,   # always sync
+        # nflverse stopped publishing the plain games.csv on 2026-10-06 (only
+        # games.csv.gz/.parquet/.qs); try the plain file first, then the .gz.
+        "gz_fallback": True,
     },
 
     # Team weekly stats — what we use for rolling EPA (no leakage)
@@ -253,7 +256,7 @@ def _download_file(url: str, dest: pathlib.Path, compressed: bool = False,
         with urllib.request.urlopen(url, timeout=60) as resp:
             data = resp.read()
 
-        if compressed:
+        if compressed or url.endswith(".gz"):
             data = gzip.decompress(data)
 
         tmp.write_bytes(data)
@@ -334,6 +337,9 @@ def sync(
                     compressed=cfg.get("compressed", False),
                     dry_run=dry_run,
                 )
+                if not ok and cfg.get("gz_fallback") and not url.endswith(".gz"):
+                    print(f"  >> {remote_name}.gz (fallback)")
+                    ok = _download_file(url + ".gz", dest, dry_run=dry_run)
                 if ok:
                     downloaded += 1
                     if not dry_run and remote_ts:

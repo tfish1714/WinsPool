@@ -60,3 +60,43 @@ def test_explicit_season_flag_still_overrides_default():
         sync_mod.main()
 
     assert mock_sync.call_args.kwargs["seasons"] == [2019]
+
+
+def test_schedules_falls_back_to_csv_gz_when_plain_csv_missing(tmp_path, monkeypatch):
+    """nflverse stopped publishing games.csv (404); sync must try games.csv
+    first, then games.csv.gz, and still write a decompressed schedules/games.csv."""
+    import gzip
+    import scripts.sync_nflverse_data as snd
+
+    monkeypatch.setattr(snd, "RAWDATA_DIR", tmp_path)
+    monkeypatch.setattr(snd, "TIMESTAMP_CACHE", tmp_path / ".ts.json")
+    monkeypatch.setattr(snd, "_fetch_release_timestamp", lambda tag: None)
+    payload = b"season,week\n2026,1\n"
+    urls = []
+
+    def fake_urlopen(url, timeout=60):
+        urls.append(url)
+        if not url.endswith(".gz"):
+            raise OSError("HTTP Error 404: Not Found")
+
+        class _R:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return gzip.compress(payload)
+
+        return _R()
+
+    monkeypatch.setattr(snd.urllib.request, "urlopen", fake_urlopen)
+    only_schedules = {"schedules": snd.RELEASES["schedules"]}
+    monkeypatch.setattr(snd, "RELEASES", only_schedules)
+
+    snd.sync([2026], max_priority=1)
+
+    assert urls[0].endswith("/schedules/games.csv")
+    assert urls[1].endswith("/schedules/games.csv.gz")
+    assert (tmp_path / "schedules" / "games.csv").read_bytes() == payload
