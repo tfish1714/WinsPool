@@ -48,16 +48,26 @@ recap itself.
 
 ## Components
 
-### 1. Recap storage and listing
+### 1. Recap storage, listing, and read cost
 
-Reuse the `weekly_recaps` collection (doc `{year}_{week}`: `year`, `week`,
-`summary`, `timestamp`). Add:
-- `db_service.list_weekly_recaps(year=None)` returning `[{year, week, timestamp}]`
-  newest first, Firestore and local-pkl paths, matching the existing
-  `get_weekly_recap` formats exactly.
-- Verify `weekly_recaps` is mirrored in `scripts/refresh_local_pkls.py`; add it if
-  not.
-- `save_weekly_recap` gains an optional `source` field value (`"published"` vs
+Keep the `weekly_recaps` collection with one doc per recap (doc `{year}_{week}`:
+`year`, `week`, `summary`, `timestamp`). A single recap fetch is one document
+read, so no re-modeling is needed. Cost and read rules:
+- `db_service.list_weekly_recaps(year)` is scoped to one season (a `where year ==`
+  query, at most about 22 docs) and projects only `year`, `week`, `timestamp` so
+  recap bodies are not transferred for the week picker. The page's season selector
+  (`year_picker`) switches seasons; no cross-season scan ever runs.
+- `get_weekly_recap` and `list_weekly_recaps` results are cached in-process with a
+  short TTL (5 minutes) through `cache_service`. The standings page's per-view
+  recap read (today an uncached read on every page view) uses the same cached
+  getter. Publishing clears the cache and signals other instances using the
+  existing `_invalidate_static()`-style clear-plus-`signal_data_update` pattern
+  (`tests/test_db_cache_signals.py` pins that pattern).
+- If measured reads ever matter, a per-season index doc is the next step; not
+  needed now (YAGNI).
+- Firestore and local-pkl paths keep identical formats; verify `weekly_recaps` is
+  mirrored in `scripts/refresh_local_pkls.py`, add it if not.
+- `save_weekly_recap` gains an optional `source` value (`"published"` vs
   `"gemini"`), additive and nullable for existing docs.
 
 ### 2. Recap pages
@@ -121,7 +131,19 @@ and `push_prefs.recap` is not false, using `push_service` (add
 `broadcast_push_notification(title, body, *, pref=None, url=None)`; existing
 callers keep working). Title "Week N recap is ready"; body is the first sentence of
 the recap, truncated; payload carries `url: "/recap/{year}/{week}"`. The publish
-response reports `{sent, failed, pruned}`.
+response reports `{sent, failed, pruned}`. The same event record format is written
+to `push_events/{year}_w{week}_recap` (title, body, counts, no per-player text
+needed since the message is identical for everyone).
+
+### 5b. Admin review of sent pushes
+
+`GET /api/admin/push-events?season=` (admin, read-only) lists `push_events` docs
+newest first (`id`, `kind`, `week`, `sent_at`, `counts`) and
+`GET /api/admin/push-events/{id}` returns one with its `messages`. A small read-only
+"Sent notifications" list in the admin AI Recaps tab links to them. A
+`--dry-run` run of `scripts/send_weekly_standings_push.py` prints the same messages
+without sending or writing the event doc, for template review before the first real
+send.
 
 ### 6. Service worker: deep link
 
@@ -137,9 +159,14 @@ relative URLs are honored. Bump any SW cache or version identifier if one exists
   step is non-required: a failure alerts per existing `job_runner` rules but never
   blocks the data sync.
 - Trigger rule: the latest regular-season week in `nfl_games` where every game is
-  final and no marker exists. Marker doc `push_events/{season}_w{week}_standings`
-  written after sending (set only when sends were attempted, to make reruns
-  idempotent). Week 1 has no prior rank, so its message omits the rank change
+  final and no marker exists. The marker is the event record
+  `push_events/{season}_w{week}_standings`, written after sending (only when sends
+  were attempted, to make reruns idempotent). It is also the review record: it
+  stores `sent_at`, `counts {total, sent, failed, pruned}` and a `messages` map of
+  `player_id -> {title, body, status}` with the exact text sent to each player (one
+  doc, small: tens of players), so the owner can review the first send and tune the
+  template. Nothing else retains sent notifications; browsers and push services keep
+  no queryable history. Week 1 has no prior rank, so its message omits the rank change
   and the wins-gained delta (rank and total wins only).
 - Content per player: rank now vs rank after the previous week, total wins, wins
   gained this week, leader's name. Example: "You moved up to 2nd (14 wins, +2).
@@ -168,7 +195,7 @@ relative URLs are honored. Bump any SW cache or version identifier if one exists
 |---|---|---|
 | `players/{id}` | `push_prefs {recap, standings}` | optional; absent means both on |
 | `weekly_recaps/{y}_{w}` | `source` | optional, additive |
-| `push_events/{season}_w{week}_standings` | `sent_at`, `counts` | new collection; add to `refresh_local_pkls.py` only if a reader needs it locally (none planned) |
+| `push_events/{season}_w{week}_standings` and `{year}_w{week}_recap` | `kind`, `sent_at`, `counts`, `messages` (standings only) | new collection; written by Firestore only; add to `refresh_local_pkls.py` only if a local reader is needed (admin list reads Firestore directly) |
 
 ## Error Handling
 
@@ -187,6 +214,10 @@ relative URLs are honored. Bump any SW cache or version identifier if one exists
   flags), prefs routes, standings-push message builder (rank up/down/same, first
   week, ties, no previous week), idempotency marker, draft-active gate, the
   trigger-week rule with a mixed complete/incomplete schedule.
+- Event record: standings push stores per-player message text and counts; rerun
+  does not resend; `--dry-run` writes nothing; admin list/detail routes are
+  admin-only. Recap read cache: second read within TTL does not hit the DB, publish
+  invalidates.
 - Template: recap page renders, nav link present in both More menu markup source and
   drawer; standings card link.
 - Node: sw.js deep-link handling (same-origin only), shared `enablePushNotifications`
