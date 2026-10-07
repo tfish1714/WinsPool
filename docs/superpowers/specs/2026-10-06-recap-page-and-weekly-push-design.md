@@ -50,25 +50,56 @@ recap itself.
 
 ### 1. Recap storage, listing, and read cost
 
-Keep the `weekly_recaps` collection with one doc per recap (doc `{year}_{week}`:
-`year`, `week`, `summary`, `timestamp`). A single recap fetch is one document
-read, so no re-modeling is needed. Cost and read rules:
-- `db_service.list_weekly_recaps(year)` is scoped to one season (a `where year ==`
-  query, at most about 22 docs) and projects only `year`, `week`, `timestamp` so
-  recap bodies are not transferred for the week picker. The page's season selector
-  (`year_picker`) switches seasons; no cross-season scan ever runs.
-- `get_weekly_recap` and `list_weekly_recaps` results are cached in-process with a
-  short TTL (5 minutes) through `cache_service`. The standings page's per-view
-  recap read (today an uncached read on every page view) uses the same cached
-  getter. Publishing clears the cache and signals other instances using the
-  existing `_invalidate_static()`-style clear-plus-`signal_data_update` pattern
-  (`tests/test_db_cache_signals.py` pins that pattern).
-- If measured reads ever matter, a per-season index doc is the next step; not
-  needed now (YAGNI).
-- Firestore and local-pkl paths keep identical formats; verify `weekly_recaps` is
-  mirrored in `scripts/refresh_local_pkls.py`, add it if not.
-- `save_weekly_recap` gains an optional `source` value (`"published"` vs
-  `"gemini"`), additive and nullable for existing docs.
+New collection `season_recaps`, one doc per season (doc id `{year}`):
+
+```
+season_recaps/2026 = {
+  year: 2026,
+  weeks: {
+    "5": {summary: "<sanitized html>", timestamp: <epoch>, source: "published"},
+    "6": {...}
+  },
+  updated_at: <epoch>
+}
+```
+
+Why: one read returns the week picker data and every recap body for the season
+(a season is at most about 22 recaps of a few KB, far below Firestore's 1 MiB doc
+limit), and publishing sets one field path (`weeks.<n>`) without rewriting other
+weeks and without a read-modify-write. Week keys are strings (Firestore map keys).
+
+Access layer in `db_service` (public signatures kept stable for existing callers):
+- `get_season_recaps(year) -> {week:int -> {summary, timestamp, source}}` (one doc
+  read; empty dict if none).
+- `get_weekly_recap(year, week)` keeps its signature and return shape
+  (`{year, week, summary, timestamp}` or `None`) and is implemented on top of
+  `get_season_recaps`.
+- `list_recap_weeks(year)` returns `sorted(weeks)` from the same read.
+- `save_weekly_recap(year, week, summary, source=None)` keeps its signature (the
+  existing Save and Broadcast flow keeps working) and now writes
+  `weeks.<week>` on the season doc with `set(..., merge=True)` semantics via a
+  nested map merge, creating the doc if absent.
+- All three read through one in-process cached getter (5 minute TTL via
+  `cache_service`), including the standings page's latest-recap read, which today
+  is an uncached read per page view. Any save clears the cache and signals other
+  instances with the existing `_invalidate_static()`-style clear-plus-
+  `signal_data_update` pattern (`tests/test_db_cache_signals.py` pins it).
+- Season page switching uses `year_picker`; no cross-season scan ever runs.
+
+Local mirror: JSON, one file per season, `.local_db/season_recaps_{year}.json`
+(the same convention as `game_predictions_{year}.json`), written through
+`local_db_dir()` and rebuilt by `scripts/refresh_local_pkls.py` (add
+`season_recaps`). The Firestore and local paths return identical shapes.
+
+Migration: the legacy `weekly_recaps/{year}_{week}` docs remain readable.
+- Reads: `get_season_recaps` falls back to assembling a season from legacy docs
+  only when no `season_recaps/{year}` doc exists (cached, so at most about 22 reads
+  once per TTL).
+- `scripts/migrate_weekly_recaps.py` (dry run by default, `--firestore` to write,
+  forces `USE_LOCAL_DATA=False` via `require_db()`) folds every legacy doc into its
+  season doc, idempotently, and never deletes the legacy docs. Run it once at
+  deploy time; after it runs the fallback is never used. Removal of the legacy
+  collection is a separate, later, owner-approved step.
 
 ### 2. Recap pages
 
@@ -194,7 +225,7 @@ relative URLs are honored. Bump any SW cache or version identifier if one exists
 | Where | Field | Notes |
 |---|---|---|
 | `players/{id}` | `push_prefs {recap, standings}` | optional; absent means both on |
-| `weekly_recaps/{y}_{w}` | `source` | optional, additive |
+| `season_recaps/{year}` | `weeks.<n>.{summary, timestamp, source}`, `updated_at` | new; replaces per-week docs; legacy `weekly_recaps` kept read-only as fallback |
 | `push_events/{season}_w{week}_standings` and `{year}_w{week}_recap` | `kind`, `sent_at`, `counts`, `messages` (standings only) | new collection; written by Firestore only; add to `refresh_local_pkls.py` only if a local reader is needed (admin list reads Firestore directly) |
 
 ## Error Handling
@@ -209,7 +240,9 @@ relative URLs are honored. Bump any SW cache or version identifier if one exists
 
 ## Testing
 
-- Unit: recap list/save/get (Firestore mock and local), publish route (defaults,
+- Unit: season recap save/get/list (Firestore mock and local JSON), saving week 6
+  leaves week 5 intact, legacy fallback assembly, migration script idempotency and
+  dry run, cache hit and invalidation on save, publish route (defaults,
   empty text 422, sanitizer strips `<script>` and `onclick`, overwrite, push/email
   flags), prefs routes, standings-push message builder (rank up/down/same, first
   week, ties, no previous week), idempotency marker, draft-active gate, the
@@ -240,7 +273,8 @@ relative URLs are honored. Bump any SW cache or version identifier if one exists
 ## Open Items for the Plan
 
 - Pick the markdown and sanitizer implementation (dependency vs minimal in-house).
-- Confirm `weekly_recaps` mirroring in `refresh_local_pkls.py`.
+- Add `season_recaps` to `refresh_local_pkls.py` and decide the legacy-collection
+  removal date (not part of this work).
 - Confirm the exact as-of-previous-week call shape for
   `calculate_wins_pool_standings`.
 - Confirm sync job service account and secret IAM binding at deploy time.
