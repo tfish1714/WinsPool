@@ -1,6 +1,11 @@
 """tests_e2e/test_admin_members_and_recap.py — Member/paid tracking and the
 weekly-recap workflow up to its real-Gemini-API boundary (see this plan's
 Task 4 for why full recap generation is out of scope for automation)."""
+import os
+import pathlib
+
+import pytest
+
 from tests_e2e.helpers import _open_admin_tab
 from tests_e2e.test_live_draft import _record_dialogs
 from tests_e2e.test_standings import _login
@@ -96,7 +101,27 @@ def test_recap_prompt_preview_populates(live_server, page, test_player_credentia
     assert page.evaluate("navigator.clipboard.readText()") == prompt_text
 
 
-def test_publish_recap_makes_text_visible_on_recap_page(live_server, page, test_player_credentials):
+@pytest.fixture
+def sentinel_recap_file_restored():
+    """The live server runs with USE_LOCAL_DATA from the repo root, so publishing
+    writes the real <repo>/.local_db/season_recaps_2000.json. Restore that file
+    exactly (or delete it if it did not exist) even when the test fails. Year 2000
+    cannot collide with a real season, so a server-side cached copy of the
+    sentinel cannot leak into other e2e tests."""
+    repo_root = pathlib.Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    path = repo_root / ".local_db" / "season_recaps_2000.json"
+    before = path.read_bytes() if path.exists() else None
+    try:
+        yield path
+    finally:
+        if before is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(before)
+
+
+def test_publish_recap_makes_text_visible_on_recap_page(
+        live_server, page, test_player_credentials, sentinel_recap_file_restored):
     """Publish a pasted recap with both notify boxes unticked (nothing is sent),
     then confirm the public /recap/{year}/{week} page shows the text. Uses
     year 2000 / week 22 so a real season's recap is never overwritten."""
