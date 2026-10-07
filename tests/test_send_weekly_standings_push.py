@@ -106,3 +106,42 @@ def test_send_failure_does_not_record_and_exits_zero(env, caplog):
     with caplog.at_level(logging.ERROR):
         assert script.main([]) == 0
     assert env["recorded"] == [] and "failed" in caplog.text
+
+
+def _record_returning(env, monkeypatch, results):
+    calls = []
+    seq = iter(results)
+
+    def fake_record(*a, **k):
+        calls.append(a)
+        return next(seq)
+    monkeypatch.setattr(push_events, "record_push_event", fake_record)
+    return calls
+
+
+def test_record_failing_twice_logs_error_and_exits_zero(env, monkeypatch, caplog):
+    calls = _record_returning(env, monkeypatch, [False, False])
+    with caplog.at_level(logging.INFO):
+        assert script.main([]) == 0
+    assert len(calls) == 2
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert errors and "2026_w02_standings" in errors[0].getMessage()
+    assert "resend" in errors[0].getMessage().lower()
+    assert not any(r.levelno == logging.INFO and r.getMessage().startswith("Sent ")
+                   for r in caplog.records)
+
+
+def test_record_failing_once_then_succeeding_retries_without_error(env, monkeypatch, caplog):
+    calls = _record_returning(env, monkeypatch, [False, True])
+    with caplog.at_level(logging.INFO):
+        assert script.main([]) == 0
+    assert len(calls) == 2
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert any(r.levelno == logging.INFO and r.getMessage().startswith("Sent ")
+               for r in caplog.records)
+
+
+def test_record_success_records_once(env, monkeypatch):
+    calls = _record_returning(env, monkeypatch, [True])
+    assert script.main([]) == 0
+    assert len(calls) == 1

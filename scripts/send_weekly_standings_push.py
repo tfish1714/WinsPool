@@ -80,10 +80,17 @@ def main(argv=None) -> int:
     try:
         result = push_service.send_to_subscribers(
             lambda pid: messages.get(pid), pref="standings", url=f"/wins-pool/{season}")
-        push_events.record_push_event(event_id, "standings", result["counts"],
-                                      result["messages"], {"season": season, "week": week})
+        record_args = (event_id, "standings", result["counts"],
+                       result["messages"], {"season": season, "week": week})
+        recorded = push_events.record_push_event(*record_args)
+        if not recorded:
+            recorded = push_events.record_push_event(*record_args)
     except Exception:
         log.exception("Weekly standings push failed for %s; not recording the event.", event_id)
+        return 0
+    if not recorded:
+        log.error("Sent %s (%s) but could not record the push event after a retry; "
+                  "the next run may resend it.", event_id, result["counts"])
         return 0
     log.info("Sent %s: %s", event_id, result["counts"])
     return 0
