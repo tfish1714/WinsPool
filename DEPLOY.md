@@ -69,6 +69,8 @@ gcloud secrets add-iam-policy-binding vapid-private-key \
 gcloud run services update winspool --region us-east1 --remove-env-vars=VAPID_PRIVATE_KEY
 ```
 
+The private key may be stored as a PKCS8 PEM (including a single line with `\n` escape sequences instead of real line breaks) or as the raw/DER base64url form. `services/push_service.py` normalizes it to the base64url form `pywebpush` requires before every send, so the existing secret works as is.
+
 Deferred decision: whether to rotate the VAPID keypair now that the old private
 key has lived as a plain env var. Rotation invalidates every existing browser
 push subscription, so it is not done automatically.

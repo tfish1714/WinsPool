@@ -1,7 +1,10 @@
 """services/push_service.py — Web Push notifications via pywebpush + VAPID."""
+import base64
+import functools
 import json
 import logging
 import os
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +16,57 @@ _VAPID_EMAIL   = os.environ.get("VAPID_CLAIMS_EMAIL", "mailto:admin@example.com"
 # invalid (unsubscribed, expired, app uninstalled). Retrying is pointless and
 # keeping the token just adds a failure to every future broadcast.
 _GONE_STATUS_CODES = (404, 410)
+
+
+_PEM_RE = re.compile(
+    r"-----BEGIN (?:EC )?PRIVATE KEY-----(.*?)-----END (?:EC )?PRIVATE KEY-----",
+    re.DOTALL,
+)
+_LITERAL_ESCAPE_RE = re.compile(r"\\r\\n|\\n|\\r")  # backslash+n etc. as literal characters
+_B64URL_RE = re.compile(r"^[A-Za-z0-9_-]+=*$")
+
+
+@functools.lru_cache(maxsize=8)
+def _normalize_vapid_private_key(raw: str) -> str:
+    """Return the key in a form py_vapid's Vapid.from_string accepts.
+
+    from_string() base64url-decodes its input and takes a 32-byte result as a
+    raw scalar, anything else as DER; it cannot parse PEM. The deployed secret
+    was a PKCS8 PEM (often one line with literal backslash-n escapes), so
+    every push failed. Accepted: PKCS8 or SEC1 ("EC") PEM with real newlines,
+    literal backslash-n / backslash-r-backslash-n escapes or collapsed
+    whitespace, optionally quoted; PEM is converted to unpadded DER base64url.
+    Raw/DER base64url input is returned unchanged (whitespace stripped).
+    Anything unparseable is returned stripped and never raises, so a bad key
+    still fails (and is logged) at send time exactly as before.
+    """
+    if not isinstance(raw, str):
+        return ""
+    text = raw.strip()
+    while len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        text = text[1:-1].strip()
+    if not text:
+        return ""
+    try:
+        match = _PEM_RE.search(_LITERAL_ESCAPE_RE.sub(" ", text))
+        if match:
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric import ec
+            body = re.sub(r"\s+", "", match.group(1))
+            key = serialization.load_der_private_key(base64.b64decode(body, validate=True), password=None)
+            if not isinstance(key, ec.EllipticCurvePrivateKey):
+                return text
+            der = key.private_bytes(
+                serialization.Encoding.DER,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+            return base64.urlsafe_b64encode(der).decode("ascii").rstrip("=")
+        if _B64URL_RE.match(text):
+            return text.rstrip("=")
+    except Exception:
+        logger.warning("push_service: VAPID private key is not in a recognized format")
+    return text
 
 
 def is_configured() -> bool:
@@ -75,7 +129,7 @@ def _deliver(player_id, sub: dict, title: str, body: str, url=None) -> str:
         webpush(
             subscription_info=sub,
             data=json.dumps(payload),
-            vapid_private_key=_VAPID_PRIVATE,
+            vapid_private_key=_normalize_vapid_private_key(_VAPID_PRIVATE),
             vapid_claims={"sub": _VAPID_EMAIL},
         )
         logger.info("push_service: sent push to player %s", player_id)
