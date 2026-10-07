@@ -209,6 +209,7 @@ class App {
     _updateMoreDropdown(role) {
         const moreLinks = [
             { href: `/wins-pool/${new Date().getFullYear()}/weekbyweek`, label: 'Weekly Progress' },
+            { href: '/recap', label: 'Recaps' },
             { href: '/headtohead', label: 'Head to Head' },
             { href: '/teams', label: 'Teams' },
             null, // divider

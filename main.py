@@ -25,6 +25,7 @@ from routes.history_routes import router as history_router, templates as history
 from routes.draft_routes import router as draft_router, templates as draft_templates
 from routes.api_routes import router as api_router
 from routes.auth_routes import router as auth_router
+from routes.recap_routes import router as recap_router
 from services.static_assets import register as register_static_assets
 from routes.mock_draft_routes import templates as mock_draft_templates
 from routes.admin_routes import router as admin_router, _page_router as admin_page_router, _templates as admin_templates
@@ -154,6 +155,7 @@ app.include_router(history_router)
 app.include_router(draft_router)
 app.include_router(api_router)
 app.include_router(auth_router)
+app.include_router(recap_router)
 app.include_router(admin_router)
 app.include_router(admin_page_router)
 app.include_router(prediction_router)

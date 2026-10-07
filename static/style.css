@@ -3201,6 +3201,19 @@ table.wp-data-table tbody td:last-child {
     padding-top: 1.25rem;
 }
 
+.recap-weeks { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
+.recap-week-chip {
+    display: inline-flex; align-items: center; min-height: 44px; padding: 0 0.9rem;
+    border: 1px solid var(--hairline); border-radius: 999px;
+    background: var(--surface-sunken); color: var(--ink); text-decoration: none;
+    font-size: 0.85rem;
+}
+.recap-week-chip.active { background: var(--btn-primary-bg); border-color: var(--btn-primary-bg); color: #fff; }
+.recap-empty { color: var(--ink-2); margin: 1.5rem 0; }
+.recap-readmore {
+    display: inline-flex; align-items: center; min-height: 44px; margin-top: 1rem;
+    color: var(--link); font-weight: 600; text-decoration: none;
+}
 .recap-content p { margin-bottom: 1rem; }
 .recap-content ul { margin-bottom: 1rem; padding-left: 1.5rem; }
 .recap-content li { margin-bottom: 0.5rem; }

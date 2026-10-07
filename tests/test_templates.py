@@ -37,3 +37,10 @@ def test_header_brands_link_to_standings():
     for a in anchors:
         assert 'href="/wins-pool"' in a
     assert '<div class="nav-brand">' not in html
+
+
+def test_recap_nav_entries_in_drawer_and_more_menu():
+    base = (pathlib.Path(__file__).resolve().parent.parent / "templates" / "base.html").read_text(encoding="utf-8")
+    assert 'href="/recap"' in base
+    js = (STATIC / "js" / "main.js").read_text(encoding="utf-8")
+    assert "{ href: '/recap', label: 'Recaps' }" in js

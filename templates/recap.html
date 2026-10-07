@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_macros.html" import year_picker %}
+{% block title %}Recaps - NFL Wins Pool{% endblock %}
+{% block content %}
+<main class="dashboard-main">
+<section class="card-glass page-card recap-page">
+  <header class="wp-top">
+    <div>
+      <div class="eyebrow">NFL Wins Pool</div>
+      <h1 class="wp-h1">Weekly Recap<span class="wp-year">/{{ year }}</span></h1>
+    </div>
+    {{ year_picker(available_years, year, '/recap/', '') }}
+  </header>
+  {% if weeks %}
+  <nav class="recap-weeks" aria-label="Weeks with a recap">
+    {% for w in weeks %}
+    <a href="/recap/{{ year }}/{{ w }}" class="recap-week-chip{% if w == week %} active{% endif %}">Wk {{ w }}</a>
+    {% endfor %}
+  </nav>
+  {% endif %}
+  {% if recap %}
+  <div class="recap-card-glass">
+    <div class="recap-card-head">
+      <span class="mono-pill"><span class="dot"></span>RECAP</span>
+      <span class="recap-week-mono">Week {{ week }} &middot; {{ year }}</span>
+    </div>
+    <div class="recap-content">{{ recap.summary | recap_html }}</div>
+  </div>
+  {% elif week %}
+  <p class="recap-empty">No recap for week {{ week }} of {{ year }} yet.</p>
+  {% else %}
+  <p class="recap-empty">No recaps have been published yet.</p>
+  {% endif %}
+</section>
+</main>
+{% endblock %}
