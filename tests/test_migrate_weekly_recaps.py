@@ -47,3 +47,22 @@ def test_refresh_local_pkls_mirrors_season_recaps_to_json(monkeypatch, tmp_path)
     rlp.dump_season_recaps()
     out = json.loads((tmp_path / "season_recaps_2025.json").read_text())
     assert out["year"] == 2025 and out["weeks"]["3"]["summary"] == "three"
+
+
+def test_refresh_main_runs_season_recaps_step(monkeypatch, tmp_path):
+    import json
+    import scripts.refresh_local_pkls as rlp
+    fs = FakeFirestore()
+    fs.collection("season_recaps").document("2025").set(
+        {"year": 2025, "weeks": {"4": {"summary": "four", "timestamp": 2.0}}})
+    monkeypatch.setattr(rlp, "get_db", lambda: fs)
+    monkeypatch.setattr(rlp, "LOCAL_DB", tmp_path)
+    monkeypatch.setattr(rlp, "COLLECTIONS", [])
+    for name in ("dump_game_predictions", "dump_prediction_features", "dump_elo_history",
+                 "dump_nn_weekly_accuracy", "dump_quarter_scores",
+                 "dump_config_settings", "dump_analytics_cache"):
+        monkeypatch.setattr(rlp, name, lambda *a, **k: None)
+    monkeypatch.setattr("sys.argv", ["refresh_local_pkls.py"])
+    rlp.main()
+    out = json.loads((tmp_path / "season_recaps_2025.json").read_text())
+    assert out["weeks"]["4"]["summary"] == "four"
