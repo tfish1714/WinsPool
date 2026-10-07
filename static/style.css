@@ -3201,6 +3201,19 @@ table.wp-data-table tbody td:last-child {
     padding-top: 1.25rem;
 }
 
+.recap-weeks { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
+.recap-week-chip {
+    display: inline-flex; align-items: center; min-height: 44px; padding: 0 0.9rem;
+    border: 1px solid var(--hairline); border-radius: 999px;
+    background: var(--surface-sunken); color: var(--ink); text-decoration: none;
+    font-size: 0.85rem;
+}
+.recap-week-chip.active { background: var(--btn-primary-bg); border-color: var(--btn-primary-bg); color: #fff; }
+.recap-empty { color: var(--ink-2); margin: 1.5rem 0; }
+.recap-readmore {
+    display: inline-flex; align-items: center; min-height: 44px; margin-top: 1rem;
+    color: var(--link); font-weight: 600; text-decoration: none;
+}
 .recap-content p { margin-bottom: 1rem; }
 .recap-content ul { margin-bottom: 1rem; padding-left: 1.5rem; }
 .recap-content li { margin-bottom: 0.5rem; }
@@ -4389,3 +4402,21 @@ a.pool-chip-mine:hover { text-decoration: underline; }
     line-height: 1;
     cursor: pointer;
 }
+
+/* Notifications card (player page) */
+.push-card { margin-bottom: 2rem; padding: 1rem; }
+.push-card[hidden] { display: none; }
+.push-card__title { margin: 0 0 0.5rem; font-size: 1.1rem; }
+.push-card__status { margin: 0 0 0.75rem; color: var(--ink-2); }
+.push-card__hint { margin: 0 0 0.75rem; padding: 10px 12px; background: var(--surface-sunken); border: 1px solid var(--hairline); border-radius: 8px; color: var(--ink); }
+.push-card__enable { min-height: 44px; margin-bottom: 0.75rem; }
+.push-card__prefs { display: flex; flex-direction: column; gap: 4px; }
+.push-card__pref { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--ink); cursor: pointer; }
+.push-card__pref input { width: 20px; height: 20px; }
+.push-card__note { margin: 0.5rem 0 0; font-size: 0.85rem; color: var(--ink-2); }
+
+/* Standings push nudge */
+.push-nudge { display: flex; align-items: center; gap: 12px; margin: 0 0 1rem; padding: 10px 12px; background: var(--surface-sunken); color: var(--ink); border: 1px solid var(--hairline-strong); border-radius: 10px; font-size: 0.9rem; }
+.push-nudge__text { flex: 1; }
+.push-nudge__link { color: var(--link); font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; min-height: 44px; }
+.push-nudge__dismiss { min-width: 44px; min-height: 44px; background: transparent; color: var(--ink); border: 1px solid var(--hairline); border-radius: 8px; font-size: 1.4rem; line-height: 1; cursor: pointer; }

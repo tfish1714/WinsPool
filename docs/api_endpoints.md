@@ -402,6 +402,47 @@ Saves the finalized AI summary to Firestore and emails it to all players.
 
 ---
 
+### `POST /api/admin/recap/publish`
+
+Publishes a finished recap (pasted text, no Gemini call) to the app. Stored on `season_recaps/{year}` with `source: "published"` and shown on `/recap/{year}/{week}`. Email and push only happen if ticked.
+
+**Auth:** Required (admin)
+
+**Request Body**:
+```json
+{ "year": "int (optional, 2000-2100)", "week": "int (optional, 1-22)", "text": "string (required, max 20000)", "send_push": false, "send_email": false }
+```
+
+A missing `year`/`week` resolves like `preview_prompt` (active season, latest completed week). Empty text is 422; no resolvable week is 404.
+
+**Response**: `{ saved: true, year, week, url: "/recap/{year}/{week}", email, push }`. `email` is `null`, `{recipients}` (plus `sent: false` if the send returned false) or `{error}`; `push` is `null`, `{sent, failed, pruned, skipped}` or `{error}`. Email and push failures never undo the saved recap. A push publish records a `push_events` doc `{year}_w{week:02d}_recap` and sends only to players with `push_prefs.recap` on (deep link `/recap/{year}/{week}`). `save_and_broadcast` is unchanged apart from sharing the email builder; `preview_prompt` still echoes `{prompt, year, week}`.
+
+---
+
+### `GET /api/admin/push-events`
+
+**Auth:** Required (admin). Recent sent notification batches, newest first, without per-player messages.
+
+**Response**: `{ events: [{ id, kind, sent_at, counts, ... }] }`
+
+### `GET /api/admin/push-events/{event_id}`
+
+**Auth:** Required (admin). One event including per-player `messages`. `event_id` must match the recap/standings id format (else 422); unknown id is 404.
+
+---
+
+## Push Preference Endpoints
+
+### `GET /api/profile/push-status`
+
+**Auth:** Required. **Response**: `{ subscribed: bool, prefs: { recap, standings }, configured: bool }` for the caller (`configured` is false when VAPID keys are not set).
+
+### `POST /api/profile/push-prefs`
+
+**Auth:** Required. **Request Body**: `{ "recap": bool, "standings": bool }` (strict booleans; anything else is 422). Saves `players.push_prefs` for the caller (id from the JWT `sub`). **Response**: `{ ok: true, prefs }`; a failed write is a generic 500.
+
+---
+
 ## Server-Side Rendered (SSR) Page Routes
 
 ### `standings_routes.py`
@@ -415,6 +456,14 @@ Saves the finalized AI summary to Firestore and emails it to all players.
 | `GET` | `/wins-pool/{year}/weekbyweek` | `weekbyweek.html` | Week-by-week wins breakdown |
 | `GET` | `/playoff-race` | (redirect) | Redirects to current season |
 | `GET` | `/playoff-race/{year}` | `playoff_race.html` | Playoff race elimination tracker |
+
+### `recap_routes.py`
+
+| Method | Path | Template | Description |
+|---|---|---|---|
+| `GET` | `/recap` | `recap.html` | Latest recap of the active season |
+| `GET` | `/recap/{year}` | `recap.html` | Latest recap of a season (year picker) |
+| `GET` | `/recap/{year}/{week}` | `recap.html` | One week's recap with a week selector; rendered through the `recap_html` filter, empty state when none exists |
 
 ### `history_routes.py`
 

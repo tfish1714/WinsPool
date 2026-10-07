@@ -200,6 +200,35 @@ def dump_elo_history():
         log.error(f"    ✗ Failed 'elo_history': {e}")
 
 
+def dump_season_recaps():
+    """Pull all season_recaps docs from Firestore → .local_db/season_recaps_{year}.json."""
+    log.info("  Fetching 'season_recaps' from Firestore...")
+    try:
+        db = get_db()
+        docs = list(db.collection("season_recaps").stream())
+        if not docs:
+            log.warning("    'season_recaps' returned no documents — skipping")
+            return
+
+        written = 0
+        for doc in docs:
+            d = doc.to_dict() or {}
+            year = d.get("year")
+            weeks = d.get("weeks")
+            if year is None or not weeks:
+                continue
+            out_path = LOCAL_DB / f"season_recaps_{int(year)}.json"
+            with open(out_path, "w") as f:
+                json.dump({"year": int(year), "weeks": weeks,
+                           "updated_at": d.get("updated_at")}, f, default=str)
+            written += 1
+            log.info(f"    ✓ {len(weeks)} weeks → season_recaps_{int(year)}.json")
+
+        log.info(f"    ✓ {written} seasons written")
+    except Exception as e:
+        log.error(f"    ✗ Failed 'season_recaps': {e}")
+
+
 def dump_nn_weekly_accuracy():
     """Pull all nn_weekly_accuracy docs from Firestore → .local_db/nn_weekly_accuracy_{season}.json."""
     log.info("  Fetching 'nn_weekly_accuracy' from Firestore...")
@@ -295,6 +324,9 @@ def main():
 
     log.info("\n-- Elo rating history --")
     dump_elo_history()
+
+    log.info("\n-- Season recaps --")
+    dump_season_recaps()
 
     log.info("\n-- NN weekly accuracy history --")
     dump_nn_weekly_accuracy()

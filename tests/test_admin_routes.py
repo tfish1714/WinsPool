@@ -1217,3 +1217,169 @@ class TestPreviewRecapPromptDefaults:
             resp = client.post("/api/admin/recap/preview_prompt", json={}, headers={"Authorization": admin_token})
         assert resp.status_code == 404
         assert resp.json() == {"error": "No completed games found for 2026."}
+
+
+class TestPublishRecap:
+    def test_publish_saves_trimmed_text_with_source(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap") as save:
+            r = client.post("/api/admin/recap/publish", json={"text": "  Hello  "},
+                            headers={"Authorization": admin_token})
+        assert r.status_code == 200
+        save.assert_called_once_with(2026, 5, "Hello", source="published")
+        body = r.json()
+        assert body["saved"] is True and body["url"] == "/recap/2026/5"
+        assert body["email"] is None and body["push"] is None
+
+    def test_blank_text_is_422(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap") as save:
+            r = client.post("/api/admin/recap/publish", json={"text": "   "},
+                            headers={"Authorization": admin_token})
+        assert r.status_code == 422
+        save.assert_not_called()
+
+    def test_explicit_year_week_not_overridden(self, admin_token):
+        with patch("routes.admin_routes.load_data") as ld, \
+             patch("routes.admin_routes.save_weekly_recap") as save:
+            r = client.post("/api/admin/recap/publish",
+                            json={"year": 2025, "week": 9, "text": "x"},
+                            headers={"Authorization": admin_token})
+        assert r.status_code == 200
+        save.assert_called_once_with(2025, 9, "x", source="published")
+        ld.assert_not_called()
+
+    def test_no_completed_week_is_404(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=None):
+            r = client.post("/api/admin/recap/publish", json={"text": "x"},
+                            headers={"Authorization": admin_token})
+        assert r.status_code == 404
+
+    def test_email_only_when_ticked(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap"), \
+             patch("routes.admin_routes.recap_service.extract_weekly_data", return_value=({}, ["a@x.com"])), \
+             patch("routes.admin_routes.email_service.send_weekly_recap_email") as send:
+            r = client.post("/api/admin/recap/publish", json={"text": "x", "send_email": True},
+                            headers={"Authorization": admin_token})
+        assert r.json()["email"] == {"recipients": 1}
+        send.assert_called_once()
+
+    def test_requires_admin(self, auth_token):
+        r = client.post("/api/admin/recap/publish", json={"text": "x"},
+                        headers={"Authorization": auth_token})
+        assert r.status_code in (401, 403)
+
+
+def test_first_sentence_truncates_and_strips():
+    from routes.admin_routes import _first_sentence
+    assert _first_sentence("A big week. Then more.") == "A big week."
+    assert _first_sentence("x" * 300).endswith("...") and len(_first_sentence("x" * 300)) <= 120
+    assert _first_sentence("**Bold** start\nsecond line") == "Bold start"
+
+
+def test_first_sentence_never_empty_for_nonempty_text():
+    from routes.admin_routes import _first_sentence
+    assert _first_sentence("***") == "Tap to read this week's recap."
+    assert _first_sentence("\n\nReal line.") == "Real line."
+
+
+class TestPublishRecapPush:
+    def test_push_sent_when_ticked_and_event_recorded(self, admin_token):
+        counts = {"total": 2, "sent": 2, "failed": 0, "pruned": 0, "skipped": 1}
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap"), \
+             patch("routes.admin_routes.push_service.send_to_subscribers",
+                   return_value={"counts": counts, "messages": {}}) as send, \
+             patch("routes.admin_routes.push_events.record_push_event", return_value=True) as rec:
+            r = client.post("/api/admin/recap/publish",
+                            json={"text": "Big week. More.", "send_push": True},
+                            headers={"Authorization": admin_token})
+        assert r.json()["push"] == {"sent": 2, "failed": 0, "pruned": 0, "skipped": 1}
+        kw = send.call_args.kwargs
+        assert kw["pref"] == "recap" and kw["url"] == "/recap/2026/5"
+        assert rec.call_args.args[0] == "2026_w05_recap"
+
+    def test_push_failure_never_loses_the_saved_recap(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap") as save, \
+             patch("routes.admin_routes.push_service.send_to_subscribers", side_effect=RuntimeError("boom")):
+            r = client.post("/api/admin/recap/publish", json={"text": "x", "send_push": True},
+                            headers={"Authorization": admin_token})
+        assert r.status_code == 200 and r.json()["saved"] is True
+        assert r.json()["push"] == {"error": "push failed; recap was saved"}
+        save.assert_called_once()
+
+    def test_no_push_when_unticked(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap"), \
+             patch("routes.admin_routes.push_service.send_to_subscribers") as send:
+            r = client.post("/api/admin/recap/publish", json={"text": "x"},
+                            headers={"Authorization": admin_token})
+        send.assert_not_called()
+        assert r.json()["push"] is None
+
+
+class TestPushEventsRoutes:
+    def test_list_and_detail_admin_only(self, admin_token, auth_token):
+        ev = {"id": "2026_w05_recap", "kind": "recap", "sent_at": 1.0, "counts": {"sent": 2}}
+        with patch("routes.admin_routes.push_events.list_push_events", return_value=[ev]), \
+             patch("routes.admin_routes.push_events.get_push_event", return_value={**ev, "messages": {}}):
+            assert client.get("/api/admin/push-events", headers={"Authorization": admin_token}).json()["events"] == [ev]
+            assert client.get("/api/admin/push-events/2026_w05_recap", headers={"Authorization": admin_token}).status_code == 200
+            assert client.get("/api/admin/push-events", headers={"Authorization": auth_token}).status_code in (401, 403)
+
+    def test_bad_event_id_is_422_and_unknown_is_404(self, admin_token):
+        h = {"Authorization": admin_token}
+        with patch("routes.admin_routes.push_events.get_push_event") as get:
+            assert client.get("/api/admin/push-events/../../etc", headers=h).status_code in (404, 422)
+            assert client.get("/api/admin/push-events/bad_id", headers=h).status_code == 422
+            assert client.get("/api/admin/push-events/2026_w05_recap%0A", headers=h).status_code == 422
+            get.assert_not_called()
+        with patch("routes.admin_routes.push_events.get_push_event", return_value=None):
+            assert client.get("/api/admin/push-events/2026_w05_recap", headers=h).status_code == 404
+
+
+class TestPublishRecapEmailIsolation:
+    _counts = {"total": 1, "sent": 1, "failed": 0, "pruned": 0, "skipped": 0}
+
+    def _post(self, admin_token, **patches):
+        return client.post("/api/admin/recap/publish",
+                           json={"text": "x", "send_email": True, "send_push": True},
+                           headers={"Authorization": admin_token})
+
+    def test_email_raising_still_saves_and_attempts_push(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap"), \
+             patch("routes.admin_routes.recap_service.extract_weekly_data", side_effect=RuntimeError("boom")), \
+             patch("routes.admin_routes.push_service.send_to_subscribers",
+                   return_value={"counts": self._counts, "messages": {}}) as send, \
+             patch("routes.admin_routes.push_events.record_push_event", return_value=True):
+            r = self._post(admin_token)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["saved"] is True and body["url"] == "/recap/2026/5"
+        assert body["email"] == {"error": "email failed; recap was saved"}
+        assert body["push"]["sent"] == 1
+        send.assert_called_once()
+
+    def test_email_returning_false_is_reported(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap"), \
+             patch("routes.admin_routes.recap_service.extract_weekly_data", return_value=({}, ["a@x.com"])), \
+             patch("routes.admin_routes.email_service.send_weekly_recap_email", return_value=False):
+            r = client.post("/api/admin/recap/publish", json={"text": "x", "send_email": True},
+                            headers={"Authorization": admin_token})
+        assert r.status_code == 200
+        assert r.json()["email"] == {"recipients": 1, "sent": False}
+
+    def test_push_failure_leaves_email_info_intact(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap"), \
+             patch("routes.admin_routes.recap_service.extract_weekly_data", return_value=({}, ["a@x.com"])), \
+             patch("routes.admin_routes.email_service.send_weekly_recap_email", return_value=True), \
+             patch("routes.admin_routes.push_service.send_to_subscribers", side_effect=RuntimeError("boom")):
+            r = self._post(admin_token)
+        body = r.json()
+        assert body["email"] == {"recipients": 1}
+        assert body["push"] == {"error": "push failed; recap was saved"}

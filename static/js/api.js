@@ -126,6 +126,21 @@ export const ApiService = {
             body: JSON.stringify({ playerId, year, week, summary })
         });
     },
+    async fetchPushEvents(playerId) {
+        return fetchWithTimeout(`${API_BASE}/admin/push-events?playerId=${playerId}`);
+    },
+    async fetchPushEvent(playerId, id) {
+        return fetchWithTimeout(`${API_BASE}/admin/push-events/${encodeURIComponent(id)}?playerId=${playerId}`);
+    },
+    async publishRecap(playerId, year, week, text, sendPush, sendEmail) {
+        const body = { playerId, text, send_push: !!sendPush, send_email: !!sendEmail };
+        if (year !== '' && year != null) body.year = Number(year);
+        if (week !== '' && week != null) body.week = Number(week);
+        return fetchWithTimeout(`${API_BASE}/admin/recap/publish`, {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+    },
     async fetchMembers(playerId, season) {
         return fetchWithTimeout(`${API_BASE}/admin/members/${season}?playerId=${playerId}`);
     },

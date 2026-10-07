@@ -65,13 +65,16 @@ def _invalidate_players_cache() -> None:
     signal_data_update("static")
 
 
-def _deliver(player_id, sub: dict, title: str, body: str) -> str:
+def _deliver(player_id, sub: dict, title: str, body: str, url=None) -> str:
     """Send one notification. Returns "sent", "failed", or "pruned"."""
     from pywebpush import webpush
+    payload = {"title": title, "body": body}
+    if url:
+        payload["url"] = url
     try:
         webpush(
             subscription_info=sub,
-            data=json.dumps({"title": title, "body": body}),
+            data=json.dumps(payload),
             vapid_private_key=_VAPID_PRIVATE,
             vapid_claims={"sub": _VAPID_EMAIL},
         )
@@ -162,28 +165,113 @@ def send_push_notification(player_id: int, title: str, body: str) -> bool:
         return False
 
 
-def broadcast_push_notification(title: str, body: str) -> dict:
+def _player_doc_id_to_int(doc_id):
+    try:
+        return int(doc_id)
+    except (TypeError, ValueError):
+        return doc_id
+
+
+def send_to_subscribers(build_message, *, pref=None, url=None) -> dict:
+    """Send a per-player message to every player with a push_subscription.
+
+    build_message(player_id: int) -> (title, body) | None (None skips the
+    player). A player whose players.push_prefs[pref] is False is also skipped.
+    Returns {"counts": {total, sent, failed, pruned, skipped},
+    "messages": {player_id: {title, body, status}}}.
+    """
+    counts = {"total": 0, "sent": 0, "failed": 0, "pruned": 0, "skipped": 0}
+    messages = {}
+    if not is_configured():
+        logger.warning("push_service: VAPID not configured, nothing sent")
+        return {"counts": counts, "messages": messages}
+    from services.db_service import get_db
+    db = get_db()
+    if db is None:
+        logger.warning("push_service: no database (local data mode), nothing sent")
+        return {"counts": counts, "messages": messages}
+    for doc in db.collection("players").stream():
+        data = doc.to_dict() or {}
+        sub = data.get("push_subscription")
+        if not isinstance(sub, dict):
+            continue
+        prefs = data.get("push_prefs")
+        if pref and isinstance(prefs, dict) and prefs.get(pref) is False:
+            counts["skipped"] += 1
+            continue
+        pid = _player_doc_id_to_int(doc.id)
+        try:
+            msg = build_message(pid)
+            if not msg:
+                counts["skipped"] += 1
+                continue
+            if not (isinstance(msg, (tuple, list)) and len(msg) == 2
+                    and all(isinstance(x, str) for x in msg)):
+                raise ValueError("build_message must return a (title, body) pair of strings")
+            title, body = msg
+            status = _deliver(doc.id, sub, title, body, url) if url else _deliver(doc.id, sub, title, body)
+            if status not in ("sent", "failed", "pruned"):
+                status = "failed"
+            counts["total"] += 1
+            counts[status] += 1
+            messages[pid] = {"title": title, "body": body, "status": status}
+        except Exception:
+            logger.exception("push_service: send failed for player %s", pid)
+            counts["total"] += 1
+            counts["failed"] += 1
+            messages[pid] = {"title": None, "body": None, "status": "failed"}
+    logger.info(
+        "push_service: broadcast complete pref=%s total=%d sent=%d failed=%d pruned=%d skipped=%d",
+        pref, counts["total"], counts["sent"], counts["failed"], counts["pruned"], counts["skipped"],
+    )
+    return {"counts": counts, "messages": messages}
+
+
+def broadcast_push_notification(title: str, body: str, *, pref=None, url=None) -> dict:
     """Send title/body to every player with a stored push_subscription.
 
     Returns {"total", "sent", "failed", "pruned"} where total counts only
     players that actually had a subscription. One bad subscription never
     stops the loop.
     """
+    result = send_to_subscribers(lambda _pid: (title, body), pref=pref, url=url)
+    c = result["counts"]
+    return {"total": c["total"], "sent": c["sent"], "failed": c["failed"], "pruned": c["pruned"]}
+
+
+def get_push_prefs(player_id: int) -> dict:
     from services.db_service import get_db
-    counts = {"total": 0, "sent": 0, "failed": 0, "pruned": 0}
+    db = get_db()
+    prefs = {}
+    if db is not None:
+        snap = db.collection("players").document(str(player_id)).get()
+        prefs = ((snap.to_dict() or {}).get("push_prefs") or {}) if snap.exists else {}
+    if not isinstance(prefs, dict):
+        prefs = {}
+    return {"recap": prefs.get("recap") is not False, "standings": prefs.get("standings") is not False}
+
+
+def set_push_prefs(player_id: int, recap: bool, standings: bool) -> bool:
+    from services.db_service import get_db
     db = get_db()
     if db is None:
-        logger.warning("push_service: broadcast skipped, no database (local data mode)")
-        return counts
-    for doc in db.collection("players").stream():
-        sub = (doc.to_dict() or {}).get("push_subscription")
-        if not isinstance(sub, dict):
-            continue
-        counts["total"] += 1
-        outcome = _deliver(doc.id, sub, title, body)
-        counts[outcome] += 1
-    logger.info(
-        "push_service: broadcast complete total=%d sent=%d failed=%d pruned=%d",
-        counts["total"], counts["sent"], counts["failed"], counts["pruned"],
-    )
-    return counts
+        return False
+    try:
+        db.collection("players").document(str(player_id)).update(
+            {"push_prefs": {"recap": bool(recap), "standings": bool(standings)}})
+    except Exception:
+        logger.exception("push_service: failed to save push prefs for player %s", player_id)
+        return False
+    try:
+        _invalidate_players_cache()
+    except Exception:
+        logger.warning("push_service: players cache invalidation failed after prefs save", exc_info=True)
+    return True
+
+
+def has_subscription(player_id: int) -> bool:
+    try:
+        return isinstance(_get_push_subscription(player_id), dict)
+    except Exception:
+        logger.warning("push_service: subscription lookup failed for %s", player_id, exc_info=True)
+        return False

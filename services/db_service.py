@@ -573,54 +573,132 @@ def record_player_activity(player_id: int, ts: float) -> None:
             bucket["players"] = patched
 
 
-def save_weekly_recap(year: int, week: int, summary: str):
-    """Saves an AI-generated weekly summary to Firestore and/or local cache."""
-    data = {
-        "year": year,
-        "week": week,
-        "summary": summary,
-        "timestamp": time.time()
-    }
-    
-    db = get_db()
-    if db:
-        doc_id = f"{year}_{week}"
-        db.collection("weekly_recaps").document(doc_id).set(data)
-    
-    # Update local cache if in local mode
-    if os.environ.get("USE_LOCAL_DATA", "False").lower() == "true":
-        local_path = local_db_dir() / "weekly_recaps.pkl"
+_RECAP_TTL_SECONDS = 300
+_RECAP_CACHE: dict = {}   # {year: (monotonic_fetched_at, {week: {...}})}
+
+
+def clear_recap_cache(year=None) -> None:
+    if year is None:
+        _RECAP_CACHE.clear()
+    else:
+        _RECAP_CACHE.pop(int(year), None)
+
+
+def _recaps_local_path(year: int):
+    return local_db_dir() / f"season_recaps_{int(year)}.json"
+
+
+def _normalize_recap_weeks(raw) -> dict:
+    out = {}
+    for key, val in (raw or {}).items():
         try:
-            if local_path.exists():
-                df = pd.read_pickle(local_path)
-                # Remove existing if present
-                mask = (df['year'] == year) & (df['week'] == week)
-                df = df[~mask]
-                df = pd.concat([df, pd.DataFrame([data])], ignore_index=True)
-            else:
-                df = pd.DataFrame([data])
-            _save_df_to_local("weekly_recaps", df)
-        except Exception as e:
-            logger.warning("Failed to persist recap locally: %s", e)
+            week = int(key)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(val, dict) and val.get("summary"):
+            out[week] = {
+                "summary": val["summary"],
+                "timestamp": val.get("timestamp"),
+                "source": val.get("source"),
+            }
+    return out
+
+
+def _legacy_firestore_recaps(db, year: int) -> dict:
+    from google.cloud.firestore_v1.base_query import FieldFilter
+    out = {}
+    for doc in db.collection("weekly_recaps").where(
+            filter=FieldFilter("year", "==", int(year))).stream():
+        d = doc.to_dict() or {}
+        if d.get("summary") and d.get("week") is not None:
+            out[int(d["week"])] = {"summary": d["summary"],
+                                    "timestamp": d.get("timestamp"), "source": None}
+    return out
+
+
+def _legacy_local_recaps(year: int) -> dict:
+    path = local_db_dir() / "weekly_recaps.pkl"
+    if not path.exists():
+        return {}
+    try:
+        df = pd.read_pickle(path)
+        df = df[df["year"] == year]
+        return {int(r["week"]): {"summary": r["summary"],
+                                  "timestamp": r.get("timestamp"), "source": None}
+                for _, r in df.iterrows() if r.get("summary")}
+    except Exception:
+        logger.warning("Failed to read legacy local recaps for %s", year, exc_info=True)
+        return {}
+
+
+def _load_season_recaps(year: int) -> dict:
+    db = get_db()
+    if db is None:
+        path = _recaps_local_path(year)
+        if path.exists():
+            try:
+                with open(path) as f:
+                    return _normalize_recap_weeks(json.load(f).get("weeks"))
+            except Exception:
+                logger.warning("Failed to read %s", path, exc_info=True)
+                return {}
+        return _legacy_local_recaps(year)
+    doc = db.collection("season_recaps").document(str(year)).get()
+    if doc.exists:
+        return _normalize_recap_weeks((doc.to_dict() or {}).get("weeks"))
+    return _legacy_firestore_recaps(db, year)
+
+
+def get_season_recaps(year: int) -> dict:
+    """{week: {summary, timestamp, source}} for one season (one doc read, cached 5 min)."""
+    year = int(year)
+    hit = _RECAP_CACHE.get(year)
+    if hit and (time.monotonic() - hit[0]) < _RECAP_TTL_SECONDS:
+        return dict(hit[1])
+    weeks = _load_season_recaps(year)
+    _RECAP_CACHE[year] = (time.monotonic(), weeks)
+    return dict(weeks)
+
+
+def list_recap_weeks(year: int) -> list:
+    return sorted(get_season_recaps(year))
+
 
 def get_weekly_recap(year: int, week: int):
-    """Retrieves a specific weekly recap from Firestore."""
-    db = get_db()
-    if not db:
-        # We are offline / local data mode
-        local_path = local_db_dir() / "weekly_recaps.pkl"
-        if local_path.exists():
-            try:
-                recaps_df = pd.read_pickle(local_path)
-                match = recaps_df[(recaps_df['year'] == year) & (recaps_df['week'] == week)]
-                if not match.empty:
-                    return match.iloc[0].to_dict()
-            except Exception:
-                pass
+    """One week's recap as {year, week, summary, timestamp}, or None."""
+    entry = get_season_recaps(year).get(int(week))
+    if not entry:
         return None
-        
-    doc = db.collection("weekly_recaps").document(f"{year}_{week}").get()
-    return doc.to_dict() if doc.exists else None
+    return {"year": int(year), "week": int(week),
+            "summary": entry["summary"], "timestamp": entry.get("timestamp")}
+
+
+def save_weekly_recap(year: int, week: int, summary: str, source: str = None):
+    """Store one week's recap on the season doc (merge: other weeks untouched)."""
+    year, week = int(year), int(week)
+    entry = {"summary": summary, "timestamp": time.time()}
+    if source:
+        entry["source"] = source
+    db = get_db()
+    if db:
+        db.collection("season_recaps").document(str(year)).set(
+            {"year": year, "weeks": {str(week): entry}, "updated_at": entry["timestamp"]},
+            merge=True)
+    if os.environ.get("USE_LOCAL_DATA", "False").lower() == "true":
+        path = _recaps_local_path(year)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            data = {"year": year, "weeks": {}}
+            if path.exists():
+                with open(path) as f:
+                    data = json.load(f)
+            data.setdefault("weeks", {})[str(week)] = entry
+            data["updated_at"] = entry["timestamp"]
+            with open(path, "w") as f:
+                json.dump(data, f)
+        except Exception as e:
+            logger.warning("Failed to persist recap locally: %s", e)
+    clear_recap_cache(year)
 
 def save_metadata(doc_id: str, data: dict):
     """Saves arbitrary metadata to Firestore and local cache."""

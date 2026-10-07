@@ -17,6 +17,7 @@
     <script src="{{ static_url('js/theme_init.js') }}"></script>
     <script src="{{ static_url('js/chart_theme.js') }}"></script>
     <link rel="stylesheet" href="{{ static_url('style.css') }}">
+    {% if push_vapid_key and not vapid_public_key %}<meta name="vapid-public-key" content="{{ push_vapid_key }}">{% endif %}
     {% block head %}{% endblock %}
     <!-- Early Auth Detection to prevent flicker -->
     <script>
@@ -150,6 +151,7 @@
                 <a href="/draft-results"><i data-lucide="clipboard-list"></i> Draft Results</a>
                 <a href="/playoff-race" id="drawer-playoff-race-link" class="hidden"><i data-lucide="flag"></i> Playoff Race</a>
                 <a href="/wins-pool/{{ current_year|default(2024) }}/weekbyweek"><i data-lucide="bar-chart-3"></i> Weekly Progress</a>
+                <a href="/recap"><i data-lucide="newspaper"></i> Recaps</a>
                 <a href="/headtohead"><i data-lucide="users"></i> Head to Head</a>
                 <a href="/teams"><i data-lucide="shield"></i> Teams</a>
                 <a href="/draft/history"><i data-lucide="book-open"></i> Draft History</a>

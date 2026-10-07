@@ -1,6 +1,6 @@
 """routes/models.py — Pydantic request body schemas for all POST endpoints."""
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictBool, StringConstraints, field_validator, model_validator
 
 
 # --- Auth ---
@@ -101,6 +101,14 @@ class RecapWeekRequest(BaseModel):
     week: Optional[int] = None
 
 
+class PublishRecapRequest(BaseModel):
+    year: Optional[int] = Field(None, ge=2000, le=2100)
+    week: Optional[int] = Field(None, ge=1, le=22)
+    text: str = Field(..., max_length=20000, description="Finished recap text to publish")
+    send_push: bool = False
+    send_email: bool = False
+
+
 class RecapYearRequest(BaseModel):
     year: int
 
@@ -176,3 +184,8 @@ class PoolConfigRequest(BaseModel):
         if len(set(places)) != len(places):
             raise ValueError("duplicate payout places")
         return self
+
+
+class PushPrefsRequest(BaseModel):
+    recap: StrictBool = Field(..., description="Receive the weekly recap push.")
+    standings: StrictBool = Field(..., description="Receive the weekly standings push.")
