@@ -361,3 +361,77 @@ def test_deliver_reports_pruned_even_if_cache_invalidation_raises(monkeypatch):
          patch.object(push_service, "_invalidate_players_cache", side_effect=RuntimeError("boom")), \
          patch("pywebpush.webpush", side_effect=_PushError(410)):
         assert push_service._deliver(7, sub, "t", "b") == "pruned"
+
+
+# --- Task 5: preference-aware sends ---------------------------------------
+from fake_firestore import FakeFirestore  # noqa: E402
+
+
+def test_send_to_subscribers_respects_prefs_and_counts(monkeypatch):
+    import services.push_service as ps
+    fs = FakeFirestore()
+    fs.collection("players").document("1").set({"push_subscription": {"endpoint": "e1"}})
+    fs.collection("players").document("2").set({"push_subscription": {"endpoint": "e2"},
+                                                "push_prefs": {"recap": False, "standings": True}})
+    fs.collection("players").document("3").set({"fullName": "No Sub"})
+    monkeypatch.setattr("services.db_service.get_db", lambda: fs)
+    monkeypatch.setattr(ps, "_VAPID_PUBLIC", "pub")
+    monkeypatch.setattr(ps, "_VAPID_PRIVATE", "priv")
+    calls = []
+    monkeypatch.setattr(ps, "_deliver", lambda pid, sub, t, b, url=None: calls.append((pid, t, url)) or "sent")
+    out = ps.send_to_subscribers(lambda pid: ("T", f"B{pid}"), pref="recap", url="/recap/2026/5")
+    assert out["counts"]["total"] == 1 and out["counts"]["sent"] == 1 and out["counts"]["skipped"] == 1
+    assert calls == [("1", "T", "/recap/2026/5")]
+    assert out["messages"][1] == {"title": "T", "body": "B1", "status": "sent"}
+
+
+def _fixture(monkeypatch):
+    import services.push_service as ps
+    fs = FakeFirestore()
+    fs.collection("players").document("1").set({"push_subscription": {"endpoint": "e1"}})
+    fs.collection("players").document("2").set({"push_subscription": {"endpoint": "e2"}})
+    monkeypatch.setattr("services.db_service.get_db", lambda: fs)
+    monkeypatch.setattr(ps, "_VAPID_PUBLIC", "pub")
+    monkeypatch.setattr(ps, "_VAPID_PRIVATE", "priv")
+    calls = []
+    monkeypatch.setattr(ps, "_deliver", lambda pid, sub, t, b, url=None: calls.append(pid) or "sent")
+    return ps, calls
+
+
+def test_build_message_none_skips_player(monkeypatch):
+    ps, calls = _fixture(monkeypatch)
+    out = ps.send_to_subscribers(lambda pid: None if pid == 1 else ("T", "B"))
+    assert out["counts"]["skipped"] == 1 and out["counts"]["sent"] == 1
+    assert calls == ["2"] and 1 not in out["messages"]
+
+
+def test_broadcast_return_keys_unchanged(monkeypatch):
+    ps, calls = _fixture(monkeypatch)
+    out = ps.broadcast_push_notification("t", "b")
+    assert set(out) == {"total", "sent", "failed", "pruned"}
+    assert out["total"] == 2 and out["sent"] == 2
+
+
+def test_unconfigured_vapid_sends_nothing(monkeypatch):
+    ps, calls = _fixture(monkeypatch)
+    monkeypatch.setattr(ps, "_VAPID_PUBLIC", "")
+    out = ps.send_to_subscribers(lambda pid: ("T", "B"))
+    assert out["counts"]["total"] == 0 and calls == []
+
+
+def test_failed_and_pruned_deliveries_are_counted(monkeypatch):
+    ps, calls = _fixture(monkeypatch)
+    statuses = iter(["failed", "pruned"])
+    monkeypatch.setattr(ps, "_deliver", lambda pid, sub, t, b, url=None: next(statuses))
+    out = ps.send_to_subscribers(lambda pid: ("T", "B"))
+    assert out["counts"]["failed"] == 1 and out["counts"]["pruned"] == 1 and out["counts"]["sent"] == 0
+
+
+def test_deliver_payload_includes_url_only_when_given(monkeypatch):
+    import json as _json
+    monkeypatch.setattr(push_service, "_VAPID_PRIVATE", "priv")
+    seen = []
+    with patch("pywebpush.webpush", side_effect=lambda **kw: seen.append(_json.loads(kw["data"]))):
+        push_service._deliver(1, {"endpoint": "e"}, "t", "b")
+        push_service._deliver(1, {"endpoint": "e"}, "t", "b", "/recap/2026/5")
+    assert seen == [{"title": "t", "body": "b"}, {"title": "t", "body": "b", "url": "/recap/2026/5"}]

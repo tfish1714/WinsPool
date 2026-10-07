@@ -65,13 +65,16 @@ def _invalidate_players_cache() -> None:
     signal_data_update("static")
 
 
-def _deliver(player_id, sub: dict, title: str, body: str) -> str:
+def _deliver(player_id, sub: dict, title: str, body: str, url=None) -> str:
     """Send one notification. Returns "sent", "failed", or "pruned"."""
     from pywebpush import webpush
+    payload = {"title": title, "body": body}
+    if url:
+        payload["url"] = url
     try:
         webpush(
             subscription_info=sub,
-            data=json.dumps({"title": title, "body": body}),
+            data=json.dumps(payload),
             vapid_private_key=_VAPID_PRIVATE,
             vapid_claims={"sub": _VAPID_EMAIL},
         )
@@ -162,28 +165,64 @@ def send_push_notification(player_id: int, title: str, body: str) -> bool:
         return False
 
 
-def broadcast_push_notification(title: str, body: str) -> dict:
+def _player_doc_id_to_int(doc_id):
+    try:
+        return int(doc_id)
+    except (TypeError, ValueError):
+        return doc_id
+
+
+def send_to_subscribers(build_message, *, pref=None, url=None) -> dict:
+    """Send a per-player message to every player with a push_subscription.
+
+    build_message(player_id: int) -> (title, body) | None (None skips the
+    player). A player whose players.push_prefs[pref] is False is also skipped.
+    Returns {"counts": {total, sent, failed, pruned, skipped},
+    "messages": {player_id: {title, body, status}}}.
+    """
+    counts = {"total": 0, "sent": 0, "failed": 0, "pruned": 0, "skipped": 0}
+    messages = {}
+    if not is_configured():
+        logger.warning("push_service: VAPID not configured, nothing sent")
+        return {"counts": counts, "messages": messages}
+    from services.db_service import get_db
+    db = get_db()
+    if db is None:
+        logger.warning("push_service: no database (local data mode), nothing sent")
+        return {"counts": counts, "messages": messages}
+    for doc in db.collection("players").stream():
+        data = doc.to_dict() or {}
+        sub = data.get("push_subscription")
+        if not isinstance(sub, dict):
+            continue
+        prefs = data.get("push_prefs")
+        if pref and isinstance(prefs, dict) and prefs.get(pref) is False:
+            counts["skipped"] += 1
+            continue
+        pid = _player_doc_id_to_int(doc.id)
+        msg = build_message(pid)
+        if not msg:
+            counts["skipped"] += 1
+            continue
+        title, body = msg
+        counts["total"] += 1
+        status = _deliver(doc.id, sub, title, body, url) if url else _deliver(doc.id, sub, title, body)
+        counts[status] += 1
+        messages[pid] = {"title": title, "body": body, "status": status}
+    logger.info(
+        "push_service: broadcast complete pref=%s total=%d sent=%d failed=%d pruned=%d skipped=%d",
+        pref, counts["total"], counts["sent"], counts["failed"], counts["pruned"], counts["skipped"],
+    )
+    return {"counts": counts, "messages": messages}
+
+
+def broadcast_push_notification(title: str, body: str, *, pref=None, url=None) -> dict:
     """Send title/body to every player with a stored push_subscription.
 
     Returns {"total", "sent", "failed", "pruned"} where total counts only
     players that actually had a subscription. One bad subscription never
     stops the loop.
     """
-    from services.db_service import get_db
-    counts = {"total": 0, "sent": 0, "failed": 0, "pruned": 0}
-    db = get_db()
-    if db is None:
-        logger.warning("push_service: broadcast skipped, no database (local data mode)")
-        return counts
-    for doc in db.collection("players").stream():
-        sub = (doc.to_dict() or {}).get("push_subscription")
-        if not isinstance(sub, dict):
-            continue
-        counts["total"] += 1
-        outcome = _deliver(doc.id, sub, title, body)
-        counts[outcome] += 1
-    logger.info(
-        "push_service: broadcast complete total=%d sent=%d failed=%d pruned=%d",
-        counts["total"], counts["sent"], counts["failed"], counts["pruned"],
-    )
-    return counts
+    result = send_to_subscribers(lambda _pid: (title, body), pref=pref, url=url)
+    c = result["counts"]
+    return {"total": c["total"], "sent": c["sent"], "failed": c["failed"], "pruned": c["pruned"]}
