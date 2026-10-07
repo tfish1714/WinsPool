@@ -325,6 +325,9 @@ def main():
     log.info("\n-- Elo rating history --")
     dump_elo_history()
 
+    log.info("\n-- Season recaps --")
+    dump_season_recaps()
+
     log.info("\n-- NN weekly accuracy history --")
     dump_nn_weekly_accuracy()
 
