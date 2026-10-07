@@ -200,15 +200,26 @@ def send_to_subscribers(build_message, *, pref=None, url=None) -> dict:
             counts["skipped"] += 1
             continue
         pid = _player_doc_id_to_int(doc.id)
-        msg = build_message(pid)
-        if not msg:
-            counts["skipped"] += 1
-            continue
-        title, body = msg
-        counts["total"] += 1
-        status = _deliver(doc.id, sub, title, body, url) if url else _deliver(doc.id, sub, title, body)
-        counts[status] += 1
-        messages[pid] = {"title": title, "body": body, "status": status}
+        try:
+            msg = build_message(pid)
+            if not msg:
+                counts["skipped"] += 1
+                continue
+            if not (isinstance(msg, (tuple, list)) and len(msg) == 2
+                    and all(isinstance(x, str) for x in msg)):
+                raise ValueError("build_message must return a (title, body) pair of strings")
+            title, body = msg
+            status = _deliver(doc.id, sub, title, body, url) if url else _deliver(doc.id, sub, title, body)
+            if status not in ("sent", "failed", "pruned"):
+                status = "failed"
+            counts["total"] += 1
+            counts[status] += 1
+            messages[pid] = {"title": title, "body": body, "status": status}
+        except Exception:
+            logger.exception("push_service: send failed for player %s", pid)
+            counts["total"] += 1
+            counts["failed"] += 1
+            messages[pid] = {"title": None, "body": None, "status": "failed"}
     logger.info(
         "push_service: broadcast complete pref=%s total=%d sent=%d failed=%d pruned=%d skipped=%d",
         pref, counts["total"], counts["sent"], counts["failed"], counts["pruned"], counts["skipped"],

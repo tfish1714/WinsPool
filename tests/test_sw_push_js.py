@@ -15,10 +15,11 @@ _HARNESS = r"""
 const fs = require('fs'); const vm = require('vm');
 const cfg = JSON.parse(process.argv[1]);
 const handlers = {}; const log = {shown: [], navigated: [], opened: [], focused: 0};
-const windows = cfg.windows ? [{
-  navigate: u => { log.navigated.push(u); return Promise.resolve({focus: () => { log.focused++; }}); },
-  focus: () => { log.focused++; },
-}] : [];
+const mode = cfg.windows === true ? 'ok' : (cfg.windows || null);
+const windows = !mode ? [] : mode === 'nonav' ? [{focus: () => Promise.resolve()}] : [{
+  navigate: u => { log.navigated.push(u); return mode === 'navreject' ? Promise.reject(new TypeError('uncontrolled')) : Promise.resolve({}); },
+  focus: () => { log.focused++; return mode === 'focusreject' ? Promise.reject(new Error('InvalidAccessError')) : Promise.resolve(); },
+}];
 const self = {
   addEventListener: (n, f) => { handlers[n] = f; },
   registration: {showNotification: (t, o) => { log.shown.push([t, o]); return Promise.resolve(); }},
@@ -74,4 +75,16 @@ def test_click_off_origin_opens_root():
 
 def test_click_without_url_opens_root():
     log = _run({"kind": "click", "windows": False, "data": None})
+    assert log["opened"] == ["/"]
+
+
+@pytest.mark.parametrize("mode", ["navreject", "focusreject", "nonav"])
+def test_click_falls_back_to_open_window(mode):
+    log = _run({"kind": "click", "windows": mode, "data": {"url": "/recap/2026/5"}})
+    assert log["opened"] == ["/recap/2026/5"]
+
+
+@pytest.mark.parametrize("bad", ["https://evil.test/x", "//evil.test/x", "javascript:alert(1)", "http://["])
+def test_click_unsafe_urls_end_at_root(bad):
+    log = _run({"kind": "click", "windows": False, "data": {"url": bad}})
     assert log["opened"] == ["/"]

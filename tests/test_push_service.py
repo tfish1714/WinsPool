@@ -435,3 +435,55 @@ def test_deliver_payload_includes_url_only_when_given(monkeypatch):
         push_service._deliver(1, {"endpoint": "e"}, "t", "b")
         push_service._deliver(1, {"endpoint": "e"}, "t", "b", "/recap/2026/5")
     assert seen == [{"title": "t", "body": "b"}, {"title": "t", "body": "b", "url": "/recap/2026/5"}]
+
+
+def _fixture3(monkeypatch):
+    ps, calls = _fixture(monkeypatch)
+    from fake_firestore import FakeFirestore as FF
+    import services.db_service as dbs
+    fs = dbs.get_db()
+    fs.collection("players").document("3").set({"push_subscription": {"endpoint": "e3"}})
+    return ps, calls
+
+
+def _consistent(c):
+    assert c["total"] == c["sent"] + c["failed"] + c["pruned"]
+
+
+def test_builder_raising_for_one_player_does_not_stop_loop(monkeypatch):
+    ps, calls = _fixture3(monkeypatch)
+
+    def build(pid):
+        if pid == 2:
+            raise RuntimeError("boom")
+        return ("T", "B")
+
+    out = ps.send_to_subscribers(build)
+    assert out["counts"]["sent"] == 2 and out["counts"]["failed"] == 1
+    _consistent(out["counts"])
+    assert out["messages"][2]["status"] == "failed"
+    assert calls == ["1", "3"]
+
+
+@pytest.mark.parametrize("bad", [("only",), ("a", "b", "c"), "ab", (None, "B"), (1, 2), 5])
+def test_malformed_builder_result_fails_that_player_only(monkeypatch, bad):
+    ps, calls = _fixture3(monkeypatch)
+    out = ps.send_to_subscribers(lambda pid: bad if pid == 2 else ("T", "B"))
+    assert out["counts"]["sent"] == 2 and out["counts"]["failed"] == 1
+    _consistent(out["counts"])
+    assert calls == ["1", "3"]
+
+
+def test_deliver_raising_does_not_stop_loop(monkeypatch):
+    ps, calls = _fixture3(monkeypatch)
+
+    def deliver(pid, sub, t, b, url=None):
+        if pid == "2":
+            raise RuntimeError("unexpected")
+        calls.append(pid)
+        return "sent"
+
+    monkeypatch.setattr(ps, "_deliver", deliver)
+    out = ps.send_to_subscribers(lambda pid: ("T", "B"))
+    assert out["counts"]["sent"] == 2 and out["counts"]["failed"] == 1
+    _consistent(out["counts"])
