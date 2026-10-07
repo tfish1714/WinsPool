@@ -101,6 +101,14 @@ class RecapWeekRequest(BaseModel):
     week: Optional[int] = None
 
 
+class PublishRecapRequest(BaseModel):
+    year: Optional[int] = Field(None, ge=2000, le=2100)
+    week: Optional[int] = Field(None, ge=1, le=22)
+    text: str = Field(..., max_length=20000, description="Finished recap text to publish")
+    send_push: bool = False
+    send_email: bool = False
+
+
 class RecapYearRequest(BaseModel):
     year: int
 

@@ -1217,3 +1217,55 @@ class TestPreviewRecapPromptDefaults:
             resp = client.post("/api/admin/recap/preview_prompt", json={}, headers={"Authorization": admin_token})
         assert resp.status_code == 404
         assert resp.json() == {"error": "No completed games found for 2026."}
+
+
+class TestPublishRecap:
+    def test_publish_saves_trimmed_text_with_source(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap") as save:
+            r = client.post("/api/admin/recap/publish", json={"text": "  Hello  "},
+                            headers={"Authorization": admin_token})
+        assert r.status_code == 200
+        save.assert_called_once_with(2026, 5, "Hello", source="published")
+        body = r.json()
+        assert body["saved"] is True and body["url"] == "/recap/2026/5"
+        assert body["email"] is None and body["push"] is None
+
+    def test_blank_text_is_422(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap") as save:
+            r = client.post("/api/admin/recap/publish", json={"text": "   "},
+                            headers={"Authorization": admin_token})
+        assert r.status_code == 422
+        save.assert_not_called()
+
+    def test_explicit_year_week_not_overridden(self, admin_token):
+        with patch("routes.admin_routes.load_data") as ld, \
+             patch("routes.admin_routes.save_weekly_recap") as save:
+            r = client.post("/api/admin/recap/publish",
+                            json={"year": 2025, "week": 9, "text": "x"},
+                            headers={"Authorization": admin_token})
+        assert r.status_code == 200
+        save.assert_called_once_with(2025, 9, "x", source="published")
+        ld.assert_not_called()
+
+    def test_no_completed_week_is_404(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=None):
+            r = client.post("/api/admin/recap/publish", json={"text": "x"},
+                            headers={"Authorization": admin_token})
+        assert r.status_code == 404
+
+    def test_email_only_when_ticked(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap"), \
+             patch("routes.admin_routes.recap_service.extract_weekly_data", return_value=({}, ["a@x.com"])), \
+             patch("routes.admin_routes.email_service.send_weekly_recap_email") as send:
+            r = client.post("/api/admin/recap/publish", json={"text": "x", "send_email": True},
+                            headers={"Authorization": admin_token})
+        assert r.json()["email"] == {"recipients": 1}
+        send.assert_called_once()
+
+    def test_requires_admin(self, auth_token):
+        r = client.post("/api/admin/recap/publish", json={"text": "x"},
+                        headers={"Authorization": auth_token})
+        assert r.status_code in (401, 403)

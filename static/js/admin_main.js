@@ -260,6 +260,7 @@ class AdminApp {
         document.getElementById('recap-copy-prompt-btn')?.addEventListener('click', () => this.copyRecapPrompt());
         document.getElementById('recap-generate-ai-btn')?.addEventListener('click', () => this.generateRecapAI());
         document.getElementById('recap-broadcast-btn')?.addEventListener('click', () => this.broadcastRecap());
+        document.getElementById('recap-publish-btn')?.addEventListener('click', () => this.publishRecap());
 
         // Test accounts toggle
         document.getElementById('show-test-accounts-toggle')?.addEventListener('change', () => this.fetchInitialData());
@@ -691,6 +692,43 @@ class AdminApp {
                 btn.disabled = false;
                 btn.textContent = 'Step 3: Save & Broadcast to Players';
             }
+        }
+    }
+
+    async publishRecap() {
+        const year = document.getElementById('recap-year')?.value ?? '';
+        const week = document.getElementById('recap-week')?.value ?? '';
+        const text = document.getElementById('recap-publish-text').value.trim();
+        const sendPush = document.getElementById('recap-publish-push').checked;
+        const sendEmail = document.getElementById('recap-publish-email').checked;
+        const btn = document.getElementById('recap-publish-btn');
+        const out = document.getElementById('recap-publish-result');
+
+        if (!text) {
+            out.textContent = 'Paste the recap text first.';
+            return;
+        }
+        if ((sendPush || sendEmail) && !confirm('Publish and notify players?')) return;
+
+        btn.disabled = true;
+        out.textContent = 'Publishing...';
+        try {
+            const data = await ApiService.publishRecap(this.playerId, year, week, text, sendPush, sendEmail);
+            out.textContent = 'Published. View: ';
+            const link = document.createElement('a');
+            link.href = `/recap/${encodeURIComponent(data.year)}/${encodeURIComponent(data.week)}`;
+            link.textContent = `Week ${data.week} recap`;
+            out.appendChild(link);
+            if (data.email) {
+                out.appendChild(document.createTextNode(` Emailed ${data.email.recipients} player(s).`));
+            }
+            if (data.push) {
+                out.appendChild(document.createTextNode(' Push notification sent.'));
+            }
+        } catch (e) {
+            out.textContent = `Publish failed: ${e.message}`;
+        } finally {
+            btn.disabled = false;
         }
     }
 

@@ -375,6 +375,16 @@
                     style="margin-top: 1rem; width: 100%; background: var(--accent-green); border-color: var(--accent-green);">Step
                     3: Save & Broadcast to Players</button>
             </div>
+
+            <div id="recap-publish-box" style="border:1px solid var(--glass-border); padding:1rem; border-radius:8px; margin-top:1rem;">
+                <h4 style="margin:0 0 .5rem 0;">Publish recap to the app</h4>
+                <p style="font-size:.75rem; color:var(--text-secondary);">Paste your finished recap. Nothing is sent unless you tick a box.</p>
+                <textarea id="recap-publish-text" style="width:100%; height:180px; background:var(--bg-elev-2); color:var(--ink); border:1px solid var(--glass-border); border-radius:4px; padding:.5rem; font-family:inherit; line-height:1.5; resize:vertical;"></textarea>
+                <label style="display:block; margin-top:.5rem;"><input type="checkbox" id="recap-publish-push" checked> Send push notification</label>
+                <label style="display:block;"><input type="checkbox" id="recap-publish-email"> Also email enrolled players</label>
+                <button id="recap-publish-btn" class="btn-primary" style="margin-top:.75rem; width:100%;">Publish to app</button>
+                <p id="recap-publish-result" style="font-size:.85rem; margin-top:.5rem;"></p>
+            </div>
         </div>
     </div>
 

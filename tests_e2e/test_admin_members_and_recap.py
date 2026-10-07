@@ -94,3 +94,28 @@ def test_recap_prompt_preview_populates(live_server, page, test_player_credentia
         timeout=5000,
     )
     assert page.evaluate("navigator.clipboard.readText()") == prompt_text
+
+
+def test_publish_recap_makes_text_visible_on_recap_page(live_server, page, test_player_credentials):
+    """Publish a pasted recap with both notify boxes unticked (nothing is sent),
+    then confirm the public /recap/{year}/{week} page shows the text. Uses
+    year 2000 / week 22 so a real season's recap is never overwritten."""
+    admin_creds = test_player_credentials[0]
+    _login(page, live_server, admin_creds)
+
+    page.goto(f"{live_server}/admin")
+    _open_admin_tab(page, "recap-section")
+
+    page.fill("#recap-year", "2000")
+    page.fill("#recap-week", "22")
+    page.fill("#recap-publish-text", "E2E published recap sentinel text")
+    page.uncheck("#recap-publish-push")
+    page.uncheck("#recap-publish-email")
+    page.click("#recap-publish-btn")
+
+    link = page.locator("#recap-publish-result a")
+    link.wait_for(timeout=10000)
+    assert link.get_attribute("href") == "/recap/2000/22"
+
+    page.goto(f"{live_server}/recap/2000/22")
+    assert "E2E published recap sentinel text" in page.content()
