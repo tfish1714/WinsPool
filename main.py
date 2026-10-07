@@ -19,6 +19,7 @@ from fastapi.responses import RedirectResponse, FileResponse, JSONResponse
 
 from services.data_service import load_data, get_active_season, get_team_logo
 from services.utils import normalize_team_abbr
+from services.recap_render import render_recap_html
 from routes.standings_routes import router as standings_router, templates as standings_templates
 from routes.history_routes import router as history_router, templates as history_templates
 from routes.draft_routes import router as draft_router, templates as draft_templates
@@ -112,6 +113,7 @@ for t in [standings_templates, history_templates, draft_templates, admin_templat
     t.env.globals['normalize_team_abbr'] = normalize_team_abbr
     t.env.globals['current_season_label'] = _current_season_label
     t.env.globals['current_year'] = _current_year()
+    t.env.filters['recap_html'] = render_recap_html
 
 # ── Static files ──────────────────────────────────────────────────────────────
 STATIC_PATH = os.environ.get("STATIC_PATH", "static")

@@ -89,7 +89,7 @@ def _real_season_frames():
     return standings, empty, games, players, empty, draft, empty
 
 
-def _render_wins_pool(monkeypatch, real_analysis=False, games_df=None):
+def _render_wins_pool(monkeypatch, real_analysis=False, games_df=None, recap=None):
     import routes.standings_routes as sr
     empty = pd.DataFrame()
     if real_analysis:
@@ -97,7 +97,7 @@ def _render_wins_pool(monkeypatch, real_analysis=False, games_df=None):
         monkeypatch.setattr(sr, "load_data", lambda *a, **k: _real_season_frames())
         monkeypatch.setattr(sr, "get_available_years", lambda *a, **k: [YEAR])
         monkeypatch.setattr(sr, "get_active_season", lambda *a, **k: YEAR)
-        monkeypatch.setattr(sr.db, "get_weekly_recap", lambda *a, **k: None)
+        monkeypatch.setattr(sr.db, "get_weekly_recap", lambda *a, **k: recap)
         return client.get(f"/wins-pool/{YEAR}")
     games = games_df if games_df is not None else pd.DataFrame([{"season": YEAR, "week": 5, "result": 1}])
     monkeypatch.setattr(sr, "load_data", lambda *a, **k: (empty, empty, games, empty, empty, empty, empty))
@@ -111,7 +111,7 @@ def _render_wins_pool(monkeypatch, real_analysis=False, games_df=None):
     monkeypatch.setattr(sr, "get_latest_week_for_year", lambda games, year: 5)
     monkeypatch.setattr(sr, "get_available_years", lambda *a, **k: [YEAR])
     monkeypatch.setattr(sr, "get_active_season", lambda *a, **k: YEAR)
-    monkeypatch.setattr(sr.db, "get_weekly_recap", lambda *a, **k: None)
+    monkeypatch.setattr(sr.db, "get_weekly_recap", lambda *a, **k: recap)
     return client.get(f"/wins-pool/{YEAR}")
 
 

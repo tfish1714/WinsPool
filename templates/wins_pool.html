@@ -192,7 +192,7 @@
                 <span class="recap-week-mono">Week {{ current_week }} · {{ year }}</span>
             </div>
             <div class="recap-content">
-                {{ recap | safe }}
+                {{ recap | recap_html }}
             </div>
         </div>
         {% endif %}
