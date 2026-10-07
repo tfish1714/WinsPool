@@ -237,3 +237,35 @@ def broadcast_push_notification(title: str, body: str, *, pref=None, url=None) -
     result = send_to_subscribers(lambda _pid: (title, body), pref=pref, url=url)
     c = result["counts"]
     return {"total": c["total"], "sent": c["sent"], "failed": c["failed"], "pruned": c["pruned"]}
+
+
+def get_push_prefs(player_id: int) -> dict:
+    from services.db_service import get_db
+    db = get_db()
+    prefs = {}
+    if db is not None:
+        snap = db.collection("players").document(str(player_id)).get()
+        prefs = ((snap.to_dict() or {}).get("push_prefs") or {}) if snap.exists else {}
+    return {"recap": prefs.get("recap") is not False, "standings": prefs.get("standings") is not False}
+
+
+def set_push_prefs(player_id: int, recap: bool, standings: bool) -> bool:
+    from services.db_service import get_db
+    db = get_db()
+    if db is None:
+        return False
+    db.collection("players").document(str(player_id)).update(
+        {"push_prefs": {"recap": bool(recap), "standings": bool(standings)}})
+    try:
+        _invalidate_players_cache()
+    except Exception:
+        logger.warning("push_service: players cache invalidation failed after prefs save", exc_info=True)
+    return True
+
+
+def has_subscription(player_id: int) -> bool:
+    try:
+        return isinstance(_get_push_subscription(player_id), dict)
+    except Exception:
+        logger.warning("push_service: subscription lookup failed for %s", player_id, exc_info=True)
+        return False

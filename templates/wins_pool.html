@@ -26,6 +26,8 @@
             </div>
         </header>
 
+        <div id="push-nudge-slot"></div>
+
         {% if draft_pending %}
         <div class="card-glass" style="padding: 2.5rem 1.5rem; text-align: center;">
             <div class="eyebrow">Draft in progress</div>
@@ -236,5 +238,6 @@
 <script src="{{ static_url('js/standings_refresh.js') }}"></script>
 <script type="module" src="{{ static_url('js/pool_fee.js') }}"></script>
 <script type="module" src="{{ static_url('js/unpaid_notice.js') }}"></script>
+<script type="module" src="{{ static_url('js/push_nudge.js') }}"></script>
 <script type="module" src="{{ static_url('js/tiebreaker_explain.js') }}"></script>
 {% endblock %}

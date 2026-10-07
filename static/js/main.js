@@ -5,6 +5,7 @@ import { WebSocketService } from './websocket_service.js';
 import { initChat, loadHistory, appendMessage } from './chat.js';
 import { isPlayoffRaceVisible } from './nav_gating.js';
 import { maybeShowIosInstallHint } from './ios_push_hint.js';
+import { subscribeToPush } from './push_client.js';
 
 /**
  * WinsPool Main Application Module (Refactored)
@@ -515,40 +516,7 @@ class App {
         const vapidKey = document.querySelector('meta[name="vapid-public-key"]')?.content;
         if (!vapidKey) return;
 
-        try {
-            const reg = await navigator.serviceWorker.register('/sw.js');
-            const permission = await Notification.requestPermission();
-            if (permission !== 'granted') return;
-
-            const sub = await reg.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: _urlBase64ToUint8Array(vapidKey),
-            });
-
-            await fetch('/api/draft/push-subscribe', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...getAuthHeaders(),
-                },
-                body: JSON.stringify({
-                    playerId: this.user.playerId,
-                    subscription: sub.toJSON(),
-                }),
-            });
-        } catch (e) {
-            console.warn('[Push] Subscription failed:', e);
-            // console.warn alone is invisible once the user closes devtools --
-            // report it server-side so it's actually observable in Cloud Logging.
-            fetch('/api/push/client-error', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...getAuthHeaders(),
-                },
-                body: JSON.stringify({ reason: `${e?.name || 'Error'}: ${e?.message || e}` }),
-            }).catch(() => {});
-        }
+        await subscribeToPush(this.user.playerId, vapidKey);
     }
 
     updateStatusBanner(text) {
@@ -1066,11 +1034,4 @@ function wireThemeToggles() {
         }
     });
     label();
-}
-
-function _urlBase64ToUint8Array(base64String) {
-    const padding = '='.repeat((4 - base64String.length % 4) % 4);
-    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-    const raw = atob(base64);
-    return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
 }

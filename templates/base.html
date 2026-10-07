@@ -17,6 +17,7 @@
     <script src="{{ static_url('js/theme_init.js') }}"></script>
     <script src="{{ static_url('js/chart_theme.js') }}"></script>
     <link rel="stylesheet" href="{{ static_url('style.css') }}">
+    {% if push_vapid_key and not vapid_public_key %}<meta name="vapid-public-key" content="{{ push_vapid_key }}">{% endif %}
     {% block head %}{% endblock %}
     <!-- Early Auth Detection to prevent flicker -->
     <script>

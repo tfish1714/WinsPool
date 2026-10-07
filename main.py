@@ -115,6 +115,7 @@ for t in [standings_templates, history_templates, draft_templates, admin_templat
     t.env.globals['current_season_label'] = _current_season_label
     t.env.globals['current_year'] = _current_year()
     t.env.filters['recap_html'] = render_recap_html
+    t.env.globals['push_vapid_key'] = os.environ.get("VAPID_PUBLIC_KEY", "")
 
 # ── Static files ──────────────────────────────────────────────────────────────
 STATIC_PATH = os.environ.get("STATIC_PATH", "static")

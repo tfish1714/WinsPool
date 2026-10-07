@@ -6,11 +6,12 @@ import time
 import pandas as pd
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse
 
 from services.data_service import load_data, get_latest_season_and_week, get_season_projection_legacy_shape, get_frozen_preseason_projection
 from services.response_helpers import error_response, server_error, not_found, unauthorized
+from routes.models import PushPrefsRequest
 from services.draft_service import sanitize_state
 from services.live_standings_service import build_live_standings_payload
 from services.utils import filter_season
@@ -430,6 +431,35 @@ async def push_subscribe(request: Request, _auth: dict = Depends(require_auth)):
     if ok:
         return JSONResponse(content={"ok": True})
     return server_error()
+
+
+def _caller_player_id(_auth: dict) -> int:
+    try:
+        return int(_auth.get("sub"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid session subject.")
+
+
+@router.get("/profile/push-status")
+def get_push_status(_auth: dict = Depends(require_auth)):
+    """Caller's push subscription state and per-category preferences."""
+    from services import push_service
+    player_id = _caller_player_id(_auth)
+    return JSONResponse(content={
+        "subscribed": push_service.has_subscription(player_id),
+        "prefs": push_service.get_push_prefs(player_id),
+        "configured": push_service.is_configured(),
+    })
+
+
+@router.post("/profile/push-prefs")
+def set_push_prefs_route(body: PushPrefsRequest, _auth: dict = Depends(require_auth)):
+    """Save the caller's weekly recap / standings push preferences."""
+    from services import push_service
+    player_id = _caller_player_id(_auth)
+    if not push_service.set_push_prefs(player_id, body.recap, body.standings):
+        return server_error()
+    return JSONResponse(content={"ok": True, "prefs": {"recap": body.recap, "standings": body.standings}})
 
 
 @router.post("/push/client-error")

@@ -162,6 +162,18 @@
     <div id="own-page-only" hidden style="margin-top:2rem;">
       <div id="pool-status-card" class="card-glass" style="margin-bottom:2rem; padding: 1rem; display:none;"></div>
 
+      <section id="notifications" class="card-glass push-card" hidden>
+        <h2 class="push-card__title"><i data-lucide="bell"></i> Notifications</h2>
+        <p id="push-status" class="push-card__status" role="status">Checking notification status...</p>
+        <button type="button" id="push-enable-btn" class="btn-primary push-card__enable" hidden>Enable notifications</button>
+        <p id="push-ios-hint" class="push-card__hint" hidden></p>
+        <div class="push-card__prefs">
+          <label class="push-card__pref"><input type="checkbox" id="push-pref-recap" disabled> <span>Weekly recap</span></label>
+          <label class="push-card__pref"><input type="checkbox" id="push-pref-standings" disabled> <span>Weekly standings</span></label>
+        </div>
+        <p class="push-card__note">Draft turn alerts stay on for anyone subscribed.</p>
+      </section>
+
       <h2 style="margin-bottom:0.25rem;"><i data-lucide="user"></i> Account and Security</h2>
       <p style="color:var(--text-secondary); margin-bottom: 1.5rem;">Manage your account settings and security.</p>
       <div style="max-width:600px;">
@@ -309,6 +321,7 @@
 </style>
 
 <script src="{{ static_url('js/player_profile.js') }}"></script>
+<script type="module" src="{{ static_url('js/push_card.js') }}"></script>
 <script>
   document.addEventListener('DOMContentLoaded', () => {
     const pagePlayerId = document.getElementById('player-page').dataset.playerId;

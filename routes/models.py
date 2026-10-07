@@ -1,6 +1,6 @@
 """routes/models.py — Pydantic request body schemas for all POST endpoints."""
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictBool, StringConstraints, field_validator, model_validator
 
 
 # --- Auth ---
@@ -184,3 +184,8 @@ class PoolConfigRequest(BaseModel):
         if len(set(places)) != len(places):
             raise ValueError("duplicate payout places")
         return self
+
+
+class PushPrefsRequest(BaseModel):
+    recap: StrictBool = Field(..., description="Receive the weekly recap push.")
+    standings: StrictBool = Field(..., description="Receive the weekly standings push.")
