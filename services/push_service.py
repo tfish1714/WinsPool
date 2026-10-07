@@ -254,8 +254,12 @@ def set_push_prefs(player_id: int, recap: bool, standings: bool) -> bool:
     db = get_db()
     if db is None:
         return False
-    db.collection("players").document(str(player_id)).update(
-        {"push_prefs": {"recap": bool(recap), "standings": bool(standings)}})
+    try:
+        db.collection("players").document(str(player_id)).update(
+            {"push_prefs": {"recap": bool(recap), "standings": bool(standings)}})
+    except Exception:
+        logger.exception("push_service: failed to save push prefs for player %s", player_id)
+        return False
     try:
         _invalidate_players_cache()
     except Exception:

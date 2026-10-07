@@ -85,3 +85,26 @@ def test_routes_require_auth():
     assert client.get("/api/profile/push-status").status_code == 401
     assert client.post("/api/profile/push-prefs",
                        json={"recap": True, "standings": True}).status_code == 401
+
+
+def test_set_prefs_missing_player_returns_false_without_invalidating(fake_db, monkeypatch):
+    calls = []
+    monkeypatch.setattr(push_service, "_invalidate_players_cache", lambda: calls.append(1))
+    assert push_service.set_push_prefs(404, True, True) is False
+    assert calls == []
+
+
+def test_set_prefs_success_returns_true_and_invalidates(fake_db, monkeypatch):
+    calls = []
+    monkeypatch.setattr(push_service, "_invalidate_players_cache", lambda: calls.append(1))
+    fake_db.collection("players").document("1").set({"playerId": 1})
+    assert push_service.set_push_prefs(1, False, True) is True
+    assert calls == [1]
+    assert push_service.get_push_prefs(1) == {"recap": False, "standings": True}
+
+
+def test_prefs_route_500_when_save_fails(fake_db):
+    r = client.post("/api/profile/push-prefs", json={"recap": True, "standings": True},
+                    headers=_bearer(404))
+    assert r.status_code == 500
+    assert r.json() == {"error": "An internal error occurred."}

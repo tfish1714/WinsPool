@@ -11,6 +11,10 @@ class _Snap:
         return None if self._d is None else copy.deepcopy(self._d)
 
 
+class FakeNotFound(Exception):
+    """Mirrors google.api_core.exceptions.NotFound on update() of a missing doc."""
+
+
 def _merge(dst, src):
     for k, v in src.items():
         if isinstance(v, dict) and isinstance(dst.get(k), dict):
@@ -34,7 +38,10 @@ class _Doc:
             col[self.id] = copy.deepcopy(data)
 
     def update(self, data):
-        _merge(self.store.setdefault(self.name, {}).setdefault(self.id, {}), data)
+        col = self.store.get(self.name, {})
+        if self.id not in col:
+            raise FakeNotFound(f"No document to update: {self.name}/{self.id}")
+        _merge(col[self.id], data)
 
 
 class _Query:
