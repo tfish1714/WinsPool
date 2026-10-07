@@ -105,6 +105,10 @@ def _leader_sentence(rank: int, leader_name: str) -> str:
     return f"Leader: {name}" if name.endswith(".") else f"Leader: {name}."
 
 
+def _wins(n: int) -> str:
+    return f"{n} win" if n == 1 else f"{n} wins"
+
+
 def build_messages(week: int, current: list[dict],
                    previous: list[dict] | None) -> dict[int, tuple[str, str]]:
     if not current:
@@ -118,12 +122,12 @@ def build_messages(week: int, current: list[dict],
         tail = _leader_sentence(rank, leader["fullName"])
         prev = prev_by_id.get(r["playerId"])
         if prev is None:
-            body = f"You are {ordinal(rank)} with {wins} wins. {tail}"
+            body = f"You are {ordinal(rank)} with {_wins(wins)}. {tail}"
         else:
             delta = prev["rank"] - rank
             verb = (f"moved up to {ordinal(rank)}" if delta > 0
                     else f"dropped to {ordinal(rank)}" if delta < 0
                     else f"held {ordinal(rank)}")
-            body = f"You {verb} ({wins} wins, +{wins - prev['wins']}). {tail}"
+            body = f"You {verb} ({_wins(wins)}, +{wins - prev['wins']}). {tail}"
         out[int(r["playerId"])] = (title, body)
     return out

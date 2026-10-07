@@ -101,3 +101,16 @@ def test_pool_ranking_orders_by_total_wins():
     assert [r["rank"] for r in ranking] == [1, 2]
     assert [r["wins"] for r in ranking] == [5, 4]
     assert ranking[0]["fullName"] == "Ann Ray"
+
+
+def test_singular_win_grammar_in_both_forms():
+    cur = [{"playerId": 1, "fullName": "Sam Lee", "rank": 1, "wins": 1},
+           {"playerId": 2, "fullName": "Ann Ray", "rank": 2, "wins": 0}]
+    first = sp.build_messages(1, cur, None)
+    assert first[1][1] == "You are 1st with 1 win. You lead the pool."
+    assert first[2][1] == "You are 2nd with 0 wins. Leader: Sam L."
+    prev = [{"playerId": 1, "fullName": "Sam Lee", "rank": 1, "wins": 0},
+            {"playerId": 2, "fullName": "Ann Ray", "rank": 2, "wins": 0}]
+    later = sp.build_messages(2, cur, prev)
+    assert later[1][1] == "You held 1st (1 win, +1). You lead the pool."
+    assert later[2][1] == "You held 2nd (0 wins, +0). Leader: Sam L."
