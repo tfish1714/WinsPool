@@ -56,7 +56,7 @@ New collection `season_recaps`, one doc per season (doc id `{year}`):
 season_recaps/2026 = {
   year: 2026,
   weeks: {
-    "5": {summary: "<sanitized html>", timestamp: <epoch>, source: "published"},
+    "5": {summary: "<recap text as written>", timestamp: <epoch>, source: "published"},
     "6": {...}
   },
   updated_at: <epoch>
@@ -110,6 +110,15 @@ Migration: the legacy `weekly_recaps/{year}_{week}` docs remain readable.
   rendered recap body, and the existing `.recap-card-glass` visual style.
 - Auth follows the standings pages. Unknown year/week returns a friendly empty state,
   not a 500.
+- Rendering: a single helper `services/recap_render.py::render_recap_html(text)` (a
+  Jinja filter `recap_html`) converts text to HTML (paragraph and line breaks, plus
+  `**bold**`, `*italic*`, simple lists and headings if present) and sanitizes it to
+  an allowlist (`p, br, strong, em, ul, ol, li, h3, h4, a[href http(s)/relative,
+  rel=noopener]`). It is used by BOTH the recap page and the standings card. Today
+  the standings card renders `{{ recap | safe }}` on raw stored text, a latent
+  injection gap and a loss of line breaks; this replaces it. Implementation
+  (dependency vs minimal in-house) is decided in the plan; pasted raw HTML is
+  escaped, not honored.
 - Nav: add "Recaps" to `_updateMoreDropdown`'s `moreLinks` and to the drawer in
   `base.html`; standings recap card gets a "Read full recap" link to the page.
 
@@ -118,12 +127,12 @@ Migration: the legacy `weekly_recaps/{year}_{week}` docs remain readable.
 - `POST /api/admin/recap/publish` (admin) body `{year, week, text, send_push: bool,
   send_email: bool}` (year and week default like the preview route:
   `get_active_season` and `get_most_recent_completed_week`).
-- Body handling: `text` is plain text or markdown. It is converted to HTML and
-  sanitized to an allowlist (paragraphs, headings, bold, italic, lists, links with
-  `rel="noopener"`, line breaks) before storage, because the page renders it for
-  every player. Choose and add one small dependency pair (markdown converter plus
-  sanitizer) in `requirements.txt`, or implement a minimal converter; decided in
-  the plan. Empty or whitespace-only text returns 422.
+- Body handling: `summary` stays the recap text exactly as written (plain text, or
+  light markdown), the same contract as existing recaps (the Gemini prompt forbids
+  markdown and `build_recap_html` escapes the text, so the email path and the stored
+  value are plain text). It is NOT converted at save time. HTML is produced only at
+  render time (see section 2), so the email path is unaffected. Empty or
+  whitespace-only text returns 422.
 - Overwrites an existing recap for that week (idempotent re-publish). Re-publish
   sends a push only when `send_push` is true again.
 - `send_email` reuses `email_service.send_weekly_recap_email` with the existing
@@ -220,6 +229,24 @@ relative URLs are honored. Bump any SW cache or version identifier if one exists
 - `pywebpush` is already in `requirements.txt` (the sync image installs it).
 - Fail open: if VAPID is missing in the job, the step logs a warning and exits 0.
 
+## Existing Code Touchpoints (weekly recap)
+
+Everything that reads or writes recaps today, and what this work does to it:
+
+| Touchpoint | Today | Change |
+|---|---|---|
+| `db_service.save_weekly_recap` / `get_weekly_recap` (`services/db_service.py` ~576-625) | per-week doc `weekly_recaps/{y}_{w}`; offline path reads `.local_db/weekly_recaps.pkl` | Rewritten onto `season_recaps/{year}`; same signatures and return shapes. Offline path reads `season_recaps_{year}.json`. |
+| `routes/standings_routes.py:100` | uncached read per page view; template renders `recap \| safe` | Uses the cached getter and the `recap_html` filter. Tests that patch `db.get_weekly_recap` keep working (`test_standings_routes.py`, `test_live_standings_route.py`, `test_standings_player_links.py`, `test_wins_pool_missing_standings.py`). |
+| `routes/admin_routes.py::save_and_broadcast_recap` (~365) | saves then emails; builds its own email HTML inline | Unchanged behavior. The inline email HTML duplicates `scripts/generate_weekly_summary.py::build_recap_html`; the new Publish route's optional email reuses one shared builder rather than a third copy (extract to `services/email_service.py`, keep both callers working). |
+| `scripts/generate_weekly_summary.py` (CLI, ~line 83) | second writer: `save_weekly_recap` after an interactive confirm | Works unchanged through the same function. It runs in another process, so cache freshness relies on the cross-instance signal plus the 5 minute TTL. |
+| `services/recap_service.py` | imports `save_weekly_recap` (line 11) | Verify it is still used; keep the import working. |
+| `scripts/refresh_local_pkls.py:43` | mirrors `weekly_recaps` as a pkl keyed by `year` | Add `season_recaps` (JSON per season). Keep the `weekly_recaps` entry while the legacy fallback exists. |
+| `services/cache_service.py` ~468-480 | deliberately gives recaps no in-memory cache domain (low-frequency reader) | Reconcile: the 5 minute TTL is a read-through cache local to the recap getters, not a new cache domain; update that comment. |
+| `db_service.delete_season_data` | clears draft_order, draft_order_rules, draft_results only | No change; recaps are intentionally kept when a season's draft data is reset. |
+| `docs/database.md` (`weekly_recaps` section), `docs/reference_manual.md` (~81-82) | document the old shape | Document `season_recaps`, mark `weekly_recaps` legacy. |
+| Admin AI Recaps tab (`admin.html`, `admin_main.js`) | preview, Generate, Save and Broadcast, Copy (this sprint) | Add Publish box and Sent notifications list; existing buttons untouched. |
+| Email footer text | says "generated by Gemini AI" | A published, human-edited recap should not claim that; the shared builder takes an optional footer line (default unchanged for the Gemini flows). |
+
 ## Data Model Additions
 
 | Where | Field | Notes |
@@ -267,6 +294,10 @@ relative URLs are honored. Bump any SW cache or version identifier if one exists
 - A player with no subscription, a dead subscription, or prefs set to false must
   not break or receive the send.
 - A week with a postponed or unfinished game must not trigger the weekly push.
+- Existing plain-text recaps (line breaks, `<`, `&`) must render correctly and safely
+  on both the standings card and the recap page after the filter change.
+- The existing admin Save and Broadcast flow and the CLI script must keep writing
+  recaps that appear on the new page.
 - The notification click must open the intended page, including when the app is
   already open, and must reject off-origin URLs.
 
