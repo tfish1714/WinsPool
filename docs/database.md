@@ -32,6 +32,7 @@ Stores all pool participants.
 | `must_change_password` | `bool` | Flag set when a temporary password is assigned by admin, requiring change on next login |
 | `last_login` | `float` | Unix epoch timestamp (seconds) of player's most recent login |
 | `last_active` | `float` | Unix epoch timestamp (seconds) of the most recent authenticated request, persisted at most once per player per 15 minutes; absent until first recorded (no backfill) |
+| `push_prefs` | `map` | `{recap: bool, standings: bool}` weekly push opt-ins, saved by `POST /api/profile/push-prefs`; absent means both on for subscribed players (only an explicit `false` skips) |
 
 **Document ID**: `{playerId}`
 
@@ -178,9 +179,39 @@ Pre-computed analytics stored by `cache_builder.py`.
 
 ---
 
-### `weekly_recaps`
+### `season_recaps`
 
-AI-generated weekly summaries.
+One document per season holding every published recap (current store).
+
+| Field | Type | Description |
+|---|---|---|
+| `year` | `int` | Season year |
+| `weeks` | `map` | `{"<week>": {summary: string, timestamp: float, source: string?}}`; `source` is `"published"` for admin-published text |
+| `updated_at` | `float` | Unix time of the last save |
+
+**Document ID**: `{year}`. Writes merge only the saved week. Recap text is stored as written (never as HTML) and rendered through the `recap_html` filter. Reads go through `db_service.get_season_recaps(year)`, a read-through in-process cache with a 5-minute TTL. Freshness across Cloud Run instances is TTL-only: the writing instance clears its own cache, others can lag a publish by up to 5 minutes. Local mirror: `.local_db/season_recaps_{year}.json`.
+
+---
+
+### `push_events`
+
+One document per notification batch sent. **Document ID**: `{year}_w{week:02d}_recap` (recap publish) or `{season}_w{week:02d}_standings` (weekly standings push).
+
+| Field | Type | Description |
+|---|---|---|
+| `kind` | `string` | `recap` or `standings` |
+| `sent_at` | `float` | Unix time |
+| `counts` | `map` | `{total, sent, failed, pruned, skipped}` |
+| `messages` | `map` | Per-player `{playerId: {title, body, status}}`, shown in the admin detail view |
+| `year`, `week`, `title`, `body` | | Extra context on recap events |
+
+The weekly standings push checks for its event id before sending, which makes the daily job run idempotent.
+
+---
+
+### `weekly_recaps` (legacy)
+
+Legacy store of AI-generated weekly summaries. Now a read-only fallback: `get_season_recaps` uses it only when a season has no `season_recaps` doc. `scripts/migrate_weekly_recaps.py` folds these docs into `season_recaps/{year}` (dry run by default; `--firestore` writes; never overwrites a week that already exists on the season doc). Run the dry run, then `--firestore`, before the first publish after deploy.
 
 | Field | Type | Description |
 |---|---|---|

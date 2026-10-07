@@ -472,9 +472,11 @@ def write_elo_history_season(season: int, rows: list[dict], *, use_local: bool |
 # scripts/scrape_quarter_scores.py --firestore. Read by
 # services/recap_service.py::extract_weekly_data() only -- a manual,
 # low-frequency action -- so this deliberately has no in-memory cache domain,
-# matching prediction_features/weekly_recaps' treatment in the
+# matching prediction_features' treatment in the
 # cache-mutability redesign (not worth a metadata/cache_control signal field
-# for one low-frequency reader). See
+# for one low-frequency reader). Recaps are no longer in that category:
+# db_service.get_season_recaps() is a read-through 5-minute TTL cache inside
+# db_service (not a cache domain; no cross-instance signal). See
 # docs/superpowers/specs/2026-09-15-comeback-win-recap-design.md.
 
 
