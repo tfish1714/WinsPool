@@ -556,6 +556,65 @@ class AdminApp {
         if (this._recapTabReady) return;
         this._recapTabReady = true;
         this.previewRecapPrompt({ silent: true });
+        this.loadPushEvents();
+    }
+
+    async loadPushEvents() {
+        const table = document.getElementById('push-events-table');
+        if (!table) return;
+        const tbody = table.querySelector('tbody');
+        const empty = document.getElementById('push-events-empty');
+        let events;
+        try {
+            ({ events } = await ApiService.fetchPushEvents(this.playerId));
+        } catch (e) {
+            tbody.replaceChildren();
+            empty.textContent = `Could not load notifications: ${e.message}`;
+            empty.classList.remove('hidden');
+            return;
+        }
+        tbody.replaceChildren();
+        empty.textContent = 'No notifications sent yet.';
+        empty.classList.toggle('hidden', events.length > 0);
+        for (const ev of events) {
+            const tr = document.createElement('tr');
+            const counts = ev.counts || {};
+            const when = ev.sent_at ? new Date(ev.sent_at * 1000).toLocaleString() : '';
+            const label = ev.week != null ? `Week ${ev.week} (${when})` : when;
+            for (const val of [ev.kind, label, counts.sent ?? 0, counts.failed ?? 0]) {
+                const td = document.createElement('td');
+                td.textContent = String(val ?? '');
+                tr.appendChild(td);
+            }
+            const actionTd = document.createElement('td');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn-secondary';
+            btn.textContent = 'Details';
+            btn.addEventListener('click', () => this.showPushEvent(ev.id));
+            actionTd.appendChild(btn);
+            tr.appendChild(actionTd);
+            tbody.appendChild(tr);
+        }
+    }
+
+    async showPushEvent(id) {
+        const pre = document.getElementById('push-event-detail');
+        pre.classList.remove('hidden');
+        pre.textContent = 'Loading...';
+        try {
+            const ev = await ApiService.fetchPushEvent(this.playerId, id);
+            const lines = [`${ev.id}: ${ev.title || ''}`, ev.body || '', ''];
+            const msgs = ev.messages || {};
+            for (const pid of Object.keys(msgs)) {
+                const m = msgs[pid] || {};
+                lines.push(`${pid} [${m.status}] ${m.title || ''} - ${m.body || ''}`);
+            }
+            if (!Object.keys(msgs).length) lines.push('No per-player messages recorded.');
+            pre.textContent = lines.join('\n');
+        } catch (e) {
+            pre.textContent = `Could not load details: ${e.message}`;
+        }
     }
 
     async previewRecapPrompt({ silent = false } = {}) {
@@ -722,8 +781,12 @@ class AdminApp {
             if (data.email) {
                 out.appendChild(document.createTextNode(` Emailed ${data.email.recipients} player(s).`));
             }
-            if (data.push) {
-                out.appendChild(document.createTextNode(' Push notification sent.'));
+            if (data.push && data.push.error) {
+                out.appendChild(document.createTextNode(` ${data.push.error}.`));
+            } else if (data.push) {
+                out.appendChild(document.createTextNode(
+                    ` Push: ${data.push.sent} sent, ${data.push.failed} failed, ${data.push.skipped} skipped.`));
+                this.loadPushEvents();
             }
         } catch (e) {
             out.textContent = `Publish failed: ${e.message}`;

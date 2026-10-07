@@ -385,6 +385,18 @@
                 <button id="recap-publish-btn" class="btn-primary" style="margin-top:.75rem; width:100%;">Publish to app</button>
                 <p id="recap-publish-result" style="font-size:.85rem; margin-top:.5rem;"></p>
             </div>
+
+            <div id="push-events-box" style="border:1px solid var(--glass-border); padding:1rem; border-radius:8px; margin-top:1rem;">
+                <h4 style="margin:0 0 .5rem 0;">Sent notifications</h4>
+                <div style="overflow-x:auto;">
+                    <table id="push-events-table" class="admin-table" style="width:100%;">
+                        <thead><tr><th>Kind</th><th>Week / Date</th><th>Sent</th><th>Failed</th><th></th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <p id="push-events-empty" class="hidden" style="font-size:.85rem; color:var(--text-secondary);">No notifications sent yet.</p>
+                <pre id="push-event-detail" class="hidden" style="white-space:pre-wrap; word-break:break-word; font-size:.8rem; margin-top:.5rem;"></pre>
+            </div>
         </div>
     </div>
 

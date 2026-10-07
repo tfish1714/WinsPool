@@ -1269,3 +1269,72 @@ class TestPublishRecap:
         r = client.post("/api/admin/recap/publish", json={"text": "x"},
                         headers={"Authorization": auth_token})
         assert r.status_code in (401, 403)
+
+
+def test_first_sentence_truncates_and_strips():
+    from routes.admin_routes import _first_sentence
+    assert _first_sentence("A big week. Then more.") == "A big week."
+    assert _first_sentence("x" * 300).endswith("...") and len(_first_sentence("x" * 300)) <= 120
+    assert _first_sentence("**Bold** start\nsecond line") == "Bold start"
+
+
+def test_first_sentence_never_empty_for_nonempty_text():
+    from routes.admin_routes import _first_sentence
+    assert _first_sentence("***") == "Tap to read this week's recap."
+    assert _first_sentence("\n\nReal line.") == "Real line."
+
+
+class TestPublishRecapPush:
+    def test_push_sent_when_ticked_and_event_recorded(self, admin_token):
+        counts = {"total": 2, "sent": 2, "failed": 0, "pruned": 0, "skipped": 1}
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap"), \
+             patch("routes.admin_routes.push_service.send_to_subscribers",
+                   return_value={"counts": counts, "messages": {}}) as send, \
+             patch("routes.admin_routes.push_events.record_push_event", return_value=True) as rec:
+            r = client.post("/api/admin/recap/publish",
+                            json={"text": "Big week. More.", "send_push": True},
+                            headers={"Authorization": admin_token})
+        assert r.json()["push"] == {"sent": 2, "failed": 0, "pruned": 0, "skipped": 1}
+        kw = send.call_args.kwargs
+        assert kw["pref"] == "recap" and kw["url"] == "/recap/2026/5"
+        assert rec.call_args.args[0] == "2026_w05_recap"
+
+    def test_push_failure_never_loses_the_saved_recap(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap") as save, \
+             patch("routes.admin_routes.push_service.send_to_subscribers", side_effect=RuntimeError("boom")):
+            r = client.post("/api/admin/recap/publish", json={"text": "x", "send_push": True},
+                            headers={"Authorization": admin_token})
+        assert r.status_code == 200 and r.json()["saved"] is True
+        assert r.json()["push"] == {"error": "push failed; recap was saved"}
+        save.assert_called_once()
+
+    def test_no_push_when_unticked(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap"), \
+             patch("routes.admin_routes.push_service.send_to_subscribers") as send:
+            r = client.post("/api/admin/recap/publish", json={"text": "x"},
+                            headers={"Authorization": admin_token})
+        send.assert_not_called()
+        assert r.json()["push"] is None
+
+
+class TestPushEventsRoutes:
+    def test_list_and_detail_admin_only(self, admin_token, auth_token):
+        ev = {"id": "2026_w05_recap", "kind": "recap", "sent_at": 1.0, "counts": {"sent": 2}}
+        with patch("routes.admin_routes.push_events.list_push_events", return_value=[ev]), \
+             patch("routes.admin_routes.push_events.get_push_event", return_value={**ev, "messages": {}}):
+            assert client.get("/api/admin/push-events", headers={"Authorization": admin_token}).json()["events"] == [ev]
+            assert client.get("/api/admin/push-events/2026_w05_recap", headers={"Authorization": admin_token}).status_code == 200
+            assert client.get("/api/admin/push-events", headers={"Authorization": auth_token}).status_code in (401, 403)
+
+    def test_bad_event_id_is_422_and_unknown_is_404(self, admin_token):
+        h = {"Authorization": admin_token}
+        with patch("routes.admin_routes.push_events.get_push_event") as get:
+            assert client.get("/api/admin/push-events/../../etc", headers=h).status_code in (404, 422)
+            assert client.get("/api/admin/push-events/bad_id", headers=h).status_code == 422
+            assert client.get("/api/admin/push-events/2026_w05_recap%0A", headers=h).status_code == 422
+            get.assert_not_called()
+        with patch("routes.admin_routes.push_events.get_push_event", return_value=None):
+            assert client.get("/api/admin/push-events/2026_w05_recap", headers=h).status_code == 404

@@ -39,6 +39,8 @@ import services.chat_service as chat_service
 import services.email_service as email_service
 import services.pool_service as pool_service
 import services.recap_service as recap_service
+from services import push_service, push_events
+from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
@@ -390,6 +392,21 @@ async def save_and_broadcast_recap(body: SaveBroadcastRecapRequest, _: dict = De
     return JSONResponse(content={"message": f"Week {body.week} recap saved and broadcast to {len(emails)} players."})
 
 
+_PUSH_EVENT_ID_RE = re.compile(r"\d{4}_w\d{2}_(recap|standings)")
+_RECAP_PUSH_FALLBACK_BODY = "Tap to read this week's recap."
+
+
+def _first_sentence(text: str, limit: int = 120) -> str:
+    """First sentence of a recap, markdown stripped, capped at `limit` chars; never empty for non-empty text."""
+    plain = re.sub(r"[*_#>`]+", "", text or "").replace("\r", "").strip()
+    plain = plain.split("\n", 1)[0].strip()
+    m = re.search(r"(?<=[.!?])\s", plain)
+    sentence = plain[:m.start()] if m else plain
+    if len(sentence) > limit:
+        sentence = sentence[: limit - 3].rstrip() + "..."
+    return sentence or _RECAP_PUSH_FALLBACK_BODY
+
+
 @router.post("/admin/recap/publish")
 async def publish_recap(body: PublishRecapRequest, _: dict = Depends(require_admin)):
     """Admin: publish a finished recap (pasted text) to the app. No Gemini; email/push only if ticked."""
@@ -409,8 +426,43 @@ async def publish_recap(body: PublishRecapRequest, _: dict = Depends(require_adm
                 emails, f"Week {week} Recap - Wins Pool",
                 email_service.build_recap_email_html(week, text, footer_html="Published by the Wins Pool commissioner."))
         email_info = {"recipients": len(emails or [])}
+    push_info = None
+    if body.send_push:
+        # Deliberate domain-level catch: the recap is already saved and must not be lost.
+        try:
+            title = f"Week {week} recap is ready"
+            blurb = _first_sentence(text)
+            result = await run_in_threadpool(
+                push_service.send_to_subscribers,
+                lambda _pid: (title, blurb), pref="recap", url=f"/recap/{year}/{week}")
+            c = result["counts"]
+            push_info = {k: c[k] for k in ("sent", "failed", "pruned", "skipped")}
+            await run_in_threadpool(push_events.record_push_event,
+                                    f"{year}_w{week:02d}_recap", "recap", c, result.get("messages"),
+                                    {"year": year, "week": week, "title": title, "body": blurb})
+        except Exception:
+            logger.exception("publish_recap: push failed after the recap was saved")
+            push_info = {"error": "push failed; recap was saved"}
     return JSONResponse(content={"saved": True, "year": year, "week": week,
-                                 "url": f"/recap/{year}/{week}", "email": email_info, "push": None})
+                                 "url": f"/recap/{year}/{week}", "email": email_info, "push": push_info})
+
+
+@router.get("/admin/push-events")
+async def list_admin_push_events(_: dict = Depends(require_admin)):
+    """Admin: recent sent push notifications (newest first, no per-player messages)."""
+    events = await run_in_threadpool(push_events.list_push_events)
+    return JSONResponse(content={"events": events})
+
+
+@router.get("/admin/push-events/{event_id}")
+async def get_admin_push_event(event_id: str, _: dict = Depends(require_admin)):
+    """Admin: one push event including per-player messages."""
+    if not _PUSH_EVENT_ID_RE.fullmatch(event_id):
+        return JSONResponse(status_code=422, content={"error": "Invalid event id."})
+    event = await run_in_threadpool(push_events.get_push_event, event_id)
+    if event is None:
+        return JSONResponse(status_code=404, content={"error": "Push event not found."})
+    return JSONResponse(content=event)
 
 
 _broadcast_limiter = get_limiter("admin-push-broadcast", 1, 60.0)
