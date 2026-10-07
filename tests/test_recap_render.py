@@ -36,6 +36,14 @@ def test_http_and_relative_links_allowed_javascript_not():
     assert "<a " not in bad
 
 
+def test_protocol_relative_link_is_not_an_anchor():
+    out = str(render_recap_html("[x](//evil.com/a)"))
+    assert "<a " not in out and "href" not in out
+    assert "[x](//evil.com/a)" in out
+    ok = str(render_recap_html("[me](/player/3) [s](https://example.com/q)"))
+    assert 'href="/player/3"' in ok and 'href="https://example.com/q"' in ok
+
+
 def test_quote_in_text_cannot_break_attribute():
     out = str(render_recap_html('[a](https://e.com/x" onclick="y)'))
     assert "onclick=" not in out or 'onclick=&quot;' in out
