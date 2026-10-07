@@ -58,3 +58,39 @@ def test_standings_card_renders_sanitized_recap(monkeypatch):
     resp = _render_wins_pool(monkeypatch, recap={"summary": "Hi <b>x</b>\nnext"})
     assert resp.status_code == 200
     assert "Hi &lt;b&gt;x&lt;/b&gt;<br>next" in resp.text
+
+
+import time
+import pytest
+
+_ADVERSARIAL = [
+    "[" * 50000,
+    "[a](https://" * 5000,
+    "*" * 50000,
+    "**" * 25000,
+    "* " * 25000,
+    "(" * 50000,
+    "**a " * 12500,
+    "*a " * 16000,
+    "[a" * 25000,
+    "- " * 25000,
+    "\n".join(["* x"] * 10000),
+]
+
+
+@pytest.mark.parametrize("payload", _ADVERSARIAL, ids=range(len(_ADVERSARIAL)))
+def test_adversarial_input_is_fast(payload):
+    start = time.perf_counter()
+    render_recap_html(payload)
+    assert time.perf_counter() - start < 1.0
+
+
+def test_link_label_up_to_200_chars_still_renders():
+    label = "a" * 200
+    out = str(render_recap_html("[%s](https://example.com/x)" % label))
+    assert '<a href="https://example.com/x"' in out and label in out
+
+
+def test_inline_formatting_and_links_unchanged():
+    out = str(render_recap_html("**a** and *b* and [c](/p/1)"))
+    assert out == '<p><strong>a</strong> and <em>b</em> and <a href="/p/1" rel="noopener noreferrer">c</a></p>'
