@@ -178,3 +178,20 @@ The alert metric label `response_code` was checked in Cloud Monitoring's Metrics
 are lowercase (`ok`, `unavailable`), so the policy filter is `response_code != "ok"`. If a policy
 was created from an earlier copy of the file that said `"OK"`, update it in place:
 `gcloud alpha monitoring policies update <POLICY_ID> --project=fishbone-wins-pool --policy-from-file=deploy/alerts/kickoff-queue-attempt-failures.json`.
+
+## Weekly standings push (one-time job config)
+
+`winspool-sync-daily` runs `scripts/send_weekly_standings_push.py` as a non-required step. The
+job needs the Web Push VAPID settings, which the web service already has. `deploy.ps1` only
+swaps images, so this is a one-time setup (these commands have not been run by the repo
+change; run them yourself). Get `<JOB_SA>` with
+`gcloud run jobs describe winspool-sync-daily --region=us-east1 --format="value(spec.template.spec.template.spec.serviceAccountName)"`.
+Without this, the step logs a warning ("Web push is not configured") and exits 0.
+
+```powershell
+gcloud run jobs update winspool-sync-daily --region=us-east1 --project=fishbone-wins-pool `
+  --update-env-vars VAPID_PUBLIC_KEY=<public key>,VAPID_CLAIMS_EMAIL=<mailto:you@example.com> `
+  --update-secrets VAPID_PRIVATE_KEY=vapid-private-key:latest
+gcloud secrets add-iam-policy-binding vapid-private-key --project=fishbone-wins-pool `
+  --member=serviceAccount:<JOB_SA> --role=roles/secretmanager.secretAccessor
+```

@@ -57,3 +57,11 @@ def test_elo_step_args_use_the_computed_current_season():
             ["--firestore", "--max-season", "2026"]
     finally:
         importlib.reload(run_cron_mod)
+
+
+def test_weekly_standings_push_step_is_last_and_non_required():
+    names = [s["name"] for s in run_cron_mod.STEPS]
+    assert names[-2:] == ["NFL Data Sync (Firestore)", "Weekly Standings Push"]
+    step = run_cron_mod.STEPS[-1]
+    assert step["required"] is False
+    assert step["script"].name == "send_weekly_standings_push.py"

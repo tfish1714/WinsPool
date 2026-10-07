@@ -7,6 +7,7 @@ Runs:
      pfr_advstats/schedules/stats_team from nflverse (default priority 3)
   2. compute_elo.py --firestore — recomputes Elo, pushes elo_history/{season}
   3. daily_nfl_sync.py — computes standings, pushes nfl_games + nfl_standings
+  4. send_weekly_standings_push.py — once per completed week, personal standings push (non-required)
 
 Does NOT run cache_builder.py (prediction regen) -- that needs
 requirements-ml.txt and runs as the separate winspool-predict-daily job
@@ -63,6 +64,13 @@ STEPS = [
         'name': 'NFL Data Sync (Firestore)',
         'script': SCRIPTS_DIR / 'daily_nfl_sync.py',
         'required': True,  # Standings must be current
+    },
+    {
+        'name': 'Weekly Standings Push',
+        'script': SCRIPTS_DIR / 'send_weekly_standings_push.py',
+        # Best-effort: skips (no VAPID, draft incomplete, already sent) exit 0,
+        # and a push failure must never fail the standings sync above.
+        'required': False,
     },
 ]
 
