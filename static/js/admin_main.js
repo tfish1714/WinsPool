@@ -778,7 +778,11 @@ class AdminApp {
             link.href = `/recap/${encodeURIComponent(data.year)}/${encodeURIComponent(data.week)}`;
             link.textContent = `Week ${data.week} recap`;
             out.appendChild(link);
-            if (data.email) {
+            if (data.email && data.email.error) {
+                out.appendChild(document.createTextNode(` ${data.email.error}.`));
+            } else if (data.email && data.email.sent === false) {
+                out.appendChild(document.createTextNode(` Email delivery failed for some of ${data.email.recipients} player(s).`));
+            } else if (data.email) {
                 out.appendChild(document.createTextNode(` Emailed ${data.email.recipients} player(s).`));
             }
             if (data.push && data.push.error) {

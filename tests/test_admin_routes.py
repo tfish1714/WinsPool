@@ -1338,3 +1338,48 @@ class TestPushEventsRoutes:
             get.assert_not_called()
         with patch("routes.admin_routes.push_events.get_push_event", return_value=None):
             assert client.get("/api/admin/push-events/2026_w05_recap", headers=h).status_code == 404
+
+
+class TestPublishRecapEmailIsolation:
+    _counts = {"total": 1, "sent": 1, "failed": 0, "pruned": 0, "skipped": 0}
+
+    def _post(self, admin_token, **patches):
+        return client.post("/api/admin/recap/publish",
+                           json={"text": "x", "send_email": True, "send_push": True},
+                           headers={"Authorization": admin_token})
+
+    def test_email_raising_still_saves_and_attempts_push(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap"), \
+             patch("routes.admin_routes.recap_service.extract_weekly_data", side_effect=RuntimeError("boom")), \
+             patch("routes.admin_routes.push_service.send_to_subscribers",
+                   return_value={"counts": self._counts, "messages": {}}) as send, \
+             patch("routes.admin_routes.push_events.record_push_event", return_value=True):
+            r = self._post(admin_token)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["saved"] is True and body["url"] == "/recap/2026/5"
+        assert body["email"] == {"error": "email failed; recap was saved"}
+        assert body["push"]["sent"] == 1
+        send.assert_called_once()
+
+    def test_email_returning_false_is_reported(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap"), \
+             patch("routes.admin_routes.recap_service.extract_weekly_data", return_value=({}, ["a@x.com"])), \
+             patch("routes.admin_routes.email_service.send_weekly_recap_email", return_value=False):
+            r = client.post("/api/admin/recap/publish", json={"text": "x", "send_email": True},
+                            headers={"Authorization": admin_token})
+        assert r.status_code == 200
+        assert r.json()["email"] == {"recipients": 1, "sent": False}
+
+    def test_push_failure_leaves_email_info_intact(self, admin_token):
+        with patch("routes.admin_routes._resolve_recap_year_week", return_value=(2026, 5)), \
+             patch("routes.admin_routes.save_weekly_recap"), \
+             patch("routes.admin_routes.recap_service.extract_weekly_data", return_value=({}, ["a@x.com"])), \
+             patch("routes.admin_routes.email_service.send_weekly_recap_email", return_value=True), \
+             patch("routes.admin_routes.push_service.send_to_subscribers", side_effect=RuntimeError("boom")):
+            r = self._post(admin_token)
+        body = r.json()
+        assert body["email"] == {"recipients": 1}
+        assert body["push"] == {"error": "push failed; recap was saved"}

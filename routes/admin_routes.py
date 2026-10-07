@@ -420,12 +420,19 @@ async def publish_recap(body: PublishRecapRequest, _: dict = Depends(require_adm
     save_weekly_recap(year, week, text, source="published")
     email_info = None
     if body.send_email:
-        _, emails = recap_service.extract_weekly_data(year, week)
-        if emails:
-            email_service.send_weekly_recap_email(
-                emails, f"Week {week} Recap - Wins Pool",
-                email_service.build_recap_email_html(week, text, footer_html="Published by the Wins Pool commissioner."))
-        email_info = {"recipients": len(emails or [])}
+        # Deliberate domain-level catch: the recap is already saved and push must still run.
+        try:
+            _, emails = recap_service.extract_weekly_data(year, week)
+            email_info = {"recipients": len(emails or [])}
+            if emails:
+                ok = email_service.send_weekly_recap_email(
+                    emails, f"Week {week} Recap - Wins Pool",
+                    email_service.build_recap_email_html(week, text, footer_html="Published by the Wins Pool commissioner."))
+                if ok is False:
+                    email_info["sent"] = False
+        except Exception:
+            logger.exception("publish_recap: email failed after the recap was saved")
+            email_info = {"error": "email failed; recap was saved"}
     push_info = None
     if body.send_push:
         # Deliberate domain-level catch: the recap is already saved and must not be lost.
