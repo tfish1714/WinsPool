@@ -39,6 +39,12 @@ def test_missing_prefs_default_true(fake_db):
     assert push_service.get_push_prefs(999) == {"recap": True, "standings": True}
 
 
+@pytest.mark.parametrize("bad", ["garbage", ["recap"], 5])
+def test_non_dict_push_prefs_treated_as_empty(fake_db, bad):
+    fake_db.collection("players").document("1").set({"playerId": 1, "push_prefs": bad})
+    assert push_service.get_push_prefs(1) == {"recap": True, "standings": True}
+
+
 def test_set_without_db_returns_false(monkeypatch):
     monkeypatch.setattr("services.db_service.get_db", lambda *a, **k: None)
     assert push_service.set_push_prefs(1, True, True) is False

@@ -246,6 +246,8 @@ def get_push_prefs(player_id: int) -> dict:
     if db is not None:
         snap = db.collection("players").document(str(player_id)).get()
         prefs = ((snap.to_dict() or {}).get("push_prefs") or {}) if snap.exists else {}
+    if not isinstance(prefs, dict):
+        prefs = {}
     return {"recap": prefs.get("recap") is not False, "standings": prefs.get("standings") is not False}
 
 
