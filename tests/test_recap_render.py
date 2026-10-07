@@ -1,3 +1,4 @@
+import pytest
 from markupsafe import Markup
 from services.recap_render import render_recap_html
 
@@ -44,6 +45,21 @@ def test_protocol_relative_link_is_not_an_anchor():
     assert 'href="/player/3"' in ok and 'href="https://example.com/q"' in ok
 
 
+@pytest.mark.parametrize("md", [
+    r"[x](/\evil.com)",
+    r"[x](/\/evil.com)",
+    r"[x](/a\b)",
+])
+def test_backslash_relative_link_is_not_an_anchor(md):
+    out = str(render_recap_html(md))
+    assert "<a " not in out and "href" not in out
+
+
+def test_root_and_normal_relative_links_still_anchor():
+    out = str(render_recap_html("[r](/) [p](/player/3)"))
+    assert 'href="/"' in out and 'href="/player/3"' in out
+
+
 def test_quote_in_text_cannot_break_attribute():
     out = str(render_recap_html('[a](https://e.com/x" onclick="y)'))
     assert "onclick=" not in out or 'onclick=&quot;' in out
@@ -78,6 +94,7 @@ _ADVERSARIAL = [
     "**" * 25000,
     "* " * 25000,
     "(" * 50000,
+    "[a](/\\" * 12500,
     "**a " * 12500,
     "*a " * 16000,
     "[a" * 25000,

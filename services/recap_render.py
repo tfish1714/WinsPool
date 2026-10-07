@@ -11,7 +11,7 @@ from markupsafe import Markup
 
 # Label and URL lengths are bounded so an unclosed "[" cannot make matching
 # quadratic on adversarial input.
-_LINK = re.compile(r"\[([^\]\n]{1,200})\]\((https?://[^\s)]{1,2000}|/(?!/)[^\s)]{0,2000})\)")
+_LINK = re.compile(r"\[([^\]\n]{1,200})\]\((https?://[^\s)]{1,2000}|/(?![/\\])[^\s)\\]{0,2000})\)")
 _BOLD = re.compile(r"\*\*(.+?)\*\*")
 _ITALIC = re.compile(r"(?<![\*\w])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\*\w])")
 _BULLET = re.compile(r"^\s*[-*]\s+")
