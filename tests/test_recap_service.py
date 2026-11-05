@@ -709,8 +709,20 @@ def test_extract_weekly_data_head_to_head_clash_and_enriched_stats(mock_load_dat
 
 @patch("services.recap_service.load_data")
 def test_extract_weekly_data_standings_movement_in_week_two(mock_load_data, sample_games_df):
+    # Season win totals now come from the raw games (same math as the standings
+    # page), so this frame must agree with the mocked enriched schedule below.
+    games = pd.DataFrame([
+        {"season": 2024, "week": 1, "game_type": "REG", "home_team": "MIA", "away_team": "JAX",
+         "home_score": 20, "away_score": 17, "result": 3.0},
+        {"season": 2024, "week": 1, "game_type": "REG", "home_team": "BUF", "away_team": "ARI",
+         "home_score": 17, "away_score": 24, "result": -7.0},
+        {"season": 2024, "week": 2, "game_type": "REG", "home_team": "BUF", "away_team": "MIA",
+         "home_score": 31, "away_score": 10, "result": 21.0},
+        {"season": 2024, "week": 2, "game_type": "REG", "home_team": "BUF", "away_team": "TEN",
+         "home_score": 24, "away_score": 13, "result": 11.0},
+    ])
     mock_load_data.return_value = (
-        pd.DataFrame(), pd.DataFrame(), sample_games_df,
+        pd.DataFrame(), pd.DataFrame(), games,
         pd.DataFrame([
             {"playerId": 1, "fullName": "Alice", "nickName": "Alice", "email": "a@x.com"},
             {"playerId": 2, "fullName": "Bob", "nickName": "Bob", "email": "b@x.com"},
@@ -766,5 +778,49 @@ def test_extract_weekly_data_standings_movement_in_week_two(mock_load_data, samp
         assert "1. Alice - 2 wins (+2 this week, climbed from #2)" in data_summary
         # Bob slipped from #1 to #2 (+0 this week)
         assert "2. Bob - 1 wins (+0 this week, slipped from #1)" in data_summary
+
+
+@patch("services.recap_service.load_data")
+def test_extract_weekly_data_tie_is_not_credited_as_a_win(mock_load_data):
+    """Regression: a tie (result == 0) used to fall into the 'away win' branch,
+    handing the away team's owner a win in the season total and weekly record."""
+    games = pd.DataFrame([
+        {"season": 2024, "week": 1, "game_type": "REG", "home_team": "MIA", "away_team": "BUF",
+         "home_score": 27, "away_score": 27, "result": 0.0},
+    ])
+    mock_load_data.return_value = (
+        pd.DataFrame(), pd.DataFrame(), games,
+        pd.DataFrame([
+            {"playerId": 1, "fullName": "Alice", "nickName": "Alice", "email": "a@x.com"},
+            {"playerId": 2, "fullName": "Bob", "nickName": "Bob", "email": "b@x.com"},
+        ]),
+        pd.DataFrame(),
+        pd.DataFrame([
+            {"season": 2024, "team": "BUF", "playerId": 1},
+            {"season": 2024, "team": "MIA", "playerId": 2},
+        ]),
+        pd.DataFrame(),
+    )
+
+    with patch("services.recap_service.get_enriched_schedule") as mock_enriched, \
+         patch("services.recap_service.fetch_weekly_espn_data", return_value={}), \
+         patch("services.recap_service.get_quarter_scores_season", return_value=[]):
+        # Alice (BUF) is the AWAY side, which is where the old code sent ties.
+        mock_enriched.return_value = pd.DataFrame([
+            {
+                "week": 1,
+                "home_team": "MIA", "away_team": "BUF",
+                "home_score": 27, "away_score": 27, "result": 0,
+                "playerId": 1, "playerId_home_draft": 2,
+                "fullName_home": "Bob", "fullName_away": "Alice",
+            },
+        ])
+
+        data_summary, _ = extract_weekly_data(2024, 1)
+
+    assert "Alice - 0 wins" in data_summary
+    assert "Bob - 0 wins" in data_summary
+    assert "WEEKLY RESULT: 1-0" not in data_summary
+    assert "CUMULATIVE SEASON WINS (UP TO WEEK 1): 1" not in data_summary
 
 

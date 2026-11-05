@@ -7,6 +7,7 @@ import pandas as pd
 from services.constants import UNDRAFTED_SENTINEL
 from services.data_service import load_data, get_season_projection_blended
 from services.analysis_service import get_enriched_schedule, compute_team_records, format_team_record
+from services.standings_push_service import standings_as_of, pool_ranking
 from services.ai_service import generate_weekly_summary, get_recap_prompt
 from services.db_service import save_weekly_recap
 from services.cache_service import get_quarter_scores_season
@@ -280,6 +281,16 @@ def _format_roster_entry(team: str, draft_pick, total_players: int, team_records
     return f"{team} (Pick #{draft_pick}, Rd {draft_round}, {record})"
 
 
+def _pool_wins_through(games, draft_results, players, year, week) -> dict:
+    """{playerId: pool wins} counting completed REG games through `week`.
+
+    Delegates to standings_as_of + pool_ranking (the standings page's math),
+    so ties are never credited as wins.
+    """
+    standings = standings_as_of(games, year, week)
+    return {r["playerId"]: r["wins"] for r in pool_ranking(standings, draft_results, players, year)}
+
+
 def extract_weekly_data(year, week):
     """
     Fetches results for the given week and identifies winners/bad beats, 
@@ -296,14 +307,9 @@ def extract_weekly_data(year, week):
         return None, []
 
     # 1. Calculate Overall Season Wins (up to and including this week)
-    season_to_date = schedule[schedule['week'] <= week]
-    played_to_date = season_to_date[(season_to_date['result'] != UNDRAFTED_SENTINEL) & (season_to_date['result'].notna())]
-    
-    overall_wins = {}
-    for _, row in played_to_date.iterrows():
-        win_pid = row['playerId_home_draft'] if row['result'] > 0 else row['playerId']
-        if pd.notna(win_pid) and win_pid != UNDRAFTED_SENTINEL:
-            overall_wins[win_pid] = overall_wins.get(win_pid, 0) + 1
+    # Uses the same standings math as the standings page and the weekly push
+    # (a tie is not a win), instead of re-deriving winners from game rows.
+    overall_wins = _pool_wins_through(games, draft_results, players, year, week)
 
     # 2. Extract specific week stats
     weekly_games = schedule[schedule['week'] == week]
@@ -378,6 +384,10 @@ def extract_weekly_data(year, week):
         margin = abs(home_score - away_score)
         qrow = quarter_scores_by_game.get((row['week'], row['home_team'], row['away_team']))
 
+        if row['result'] == 0:
+            # A tie is neither a win nor a loss for either owner.
+            continue
+
         if row['result'] > 0: # Home Win
             if h_drafted:
                 player_stats[h_pid]['wins'] += 1
@@ -446,15 +456,7 @@ def extract_weekly_data(year, week):
     prior_ranks = {}
     prior_wins = {}
     if week > 1:
-        prior_to_date = schedule[
-            (schedule['week'] < week) & 
-            (schedule['result'] != UNDRAFTED_SENTINEL) & 
-            (schedule['result'].notna())
-        ]
-        for _, row in prior_to_date.iterrows():
-            win_pid = row['playerId_home_draft'] if row['result'] > 0 else row['playerId']
-            if pd.notna(win_pid) and win_pid != UNDRAFTED_SENTINEL:
-                prior_wins[win_pid] = prior_wins.get(win_pid, 0) + 1
+        prior_wins = _pool_wins_through(games, draft_results, players, year, week - 1)
 
         prior_sorted = sorted(
             included_pids,
