@@ -1210,7 +1210,18 @@ class TestRunSubprocessStep:
             ok = cb._run_subprocess_step(["py", "/x/sync_nflverse_data.py"], "nflverse sync", 300)
         out = capsys.readouterr().out
         assert ok is False
-        assert "[warn] sync_nflverse_data.py exited non-zero (non-fatal): 404 not found" in out
+        assert ("[warn] sync_nflverse_data.py exited non-zero (non-fatal): "
+                "returncode=1; stderr tail: 404 not found") in out
+
+    def test_nonzero_exit_logs_stderr_tail_not_head(self, capsys):
+        cb = self._cb()
+        noise = "tf startup noise\n" * 200
+        with patch.object(cb.subprocess, "run") as run:
+            run.return_value = MagicMock(returncode=-9, stdout="", stderr=noise + "REAL_ERROR")
+            cb._run_subprocess_step(["py", "s.py"], "x", 5, swallow_errors=True)
+        out = capsys.readouterr().out
+        assert "returncode=-9" in out
+        assert "REAL_ERROR" in out
 
     def test_none_stdout_and_stderr_are_tolerated(self, capsys):
         cb = self._cb()

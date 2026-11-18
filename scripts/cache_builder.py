@@ -520,8 +520,11 @@ def _run_subprocess_step(cmd: list, label: str, timeout: int, *,
     for line in stdout_tail:
         print(f"  {line}")
     if result.returncode != 0:
+        # Tail, not head: the head of a TF child's stderr is startup noise, and
+        # a negative returncode (e.g. -9) means it was killed by a signal (OOM).
         print(f"[warn] {script} exited non-zero (non-fatal): "
-              f"{(result.stderr or '').strip()[:500]}")
+              f"returncode={result.returncode}; stderr tail: "
+              f"{(result.stderr or '').strip()[-1500:]}")
     return result.returncode == 0
 
 
