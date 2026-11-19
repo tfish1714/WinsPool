@@ -17,8 +17,11 @@ def _fake_fetch(assets):
 def test_reports_remote_newer_than_local(tmp_path):
     local = tmp_path / "depth_charts_2026.csv"
     local.write_text("x")
-    import os, time
-    old = time.time() - 90 * 86400
+    import os
+    from datetime import datetime, timezone
+    # Fixed date, not "now - N days": the remote timestamp below is fixed, so a
+    # relative mtime silently flips this test once N days after it has passed.
+    old = datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()
     os.utime(local, (old, old))
 
     res = check_asset_freshness(
